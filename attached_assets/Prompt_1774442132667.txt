@@ -1,0 +1,224 @@
+```
+Implement the following styling changes to the NexFeed application:
+
+---
+
+## 1. IMPACT ANALYSIS — LIGHT ORANGE BACKGROUND
+
+Update the Impact Analysis container in the Add New Order dialog to use a light orange background, matching the style of other AI insight containers in the app.
+
+### STYLING
+
+```css
+.impact-analysis-container {
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  border-radius: 8px;
+  padding: 16px 20px;
+}
+```
+
+| Property | Value |
+|---|---|
+| Background | Light orange (#fff7ed) |
+| Border | 1px solid #fed7aa |
+| Border-radius | 8px |
+| Padding | 16px 20px |
+
+### HEADER
+
+| Property | Value |
+|---|---|
+| Title "🤖 Impact Analysis" | 13px, font-weight 700, dark text (#1a1a1a) |
+| Margin-bottom | 12px |
+
+### CONTENT TEXT
+
+| Property | Value |
+|---|---|
+| Font weight | 400 (regular) |
+| Font size | 12px |
+| Color | Dark grey (#4b5563) |
+| Line height | 1.7 |
+
+### BOLD TEXT (section headers, product names)
+
+| Property | Value |
+|---|---|
+| Font weight | 700 |
+| Color | Dark text (#1a1a1a) |
+
+---
+
+## 2. SAFETY STOCK INSIGHTS — VISIBLE CONTAINER WITH BORDER AND PADDING
+
+Make the Safety Stock Insights container visually obvious with border lines and proper padding so text doesn't touch the edges.
+
+### OUTER CONTAINER (header + scrollable content)
+
+```css
+.safety-stock-insights-wrapper {
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  border-radius: 8px;
+  overflow: hidden;
+}
+```
+
+| Property | Value |
+|---|---|
+| Background | Light orange (#fff7ed) |
+| Border | 1px solid #fed7aa |
+| Border-radius | 8px |
+| Overflow | Hidden (clips content to border-radius) |
+
+### HEADER (stays fixed above scroll)
+
+```css
+.safety-stock-insights-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 20px;
+  border-bottom: 1px solid #fed7aa;
+  background: #fff7ed;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+```
+
+| Property | Value |
+|---|---|
+| Padding | 14px 20px |
+| Border-bottom | 1px solid #fed7aa (separates header from content) |
+| Background | Same light orange (#fff7ed) |
+| Sticky | Yes — stays fixed when content scrolls |
+
+**Header content:**
+
+| Element | Styling |
+|---|---|
+| "✨ Safety Stock Insights" | 13px, font-weight 700, dark text (#1a1a1a) |
+| "↻ Refresh" | 12px, orange (#fd5108), cursor pointer |
+
+### SCROLLABLE CONTENT AREA
+
+```css
+.safety-stock-insights-content {
+  max-height: 400px;
+  overflow-y: auto;
+  padding: 16px 20px 20px 20px;
+}
+
+.safety-stock-insights-content::-webkit-scrollbar {
+  width: 6px;
+}
+
+.safety-stock-insights-content::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.03);
+  border-radius: 3px;
+}
+
+.safety-stock-insights-content::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 3px;
+}
+
+.safety-stock-insights-content::-webkit-scrollbar-thumb:hover {
+  background: #9ca3af;
+}
+```
+
+| Property | Value |
+|---|---|
+| Padding | 16px top, 20px left, 20px right, 20px bottom |
+| Max height | 400px |
+| Overflow-y | Auto |
+| Scrollbar | Thin (6px), subtle grey |
+
+### CONTENT TEXT
+
+| Property | Value |
+|---|---|
+| Font weight | 400 (regular) |
+| Font size | 12px |
+| Color | Dark grey (#4b5563) |
+| Line height | 1.7 |
+
+### BOLD TEXT (section headers, product names)
+
+| Property | Value |
+|---|---|
+| Font weight | 700 |
+| Color | Dark text (#1a1a1a) |
+
+---
+
+## 3. COMPLETE VISUAL LAYOUT
+
+### IMPACT ANALYSIS (inside Add New Order dialog)
+
+```
+┌─ 🤖 Impact Analysis ────────────────────────────────┐
+│  (light orange background #fff7ed)                   │
+│  (border: 1px solid #fed7aa)                         │
+│  (padding: 16px 20px)                                │
+│                                                      │
+│  📍 **Insertion Position:**                          │
+│  This order will be inserted at Priority 2...        │
+│                                                      │
+│  ⏱ **Production Impact:**                           │
+│  Production time: 0.40 hours, plus changeover...     │
+│                                                      │
+│  ⚠ **Downstream Effects:**                          │
+│  9 orders will shift down by one position...         │
+│                                                      │
+│  📅 **Deadline Risk:**                               │
+│  No start dates are currently set...                 │
+│                                                      │
+└──────────────────────────────────────────────────────┘
+```
+
+### SAFETY STOCK INSIGHTS (Next 10 Days tab)
+
+```
+┌─────────────────────────────────────────────────────┐
+│  (light orange background, border #fed7aa)          │
+│                                                     │
+│  ✨ Safety Stock Insights          ↻ Refresh        │
+│  ───────────────────────────────────────────────    │  ← border-bottom separator
+│  ┌─ Scrollable (max 400px) ─────────────────────┐  │
+│  │  (padding: 16px 20px)                        │  │
+│  │                                              │  │
+│  │  **A) Overview**                             │  │
+│  │                                              │  │
+│  │  There are 20 products in the analysis...    │  │
+│  │                                              │  │
+│  │  **B) Urgent — Production Needed Soon**      │  │
+│  │                                              │  │
+│  │  • **Poultry Sol Broiler Starter** —         │  │
+│  │    Target: March 22, 2026.                   │  │
+│  │    Demand: 127.8 MT | Inventory: 376.4 MT    │  │
+│  │    Buffer: 66%.                              │▐ │  ← scrollbar
+│  │                                              │▐ │
+│  │  • **Poultry Sol Broiler Finisher** —        │▐ │
+│  │    Target: March 23, 2026.                   │  │
+│  │    ...                                       │  │
+│  │                                              │  │
+│  │  **C) Production Needed**                    │  │
+│  │  ...                                         │  │
+│  │                                              │  │
+│  │  **D) Stock Sufficient**                     │  │
+│  │  ...                                         │  │
+│  │                                              │  │
+│  │  **E) SAP Order Match**                      │  │
+│  │  ...                                         │  │
+│  │                                              │  │
+│  └──────────────────────────────────────────────┘  │
+│                                                     │
+└─────────────────────────────────────────────────────┘
+```
+
+Text is well-padded from all edges — never touches the border.
+```

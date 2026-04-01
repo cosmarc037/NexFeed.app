@@ -1,0 +1,291 @@
+```
+Implement the following changes to the NexFeed application:
+
+---
+
+## 1. AUTO-SEQUENCE PREVIEW — NO ABBREVIATIONS
+
+Replace all abbreviations in the Auto-Sequence preview with full, readable labels.
+
+**Summary metric cards:**
+
+| Current (abbreviated) | Updated (full label) |
+|---|---|
+| ORDERS | ORDERS |
+| DEADLINE | WITH DEADLINE |
+| NO DATE | NO DEADLINE |
+| STK SUF | STOCK SUFFICIENT |
+| CONFL. | CONFLICTS |
+
+**Updated metric cards:**
+```
+┌──────────┐ ┌───────────────┐ ┌─────────────┐ ┌──────────────────┐ ┌───────────┐
+│ 10       │ │ 9             │ │ 0           │ │ 1                │ │ 0         │
+│ Orders   │ │ With Deadline │ │ No Deadline │ │ Stock Sufficient │ │ Conflicts │
+└──────────┘ └───────────────┘ └─────────────┘ └──────────────────┘ └───────────┘
+```
+
+- Labels: 10px, grey (#6b7280), normal case (not uppercase — more readable)
+- Numbers: 18px, font-weight 700
+- Card widths adjust to fit the full label text
+
+---
+
+## 2. AI INSIGHTS — ADD REFRESH BUTTON
+
+Add a Refresh button to the AI Sequence Analysis section header.
+
+**Updated header:**
+```
+🤖 Sequence Analysis                    ↻ Refresh    ▲ Collapse
+```
+
+| Element | Styling |
+|---|---|
+| "↻ Refresh" | Orange text (#fd5108), 11px, with refresh icon. Cursor: pointer. Hover: slightly darker orange. |
+| Position | To the left of the Collapse/Expand toggle |
+
+**Refresh behavior:**
+- On click: re-generates the AI insights based on the current sequence in the preview table.
+- Brief loading state: "Analyzing sequence..." in grey italic with subtle spinner.
+- New insights replace old ones with smooth fade transition.
+- Useful after user edits start dates, drags orders, or clicks Re-analyze.
+
+---
+
+## 3. FIX AI OUTPUT — HUMAN-FRIENDLY, NOT TECHNICAL
+
+The current AI output uses technical language like "Cat B", "Cat A", "Cat D", "marked blue", "marked amber", "inferred target", "lightgrey". This is developer language, not user language. Fix the AI prompting to produce human-friendly, production-planner-friendly output.
+
+**Current output (BAD — too technical):**
+```
+Order 1 (Cat B) is scheduled to complete at 12:11, which 
+is on the same day as its inferred target. It is marked blue.
+
+Order 2 (Cat A) is scheduled to complete at 12:27, which 
+is before its actual avail date of 2026-03-22, thus marked 
+green.
+
+Orders 3 to 9 (Cat B) are all marked amber due to tight 
+scheduling relative to their inferred targets of 2026-03-28, 
+with unlikely completion in 10 days.
+
+Order 10 (Cat D) is marked lightgrey as it has sufficient 
+stock and is scheduled last.
+```
+
+**Problems:**
+- ❌ "Cat B", "Cat A", "Cat D" — users don't know what these categories mean
+- ❌ "inferred target" — too technical
+- ❌ "marked blue", "marked amber", "marked lightgrey" — referencing internal color codes
+- ❌ Date format "2026-03-22" — should be "March 22, 2026" or "Mar 22"
+- ❌ Generic "Orders 3 to 9" — should reference actual product names
+- ❌ No actionable advice
+
+---
+
+### UPDATED AI PROMPT GUIDELINES
+
+The AI must generate insights that follow these rules:
+
+**Rule 1: Use product names, not category codes.**
+- ❌ "Order 1 (Cat B)"
+- ✅ "Gallimax 3 Maintenance (80 MT)"
+
+**Rule 2: Use plain language, not technical terms.**
+- ❌ "inferred target"
+- ✅ "stock target date" or "estimated needed-by date based on warehouse demand"
+- ❌ "marked blue" / "marked amber"
+- ✅ "on track to meet its deadline" / "may be tight on timing"
+- ❌ "Cat A", "Cat B", "Cat D"
+- ✅ Don't reference internal categories at all
+
+**Rule 3: Use friendly date formats.**
+- ❌ "2026-03-22"
+- ✅ "March 22" or "Mar 22, 2026"
+
+**Rule 4: Reference specific FPR numbers and product names.**
+- ✅ "FPR: 260309 — Gallimax 3 Maintenance (80 MT)"
+- ✅ "Salto Conditioner (3 MT, due March 22)"
+
+**Rule 5: Be conversational and actionable.**
+- ❌ "It is marked blue."
+- ✅ "This order is on track and should complete well before its deadline."
+
+**Rule 6: Do not reference colors or internal UI elements.**
+- ❌ "marked green", "marked amber", "lightgrey"
+- ✅ Describe the STATUS in words: "on track", "tight timing", "at risk", "low priority"
+
+**Rule 7: Group similar orders intelligently.**
+- ❌ "Orders 3 to 9 (Cat B) are all marked amber"
+- ✅ "5 Elite XP Startex orders (total 225 MT) are grouped together from Prio 3 to 9. Their stock target date is March 28, which gives sufficient buffer. Running them consecutively saves approximately 1.5 hours of changeover time."
+
+---
+
+### CORRECT AI OUTPUT FORMAT
+
+The AI should generate insights in the topic-based format defined in the previous prompt:
+
+**Topic A — Sequence Rationale:**
+```
+📋 Sequence Rationale
+
+Gallimax 3 Maintenance (FPR: 260309, 80 MT) is placed 
+first because warehouse demand data shows this product 
+needs to be ready by March 19 — the earliest deadline 
+on this line. Without production, the warehouse will 
+fall short of its 74.9 MT inventory target.
+
+Salto Conditioner (FPR: 260309, 3 MT) follows at Prio 2. 
+Its availability date is March 22, giving comfortable 
+buffer after Gallimax 3 completes.
+
+Five Elite XP Startex orders (total 225 MT) are grouped 
+from Prio 3 through 9. Running them back-to-back avoids 
+unnecessary changeovers since they share the same product 
+and form.
+
+Gall 21 Chicken Layer (FPR: 260309, 39 MT) is placed 
+last. Warehouse stock data shows current loading already 
+exceeds the inventory target — no rush to produce this 
+one.
+```
+
+**Topic B — Production Impact:**
+```
+⚡ Production Impact
+
+This sequence covers 10 orders totaling 459 MT on Line 1.
+
+• Estimated production time: ~47.8 hours
+• Changeover events: 4 (reduced from 7 in current sequence)
+• Changeover time saved: ~1.5 hours
+• Line utilization: ~92%
+
+Grouping the Elite XP Startex orders together eliminates 
+3 unnecessary changeovers, saving roughly 90 minutes 
+of non-productive time.
+```
+
+**Topic C — Time Savings:**
+```
+⏱ Time Savings
+
+Compared to the current order arrangement:
+
+• 3 fewer changeovers (7 → 4)
+• ~1.5 hours saved in changeover time
+• Gallimax 3 Maintenance completes ~8 hours earlier 
+  (moved from position 10 to position 1)
+• Gallimax Pigeon Pellet completes ~3 hours earlier
+
+Overall, all orders finish approximately 1.5 hours 
+sooner than the current schedule.
+```
+
+**Topic D — Deadline Compliance:**
+```
+📅 Deadline Compliance
+
+All 9 orders with deadlines are projected to complete 
+on time:
+
+• Gallimax 3 Maintenance — needed by Mar 19 — ✅ on track
+• Salto Conditioner — due Mar 22 — ✅ on track
+• Elite XP Startex (5 orders) — needed by Mar 28 — ✅ on track
+• Gallimax Pigeon Pellet — needed by Mar 28 — ✅ on track
+
+Gall 21 Chicken Layer has no deadline (stock sufficient) 
+and is scheduled last.
+
+Note: Completion times depend on when you set the start 
+date. Set a start date for Prio 1 to see exact completion 
+projections.
+```
+
+**Topic E — Risk Assessment:**
+```
+⚠ Risks to Watch
+
+• Gallimax 3 Maintenance has the tightest deadline 
+  (March 19). Any delay in starting could push it past 
+  the target. Set a start date as soon as possible.
+
+• Elite XP Startex makes up 49% of total volume on 
+  this line (225 MT out of 459 MT). A material shortage 
+  or hand-adds issue on any one order could cascade 
+  delays across all five.
+
+• No start dates are set yet. Until a start date is 
+  entered for at least Prio 1, completion dates cannot 
+  be calculated.
+```
+
+**Topic F — Recommendations:**
+```
+💡 What to Do Next
+
+1. Set a start date for Gallimax 3 Maintenance (Prio 1). 
+   To meet the March 19 target, start no later than 
+   March 18, 6:00 AM.
+
+2. Consider combining the smaller Elite XP Startex 
+   orders (5 MT + 10 MT + 20 MT = 35 MT) using Smart 
+   Combine to reduce batch changeovers further.
+
+3. Click "Apply to Schedule" to save this sequence to 
+   your production schedule, then set start dates to 
+   finalize timing.
+```
+
+---
+
+### TOPIC STYLING
+
+Each topic section within the AI insights:
+
+| Element | Styling |
+|---|---|
+| Topic heading (e.g., "📋 Sequence Rationale") | 12px, font-weight 600, dark text (#1a1a1a) |
+| Topic body text | 11px, regular (400), grey (#4b5563), line-height 1.6 |
+| Product references (FPR, product names) | 11px, semi-bold (600), dark text (#374151) |
+| Bullet points | Standard bullets, indented 16px |
+| Status indicators in text | ✅ green (#43a047), ⚠ amber (#f59e0b), ❌ red (#e53935) |
+| Separator between topics | 1px dashed #e5e7eb, 14px margin above and below |
+| No emoji rendering issues | Ensure ✅ ⚠ ❌ 📋 ⚡ ⏱ 📅 💡 render properly |
+
+---
+
+### AI PROMPT — WHAT TO SEND TO THE AI
+
+When generating insights, send the AI the following context:
+
+```
+Generate a production sequence analysis for the following auto-sequence result. 
+Write in plain, conversational English that a production planner would understand. 
+
+DO NOT use:
+- Category codes like "Cat A", "Cat B", "Cat D"
+- Color references like "marked blue", "marked amber", "lightgrey"
+- Technical date formats like "2026-03-22" — use "March 22" instead
+- The word "inferred" — say "stock target date" or "needed-by date"
+
+DO use:
+- Actual product names and FPR numbers
+- Friendly date formats (March 22, Mar 19)
+- Actionable language ("consider", "recommend", "set a start date")
+- Specific numbers (hours saved, changeovers reduced, MT volumes)
+
+Cover these topics:
+1. Sequence Rationale — why each order is in its position
+2. Production Impact — total time, changeovers, utilization
+3. Time Savings — compared to current arrangement
+4. Deadline Compliance — which orders meet deadlines
+5. Risk Assessment — what could go wrong
+6. Recommendations — actionable next steps
+
+Orders data:
+[include the sequence data with product names, volumes, 
+avail dates, target dates, production times, changeover times]
+```
+```

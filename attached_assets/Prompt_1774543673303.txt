@@ -1,0 +1,535 @@
+```
+Implement the following changes to the NexFeed Production Report:
+
+---
+
+## 1. PDF STYLING — MATCH APP COLOR PALETTE
+
+Update the PDF report styling to use the NexFeed app's color palette instead of the generic dark blue.
+
+### TABLE HEADER
+
+| Property | Current | Updated |
+|---|---|---|
+| Background | Dark blue (#1e3a5f) | NexFeed orange (#fd5108) |
+| Text color | White | White |
+| Font weight | 600 | 600 |
+
+### ACCENT COLORS THROUGHOUT PDF
+
+| Element | Color |
+|---|---|
+| Table header background | Orange (#fd5108) |
+| Table header text | White |
+| Section numbers (1, 2, 3) | Orange (#fd5108) |
+| Section titles | Dark text (#1a1a1a) |
+| Separators / horizontal rules | Light grey (#e5e7eb) |
+| Feedmill sub-headers | Dark text (#1a1a1a) with left orange border |
+| TOTAL row background | Light orange (#fff7ed) |
+| TOTAL row text | Dark text (#1a1a1a), font-weight 700 |
+| Alternating row background | White / Light grey (#f9fafb) |
+| Status color dots in tables | Match the stacked bar colors |
+
+### REPORT HEADER
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                                                             │
+│  ████  NexFeed: Feed Production Report                      │
+│  ████  ─────────────────────────────────────────            │
+│        Report Period: March 2026                            │
+│        Generated: March 27, 2026 at 12:44 AM               │
+│                                                             │
+│  ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔  │
+│  (orange accent line below header)                          │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+| Element | Styling |
+|---|---|
+| "NexFeed" | 20px, font-weight 700, orange (#fd5108) |
+| ": Feed Production Report" | 20px, font-weight 700, dark text (#1a1a1a) |
+| Accent line below title | 2px solid orange (#fd5108), full width |
+| "Report Period" | 12px, dark text |
+| "Generated" | 9px, grey (#6b7280) |
+
+### TABLE STYLING
+
+```
+┌──────────────────────────────────────────────────┐
+│  Status          │  Volume       │  %            │  ← orange header
+├──────────────────┼───────────────┼───────────────┤
+│ ● Completed      │  148 MT       │  2.6%         │  ← white row
+├──────────────────┼───────────────┼───────────────┤
+│ ● In Progress    │  0 MT         │  0.0%         │  ← light grey row
+├──────────────────┼───────────────┼───────────────┤
+│ ● Scheduled      │  5,604 MT     │  97.1%        │  ← white row
+├──────────────────┼───────────────┼───────────────┤
+│ ● On Hold        │  0 MT         │  0.0%         │  ← light grey row
+├──────────────────┼───────────────┼───────────────┤
+│ ● Cancelled      │  20 MT        │  0.3%         │  ← white row
+├──────────────────┼───────────────┼───────────────┤
+│  TOTAL           │  5,772 MT     │  100%         │  ← light orange bg
+└──────────────────┴───────────────┴───────────────┘
+```
+
+**Status color dots in the Status column:**
+
+| Status | Dot color |
+|---|---|
+| ● Completed | Green (#4ade80) |
+| ● In Progress | Light orange (#fb923c) |
+| ● Scheduled | Light grey (#e5e7eb) |
+| ● On Hold | Grey (#9ca3af) |
+| ● Cancelled | Red (#f87171) |
+
+Small 6px circle before the status text in the PDF.
+
+### SECTION HEADERS IN PDF
+
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. OVERALL SUMMARY
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
+
+| Element | Styling |
+|---|---|
+| Section number "1." | Orange (#fd5108), font-weight 700 |
+| Section title "OVERALL SUMMARY" | Dark text (#1a1a1a), font-weight 700, 14px |
+| Top/bottom separator | 1px solid #e5e7eb |
+
+### FEEDMILL SUB-HEADERS
+
+```
+┃ FEEDMILL 1 (FM1)
+```
+
+| Element | Styling |
+|---|---|
+| Left border | 3px solid orange (#fd5108) |
+| Text | 12px, font-weight 700, dark text |
+| Padding-left | 8px |
+| Margin-top | 16px |
+
+---
+
+## 2. AI INSIGHT SECTION IN PDF
+
+Add a new section at the end of the PDF report — "4. AI PRODUCTION INSIGHT" — where the AI analyzes the month's data and provides a summary insight.
+
+### PDF SECTION
+
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+4. AI PRODUCTION INSIGHT
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Based on the production data for March 2026:
+
+📊 Production Overview
+Out of 5,772 MT total volume across 98 orders, 
+only 148 MT (2.6%) has been completed. The vast 
+majority of orders (97.1%) remain in scheduled 
+status, indicating production is in its early stages 
+for this month. 20 MT (0.3%) has been cancelled.
+
+⚖ Feedmill Utilization
+Feedmill 1 carries the highest load at 2,306 MT 
+(40% of total), followed by Feedmill 3 at 1,810 MT 
+(31%). Feedmill 2 handles 1,218 MT (21%) while 
+Powermix has the lightest load at 438 MT (8%). 
+Consider rebalancing if Feedmill 1 becomes a 
+bottleneck.
+
+📈 Completion Rate
+The current completion rate of 2.6% suggests 
+production has recently started or is ramping up. 
+At current pace, the month-end completion target 
+may be at risk. Monitor daily throughput to ensure 
+the schedule stays on track.
+
+⚠ Attention Areas
+- 20 MT of orders have been cancelled — review 
+  cancellation reasons to identify patterns.
+- No orders are currently in progress — if 
+  production hasn't started, investigate potential 
+  delays or scheduling issues.
+- Feedmill 1's high volume share may create 
+  scheduling pressure — consider diverting some 
+  orders to underutilized lines.
+
+💡 Recommendations
+- Prioritize starting production on urgent orders 
+  to improve the completion rate.
+- Monitor Feedmill 1 closely given its 40% volume 
+  share.
+- Review cancelled orders to prevent future 
+  cancellations.
+```
+
+### AI PROMPT FOR GENERATING INSIGHT
+
+```javascript
+async function generateReportInsight(data, monthName, year) {
+  const overall = calculateOverallTotals(data);
+  
+  const prompt = `
+Generate a professional production insight analysis for 
+a PDF report. Use the PRE-CALCULATED data provided. 
+Do NOT recalculate any values.
+
+RULES:
+- Write as a professional production analyst
+- Use flowing paragraphs, not bullet lists (except for Attention Areas)
+- Bold topic headings only
+- Use actual numbers and percentages from the data
+- Keep each topic to 2-3 sentences maximum
+- Format numbers with commas (e.g., 5,772 MT)
+- Be specific and actionable — avoid generic statements
+- Dates as "March 2026"
+
+REPORT DATA:
+
+Report Period: ${monthName} ${year}
+
+Overall:
+Total Orders: ${overall.orderCount}
+Total Volume: ${overall.total} MT
+Completed: ${overall.completed} MT (${overall.completed_pct}%)
+In Progress: ${overall.in_progress} MT (${overall.in_progress_pct}%)
+Scheduled: ${overall.scheduled} MT (${overall.scheduled_pct}%)
+On Hold: ${overall.on_hold} MT (${overall.on_hold_pct}%)
+Cancelled: ${overall.cancelled} MT (${overall.cancelled_pct}%)
+
+Feedmill Breakdown:
+${Object.entries(data).map(([fm, d]) => 
+  `${fm}: Total ${d.total} MT (${((d.total/overall.total)*100).toFixed(1)}% of total). ` +
+  `Completed: ${d.completed} MT, In Progress: ${d.in_progress} MT, ` +
+  `Scheduled: ${d.scheduled} MT, On Hold: ${d.on_hold} MT, ` +
+  `Cancelled: ${d.cancelled} MT.`
+).join('\n')}
+
+Line Breakdown:
+${Object.entries(data).map(([fm, d]) => 
+  Object.entries(d.lines).map(([line, ld]) =>
+    `${line} (${fm}): Total ${ld.total} MT. ` +
+    `Completed: ${ld.completed} MT, In Progress: ${ld.in_progress} MT, ` +
+    `Scheduled: ${ld.scheduled} MT.`
+  ).join('\n')
+).join('\n')}
+
+GENERATE THESE TOPICS:
+
+📊 **Production Overview**
+Summary of the month's production status — what percentage 
+is done, in progress, and still scheduled. Overall health.
+
+⚖ **Feedmill Utilization**
+Which feedmills carry the most volume, are any overloaded 
+or underutilized compared to others.
+
+📈 **Completion Rate**
+Assessment of the completion rate — is it on track for 
+the month? Any concerns about pacing.
+
+⚠ **Attention Areas**
+Use bullet points (- ) for specific items needing attention.
+Cancelled orders, stalled production, imbalances, etc.
+
+💡 **Recommendations**
+Use bullet points (- ) for 2-3 actionable recommendations 
+based on the data.
+  `;
+  
+  const aiResponse = await callAI(prompt);
+  return aiResponse;
+}
+```
+
+### AI INSIGHT STYLING IN PDF
+
+| Element | Styling |
+|---|---|
+| Section header "4. AI PRODUCTION INSIGHT" | Same as other section headers |
+| Topic headings (📊, ⚖, 📈, ⚠, 💡) | 11px, font-weight 700, dark text |
+| Topic emoji | Rendered as text (or replaced with simple symbols) |
+| Body text | 10px, dark grey (#374151), line-height 1.6 |
+| Bullet points (- ) | 10px, dark grey, 8px left indent |
+| Spacing between topics | 10px |
+| Container | Light grey background (#f9fafb), 1px border (#e5e7eb), 8px padding, border-radius 4px |
+
+---
+
+## 3. AI INSIGHT ALSO IN OVERVIEW TAB (NOT JUST PDF)
+
+Add the same AI insight below the feedmill cards in the Overview tab, inside a collapsible container.
+
+### LAYOUT IN OVERVIEW TAB
+
+```
+Line Status Monitoring
+
+[March 2026 ▼]    [📄 Export Report]
+
+┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐
+│ FM1      │  │ FM2      │  │ FM3      │  │ PMX      │
+│ [bars]   │  │ [bars]   │  │ [bars]   │  │ [bars]   │
+└──────────┘  └──────────┘  └──────────┘  └──────────┘
+
+■ Completed  ■ In Progress  ■ On Hold  ■ Cancelled  ■ Scheduled
+
+┌─ 🤖 Production Insight ────────────────── ↻ Refresh ─┐
+│                                                       │
+│  📊 Production Overview                               │
+│  Out of 5,772 MT total volume across 98 orders...     │
+│                                                       │
+│  ⚖ Feedmill Utilization                              │
+│  Feedmill 1 carries the highest load at 2,306 MT...   │
+│                                                       │
+│  📈 Completion Rate                                   │
+│  The current completion rate of 2.6% suggests...      │
+│                                                       │
+│  ⚠ Attention Areas                                   │
+│  - 20 MT of orders have been cancelled...             │
+│  - No orders are currently in progress...             │
+│                                                       │
+│  💡 Recommendations                                   │
+│  - Prioritize starting production...                  │
+│  - Monitor Feedmill 1 closely...                      │
+│                                                       │
+└───────────────────────────────────────────────────────┘
+```
+
+### INSIGHT CONTAINER STYLING (OVERVIEW TAB)
+
+| Property | Value |
+|---|---|
+| Background | Light grey (#f9fafb) |
+| Border | 1px solid #e5e7eb |
+| Border-radius | 8px |
+| Padding | 16px 20px |
+| Margin-top | 20px |
+| Max-height | 400px |
+| Overflow-y | Auto (scrollable) |
+
+### INSIGHT HEADER
+
+| Property | Value |
+|---|---|
+| Title | "🤖 Production Insight" |
+| Font size | 13px |
+| Font weight | 700 |
+| Color | Dark text (#1a1a1a) |
+| Refresh button | "↻ Refresh", orange (#fd5108), 12px |
+| Display | Flex, space-between |
+| Position | Outside the scrollable container (fixed) |
+
+### INSIGHT CONTENT
+
+| Property | Value |
+|---|---|
+| Font size | 11px |
+| Font weight | 400 (regular) |
+| Color | Dark grey (#4b5563) |
+| Line height | 1.7 |
+| Topic headings | 11px, font-weight 700, dark text (#1a1a1a) |
+| Topic headings | On their OWN line, not inline with content |
+| Separator between topics | 1px dashed #e5e7eb, margin 10px 0 |
+
+### TRIGGER
+
+AI insight generates when:
+- Page loads with current month data
+- User changes the month dropdown
+- User clicks "↻ Refresh"
+
+### SCROLLBAR
+
+```css
+.production-insight-content::-webkit-scrollbar {
+  width: 6px;
+}
+
+.production-insight-content::-webkit-scrollbar-track {
+  background: #f3f4f6;
+  border-radius: 3px;
+}
+
+.production-insight-content::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 3px;
+}
+```
+
+---
+
+## 4. COMPLETE PDF STRUCTURE WITH APP COLORS
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                                                             │
+│  NexFeed: Feed Production Report                            │
+│  ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔  (orange accent line)  │
+│  Report Period: March 2026                                  │
+│  Generated: March 27, 2026 at 12:44 AM                     │
+│                                                             │
+│  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  │
+│                                                             │
+│  1. OVERALL SUMMARY     (number in orange)                  │
+│  ───────────────────────────────────────────                │
+│                                                             │
+│  Total Orders: 98                                           │
+│  Total Volume: 5,772 MT                                     │
+│                                                             │
+│  ┌──────────────────┬───────────┬─────────┐                 │
+│  │ Status           │ Volume    │ %       │  ← orange header│
+│  ├──────────────────┼───────────┼─────────┤                 │
+│  │ ● Completed      │ 148 MT    │ 2.6%    │  green dot      │
+│  │ ● In Progress    │ 0 MT      │ 0.0%    │  orange dot     │
+│  │ ● Scheduled      │ 5,604 MT  │ 97.1%   │  grey dot       │
+│  │ ● On Hold        │ 0 MT      │ 0.0%    │  grey dot       │
+│  │ ● Cancelled      │ 20 MT     │ 0.3%    │  red dot        │
+│  ├──────────────────┼───────────┼─────────┤                 │
+│  │ TOTAL            │ 5,772 MT  │ 100%    │  light orange bg│
+│  └──────────────────┴───────────┴─────────┘                 │
+│                                                             │
+│  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  │
+│                                                             │
+│  2. FEEDMILL BREAKDOWN                                      │
+│  ───────────────────────────────────────────                │
+│                                                             │
+│  ┃ FEEDMILL 1 (FM1)        (orange left border)             │
+│                                                             │
+│  [table same format as above]                               │
+│                                                             │
+│    Line 1:                                                  │
+│    [table same format]                                      │
+│                                                             │
+│    Line 2:                                                  │
+│    [table same format]                                      │
+│                                                             │
+│  ┃ FEEDMILL 2 (FM2)                                         │
+│  [repeat]                                                   │
+│                                                             │
+│  ┃ FEEDMILL 3 (FM3)                                         │
+│  [repeat]                                                   │
+│                                                             │
+│  ┃ POWERMIX (PMX)                                           │
+│  [repeat]                                                   │
+│                                                             │
+│  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  │
+│                                                             │
+│  3. ORDER LIST                                              │
+│  ───────────────────────────────────────────                │
+│                                                             │
+│  [full order table with orange header]                      │
+│                                                             │
+│  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  │
+│                                                             │
+│  4. AI PRODUCTION INSIGHT                                   │
+│  ───────────────────────────────────────────                │
+│                                                             │
+│  ┌─────────────────────────────────────────────────────┐    │
+│  │ (light grey background container)                   │    │
+│  │                                                     │    │
+│  │ 📊 Production Overview                              │    │
+│  │ Out of 5,772 MT total volume across 98 orders...    │    │
+│  │                                                     │    │
+│  │ ⚖ Feedmill Utilization                             │    │
+│  │ Feedmill 1 carries the highest load at...           │    │
+│  │                                                     │    │
+│  │ 📈 Completion Rate                                  │    │
+│  │ The current completion rate of 2.6%...              │    │
+│  │                                                     │    │
+│  │ ⚠ Attention Areas                                  │    │
+│  │ - 20 MT cancelled...                               │    │
+│  │ - No orders in progress...                         │    │
+│  │                                                     │    │
+│  │ 💡 Recommendations                                  │    │
+│  │ - Prioritize starting production...                │    │
+│  │ - Monitor Feedmill 1...                            │    │
+│  │                                                     │    │
+│  └─────────────────────────────────────────────────────┘    │
+│                                                             │
+│  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  │
+│                                                             │
+│  Generated by NexFeed Production Scheduling System          │
+│  Page X of Y                                                │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 5. PDF GENERATION — INCLUDE AI INSIGHT
+
+```javascript
+async function generateReport(selectedMonth, selectedYear) {
+  const data = calculateStatusBreakdown(allOrders, selectedMonth, selectedYear);
+  const monthOrders = getOrdersForMonth(allOrders, selectedMonth, selectedYear);
+  const monthName = new Date(selectedYear, selectedMonth)
+    .toLocaleString('en-US', { month: 'long' });
+  
+  // Generate AI insight
+  const aiInsight = await generateReportInsight(data, monthName, selectedYear);
+  
+  const pdf = new jsPDF('p', 'mm', 'a4');
+  
+  // === HEADER ===
+  pdf.setFontSize(20);
+  pdf.setTextColor(253, 81, 8); // orange
+  pdf.setFont('helvetica', 'bold');
+  pdf.text('NexFeed', 20, 20);
+  
+  pdf.setTextColor(26, 26, 26); // dark text
+  pdf.text(': Feed Production Report', 52, 20);
+  
+  // Orange accent line
+  pdf.setDrawColor(253, 81, 8);
+  pdf.setLineWidth(0.75);
+  pdf.line(20, 24, 190, 24);
+  
+  pdf.setFontSize(12);
+  pdf.setFont('helvetica', 'normal');
+  pdf.setTextColor(26, 26, 26);
+  pdf.text(`Report Period: ${monthName} ${selectedYear}`, 20, 32);
+  
+  pdf.setFontSize(9);
+  pdf.setTextColor(107, 114, 128);
+  pdf.text(`Generated: ${new Date().toLocaleString()}`, 20, 38);
+  
+  // ... Section 1: Overall Summary
+  // ... Section 2: Feedmill Breakdown
+  // ... Section 3: Order List
+  
+  // === Section 4: AI Insight ===
+  // Add AI insight text with grey background container
+  pdf.setFillColor(249, 250, 251); // light grey bg
+  pdf.roundedRect(20, yPos, 170, insightHeight, 3, 3, 'F');
+  
+  // Render AI insight text inside the container
+  // Parse markdown bold and render accordingly
+  
+  // === FOOTER ===
+  const pageCount = pdf.getNumberOfPages();
+  for (let i = 1; i <= pageCount; i++) {
+    pdf.setPage(i);
+    pdf.setFontSize(8);
+    pdf.setTextColor(107, 114, 128);
+    pdf.text(
+      'Generated by NexFeed Production Scheduling System', 
+      105, 290, { align: 'center' }
+    );
+    pdf.text(`Page ${i} of ${pageCount}`, 190, 290, { align: 'right' });
+  }
+  
+  pdf.save(`NexFeed_Report_${monthName}_${selectedYear}.pdf`);
+}
+```
+```

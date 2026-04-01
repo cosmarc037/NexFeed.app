@@ -1,0 +1,863 @@
+```
+Implement the following changes to the NexFeed application:
+
+---
+
+## 1. ADD "PLANNED" STATUS
+
+Add a new status option called "Planned" to the status dropdown.
+
+### DROPDOWN ORDER
+
+```
+Plotted
+(Uncombine — only for combined orders)
+(Merge Back — only for cut orders)
+Planned ← NEW
+Hold
+Cut
+In Production
+On-going batching
+On-going pelleting
+On-going bagging
+Done
+Cancel PO
+─────────────────────
+[Type custom status...] ← Free text input
+```
+
+### PLANNED STATUS STYLING
+
+| Property | Value |
+|---|---|
+| Background | Light blue (#eff6ff) |
+| Text color | Blue (#2563eb) |
+| Font weight | 500 |
+| Border | 1px solid #bfdbfe |
+| Border-radius | 4px |
+| Padding | 2px 8px |
+
+---
+
+## 2. ADD CUSTOM FREE TEXT STATUS
+
+Add a free text input at the bottom of the status dropdown.
+
+### BEHAVIOR
+
+- Text input field at the bottom of the dropdown below a separator
+- User types and presses Enter to apply
+- Only applies to that specific order — not saved as reusable option
+- Treated as MOVABLE (same behavior as Plotted)
+- All cells remain editable — same as Plotted
+
+### INPUT STYLING
+
+```css
+.custom-status-input {
+  width: 100%;
+  padding: 6px 10px;
+  font-size: 12px;
+  border: none;
+  border-top: 1px solid #e5e7eb;
+  outline: none;
+  background: #ffffff;
+}
+
+.custom-status-input::placeholder {
+  color: #9ca3af;
+  font-style: italic;
+}
+
+.custom-status-input:focus {
+  background: #f9fafb;
+}
+```
+
+### CUSTOM STATUS DISPLAY
+
+| Property | Value |
+|---|---|
+| Background | Transparent / none |
+| Text color | Dark text (#374151) |
+| Font weight | 400 |
+| No badge styling | Just plain text |
+
+### CUSTOM STATUS EDITABILITY
+
+Orders with custom status have ALL cells editable — identical to Plotted:
+
+```javascript
+function isCellEditable(order, cellType) {
+  if (order.status === 'Done' || order.status === 'Cancel PO') {
+    return isDoneEditableCell(cellType);
+  }
+  
+  if (order.status === 'In Production' || order.status.startsWith('On-going')) {
+    return isInProductionEditableCell(cellType);
+  }
+  
+  // Plotted, Planned, Hold, Cut, Uncombine, Merge Back, Custom — ALL editable
+  return true;
+}
+
+function isCustomStatus(status) {
+  const knownStatuses = [
+    'Plotted', 'Planned', 'Hold', 'Cut',
+    'In Production',
+    'On-going batching', 'On-going pelleting', 'On-going bagging',
+    'Done', 'Cancel PO',
+    'Uncombine', 'Merge Back'
+  ];
+  return !knownStatuses.includes(status);
+}
+```
+
+---
+
+## 3. STATUS GROUPS — LOCKED VS MOVABLE
+
+### LOCKED (cannot be moved by auto-sequence, stick in place)
+
+| Status | Behavior |
+|---|---|
+| Done | Locked at top — already implemented |
+| Cancel PO | Locked at bottom — already implemented |
+| In Production | Locked — only 1 per line at a time |
+| On-going batching | Locked — can coexist with In Production |
+| On-going pelleting | Locked — can coexist with In Production |
+| On-going bagging | Locked — can coexist with In Production |
+| Planned | Locked — stays at current prio, but Critical can override |
+
+### MOVABLE (can be sorted/sequenced)
+
+| Status | Behavior |
+|---|---|
+| Plotted | Sortable |
+| Hold | Sortable |
+| Cut | Sortable |
+| Uncombine | Sortable |
+| Merge Back | Sortable |
+| Custom (free text) | Sortable |
+
+```javascript
+function isLockedStatus(status) {
+  const lockedStatuses = [
+    'Done', 'Cancel PO', 'In Production',
+    'On-going batching', 'On-going pelleting', 'On-going bagging',
+    'Planned'
+  ];
+  return lockedStatuses.includes(status);
+}
+
+function isMovableStatus(status) {
+  return !isLockedStatus(status);
+}
+```
+
+---
+
+## 4. PLANNED — BEHAVIOR
+
+### STAYS AT CURRENT PRIO
+
+When set to Planned, order stays at its current priority — does NOT jump to top:
+
+```javascript
+function handleStatusChange(order, newStatus, allOrders) {
+  // Store original prio when changing to locked
+  if (isLockedStatus(newStatus) && !order._originalPrioBeforeLock) {
+    order._originalPrioBeforeLock = order.prio;
+  }
+  
+  // When reverting from locked to movable — restore original position
+  if (isLockedStatus(order.status) && !isLockedStatus(newStatus)) {
+    if (order._originalPrioBeforeLock) {
+      const targetPrio = order._originalPrioBeforeLock;
+      order._originalPrioBeforeLock = null;
+      const maxPrio = allOrders.length;
+      const finalPrio = Math.min(targetPrio, maxPrio);
+      moveOrderToPrio(order, finalPrio, allOrders);
+    }
+  }
+  
+  if (newStatus === 'Planned') {
+    order.status = 'Planned';
+    order._plannedPrio = order.prio;
+    return;
+  }
+  
+  order.status = newStatus;
+}
+
+function moveOrderToPrio(order, targetPrio, allOrders) {
+  const currentIndex = allOrders.findIndex(o => o.id === order.id);
+  if (currentIndex === -1) return;
+  allOrders.splice(currentIndex, 1);
+  const insertIndex = Math.min(targetPrio - 1, allOrders.length);
+  allOrders.splice(insertIndex, 0, order);
+  allOrders.forEach((o, i) => { o.prio = i + 1; });
+}
+```
+
+### CAN BE MANUALLY DRAGGED
+
+```javascript
+function canDragOrder(order) {
+  if (order.status === 'Planned') return true;
+  if (order.status === 'Done' || order.status === 'Cancel PO') return false;
+  if (order.status === 'In Production') return false;
+  if (order.status.startsWith('On-going')) return false;
+  return true;
+}
+```
+
+When dragged to new position, update the locked prio:
+
+```javascript
+function handlePlannedOrderDrag(order, newPrio) {
+  order.prio = newPrio;
+  order._plannedPrio = newPrio;
+}
+```
+
+---
+
+## 5. DRAG AND DROP — WARNINGS
+
+### MOVABLE ABOVE LOCKED — BLOCKED
+
+```javascript
+function canMoveOrderToPosition(order, targetPosition, allOrders) {
+  if (!isMovableStatus(order.status) && order.status !== 'Planned') {
+    return { allowed: false, message: `This order is "${order.status}" and cannot be moved.` };
+  }
+  
+  const orderAbove = allOrders[targetPosition - 1];
+  if (orderAbove && isLockedStatus(orderAbove.status) && 
+      orderAbove.status !== 'Cancel PO' && orderAbove.status !== 'Planned') {
+    return {
+      allowed: false,
+      message: `Cannot place above "${orderAbove.item_description}" which is "${orderAbove.status}". Orders with locked statuses cannot be overtaken.`
+    };
+  }
+  
+  return { allowed: true };
+}
+```
+
+### MOVABLE ABOVE PLANNED — WARNING WITH OPTION
+
+```
+╔════════════════════════════════════════════════════════╗
+║                                                        ║
+║  ⚠ Planned Order Will Be Affected                ✕   ║
+║                                                        ║
+║  Inserting this order here will push                   ║
+║  "Product F" (Planned at Priority 6) down              ║
+║  to Priority 7.                                        ║
+║                                                        ║
+║  Consider adjusting the Planned order first,           ║
+║  or proceed if this is intentional.                    ║
+║                                                        ║
+║              [Cancel]    [Proceed Anyway]               ║
+║                                                        ║
+╚════════════════════════════════════════════════════════╝
+```
+
+---
+
+## 6. IN PRODUCTION / ON-GOING — RESTRICTIONS
+
+### ONLY AFTER DONE/LOCKED ORDERS
+
+```javascript
+function canSetToInProductionOrOngoing(order, newStatus, allOrders) {
+  if (newStatus !== 'In Production' && !newStatus.startsWith('On-going')) {
+    return { allowed: true };
+  }
+  
+  const orderIndex = allOrders.findIndex(o => o.id === order.id);
+  
+  const allowedAbove = [
+    'Done', 'In Production',
+    'On-going batching', 'On-going pelleting', 'On-going bagging',
+    'Planned', 'Cancel PO'
+  ];
+  
+  const problemOrders = [];
+  
+  for (let i = 0; i < orderIndex; i++) {
+    const aboveOrder = allOrders[i];
+    if (!allowedAbove.includes(aboveOrder.status)) {
+      problemOrders.push({
+        prio: i + 1,
+        name: aboveOrder.item_description,
+        status: aboveOrder.status
+      });
+    }
+  }
+  
+  if (problemOrders.length > 0) {
+    const statusLabel = newStatus === 'In Production' ? 'In Production' : 'On-going';
+    return {
+      allowed: false,
+      title: `Cannot Set ${statusLabel}`,
+      message: `There are orders at earlier priorities that have not been produced or completed yet. Consider producing or completing those orders first before ${newStatus === 'In Production' ? 'starting this one' : 'marking this order as on-going'}.`,
+      problemOrders: problemOrders
+    };
+  }
+  
+  // In Production — only 1 per line
+  if (newStatus === 'In Production') {
+    const existingInProduction = allOrders.find(
+      o => o.line === order.line &&
+           o.status === 'In Production' &&
+           o.id !== order.id
+    );
+    
+    if (existingInProduction) {
+      return {
+        allowed: false,
+        title: 'In Production Conflict',
+        message: `"${existingInProduction.item_description}" is currently In Production on this line. Consider marking it as Done or On-going before setting another order to In Production.`,
+        problemOrders: []
+      };
+    }
+  }
+  
+  // On-going — can coexist with In Production, no single-order restriction
+  
+  return { allowed: true };
+}
+```
+
+### WARNING DIALOG — ORANGE BUTTON
+
+```jsx
+function StatusWarningDialog({ title, message, problemOrders, onClose }) {
+  return (
+    <div className="dialog-overlay">
+      <div className="dialog-container" style={{ maxWidth: '440px' }}>
+        <div className="dialog-header">
+          <span>⚠ {title}</span>
+          <button className="dialog-close" onClick={onClose}>✕</button>
+        </div>
+        
+        <div className="dialog-body">
+          <p style={{ fontSize: '12px', color: '#374151', lineHeight: 1.6 }}>
+            {message}
+          </p>
+          
+          {problemOrders && problemOrders.length > 0 && (
+            <div style={{ marginTop: '12px' }}>
+              <p style={{ fontSize: '11px', color: '#6b7280', fontWeight: 600 }}>
+                Orders ahead that need attention:
+              </p>
+              <ul style={{ listStyle: 'none', padding: 0, margin: '8px 0 0 0' }}>
+                {problemOrders.map(o => (
+                  <li key={o.prio} style={{ fontSize: '11px', color: '#374151', padding: '2px 0' }}>
+                    • Priority {o.prio}: {o.name} — <em>{o.status}</em>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+        
+        <div className="dialog-footer" style={{ textAlign: 'right' }}>
+          <button 
+            onClick={onClose}
+            style={{
+              background: '#fd5108',
+              color: '#ffffff',
+              border: 'none',
+              borderRadius: '6px',
+              padding: '8px 20px',
+              fontSize: '13px',
+              fontWeight: 600,
+              cursor: 'pointer'
+            }}
+          >
+            OK
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+## 7. AUTO-SEQUENCE — COMPLETE LOGIC
+
+### EXCLUDED FROM PREVIEW (NOT SHOWN)
+
+| Status | Shown? |
+|---|---|
+| Done | ❌ Not shown |
+| Cancel PO | ❌ Not shown |
+| In Production | ❌ Not shown |
+| On-going batching | ❌ Not shown |
+| On-going pelleting | ❌ Not shown |
+| On-going bagging | ❌ Not shown |
+
+### SHOWN IN PREVIEW
+
+| Status | Shown? | Sortable? |
+|---|---|---|
+| Planned | ✅ Shown | ❌ Locked (but Critical can override) |
+| Plotted | ✅ Shown | ✅ Sorted |
+| Hold | ✅ Shown | ✅ Sorted |
+| Cut | ✅ Shown | ✅ Sorted |
+| Uncombine | ✅ Shown | ✅ Sorted |
+| Merge Back | ✅ Shown | ✅ Sorted |
+| Custom | ✅ Shown | ✅ Sorted |
+
+### SORTING PRIORITY
+
+```
+1. CRITICAL orders (DFL >= Inventory, need production NOW)
+   - Among themselves: sorted by DFL/Inventory ratio (highest deficit first)
+   - Critical overrides Planned — pushes Planned down
+2. PLANNED orders (locked at their position, shifted if Critical takes their spot)
+3. All other orders sorted chronologically by avail date
+   - Within same date: Urgent > Monitor > Sufficient
+   - Within same date and status: higher volume first
+```
+
+### COMPLETE AUTO-SEQUENCE FUNCTION
+
+```javascript
+function runAutoSequence(allOrders, n10dData, dailyColumns, today) {
+  const excludedOrders = [];
+  const plannedOrders = [];
+  const movableOrders = [];
+  
+  allOrders.forEach((order) => {
+    const realPrio = order.prio;
+    
+    if (['Done', 'Cancel PO', 'In Production',
+         'On-going batching', 'On-going pelleting', 'On-going bagging'
+        ].includes(order.status)) {
+      excludedOrders.push({ ...order, _realPrio: realPrio });
+    } else if (order.status === 'Planned') {
+      const lockedPrio = order._plannedPrio || realPrio;
+      plannedOrders.push({ ...order, _realPrio: lockedPrio });
+    } else {
+      movableOrders.push({ ...order, _realPrio: realPrio });
+    }
+  });
+  
+  // Excluded prio slots
+  const excludedPrios = new Set(excludedOrders.map(o => o._realPrio));
+  
+  // Available slots (not excluded)
+  const totalOrders = allOrders.length;
+  const availableSlots = [];
+  for (let i = 1; i <= totalOrders; i++) {
+    if (!excludedPrios.has(i)) {
+      availableSlots.push(i);
+    }
+  }
+  
+  // Assign avail dates and N10D data to movable orders
+  const movableWithDates = assignAvailDates(movableOrders, n10dData, dailyColumns, today);
+  
+  movableWithDates.forEach(order => {
+    const product = n10dData?.find(
+      p => String(p.material_code_fg) === String(order.material_code_fg)
+    );
+    if (product && product.inventory > 0) {
+      order._n10dRatio = product.due_for_loading / product.inventory;
+    } else if (product && product.inventory <= 0) {
+      order._n10dRatio = Infinity;
+    } else {
+      order._n10dRatio = 0;
+    }
+  });
+  
+  // Sort movable orders
+  movableWithDates.sort((a, b) => {
+    const statusOrder = { 'Critical': 0, 'Urgent': 1, 'Monitor': 2, 'Sufficient': 3 };
+    const statusA = statusOrder[a._n10dStatus] ?? 3;
+    const statusB = statusOrder[b._n10dStatus] ?? 3;
+    
+    const isCriticalA = statusA === 0;
+    const isCriticalB = statusB === 0;
+    
+    // Critical ALWAYS first
+    if (isCriticalA && !isCriticalB) return -1;
+    if (!isCriticalA && isCriticalB) return 1;
+    
+    // Both Critical — highest DFL/Inventory ratio first
+    if (isCriticalA && isCriticalB) {
+      return (b._n10dRatio || 0) - (a._n10dRatio || 0);
+    }
+    
+    // Neither Critical — chronological
+    const dateA = a._sortDate;
+    const dateB = b._sortDate;
+    if (dateA && !dateB) return -1;
+    if (!dateA && dateB) return 1;
+    if (!dateA && !dateB) return 0;
+    
+    const dateDiff = dateA.getTime() - dateB.getTime();
+    if (dateDiff !== 0) return dateDiff;
+    
+    // Same date — urgency tiebreaker
+    if (statusA !== statusB) return statusA - statusB;
+    
+    // Same date, same status — higher volume first
+    return (parseFloat(b.volume) || 0) - (parseFloat(a.volume) || 0);
+  });
+  
+  // Separate Critical from non-Critical
+  const criticalOrders = movableWithDates.filter(o => o._n10dStatus === 'Critical');
+  const nonCriticalOrders = movableWithDates.filter(o => o._n10dStatus !== 'Critical');
+  
+  // Build planned prio map
+  const plannedPrioMap = {};
+  const bumpedPlanned = [];
+  plannedOrders.forEach(o => {
+    plannedPrioMap[o._realPrio] = o;
+  });
+  
+  // Build preview
+  const previewResult = [];
+  let criticalIndex = 0;
+  let nonCriticalIndex = 0;
+  
+  // First: Critical orders take earliest available slots, even bumping Planned
+  const criticalSlots = [];
+  const remainingSlots = [];
+  
+  for (const slot of availableSlots) {
+    if (criticalIndex < criticalOrders.length) {
+      if (plannedPrioMap[slot]) {
+        bumpedPlanned.push(plannedPrioMap[slot]);
+        delete plannedPrioMap[slot];
+      }
+      
+      previewResult.push({
+        ...criticalOrders[criticalIndex],
+        prio: slot,
+        _isLocked: false,
+        _isCritical: true
+      });
+      criticalIndex++;
+    } else {
+      remainingSlots.push(slot);
+    }
+  }
+  
+  // Find slots for bumped Planned orders
+  const remainingPlannedMap = {};
+  const allPlanned = [...Object.values(plannedPrioMap), ...bumpedPlanned];
+  
+  allPlanned.forEach(o => {
+    const originalPrio = o._realPrio;
+    if (remainingSlots.includes(originalPrio) && !remainingPlannedMap[originalPrio]) {
+      remainingPlannedMap[originalPrio] = o;
+    } else {
+      const nearestSlot = remainingSlots.find(
+        s => s >= originalPrio && !remainingPlannedMap[s]
+      );
+      if (nearestSlot) {
+        remainingPlannedMap[nearestSlot] = o;
+      } else {
+        const anySlot = remainingSlots.find(s => !remainingPlannedMap[s]);
+        if (anySlot) {
+          remainingPlannedMap[anySlot] = o;
+        }
+      }
+    }
+  });
+  
+  // Fill remaining slots with Planned and non-Critical
+  for (const slot of remainingSlots) {
+    if (remainingPlannedMap[slot]) {
+      previewResult.push({
+        ...remainingPlannedMap[slot],
+        prio: slot,
+        _isLocked: true
+      });
+    } else {
+      if (nonCriticalIndex < nonCriticalOrders.length) {
+        previewResult.push({
+          ...nonCriticalOrders[nonCriticalIndex],
+          prio: slot,
+          _isLocked: false
+        });
+        nonCriticalIndex++;
+      }
+    }
+  }
+  
+  // Sort by prio for display
+  previewResult.sort((a, b) => a.prio - b.prio);
+  
+  return { previewResult, excludedOrders };
+}
+```
+
+### EXAMPLE — CRITICAL OVERRIDES PLANNED
+
+Order table:
+```
+Prio 1: Salto Conditioner → In Production (excluded)
+Prio 2: Gallimax Pigeon → Planned (locked at 2)
+Prio 3: Elite XP Startex → Plotted
+Prio 4: Gall 21 Chicken → Plotted (Critical)
+Prio 5: Gallimax 3 Maintenance → Plotted (Urgent)
+```
+
+Preview:
+```
+1 order excluded (In Production)
+
+Prio 2: Gall 21 Chicken → Critical (takes first slot, bumps Planned)
+Prio 3: Gallimax Pigeon → Planned 🔒 (bumped to nearest available)
+Prio 4: Gallimax 3 Maintenance → Mar 31, Urgent (chronological)
+Prio 5: Elite XP Startex → Apr 9, Sufficient (chronological)
+```
+
+### EXAMPLE — NO CRITICAL
+
+Order table:
+```
+Prio 1: Done (excluded)
+Prio 2: In Production (excluded)
+Prio 3: Planned
+Prio 4: Plotted (Apr 9)
+Prio 5: Plotted (Apr 5)
+Prio 6: Cancel PO (excluded)
+```
+
+Preview:
+```
+3 orders excluded
+
+Prio 3: Planned 🔒 (stays at 3)
+Prio 4: Plotted (Apr 5 — sorted first)
+Prio 5: Plotted (Apr 9 — sorted second)
+```
+
+---
+
+## 8. PREVIEW — PRIO NUMBERS MATCH ORDER TABLE
+
+Preview must show REAL prio numbers from the order table, not renumbered from 1.
+
+```
+ORDER TABLE:                    PREVIEW:
+Prio 1: In Production          (excluded)
+Prio 2: Planned                Prio 2: Planned 🔒
+Prio 3: Plotted                Prio 3: [sorted]
+Prio 4: Plotted                Prio 4: [sorted]
+```
+
+NOT:
+```
+WRONG PREVIEW:
+Prio 1: Planned         ← WRONG, should be 2
+Prio 2: Plotted          ← WRONG, should be 3
+Prio 3: Plotted          ← WRONG, should be 4
+```
+
+### EXCLUDED COUNT
+
+```jsx
+{excludedOrders.length > 0 && (
+  <div style={{ fontSize: '11px', color: '#6b7280', marginBottom: '8px' }}>
+    {excludedOrders.length} order(s) excluded (Done, In Production, On-going, Cancelled)
+  </div>
+)}
+```
+
+---
+
+## 9. PLANNED ROW IN PREVIEW — VISUAL INDICATOR
+
+Only in the auto-sequence preview (NOT in order table):
+
+```css
+.preview-row-planned {
+  background: #eff6ff;
+  border-left: 3px solid #2563eb;
+}
+
+.planned-lock-indicator {
+  font-size: 10px;
+  color: #2563eb;
+  font-weight: 500;
+}
+```
+
+```jsx
+// ONLY in preview
+{order._isLocked && (
+  <div className="planned-lock-indicator">🔒 Planned — locked</div>
+)}
+```
+
+---
+
+## 10. SEQUENCE ANALYSIS — UPDATED
+
+```javascript
+function buildSequenceAnalysisPrompt(previewOrders, excludedOrders) {
+  const excludedSummary = excludedOrders.map(o =>
+    `${o.item_description} (Priority ${o._realPrio}, ${o.status})`
+  ).join(', ');
+  
+  const plannedOrders = previewOrders.filter(o => o._isLocked);
+  const criticalOrders = previewOrders.filter(o => o._isCritical);
+  
+  return `
+Analyze this production sequence.
+
+CONTEXT:
+- Orders excluded from sequencing: ${excludedSummary || 'None'}
+- Critical orders (prioritized first): ${criticalOrders.map(o => o.item_description).join(', ') || 'None'}
+- Planned orders (locked positions): ${plannedOrders.map(o => `${o.item_description} at Priority ${o.prio}`).join(', ') || 'None'}
+- Remaining orders sorted chronologically by availability dates.
+
+RULES:
+- Explain why excluded orders are not in the sequence.
+- If Critical orders exist, explain why they are prioritized first.
+- Mention Planned orders and their locked positions.
+- Explain chronological sorting for remaining orders.
+- Use full month names.
+- 2-4 sentences.
+
+ORDERS:
+${previewOrders.map(o => `
+Priority ${o.prio}: ${o.item_description}
+Status: ${o.status} | N10D Status: ${o._n10dStatus || 'N/A'}
+Avail Date: ${o._displayAvailDate || o.avail_date || 'N/A'}
+Volume: ${o.volume} MT
+${o._isCritical ? '(CRITICAL — prioritized)' : ''}
+${o._isLocked ? '(PLANNED — locked)' : '(SORTED)'}
+`).join('\n')}
+  `;
+}
+```
+
+---
+
+## 11. REVERT STATUS — RETURN TO ORIGINAL POSITION
+
+```javascript
+function handleStatusChange(order, newStatus, allOrders) {
+  if (isLockedStatus(newStatus) && !order._originalPrioBeforeLock) {
+    order._originalPrioBeforeLock = order.prio;
+  }
+  
+  if (isLockedStatus(order.status) && !isLockedStatus(newStatus)) {
+    if (order._originalPrioBeforeLock) {
+      const targetPrio = order._originalPrioBeforeLock;
+      order._originalPrioBeforeLock = null;
+      const maxPrio = allOrders.length;
+      const finalPrio = Math.min(targetPrio, maxPrio);
+      moveOrderToPrio(order, finalPrio, allOrders);
+    }
+  }
+  
+  if (newStatus === 'Planned') {
+    order.status = 'Planned';
+    order._plannedPrio = order.prio;
+    return;
+  }
+  
+  order.status = newStatus;
+}
+```
+
+---
+
+## 12. METRIC CARDS — UPDATED
+
+```javascript
+function calculatePreviewMetrics(previewOrders, excludedOrders) {
+  let withDeadline = 0;
+  let noDeadline = 0;
+  let stockSufficient = 0;
+  let planned = 0;
+  let conflicts = 0;
+  
+  previewOrders.forEach(order => {
+    if (order.status === 'Planned') {
+      planned++;
+    } else if (order._n10dStatus === 'Sufficient') {
+      stockSufficient++;
+    } else if (order._sortDate) {
+      withDeadline++;
+    } else {
+      noDeadline++;
+    }
+  });
+  
+  return {
+    total: previewOrders.length,
+    withDeadline,
+    noDeadline,
+    stockSufficient,
+    planned,
+    conflicts
+  };
+}
+```
+
+---
+
+## VERIFICATION
+
+### Planned status
+1. ✅ Setting to Planned — stays at current prio, no jump to top
+2. ✅ Can be manually dragged — updates locked position
+3. ✅ Auto-sequence does NOT move Planned (unless Critical overrides)
+4. ✅ Critical overrides Planned — pushes Planned to next available slot
+
+### Custom status
+5. ✅ All cells editable — same as Plotted
+6. ✅ Plain text display, no badge
+7. ✅ Treated as movable in auto-sequence
+8. ✅ Only applies to that order
+
+### In Production / On-going
+9. ✅ Can only set if all above are Done/InProd/OnGoing/Planned
+10. ✅ Warning with orange OK button if Plotted/Hold/Custom above
+11. ✅ Lists problem orders in warning
+12. ✅ Only 1 In Production per line
+13. ✅ On-going can coexist with In Production
+
+### Auto-sequence preview
+14. ✅ Done, Cancel, In Production, On-going — NOT shown
+15. ✅ Planned — shown, locked, blue left border + lock icon
+16. ✅ Movable — sorted: Critical first, then chronological
+17. ✅ Critical sorted by DFL/Inventory ratio (highest first)
+18. ✅ Non-critical sorted by date, then Urgent > Monitor > Sufficient
+19. ✅ Prio numbers match order table (not renumbered)
+20. ✅ Excluded count shown
+
+### Drag and drop
+21. ✅ Movable above In Production/On-going/Done — blocked
+22. ✅ Movable above Planned — warning with Cancel/Proceed
+23. ✅ Planned can be dragged by user
+
+### Revert status
+24. ✅ Done → Plotted returns to original prio, not bottom
+25. ✅ If original prio > total orders, goes to nearest available
+
+### Sequence Analysis
+26. ✅ Mentions excluded orders and why
+27. ✅ Mentions Critical prioritization
+28. ✅ Mentions Planned locked positions
+29. ✅ Explains chronological sorting
+
+### Planned label
+30. ✅ "🔒 Planned — locked" only in preview
+31. ✅ Order table shows normal "Planned" badge
+```

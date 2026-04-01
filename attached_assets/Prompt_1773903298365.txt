@@ -1,0 +1,288 @@
+```
+Implement the following critical fix to the NexFeed application:
+
+---
+
+## FIX: AUTO-SEQUENCE — CORRECT SEQUENCING WITH NEXT 10 DAYS TARGET DATES
+
+The Auto-Sequence feature is not correctly using the Next 10 Days target dates. Orders with inferred target dates from stock level data are being placed AFTER actual dated orders instead of being interleaved chronologically.
+
+---
+
+### THE PROBLEM
+
+Current auto-sequence output (WRONG):
+```
+Prio 1: Salto Conditioner    | Avail: Mar 22    | Start: Mar 22
+Prio 2: Gallimax Pigeon      | Avail: prio rep   | Start: Mar 22
+Prio 3: Elite XP Startex     | Avail: prio rep   | Start: Mar 22
+Prio 4: Gall 21 Chicken      | Avail: safety stk | Start: Mar 22
+Prio 5: Gallimax 3 Maint     | Avail: safety stk | Start: Mar 23  ← TARGET: Mar 19!
+...
+```
+
+Gallimax 3 Maintenance has a target date of March 19 from the Next 10 Days file, but it's placed at Prio 5 starting March 23. This is WRONG — it should be the FIRST order because March 19 is the earliest date among all orders.
+
+---
+
+### THE CORRECT LOGIC
+
+**Step 1: Assign an effective date to EVERY order**
+
+Every order gets an "effective date" used for sequencing:
+
+```
+function getEffectiveDate(order) {
+  // Priority 1: Actual avail date (from SAP)
+  if (isDateValue(order.avail_date)) {
+    return { date: parseDate(order.avail_date), source: 'avail_date' };
+  }
+  
+  // Priority 2: Inferred target date (from Next 10 Days)
+  if (order.inferred_target_date) {
+    return { date: parseDate(order.inferred_target_date), source: 'target_date' };
+  }
+  
+  // Priority 3: No date — gap filler
+  if (order.stock_status === 'stock_sufficient') {
+    return { date: null, source: 'stock_sufficient' };
+  }
+  
+  // Priority 4: No date, no match — true gap filler
+  return { date: null, source: 'none' };
+}
+```
+
+**Step 2: Sort ALL orders by effective date**
+
+```
+function sortByEffectiveDate(orders) {
+  return orders.sort((a, b) => {
+    const dateA = getEffectiveDate(a);
+    const dateB = getEffectiveDate(b);
+    
+    // Both have dates — sort chronologically
+    if (dateA.date && dateB.date) {
+      if (dateA.date < dateB.date) return -1;
+      if (dateA.date > dateB.date) return 1;
+      
+      // Same date — actual avail date takes priority over target date
+      if (dateA.source === 'avail_date' && dateB.source === 'target_date') return -1;
+      if (dateA.source === 'target_date' && dateB.source === 'avail_date') return 1;
+      
+      return 0;
+    }
+    
+    // Order with date comes before order without date
+    if (dateA.date && !dateB.date) return -1;
+    if (!dateA.date && dateB.date) return 1;
+    
+    // Both have no date
+    // Stock sufficient goes AFTER no-match gap fillers
+    if (dateA.source === 'stock_sufficient' && dateB.source !== 'stock_sufficient') return 1;
+    if (dateA.source !== 'stock_sufficient' && dateB.source === 'stock_sufficient') return -1;
+    
+    return 0;
+  });
+}
+```
+
+**Step 3: The sorted list IS the proposed sequence**
+
+There is no separate "dated orders first, then gap fillers" logic. ALL orders with any kind of date (actual avail OR inferred target) are treated equally and sorted chronologically together. Orders without any date go to the bottom.
+
+---
+
+### CORRECT EXAMPLE
+
+**Given orders:**
+```
+Order 1: Salto Conditioner    | Avail: Mar 22         | Effective: Mar 22 (avail)
+Order 2: Gallimax Pigeon      | Avail: prio replenish  | Target: Mar 28        | Effective: Mar 28 (target)
+Order 3: Elite XP Startex     | Avail: prio replenish  | Target: Mar 28        | Effective: Mar 28 (target)
+Order 4: Gall 21 Chicken      | Avail: safety stocks   | Stock Sufficient      | Effective: null (stock_sufficient)
+Order 5: Gallimax 3 Maint     | Avail: safety stocks   | Target: Mar 19        | Effective: Mar 19 (target)
+Order 6: Elite XP Startex     | Avail: safety stocks   | Target: Mar 28        | Effective: Mar 28 (target)
+Order 7: Elite XP Startex     | Avail: safety stocks   | Target: Mar 28        | Effective: Mar 28 (target)
+Order 8: Elite XP Startex     | Avail: safety stocks   | Target: Mar 28        | Effective: Mar 28 (target)
+Order 9: Elite XP Startex     | Avail: safety stocks   | Target: Mar 28        | Effective: Mar 28 (target)
+Order 10: Elite XP Startex    | Avail: safety stocks   | Target: Mar 28        | Effective: Mar 28 (target)
+```
+
+**Correct auto-sequence output:**
+```
+Prio 1:  Order 5 — Gallimax 3 Maint     | Effective: Mar 19 (TARGET) ← earliest!
+Prio 2:  Order 1 — Salto Conditioner    | Effective: Mar 22 (AVAIL)
+Prio 3:  Order 2 — Gallimax Pigeon      | Effective: Mar 28 (TARGET)
+Prio 4:  Order 3 — Elite XP Startex     | Effective: Mar 28 (TARGET)
+Prio 5:  Order 6 — Elite XP Startex     | Effective: Mar 28 (TARGET)
+Prio 6:  Order 7 — Elite XP Startex     | Effective: Mar 28 (TARGET)
+Prio 7:  Order 8 — Elite XP Startex     | Effective: Mar 28 (TARGET)
+Prio 8:  Order 9 — Elite XP Startex     | Effective: Mar 28 (TARGET)
+Prio 9:  Order 10 — Elite XP Startex    | Effective: Mar 28 (TARGET)
+Prio 10: Order 4 — Gall 21 Chicken      | Effective: null (STOCK SUFFICIENT) ← last
+```
+
+**Key points:**
+- Gallimax 3 Maintenance (Target: Mar 19) is FIRST — it has the earliest effective date.
+- Salto Conditioner (Avail: Mar 22) is SECOND — next chronologically.
+- All Target: Mar 28 orders follow — they share the same effective date.
+- Gall 21 Chicken (Stock Sufficient) is LAST — no production urgency.
+
+---
+
+### START DATE CALCULATION AFTER SEQUENCING
+
+Once the sequence is determined, calculate start dates working backwards from each order's effective date:
+
+**For orders with effective dates (actual or target):**
+- The order must COMPLETE on or before its effective date.
+- Start Date = Effective Date - Production Hours - Changeover Time
+- If the previous order's completion pushes this order's start later than needed, cascade forward and flag conflicts.
+
+**For orders without effective dates (gap fillers, stock sufficient):**
+- Start Date cascades from the previous order's completion + changeover.
+- No deadline constraint.
+
+**Example with times:**
+```
+Prio 1: Gallimax 3 Maint (80 MT, ~4.18 hrs, Target: Mar 19)
+  Must complete by: Mar 19
+  Start: Mar 19 minus 4.18 hrs = ~Mar 18, 7:49 PM
+  Completion: Mar 19, ~12:00 AM
+
+Prio 2: Salto Conditioner (3 MT, ~0.32 hrs, Avail: Mar 22)
+  Previous completion: Mar 19 12:00 AM + changeover
+  Start: cascades from Prio 1 → Mar 19, ~12:10 AM
+  Completion: Mar 19, ~12:30 AM
+  ✅ Well before Mar 22
+
+Prio 3: Gallimax Pigeon (24 MT, ~1.4 hrs, Target: Mar 28)
+  Start: cascades from Prio 2
+  Completion: Mar 19, ~2:00 AM
+  ✅ Well before Mar 28
+
+... and so on
+```
+
+---
+
+### SLIPPING ORDERS BEFORE ACTUAL DATED ORDERS
+
+**Critical rule:** Even if the first order in the sequence has an actual avail date (e.g., March 22), the auto-sequence CAN and SHOULD place other orders BEFORE it if those orders have earlier effective dates.
+
+**Example:**
+```
+If the line has:
+- Order A: Avail = March 22 (actual)
+- Order B: Avail = prio replenish, Target = March 19
+
+Auto-sequence places Order B FIRST because March 19 < March 22.
+Order B starts first, completes by March 19.
+Order A starts after, completes by March 22.
+
+This is CORRECT — dated orders are NOT always at the top.
+```
+
+**Another example with tight scheduling:**
+```
+- Order A: Avail = March 20 (actual), Production = 8 hrs
+- Order B: Avail = safety stocks, Target = March 19, Production = 4 hrs
+- Order C: Avail = prio replenish, Target = March 18, Production = 2 hrs
+
+Auto-sequence:
+Prio 1: Order C — Target: Mar 18 (start ~Mar 18 early, complete by Mar 18)
+Prio 2: Order B — Target: Mar 19 (start after Order C, complete by Mar 19)
+Prio 3: Order A — Avail: Mar 20 (start after Order B, complete by Mar 20) ✅
+
+All orders meet their deadlines.
+```
+
+---
+
+### CONFLICT DETECTION
+
+After building the sequence, check for conflicts:
+
+**Conflict: Order cannot meet its effective date:**
+```
+If an order's calculated completion date > its effective date:
+  → Flag as conflict
+  → Red left border in simulation table
+  → AI insight: "⚠ FPR: 260309 (Gallimax 3 Maint) is scheduled to 
+    complete on Mar 20 but its stock target date is Mar 19. 
+    Consider moving it earlier or reducing upstream production time."
+```
+
+**Warning: Tight fit:**
+```
+If an order's completion date is within 12 hours of its effective date:
+  → Flag as warning
+  → Amber left border
+  → AI insight: "⚠ FPR: 260309 completes just 6 hours before its 
+    Mar 19 target. Any delays could cause a stockout."
+```
+
+---
+
+### SUMMARY BAR UPDATE
+
+```
+Orders: 10 | Avail-dated: 1 | Stock-targeted: 7 | Gap fillers: 0 | Stock sufficient: 2 | Conflicts: 0
+```
+
+- **Avail-dated:** Orders with actual avail dates from SAP.
+- **Stock-targeted:** Orders with inferred target dates from Next 10 Days.
+- **Gap fillers:** Non-dated orders with no match (no date constraint).
+- **Stock sufficient:** Orders deprioritized.
+
+---
+
+### AI INSIGHTS IN AUTO-SEQUENCE MODAL
+
+**Insight 1 — Stock-driven reordering:**
+```
+📊 Gallimax 3 Maintenance (FPR: 260309, 80 MT) was 
+moved from Prio 5 to Prio 1. Stock level data shows 
+this product must be ready by March 19 — warehouse 
+loading reaches inventory threshold by March 20. 
+Completing this order first prevents a stockout.
+```
+
+**Insight 2 — Actual date preserved:**
+```
+✅ Salto Conditioner (FPR: 260309, 3 MT, Avail: Mar 22) 
+remains on track at Prio 2. Estimated completion: 
+Mar 19, 12:30 AM — well within its March 22 deadline.
+```
+
+**Insight 3 — Stock sufficient deprioritized:**
+```
+📊 Gall 21 Chicken Layer (FPR: 260309, 39 MT) moved 
+to Prio 10 (last). Stock levels show warehouse already 
+has 24.0 MT against a 0.7 MT target — well overstocked. 
+This order can wait until all other production is complete.
+```
+
+**Insight 4 — Target unlikely within 10 days:**
+```
+⚠ Elite XP Startex (5 orders, total 225 MT) has a 
+stock target of Mar 28 but inventory target (310.6 MT) 
+is unlikely to be fully met within 10 days. These 
+orders are scheduled consecutively starting Prio 4 
+to maximize throughput toward the target.
+```
+
+---
+
+### SIMULATION TABLE — LEFT BORDER COLORS
+
+| Border Color | Meaning |
+|---|---|
+| Green (#43a047) | Actual avail date — on track |
+| Blue (#3b82f6) | Stock target date — on track |
+| Amber (#f59e0b) | Any date — tight fit (within 12 hrs) |
+| Red (#e53935) | Any date — will miss deadline |
+| Grey (#a1a8b3) | No date — gap filler |
+| Light grey (#d1d5db) | Stock sufficient — lowest priority |
+```

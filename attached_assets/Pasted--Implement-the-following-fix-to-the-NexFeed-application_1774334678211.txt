@@ -1,0 +1,118 @@
+```
+Implement the following fix to the NexFeed application:
+
+---
+
+## FIX: ADD ORDER BUTTON — CORRECT PLACEMENT AND HEADER STYLING
+
+---
+
+### ON "ALL" TAB — BUTTON BESIDE LINE LABEL
+
+When viewing the "All" tab, each line section has a header container showing the line label. Place the "+ Add Order" button right next to it, separated by a pipe divider.
+
+**Layout:**
+```
+┌─────────────────────────────────────────────────────────┐
+│ 📋 Line 1  |  + Add Order                   10 orders   │
+├─────────────────────────────────────────────────────────┤
+│ [Table for Line 1...]                                    │
+└─────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────┐
+│ 📋 Line 2  |  + Add Order                   9 orders    │
+├─────────────────────────────────────────────────────────┤
+│ [Table for Line 2...]                                    │
+└─────────────────────────────────────────────────────────┘
+```
+
+- "📋 Line 1" on the left — existing styling
+- " | " pipe divider — grey (#d1d5db), 12px
+- "+ Add Order" — simple clickable text, no border, no background
+- "10 orders" on the far right — existing styling
+
+---
+
+### ON PER-LINE TAB — BUTTON ONLY, WITH GREY HEADER
+
+When viewing a specific line tab (Line 1, Line 2, etc.), the table header container shows ONLY the "+ Add Order" button. The header background should be grey to match the "All" tab's header style.
+
+**Layout:**
+```
+┌─────────────────────────────────────────────────────────┐
+│ + Add Order                                              │  ← grey background header
+├─────────────────────────────────────────────────────────┤
+│          ORDER DETAILS          │  PRODUCTION PARAMETERS │
+├─────────────────────────────────┤────────────────────────┤
+│ Prio │ FPR │ Planned Order │ ...│ Form │ Volume │ ...    │
+```
+
+- No line label (already shown in the tab above)
+- No order count (already shown in the tab badge)
+- Just "+ Add Order" on the left
+
+**Per-line header container styling — match "All" tab header:**
+
+| Property | Value |
+|---|---|
+| Background | Light grey (#f9fafb) — same as "All" tab's line header |
+| Padding | 8px 16px |
+| Border-bottom | 1px solid #e5e7eb |
+| Border-top-left-radius | 8px (if it's the top of the table container) |
+| Border-top-right-radius | 8px |
+
+---
+
+### "+ ADD ORDER" TEXT STYLING
+
+Same styling everywhere — simple clickable text:
+
+| Property | Value |
+|---|---|
+| Text | "+ Add Order" |
+| Font size | 12px |
+| Font weight | 500 |
+| Color | Orange (#fd5108) |
+| Background | None |
+| Border | None |
+| Padding | 0 |
+| Cursor | Pointer |
+| Hover | Underline, slightly darker orange (#e8490b) |
+| No button shape | No border, no border-radius, no background |
+
+---
+
+### VISUAL COMPARISON
+
+**All tab:**
+```
+┌──────────────────────────────────────────────────────┐
+│ 📋 Line 1  |  + Add Order                 10 orders  │  ← grey bg
+├──────────────────────────────────────────────────────┤
+│ ORDER DETAILS              │ PRODUCTION PARAMETERS    │
+│ Prio │ FPR │ ...           │ Form │ Volume │ ...      │
+│ data...                    │ data...                  │
+└──────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────┐
+│ 📋 Line 2  |  + Add Order                  9 orders  │  ← grey bg
+├──────────────────────────────────────────────────────┤
+│ ORDER DETAILS              │ PRODUCTION PARAMETERS    │
+│ Prio │ FPR │ ...           │ Form │ Volume │ ...      │
+│ data...                    │ data...                  │
+└──────────────────────────────────────────────────────┘
+```
+
+**Per-line tab (e.g., Line 1 selected):**
+```
+┌──────────────────────────────────────────────────────┐
+│ + Add Order                                           │  ← grey bg (matching All tab)
+├──────────────────────────────────────────────────────┤
+│ ORDER DETAILS              │ PRODUCTION PARAMETERS    │
+│ Prio │ FPR │ ...           │ Form │ Volume │ ...      │
+│ data...                    │ data...                  │
+└──────────────────────────────────────────────────────┘
+```
+
+Both have the same grey header background — visually consistent.
+```

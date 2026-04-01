@@ -1,0 +1,94 @@
+```
+Implement the following fix to the NexFeed application:
+
+---
+
+## FIX: AUTO-SEQUENCE DISABLED TOOLTIP — STYLING
+
+The tooltip on the disabled Auto-Sequence button is displaying incorrectly — it's too narrow, too tall, and the text is wrapping on every word. Fix the tooltip to be a proper horizontal tooltip.
+
+---
+
+### CURRENT (BROKEN)
+
+The tooltip appears as a tall, narrow vertical strip with text wrapping on almost every word:
+```
+Auto-
+Sequence
+is
+available
+per line.
+Please
+select a
+specific
+line tab
+...
+```
+
+### FIXED
+
+The tooltip should be a wide, horizontal tooltip with text flowing naturally:
+
+```
+Auto-Sequence is available per line. Please select a specific line tab (e.g. Line 1, Line 2) to use this feature.
+```
+
+---
+
+### TOOLTIP STYLING
+
+| Property | Value |
+|---|---|
+| Max-width | 300px |
+| Min-width | 250px |
+| Width | Auto (fits content up to max-width) |
+| White-space | Normal (allow wrapping, but at natural word breaks) |
+| Background | Dark grey (#374151) |
+| Text color | White (#ffffff) |
+| Font size | 11px |
+| Font weight | 400 (regular) |
+| Line height | 1.5 |
+| Padding | 8px 12px |
+| Border radius | 6px |
+| Text align | Left |
+| Position | Below the button, centered horizontally |
+| z-index | 9999 (above all other content) |
+| Box shadow | 0 2px 8px rgba(0,0,0,0.15) |
+| Arrow | Small triangle pointing up toward the button, centered |
+
+---
+
+### TOOLTIP POSITIONING
+
+- The tooltip appears BELOW the button, not to the side.
+- Horizontally centered relative to the button.
+- If the button is near the right edge of the screen, the tooltip shifts left so it doesn't overflow off-screen.
+- If the button is near the left edge, the tooltip shifts right.
+- Minimum 8px gap between the button and the top of the tooltip.
+
+---
+
+### TOOLTIP TEXT
+
+Shorten the message slightly for a cleaner read:
+
+```
+Auto-Sequence is available per line. Select a specific line tab (e.g., Line 1, Line 2) to use this feature.
+```
+
+- Removed "Please" for brevity.
+- One sentence, flows naturally within 300px max-width.
+- Should wrap into 2 lines maximum at 300px width.
+
+---
+
+### TOOLTIP BEHAVIOR
+
+| Property | Value |
+|---|---|
+| Show on | Hover over the disabled button |
+| Delay before showing | 300ms |
+| Hide on | Mouse leaves the button area |
+| Delay before hiding | 100ms |
+| Animation | Fade in (opacity 0 → 1, 150ms) |
+```

@@ -1,0 +1,8 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "_DpjI9-R10rYKtF6N0kWS"
+uri = "file://AI_PROMPTS.md"
+type = "text"
+title = "NexFeed — Active AI System Prompts"

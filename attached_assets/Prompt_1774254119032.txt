@@ -1,0 +1,255 @@
+```
+Implement the following changes to the NexFeed application:
+
+---
+
+## GLOBAL FONT SIZE INCREASE — ALL UI ELEMENTS EXCEPT ORDER TABLE
+
+Increase font sizes across the entire application for better readability. The order table has already been updated separately — do NOT change the order table font sizes.
+
+---
+
+### 1. OVERVIEW PAGE — LINE CAPACITY MONITORING
+
+| Element | Current (~size) | Updated |
+|---|---|---|
+| Line labels (Line 1, Line 2, ... Line 7) | ~12px | 14px |
+| Line status text (Active, Idle, etc.) | ~11px | 13px |
+| Capacity percentage | ~12px | 14px, font-weight 600 |
+| Capacity bar labels | ~10px | 12px |
+| Section title "Line Capacity Monitoring" | ~14px | 16px, font-weight 600 |
+| Any sub-text or descriptions | ~11px | 13px |
+
+---
+
+### 2. ORDER TABS PAGE
+
+**Key Metric Cards (Total Orders, Active Orders, Urgent Orders, Lacking Details):**
+
+| Element | Current (~size) | Updated |
+|---|---|---|
+| Card number/value (e.g., "15", "12") | ~20-24px | 28px, font-weight 700 |
+| Card label (e.g., "Total Orders", "Active Orders") | ~11-12px | 14px |
+| Card sub-text or description | ~10px | 12px |
+
+**Line Tabs (All, Line 1, Line 2, etc.):**
+
+| Element | Current (~size) | Updated |
+|---|---|---|
+| Tab labels (All, Line 1, Line 2, ...) | ~12px | 14px |
+| Active tab label | ~12px | 14px, font-weight 600 |
+| Tab count badges (if any) | ~10px | 12px |
+
+**Search Bar:**
+
+| Element | Current (~size) | Updated |
+|---|---|---|
+| Search input text | ~12px | 14px |
+| Search placeholder text | ~12px | 14px |
+| Search icon | ~14px | 16px |
+
+**Filter Dropdowns:**
+
+| Element | Current (~size) | Updated |
+|---|---|---|
+| Filter label text | ~11px | 13px |
+| Filter dropdown text | ~12px | 14px |
+| Filter dropdown options | ~12px | 14px |
+| Filter badge/chip text | ~10px | 12px |
+
+**Action Buttons (Auto-Sequence, Upload, Export):**
+
+| Element | Current (~size) | Updated |
+|---|---|---|
+| Button text | ~12px | 14px |
+| Button icon | ~14px | 16px |
+
+---
+
+### 3. ANALYTICS PAGE
+
+**Smart Insights section:**
+
+| Element | Current (~size) | Updated |
+|---|---|---|
+| Section title "Smart Insight" | ~14px | 16px, font-weight 600 |
+| Insight text body | ~12px | 14px |
+| Insight numbered items (1. 2. 3.) | ~12px | 14px |
+| Refresh button text | ~11px | 13px |
+
+**Key Metric Cards:**
+
+| Element | Current (~size) | Updated |
+|---|---|---|
+| Card number/value | ~20-24px | 28px, font-weight 700 |
+| Card label (e.g., "Total Volume", "Avg Production Time") | ~11-12px | 14px |
+| Card sub-text or change indicators | ~10px | 12px |
+
+**Chart labels and titles:**
+
+| Element | Current (~size) | Updated |
+|---|---|---|
+| Chart titles | ~13px | 15px, font-weight 600 |
+| Chart axis labels | ~10px | 12px |
+| Chart legend text | ~10px | 12px |
+| Chart tooltip text | ~11px | 13px |
+
+---
+
+### 4. ORDER HISTORY PAGE
+
+**Line Tabs (Line 1, Line 2, ... Line 7):**
+
+| Element | Current (~size) | Updated |
+|---|---|---|
+| Tab labels | ~12px | 14px |
+| Active tab label | ~12px | 14px, font-weight 600 |
+| Tab count badges | ~10px | 12px |
+
+**Search and filter (if any):**
+
+| Element | Current (~size) | Updated |
+|---|---|---|
+| Search input text | ~12px | 14px |
+| Search placeholder | ~12px | 14px |
+| Filter dropdown text | ~12px | 14px |
+
+---
+
+### 5. OTHER GLOBAL ELEMENTS TO INCREASE
+
+**Navigation sidebar:**
+
+| Element | Current (~size) | Updated |
+|---|---|---|
+| Nav item labels (Overview, Orders, Analytics, etc.) | ~13px | 14px |
+| Nav sub-item labels (Feedmill 1, Line 1, etc.) | ~12px | 13px |
+| Nav section headers (Orders, Configurations) | ~11px | 12px, font-weight 600, uppercase |
+
+**Page titles (all pages):**
+
+| Element | Current (~size) | Updated |
+|---|---|---|
+| Main page title (e.g., "Configurations", "Analytics") | ~18-20px | 22px, font-weight 700 |
+| Page subtitle/description | ~12-13px | 14px |
+
+**Toast notifications:**
+
+| Element | Current (~size) | Updated |
+|---|---|---|
+| Toast title text | ~13px | 14px, font-weight 600 |
+| Toast body text | ~12px | 13px |
+
+**Dialog/Modal text (Cancel, Cut, Combine, etc.):**
+
+| Element | Current (~size) | Updated |
+|---|---|---|
+| Dialog title | ~16px | 18px, font-weight 600 |
+| Dialog body text | ~12-13px | 14px |
+| Dialog label text | ~12px | 13px |
+| Dialog button text | ~12px | 14px |
+| Dialog input text | ~12px | 14px |
+
+**Chatbot:**
+
+| Element | Current (~size) | Updated |
+|---|---|---|
+| Chat message text | ~12-13px | 14px |
+| Chat input text | ~12px | 14px |
+| Chat placeholder | ~12px | 14px |
+
+**Production Insights & Alerts panels:**
+
+| Element | Current (~size) | Updated |
+|---|---|---|
+| Panel header text | ~13px | 14px, font-weight 600 |
+| Insight/alert card heading | ~12-13px | 14px |
+| Insight/alert card body | ~11-12px | 13px |
+| Collapsed summary count | ~12px | 13px |
+
+**Smart Combine panel:**
+
+| Element | Current (~size) | Updated |
+|---|---|---|
+| Panel title | ~14px | 16px |
+| Combine card title | ~13px | 14px |
+| Combine card details | ~11-12px | 13px |
+| Combine button text | ~12px | 14px |
+
+---
+
+### DO NOT CHANGE
+
+| Element | Reason |
+|---|---|
+| Main interactive order table | Already updated separately to 13px |
+| Auto-Sequence preview table | Already updated separately to 13px |
+| Order History table data | Already updated separately to 13px |
+| Knowledge Base table | Has its own sizing |
+| Next 10 Days table | Has its own sizing |
+| Upload History table | Intentionally compact |
+
+---
+
+### GLOBAL CSS APPROACH
+
+To ensure consistency, consider setting base font sizes:
+
+```css
+/* Base font size for the app */
+:root {
+  --font-size-xs: 12px;
+  --font-size-sm: 13px;
+  --font-size-base: 14px;
+  --font-size-md: 16px;
+  --font-size-lg: 18px;
+  --font-size-xl: 22px;
+  --font-size-2xl: 28px;
+}
+
+/* Apply base to body */
+body {
+  font-size: var(--font-size-base); /* 14px default */
+}
+
+/* Page titles */
+.page-title {
+  font-size: var(--font-size-xl);
+  font-weight: 700;
+}
+
+/* Section titles */
+.section-title {
+  font-size: var(--font-size-md);
+  font-weight: 600;
+}
+
+/* Card values */
+.metric-card-value {
+  font-size: var(--font-size-2xl);
+  font-weight: 700;
+}
+
+/* Card labels */
+.metric-card-label {
+  font-size: var(--font-size-base);
+}
+
+/* Buttons */
+.btn-text {
+  font-size: var(--font-size-base);
+}
+
+/* Inputs */
+input, select, textarea {
+  font-size: var(--font-size-base);
+}
+
+/* Tabs */
+.tab-label {
+  font-size: var(--font-size-base);
+}
+```
+
+This ensures all new components automatically inherit the correct size.
+```

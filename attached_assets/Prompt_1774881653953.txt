@@ -1,0 +1,176 @@
+```
+Implement the following fix to the Smart Combine panel:
+
+---
+
+## FIX: SMART COMBINE ORDER ROWS — PROPER COLUMN ALIGNMENT
+
+The panel is a right-side panel approximately 350-400px wide. Fix the three-column layout to be properly distributed and aligned.
+
+---
+
+### THE FIX
+
+Use fixed proportions that match the panel width:
+
+```css
+.smart-combine-order-row {
+  display: grid;
+  grid-template-columns: 120px 1fr auto;
+  gap: 8px;
+  padding: 10px 12px;
+  padding-right: 24px;
+  border-bottom: 1px solid #f3f4f6;
+  align-items: start;
+  position: relative;
+}
+```
+
+| Column | Width | Alignment | Content |
+|---|---|---|---|
+| Left (FPR) | 120px fixed | Left | FPR, FG, SFG |
+| Middle (Time) | 1fr (fills remaining) | Left | Prod time, CD, CT |
+| Right (Volume) | auto (fits content) | Right | Volume, Availability, Avail date |
+
+### WHY THIS WORKS
+
+- **Left (120px):** FPR numbers and FG/SFG codes are consistent length — fixed width keeps them aligned across all rows
+- **Middle (1fr):** Production time and dates vary in length — flexible width absorbs the variation
+- **Right (auto):** Volume, "Availability", and avail date labels are short — auto-width keeps them tight against the right edge
+
+### COLUMN STYLING
+
+**Left — FPR:**
+
+```css
+.combine-col-fpr {
+  text-align: left;
+}
+
+.combine-col-fpr .fpr-value {
+  font-size: 11px;
+  font-weight: 600;
+  color: #1a1a1a;
+}
+
+.combine-col-fpr .fg-value,
+.combine-col-fpr .sfg-value {
+  font-size: 9px;
+  font-weight: 400;
+  color: #9ca3af;
+  margin-top: 1px;
+}
+```
+
+**Middle — Time:**
+
+```css
+.combine-col-time {
+  text-align: left;
+}
+
+.combine-col-time .time-value {
+  font-size: 11px;
+  font-weight: 600;
+  color: #1a1a1a;
+}
+
+.combine-col-time .cd-value,
+.combine-col-time .ct-value {
+  font-size: 9px;
+  font-weight: 400;
+  color: #9ca3af;
+  margin-top: 1px;
+}
+```
+
+**Right — Volume:**
+
+```css
+.combine-col-volume {
+  text-align: right;
+}
+
+.combine-col-volume .volume-value {
+  font-size: 11px;
+  font-weight: 700;
+  color: #1a1a1a;
+}
+
+.combine-col-volume .avail-label {
+  font-size: 9px;
+  font-weight: 400;
+  color: #9ca3af;
+  margin-top: 1px;
+}
+
+.combine-col-volume .avail-value {
+  font-size: 9px;
+  font-weight: 500;
+  margin-top: 1px;
+}
+
+.combine-col-volume .avail-value.prio-replenish {
+  color: #ea580c;
+}
+
+.combine-col-volume .avail-value.safety-stocks {
+  color: #16a34a;
+}
+```
+
+### CLOSE (×) BUTTON
+
+```css
+.combine-row-close {
+  position: absolute;
+  top: 10px;
+  right: 4px;
+  font-size: 11px;
+  color: #d1d5db;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.combine-row-close:hover {
+  color: #374151;
+}
+```
+
+### VISUAL — PROPERLY ALIGNED
+
+```
+┌────────────┬─────────────────┬──────────┬──┐
+│FPR: 260330 │ 4 hrs 11 min    │    80 MT │× │
+│FG: 5869937 │ CD: Apr 11, 2026│Availability│ │
+│SFG: 5877608│ CT: 01:55 PM    │prio repln│  │
+├────────────┼─────────────────┼──────────┼──┤
+│FPR: 260330 │ 4 hrs 11 min    │    80 MT │× │
+│FG: 5873008 │ CD: Apr 12, 2026│Availability│ │
+│SFG: 5920946│ CT: 12:48 AM    │safety stk│  │
+├────────────┼─────────────────┼──────────┼──┤
+│FPR: 260330 │ 25 min          │     8 MT │× │
+│FG: 5873012 │ CD: Apr 12, 2026│Availability│ │
+│SFG: 5920950│ CT: 01:24 AM    │safety stk│  │
+├────────────┼─────────────────┼──────────┼──┤
+│FPR: 260330 │ 1 hr 41 min     │    32 MT │× │
+│FG: 5873010 │ CD: Apr 12, 2026│Availability│ │
+│SFG: 5920948│ CT: 04:03 AM    │safety stk│  │
+├────────────┼─────────────────┼──────────┼──┤
+│FPR: 260330 │ 1 hr 3 min      │    20 MT │× │
+│FG: 5873011 │ CD: Apr 12, 2026│Availability│ │
+│SFG: 5920949│ CT: 05:16 AM    │safety stk│  │
+├────────────┼─────────────────┼──────────┼──┤
+│FPR: 260330 │ 38 min          │    12 MT │× │
+│FG: 5873009 │ CD: Apr 12, 2026│Availability│ │
+│SFG: 5920947│ CT: 02:12 AM    │safety stk│  │
+└────────────┴─────────────────┴──────────┴──┘
+```
+
+Key alignment:
+- All FPR values start at the same position (left edge)
+- All time values start at the same position (after 120px)
+- All volume values end at the same position (right-aligned)
+- All sub-labels (FG, SFG, CD, CT, Availability) align under their parent values
+- Consistent row heights across all entries
+```

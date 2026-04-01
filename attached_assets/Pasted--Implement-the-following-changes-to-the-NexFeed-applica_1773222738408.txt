@@ -1,0 +1,148 @@
+```
+Implement the following changes to the NexFeed application:
+
+---
+
+## CANCELLED ORDERS — ABILITY TO UN-CANCEL
+
+Currently, when an order is cancelled, it moves to the bottom of the interactive table and is greyed out. The user has no way to bring it back to active status. This needs to be fixed.
+
+---
+
+### UN-CANCEL BEHAVIOR
+
+**How to un-cancel:**
+- Cancelled orders (greyed out at the bottom of the table) retain their status dropdown.
+- The user can click the status dropdown on a cancelled order and select any other status (e.g., "Plotted", "In production", etc.).
+- When the user changes the status FROM "Cancel PO" to any other status, the order is un-cancelled.
+
+**What happens when un-cancelled:**
+
+1. **Status changes** to the newly selected status (e.g., "Plotted").
+
+2. **Row moves back** to the active orders section of the table:
+   - The order is removed from the cancelled section at the bottom.
+   - The order is placed at the END of the active orders (just above the cancelled section), as the last active order in the line.
+   - The order receives the next available Prio number.
+   - The user can then drag it to the desired position.
+
+3. **Greyed-out styling is removed:**
+   - Text returns to normal dark colors.
+   - Background returns to normal (white/default).
+   - Opacity returns to 1.0.
+   - The order looks and behaves like any other active order.
+
+4. **FPR Notes auto-entry:**
+   - When an order is un-cancelled, the following text is APPENDED to the existing FPR Notes:
+     ```
+     Uncancelled: [New Status] — [Month DD, YYYY HH:MM AM/PM]
+     ```
+   - Example:
+     ```
+     Uncancelled: Plotted — March 11, 2026 09:15 AM
+     ```
+   - This is appended AFTER any existing notes. If the order was previously cancelled, the notes will show the full history:
+     ```
+     Cancelled: Material unavailable — March 10, 2026 02:30 PM
+     Uncancelled: Plotted — March 11, 2026 09:15 AM
+     ```
+
+5. **Scheduling cascade:**
+   - The un-cancelled order re-enters the scheduling cascade.
+   - Since it is placed at the end of the active orders, its Completion Date is calculated based on the previous active order's Completion Date + Changeover + Production Hours (following existing cascade rules).
+
+---
+
+### UN-CANCEL CONFIRMATION DIALOG
+
+When a user changes a cancelled order's status to a non-cancelled status, show a brief confirmation dialog:
+
+```
+╔══════════════════════════════════════════════════════════════╗
+║  ↩ Restore Order                                              ║
+║                                                               ║
+║  Are you sure you want to restore this order?                 ║
+║                                                               ║
+║  Line:           1                                            ║
+║  FPR:            260309                                       ║
+║  Item:           Salto Conditioner P 1kg (Bundle) - MP        ║
+║  Volume:         3 MT                                         ║
+║  Availability:   prio replenish                               ║
+║                                                               ║
+║  New Status:     Plotted                                      ║
+║                                                               ║
+║  This order will be moved back to active orders.              ║
+║                                                               ║
+║              [Go Back]    [Confirm Restore]                   ║
+╚══════════════════════════════════════════════════════════════╝
+```
+
+**Dialog details:**
+- Title: "↩ Restore Order" — with a restore/undo icon
+- Same detail layout as the Cancel dialog (Line, FPR, Item greyed out, Volume, Availability)
+- "New Status" line shows the status the user selected, in its badge color
+- Informational text: "This order will be moved back to active orders."
+- [Go Back]: Grey outlined button. Closes dialog, status remains "Cancel PO".
+- [Confirm Restore]: Green filled button (#43a047), white text. Processes the restore.
+
+**Item field styling:** Same as cancel dialog — Item value text is greyed out (#a1a8b3), includes Form appended (e.g., "- MP").
+
+**Availability field styling:** Same as cancel dialog — dark text for dates, orange (#fd5108) for non-date values.
+
+---
+
+### SAP CANCEL PO vs USER CANCEL PO — UN-CANCEL RULES
+
+**User-cancelled orders (cancelled via the app's cancel dialog):**
+- CAN be un-cancelled by the user.
+- Status dropdown is active on cancelled rows.
+- User can select any status to restore.
+
+**SAP-cancelled orders (Cancel PO status set from SAP upload):**
+- CAN also be un-cancelled by the user.
+- However, show an additional warning in the restore dialog:
+  ```
+  ⚠ This order was cancelled from SAP. Restoring it in NexFeed 
+  does not change its status in SAP. Please verify with SAP 
+  before proceeding.
+  ```
+- This warning appears below the "New Status" line and above the action buttons.
+- Warning text: amber/yellow (#92400e) on light amber background (#fef3c7), with ⚠ icon.
+
+---
+
+### AUTO-REMOVAL TIMER RESET
+
+When an order is un-cancelled:
+- The auto-removal timer (midnight of the next day after cancellation) is CANCELLED.
+- The order is now active — it will not be moved to Order History unless it is cancelled again or set to "Done".
+
+If the order is cancelled AGAIN after being un-cancelled:
+- A NEW auto-removal timer starts from the new cancellation time.
+- The FPR Notes accumulate:
+  ```
+  Cancelled: Material unavailable — March 10, 2026 02:30 PM
+  Uncancelled: Plotted — March 11, 2026 09:15 AM
+  Cancelled: Client request — March 11, 2026 03:00 PM
+  ```
+
+---
+
+### EDGE CASES
+
+**Edge case 1 — Un-cancel an order that was part of a combined group:**
+- If the order was previously a child or lead in a combined group, it does NOT automatically rejoin the group.
+- It is restored as an independent/standalone order.
+- The user can re-combine it using Smart Combine if desired.
+
+**Edge case 2 — Multiple cancelled orders restored at once:**
+- Each restore is independent.
+- Each gets its own FPR Notes entry.
+- Each is placed at the end of the active orders in the sequence they are restored.
+
+**Edge case 3 — All orders in a line are cancelled, then one is restored:**
+- The restored order becomes the only active order in the line.
+- It gets Prio 1.
+- Start Date/Time is blank (user must set it).
+- Completion Date is blank (no previous order to cascade from).
+```

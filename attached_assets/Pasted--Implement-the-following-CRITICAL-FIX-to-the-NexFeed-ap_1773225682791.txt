@@ -1,0 +1,324 @@
+
+
+```
+Implement the following CRITICAL FIX to the NexFeed application:
+
+---
+
+## CRITICAL FIX: COMBINED ORDERS MUST ALWAYS BE CONTIGUOUS — NO EXCEPTIONS
+
+There is a persistent bug where combined orders do not stay together as a contiguous block. Non-group orders get stuck between the lead and child orders, breaking the combined group apart. This must be fixed definitively.
+
+**The bug:**
+```
+Prio 7:  260311 — Lead       ← combined group starts
+Prio 8:  260309 — Child      ← correct, part of group
+Prio 9:  260309 — (none)     ← ❌ BUG: unrelated order stuck inside the group
+Prio 10: 260309 — Child      ← part of group but separated from lead
+Prio 11: 260309 — Child      ← part of group but separated from lead
+```
+
+**What it should be:**
+```
+Prio 7:  260311 — Lead       ← combined group starts
+Prio 8:  260309 — Child      ← immediately below lead
+Prio 9:  260309 — Child      ← immediately below previous child
+Prio 10: 260309 — Child      ← immediately below previous child
+Prio 11: 260309 — (none)     ← unrelated order pushed OUT, below the group
+```
+
+---
+
+### ROOT CAUSE ANALYSIS — WHAT TO CHECK AND FIX
+
+The following are the likely causes of this bug. ALL of these must be checked and fixed:
+
+**Cause 1: Combine function does not reorder rows after grouping**
+
+When the combine action is approved:
+- The function likely sets the lead/child labels and group IDs on the correct orders.
+- BUT it does NOT physically move the rows to be adjacent.
+- Orders that were between the lead and children BEFORE combining remain in place.
+
+**FIX:** After setting combine group data, the function MUST physically reorder the rows:
+
+```
+Step 1: Identify the lead order and its current row index.
+Step 2: Identify ALL child orders in the group (by group ID).
+Step 3: Remove all child orders from their current positions in the array.
+Step 4: Remove any non-group orders that are currently between the lead and where children should be.
+Step 5: Insert all child orders immediately after the lead order, in sequence.
+Step 6: Insert all displaced non-group orders after the combined block.
+Step 7: Re-number all Prio values sequentially (1, 2, 3, ...).
+Step 8: Save the updated order.
+```
+
+**Cause 2: Row reordering happens before group assignment**
+
+The function might be trying to move rows before the group IDs and lead/child labels are fully set, causing some orders to be missed.
+
+**FIX:** Ensure the sequence is:
+```
+1. First: Set group_id, is_lead, is_child flags on ALL orders in the group.
+2. Second: THEN reorder the rows to make them contiguous.
+3. Third: THEN re-number Prio values.
+4. Fourth: THEN save/update state.
+```
+
+**Cause 3: Index-based insertion errors**
+
+When moving child orders next to the lead, the code might use fixed indices that become stale after each move operation. For example:
+- Move Child 1 to index 8 (correct).
+- Move Child 2 to index 9 — but since Child 1 was just inserted, the indices shifted and Child 2 ends up in the wrong place.
+
+**FIX:** Use one of these approaches:
+- **Approach A (recommended): Rebuild the entire array.**
+  1. Separate the line's orders into three groups:
+     - Orders BEFORE the lead (by original position)
+     - The combined block (lead + all children)
+     - Orders AFTER the lead that are NOT children
+  2. Concatenate: [before] + [combined block] + [after]
+  3. Re-number Prio values.
+
+- **Approach B: Remove then insert.**
+  1. Remove ALL children from the array first.
+  2. Find the lead's current index.
+  3. Insert all children one by one after the lead, incrementing the insert position each time.
+
+**Cause 4: State update race condition**
+
+If the app uses React state (or similar), multiple setState calls for moving individual orders might batch incorrectly, causing intermediate states where orders are in wrong positions.
+
+**FIX:** Perform ALL reordering in a SINGLE state update:
+```javascript
+// WRONG — multiple state updates
+setOrders(moveChild1(orders));  // state update 1
+setOrders(moveChild2(orders));  // state update 2 — may use stale state
+setOrders(moveChild3(orders));  // state update 3 — may use stale state
+
+// CORRECT — single state update with all changes
+const newOrders = rebuildOrderArray(orders, groupId);
+setOrders(newOrders);  // single atomic update
+```
+
+---
+
+### THE DEFINITIVE COMBINE REORDERING ALGORITHM
+
+Use this exact algorithm when combining orders:
+
+```
+function reorderAfterCombine(allLineOrders, groupId, leadOrderId) {
+  
+  // Step 1: Identify group members
+  const leadOrder = find order where id === leadOrderId;
+  const childOrders = find all orders where group_id === groupId AND id !== leadOrderId;
+  
+  // Step 2: Sort child orders (by their original Prio or a defined sequence)
+  childOrders.sort by original priority or sequence;
+  
+  // Step 3: Build the combined block
+  const combinedBlock = [leadOrder, ...childOrders];
+  
+  // Step 4: Get all OTHER orders (not in this group)
+  const otherOrders = all orders where group_id !== groupId OR group_id is null;
+  
+  // Step 5: Find where the lead was positioned
+  const leadOriginalIndex = original index of leadOrder in allLineOrders;
+  
+  // Step 6: Split other orders into "before lead" and "after lead"
+  const ordersBefore = otherOrders that were originally positioned BEFORE the lead;
+  const ordersAfter = otherOrders that were originally positioned AFTER the lead;
+  
+  // Note: "before" and "after" is determined by each order's ORIGINAL position
+  // relative to the lead's original position, NOT their current position.
+  // Any non-group order that was between children should go to "after".
+  
+  // Step 7: Rebuild the complete array
+  const newOrder = [...ordersBefore, ...combinedBlock, ...ordersAfter];
+  
+  // Step 8: Re-assign Prio numbers
+  newOrder.forEach((order, index) => {
+    order.prio = index + 1;
+  });
+  
+  // Step 9: Return the new array
+  return newOrder;
+}
+```
+
+**Critical detail for Step 6:**
+- Any non-group order that was BETWEEN the lead and any child (i.e., it was sandwiched in the middle of where group members were scattered) must be placed in the "after" group.
+- This ensures non-group orders are pushed OUT of the combined block.
+
+**Example walkthrough:**
+
+Before combine (original positions):
+```
+Index 0: Order A (not in group)
+Index 1: Order B (LEAD of group)
+Index 2: Order C (not in group) ← this is the problematic order
+Index 3: Order D (CHILD of group)
+Index 4: Order E (not in group)
+Index 5: Order F (CHILD of group)
+Index 6: Order G (CHILD of group)
+Index 7: Order H (not in group)
+```
+
+Algorithm execution:
+```
+leadOrder = Order B (index 1)
+childOrders = [Order D, Order F, Order G]
+combinedBlock = [Order B, Order D, Order F, Order G]
+
+otherOrders = [Order A, Order C, Order E, Order H]
+
+leadOriginalIndex = 1
+
+ordersBefore = orders originally before index 1 = [Order A]
+ordersAfter = orders originally at or after index 1 that are not in group
+            = [Order C, Order E, Order H]
+
+Note: Order C was at index 2 (after lead at index 1), so it goes to "after".
+
+newOrder = [Order A] + [Order B, Order D, Order F, Order G] + [Order C, Order E, Order H]
+
+Re-number:
+Prio 1: Order A
+Prio 2: Order B (Lead)
+Prio 3: Order D (Child)
+Prio 4: Order F (Child)
+Prio 5: Order G (Child)
+Prio 6: Order C ← pushed out of the group
+Prio 7: Order E
+Prio 8: Order H
+```
+
+---
+
+### VALIDATION — RUN AFTER EVERY TABLE OPERATION
+
+Add a validation function that checks combined group integrity. This function runs AFTER every operation that modifies the table order.
+
+**Trigger events:**
+- After combine action
+- After uncombine action
+- After drag-and-drop reorder
+- After SAP file upload (new orders added)
+- After Auto-Sequence (AI reorder)
+- After status change (Done, Cancel PO)
+- After any order addition, deletion, or modification
+
+**Validation function:**
+
+```
+function validateCombinedGroups(allLineOrders) {
+  
+  // Get all unique group IDs (exclude null/undefined)
+  const groupIds = unique group IDs from allLineOrders where group_id is not null;
+  
+  for each groupId in groupIds {
+    
+    // Find all orders in this group
+    const groupOrders = orders where group_id === groupId;
+    
+    if (groupOrders.length < 2) continue; // not a real group
+    
+    // Find the lead order
+    const leadOrder = groupOrders.find(o => o.is_lead === true);
+    if (!leadOrder) continue;
+    
+    // Get the indices of all group members in the current table order
+    const indices = groupOrders.map(o => indexOf(o, allLineOrders));
+    
+    // Sort indices
+    indices.sort((a, b) => a - b);
+    
+    // Check if indices are contiguous
+    const isContiguous = indices.every((val, i) => {
+      if (i === 0) return true;
+      return val === indices[i - 1] + 1;
+    });
+    
+    // Check that lead is the first in the block
+    const leadIndex = indexOf(leadOrder, allLineOrders);
+    const leadIsFirst = leadIndex === indices[0];
+    
+    if (!isContiguous || !leadIsFirst) {
+      // ❌ GROUP IS BROKEN — AUTO-CORRECT
+      console.warn(`Combined group ${groupId} is not contiguous. Auto-correcting...`);
+      
+      // Use the reorderAfterCombine algorithm to fix it
+      allLineOrders = reorderAfterCombine(allLineOrders, groupId, leadOrder.id);
+    }
+  }
+  
+  return allLineOrders;
+}
+```
+
+**This validation ensures that even if a bug causes separation, the system auto-corrects IMMEDIATELY.**
+
+---
+
+### DRAG-AND-DROP — BLOCK MOVEMENT
+
+When dragging combined orders:
+
+**Rule 1: Dragging the lead order moves the ENTIRE block.**
+- When the user grabs the lead order's drag handle, all children move with it.
+- The combined block behaves as a single draggable unit.
+- The drop position applies to the lead; children follow immediately below.
+
+**Rule 2: Child orders CANNOT be dragged individually.**
+- The drag handle on child orders is disabled or hidden.
+- If a child row is grabbed, nothing happens (or it moves the entire block, same as dragging the lead).
+
+**Rule 3: External orders CANNOT be dropped inside a combined block.**
+- When a user drags a non-group order and hovers over a combined block:
+  - The drop indicator should appear ABOVE the lead or BELOW the last child — never between group members.
+  - If the user drops between group members, the order is placed AFTER the last child instead.
+
+**Rule 4: After ANY drag-and-drop, run the validation function.**
+- Even if the drag-and-drop logic is correct, always validate as a safety net.
+
+---
+
+### NEW ORDERS INSERTED VIA SAP UPLOAD
+
+When new orders are uploaded from SAP:
+
+**Rule: New orders must NOT be inserted between members of a combined group.**
+
+- When determining where to place new orders in the table:
+  1. Check if the target position is inside a combined block.
+  2. If yes, place the new order AFTER the last child of that block instead.
+  3. Run the validation function after all new orders are placed.
+
+---
+
+### AUTO-SEQUENCE (AI REORDER)
+
+When the AI auto-sequence feature reorders the line:
+
+**Rule: Combined blocks are treated as atomic units.**
+
+- The AI determines the optimal position for the BLOCK (using the lead order's attributes).
+- The entire block (lead + all children) is moved to that position together.
+- The AI NEVER separates a lead from its children.
+- After auto-sequence completes, run the validation function.
+
+---
+
+### SUMMARY OF ALL SAFEGUARDS
+
+| Layer | What it does |
+|---|---|
+| Combine function | Physically reorders rows using the definitive algorithm |
+| Drag-and-drop | Moves entire block, prevents splitting |
+| SAP upload | Prevents insertion into combined blocks |
+| Auto-sequence | Treats blocks as atomic units |
+| Validation function | Runs after EVERY operation, auto-corrects any breaks |
+
+Five layers of protection to ensure combined orders ALWAYS stick together.
+```

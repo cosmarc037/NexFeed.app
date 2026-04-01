@@ -1,0 +1,149 @@
+```
+Implement the following change to the Line Status Monitoring:
+
+---
+
+## ADD MT PER HOUR — FEEDMILL AND LINE CAPACITY LABELS
+
+Add the MT per hour capacity text next to the total MT labels for each feedmill and line.
+
+---
+
+### CAPACITY DATA
+
+| Feedmill / Line | Capacity |
+|---|---|
+| Feedmill 1 (FM1) | 40 MT/hr |
+| Line 1 | 20 MT/hr |
+| Line 2 | 20 MT/hr |
+| Feedmill 2 (FM2) | 20 MT/hr |
+| Line 3 | 10 MT/hr |
+| Line 4 | 10 MT/hr |
+| Feedmill 3 (FM3) | 20 MT/hr |
+| Line 5 | 10 MT/hr |
+| Line 6 | 10 MT/hr |
+| Powermix (PMX) | 20 MT/hr |
+| Line 7 | 10 MT/hr |
+
+---
+
+### DISPLAY — FEEDMILL LEVEL
+
+```
+[████████████████░░░░░░░░░ 100% ░░░░░░░░░]
+2,306 MT total · 40 MT/hr
+```
+
+### DISPLAY — LINE LEVEL
+
+```
+Line 1
+[████████████████░░░░░░░░░ 100% ░░░░░░░░░]
+822 MT · 20 MT/hr
+```
+
+---
+
+### STYLING
+
+The MT/hr text is appended to the existing MT total label, separated by a dot (·):
+
+| Property | Value |
+|---|---|
+| Separator | " · " (space dot space) |
+| MT/hr text | Same font size as MT total (11px) |
+| Color | Grey (#9ca3af) — slightly lighter than the MT total |
+| Font weight | 400 |
+
+```jsx
+<span className="mt-total">
+  {total.toLocaleString()} MT total
+</span>
+<span className="capacity-separator"> · </span>
+<span className="mt-per-hour">
+  {capacity} MT/hr
+</span>
+```
+
+```css
+.mt-total {
+  font-size: 11px;
+  font-weight: 500;
+  color: #6b7280;
+}
+
+.capacity-separator {
+  font-size: 11px;
+  color: #9ca3af;
+}
+
+.mt-per-hour {
+  font-size: 11px;
+  font-weight: 400;
+  color: #9ca3af;
+}
+```
+
+---
+
+### COMPLETE VISUAL — COLLAPSED CARD
+
+```
+┌─────────────────────────────────────┐
+│ FM1                             ▶   │
+├─────────────────────────────────────┤
+│                                     │
+│ [██ 50% ██│█ 20% █│░░░ 30% ░░░]   │
+│ 2,306 MT total · 40 MT/hr          │
+│                                     │
+└─────────────────────────────────────┘
+```
+
+### COMPLETE VISUAL — EXPANDED CARD
+
+```
+┌─────────────────────────────────────┐
+│ FM1                             ▼   │
+├─────────────────────────────────────┤
+│                                     │
+│ [██ 50% ██│█ 20% █│░░░ 30% ░░░]   │
+│ 2,306 MT total · 40 MT/hr          │
+│                                     │
+│ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─    │
+│                                     │
+│ Line 1                              │
+│ [██ 55% ██│░░░░░ 45% ░░░░░]       │
+│ 822 MT · 20 MT/hr                   │
+│                                     │
+│ Line 2                              │
+│ [██ 45% ██│░░░░░ 55% ░░░░░]       │
+│ 1,484 MT · 20 MT/hr                 │
+│                                     │
+│ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─    │
+│                                     │
+│ Category Breakdown                  │
+│ ...                                 │
+│                                     │
+└─────────────────────────────────────┘
+```
+
+---
+
+### CAPACITY MAPPING IN CODE
+
+```javascript
+const capacityMap = {
+  'FM1': { total: 40, lines: { 'Line 1': 20, 'Line 2': 20 } },
+  'FM2': { total: 20, lines: { 'Line 3': 10, 'Line 4': 10 } },
+  'FM3': { total: 20, lines: { 'Line 5': 10, 'Line 6': 10 } },
+  'PMX': { total: 20, lines: { 'Line 7': 10 } },
+};
+
+function getCapacity(feedmill, line = null) {
+  if (line) {
+    return capacityMap[feedmill]?.lines[line] || 0;
+  }
+  return capacityMap[feedmill]?.total || 0;
+}
+```
+```

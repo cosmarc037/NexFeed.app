@@ -1,0 +1,183 @@
+```
+Implement the following fix:
+
+---
+
+## FIX: AVAIL DATE ICONS — ALIGN WITH CORRECTED N10D STATUS
+
+The avail date icons in the order table are inverted — showing warnings for Sufficient products and green checks for Critical products. Fix the icon logic to use the CORRECT N10D status.
+
+---
+
+### THE PROBLEM
+
+| Product | N10D Status | Expected Icon | Current Icon | Issue |
+|---|---|---|---|---|
+| Gall 21 Chicken Layer | Critical | ⚠ Red | ✅ Green | INVERTED |
+| Elite XP Startex | Sufficient | ✅ Green | ⚠ Orange | INVERTED |
+| Gallimax Pigeon Pellet | Sufficient | ✅ Green | ⚠ Orange | INVERTED |
+| Gallimax 3 Maintenance | Urgent | ⚠ Orange | ⚠ Orange | Correct by accident |
+
+The icon logic is using the OLD understanding where low DFL = urgent. It should use the CORRECTED understanding where high DFL relative to Inventory = urgent.
+
+---
+
+### THE FIX
+
+Find the function that determines the avail date icon and ensure it reads the N10D status DIRECTLY — not recalculating it with old logic.
+
+### STEP 1: FIND THE ICON LOGIC
+
+Search the codebase for where avail date icons are determined. Look for:
+- Any function that compares DFL and Inventory for icon color
+- Any function that uses fulfillment % or gap % for icon
+- Old logic like `if (dfl < inventory) → warning` (this is WRONG)
+- Old logic like `if (fulfillment < threshold) → warning` (this is WRONG)
+
+### STEP 2: REPLACE WITH DIRECT N10D STATUS LOOKUP
+
+```javascript
+function getAvailDateIcon(order, n10dData) {
+  // Skip orders without prio replenish or safety stocks
+  if (!order.avail_date) return null;
+  if (order.avail_date !== 'prio replenish' && 
+      order.avail_date !== 'safety stocks') {
+    // Dated order — no stock icon needed
+    return null;
+  }
+  
+  if (!n10dData || n10dData.length === 0) return null;
+  
+  // Find matching product in N10D by material code
+  const product = n10dData.find(
+    p => String(p.material_code_fg) === String(order.material_code_fg)
+  );
+  
+  if (!product) return null;
+  
+  // Use the N10D status DIRECTLY — do NOT recalculate
+  const status = product.status;
+  
+  switch (status) {
+    case 'Critical':
+      return { icon: '⚠', color: '#dc2626' };    // Red — needs production NOW
+    case 'Urgent':
+      return { icon: '⚠', color: '#ea580c' };     // Orange — needs production soon
+    case 'Monitor':
+      return { icon: '⚠', color: '#ca8a04' };     // Yellow — monitor closely
+    case 'Sufficient':
+      return { icon: '✅', color: '#16a34a' };     // Green — stock is fine
+    default:
+      return null;
+  }
+}
+```
+
+### STEP 3: REMOVE ANY OLD ICON LOGIC
+
+Search and REMOVE any of these old patterns:
+
+```javascript
+// WRONG — OLD LOGIC — DELETE THESE
+if (dfl > inventory) { icon = 'green'; }  // This is backwards
+if (dfl < inventory) { icon = 'warning'; } // This is backwards
+if (fulfillment > threshold) { icon = 'green'; }
+if (fulfillment < threshold) { icon = 'warning'; }
+if (gap > 0) { icon = 'warning'; }
+
+// Also check for inverted comparisons like:
+// "needs production" when DFL < inventory (WRONG)
+// "sufficient" when DFL > inventory (WRONG)
+```
+
+### STEP 4: ENSURE STATUS IS CALCULATED CORRECTLY
+
+Double-check the status calculation in N10D is using the corrected understanding:
+
+```javascript
+function determineProductStatus(product, dailyColumns, today) {
+  const dfl = product.due_for_loading;
+  const inventory = product.inventory;
+  
+  // CORRECT: DFL >= Inventory from Day 0 = Critical
+  if (dfl >= inventory) {
+    return 'Critical';
+  }
+  
+  // Calculate when cumulative sum exceeds inventory
+  let cumulativeSum = dfl;
+  let breachDay = null;
+  
+  for (let i = 0; i < dailyColumns.length; i++) {
+    const dayValue = parseFloat(product[dailyColumns[i].key]) || 0;
+    cumulativeSum += dayValue;
+    
+    if (cumulativeSum >= inventory && breachDay === null) {
+      breachDay = i;
+      break;
+    }
+  }
+  
+  if (breachDay === null) {
+    return 'Sufficient';  // Never breaches in 10 days
+  }
+  
+  const breachDate = new Date(dailyColumns[breachDay].date);
+  const diffMs = breachDate.getTime() - today.getTime();
+  const daysUntilBreach = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+  
+  if (daysUntilBreach <= 3) {
+    return 'Urgent';      // Breaches within 3 days
+  }
+  
+  return 'Monitor';       // Breaches within 4-10 days
+}
+```
+
+### STEP 5: ENSURE ICONS UPDATE WHEN N10D CHANGES
+
+When N10D file is uploaded or "Re-apply to Existing Orders" is clicked:
+
+```javascript
+function updateAvailDateIcons(allOrders, n10dData) {
+  allOrders.forEach(order => {
+    // Recalculate icon based on CURRENT N10D status
+    const iconData = getAvailDateIcon(order, n10dData);
+    order.stockIcon = iconData;
+  });
+  
+  triggerOrderTableRefresh();
+}
+```
+
+---
+
+### VERIFICATION
+
+After fix, cross-reference with N10D data:
+
+| Product | Material Code | N10D Status | Expected Icon |
+|---|---|---|---|
+| Gall 21 Chicken Layer P (Breeder) | 1000000000594 | Critical | ⚠ Red |
+| Salto Baby Stag w/Grits | 1000000000915 | Critical | ⚠ Red |
+| Ave Max Duck Layex 2 Pellet | 1000000000528 | Critical | ⚠ Red |
+| Gallimax 3 Maintenance (Natural) | 1000000000219 | Urgent | ⚠ Orange |
+| Gallimax 2 Plus Ready Mix | 1000000000039 | Monitor | ⚠ Yellow |
+| Poultry Sol Broiler Finisher | 1000000000013 | Monitor | ⚠ Yellow |
+| Basic Broiler Finex Crumble | 1000000000043 | Monitor | ⚠ Yellow |
+| Ave Max Duck Layex 50 kg | 1000000000517 | Monitor | ⚠ Yellow |
+| Elite XP GestaPro | 1000000000235 | Monitor | ⚠ Yellow |
+| Poultry Sol Broiler Starter | 1000000000012 | Monitor | ⚠ Yellow |
+| Poultry Express Chicken Layer | 1000000001497 | Sufficient | ✅ Green |
+| Elite XP Lactatex | 1000000000237 | Sufficient | ✅ Green |
+| Poultry Sol Broiler Booster | 1000000000011 | Sufficient | ✅ Green |
+| Elite XP GestaPrime | 1000000000233 | Sufficient | ✅ Green |
+| Elite XP Growex 2 | 1000000000244 | Sufficient | ✅ Green |
+| Elite XP Startex | 1000000000241 | Sufficient | ✅ Green |
+| Elite XP Pre-startex | 1000000000240 | Sufficient | ✅ Green |
+| Classic Hog Growex | 1000000000939 | Sufficient | ✅ Green |
+| Gallimax Pigeon Pellet | 1000000000934 | Sufficient | ✅ Green |
+| Salto Stag Developer P | 1000000000543 | Sufficient | ✅ Green |
+
+Check EVERY order in the order table matches its N10D status.
+```

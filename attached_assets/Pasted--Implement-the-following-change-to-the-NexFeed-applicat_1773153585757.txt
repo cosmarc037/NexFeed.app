@@ -1,0 +1,96 @@
+```
+Implement the following change to the NexFeed application:
+
+---
+
+## FEEDMILL "ALL" TAB — SEPARATE TABLES PER LINE
+
+In each feedmill's "All" tab, instead of displaying all orders from all lines in a single mixed table, display SEPARATE tables for each line, stacked vertically. This prevents confusion from mixed scheduling dates and times across different lines.
+
+**Current behavior (incorrect):**
+- The "All" tab shows one single table with all orders from all lines interleaved.
+- Start Dates, Start Times, and Completion Dates from different lines are mixed together, making the schedule confusing and unreadable.
+
+**Correct behavior:**
+- The "All" tab shows separate, distinct tables stacked vertically — one table per line.
+- Each table has its own header identifying the line.
+- Each table has its own column headers.
+- Each table's orders are independently sequenced with their own Prio numbering (Prio 1, 2, 3... per line).
+
+---
+
+### LAYOUT PER FEEDMILL
+
+**Feedmill 1 — "All" tab:**
+```
+┌─────────────────────────────────────────────────────┐
+│  📋 Line 1                              [X] orders  │
+├─────────────────────────────────────────────────────┤
+│  Prio | FPR | Item Description | ... | Start Date  │
+│  1    | ... | ...              | ... | ...          │
+│  2    | ... | ...              | ... | ...          │
+│  3    | ... | ...              | ... | ...          │
+└─────────────────────────────────────────────────────┘
+
+              ↕ spacing / visual separator
+
+┌─────────────────────────────────────────────────────┐
+│  📋 Line 2                              [X] orders  │
+├─────────────────────────────────────────────────────┤
+│  Prio | FPR | Item Description | ... | Start Date  │
+│  1    | ... | ...              | ... | ...          │
+│  2    | ... | ...              | ... | ...          │
+│  3    | ... | ...              | ... | ...          │
+└─────────────────────────────────────────────────────┘
+```
+
+**Feedmill 2 — "All" tab:**
+```
+┌─────────────────────────────────────────────────────┐
+│  📋 Line 3                              [X] orders  │
+├─────────────────────────────────────────────────────┤
+│  [Full interactive table for Line 3]                │
+└─────────────────────────────────────────────────────┘
+
+              ↕ spacing / visual separator
+
+┌─────────────────────────────────────────────────────┐
+│  📋 Line 4                              [X] orders  │
+├─────────────────────────────────────────────────────┤
+│  [Full interactive table for Line 4]                │
+└─────────────────────────────────────────────────────┘
+```
+
+**Feedmill 3 — "All" tab:**
+```
+┌─────────────────────────────────────────────────────┐
+│  📋 Line 6                              [X] orders  │
+├─────────────────────────────────────────────────────┤
+│  [Full interactive table for Line 6]                │
+└─────────────────────────────────────────────────────┘
+
+              ↕ spacing / visual separator
+
+┌─────────────────────────────────────────────────────┐
+│  📋 Line 7                              [X] orders  │
+├─────────────────────────────────────────────────────┤
+│  [Full interactive table for Line 7]                │
+└─────────────────────────────────────────────────────┘
+```
+
+**Powermix — "All" tab:**
+- Powermix only has Line 5, so the "All" tab is identical to the Line 5 tab (single table). No change needed here.
+
+---
+
+### TABLE SECTION HEADER
+
+Each line's table section has a header bar:
+
+**Header bar layout:**
+```
+📋 Line [X]                                          [X] orders
+```
+
+- Left side: Line icon (📋 or a subtle line icon) + "Line [X]" in bold, Dark Grey (#2e343a), font size slightly larger than table content.
+- Right side: Order count badge showing "[X] orders" in Grey (#a

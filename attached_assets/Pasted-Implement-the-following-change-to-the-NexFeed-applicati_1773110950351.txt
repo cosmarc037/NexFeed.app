@@ -1,0 +1,38 @@
+Implement the following change to the NexFeed application:
+
+---
+
+## DRAG AND DROP — CURSOR BEHAVIOR REFINEMENT
+
+Refine the cursor behavior on order rows so that text selection and drag-and-drop coexist smoothly.
+
+**Behavior:**
+
+**Default (hovering anywhere on the row):**
+- The cursor displays as `grab` (hand icon) indicating the row is draggable.
+- Click-and-hold anywhere on the row (except text and interactive elements) initiates drag-and-drop.
+
+**Hovering directly over text content:**
+- When the cursor is positioned directly over rendered text characters (Material Code values, Item Description, FPR numbers, Planned Order numbers, Production Order numbers, Volume values, date text, FPR Notes, Special Remarks, or any other visible text), the cursor changes to `text` (I-beam / typeface cursor).
+- The user can click and drag over the text to select it for copying.
+- Text selection takes priority over drag-and-drop when the cursor is directly on text.
+- Double-click to select a word, triple-click to select a line. Right-click context menu for Copy is available.
+
+**Hovering over empty space within a cell (padding, whitespace around text):**
+- The cursor reverts to `grab` (hand icon).
+- Click-and-hold initiates drag-and-drop.
+
+**Hovering over interactive elements:**
+- Dropdowns, buttons, lock icons, calendar pickers: `pointer` cursor. No drag-and-drop.
+- Input fields: `text` cursor. No drag-and-drop.
+
+**Drag handle icon (grip dots on the left):**
+- Always shows `grab` cursor.
+- Always initiates drag-and-drop on click-and-hold, regardless of anything else.
+
+**Implementation notes:**
+- Apply `cursor: text` specifically to text-containing `<span>`, `<p>`, `<a>`, `<label>`, or other inline text elements within cells.
+- The parent row element retains `cursor: grab`.
+- Text elements should call `event.stopPropagation()` on `mousedown` to prevent the row-level drag handler from firing when the user is clicking on text to select it.
+- Once the user finishes text selection (mouseup), normal row drag behavior resumes for subsequent interactions outside the text.
+- This creates a natural feel: hovering over text shows the I-beam for copying, hovering over empty row space shows the hand for dragging.

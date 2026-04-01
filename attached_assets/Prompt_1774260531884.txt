@@ -1,0 +1,322 @@
+```
+Implement the following changes to the NexFeed application:
+
+---
+
+## 1. FONT SIZE — 12px FOR ALL ORDER TABLE VALUES AND HEADERS
+
+Change all font sizes in the order table to 12px.
+
+**Order table data cells:**
+
+| Element | Updated Size |
+|---|---|
+| ALL data cell values | 12px |
+| Main header group text | 12px, font-weight 600, uppercase |
+| Sub-header / column header text | 10px, font-weight 600, uppercase, grey (#6b7280) |
+| Secondary/2nd line text (Category, CO/Rate, Original MT, SCADA/PV, Remarks) | 10px, grey (#6b7280) |
+| Placeholder text ("Set start date", "Add note...", etc.) | 10px, italic, grey (#9ca3af) |
+| Lead/Child/Cut badges | 10px |
+| Status badge text | 11px |
+| Readiness icons | 14px |
+| Warning/check icons | 14px |
+
+**Cell padding for 12px:**
+
+| Property | Value |
+|---|---|
+| Cell padding vertical | 8px |
+| Cell padding horizontal | 10px |
+| Minimum row height | 38px |
+| Line height | 1.5 |
+
+---
+
+## 2. MAIN HEADER GROUPINGS — RESTRUCTURE
+
+Restructure the main header groups to match the confirmed groupings. Some columns are standalone (no group header), while others are under specific groups.
+
+### STANDALONE COLUMNS (NO GROUP HEADER)
+
+These columns have NO main header row above them. The main header row cell above these is empty or merged with adjacent standalone columns.
+
+| Column | Standalone |
+|---|---|
+| Readiness icon | ✅ Standalone |
+| Drag Handle | ✅ Standalone |
+| Prio | ✅ Standalone |
+| FPR | ✅ Standalone |
+
+### GROUPED COLUMNS
+
+| Main Header Group | Sub-columns |
+|---|---|
+| ORDER DETAILS | Planned Order FG, Planned Order SFG, Planned Order PMX, Production Order FG1, Production Order SFG1, Production Order SFGPMX, Material Code (SFG), Material Code (FG), Item Description |
+| PRODUCTION PARAMETERS | Form, Volume (MT), Batch Size, Batches, Bags, Prod. Time |
+| MIXER DETAILS | HA Info, HA Prep |
+| OPERATOR | Status |
+| SCHEDULING | Start Date, Start Time, Avail Date, Completion Date |
+| NOTES | FPR Notes, Special Remarks |
+| BAGGER DETAILS | Threads, Sacks, Markings, Tags |
+| COMPLETION & TRACKING | End Date, History |
+
+### TABLE HEADER STRUCTURE
+
+```html
+<thead>
+  <!-- Row 1: Main header groups -->
+  <tr>
+    <th></th>                           <!-- Readiness - standalone, empty header -->
+    <th></th>                           <!-- Drag Handle - standalone, empty header -->
+    <th></th>                           <!-- Prio - standalone, empty header -->
+    <th></th>                           <!-- FPR - standalone, empty header -->
+    <th colspan="9">ORDER DETAILS</th>
+    <th colspan="6">PRODUCTION PARAMETERS</th>
+    <th colspan="2">MIXER DETAILS</th>
+    <th colspan="1">OPERATOR</th>
+    <th colspan="4">SCHEDULING</th>
+    <th colspan="2">NOTES</th>
+    <th colspan="4">BAGGER DETAILS</th>
+    <th colspan="2">COMPLETION & TRACKING</th>
+  </tr>
+  
+  <!-- Row 2: Sub-headers (individual column names) -->
+  <tr>
+    <th><!-- Readiness icon --></th>
+    <th><!-- Drag --></th>
+    <th>PRIO</th>
+    <th>FPR</th>
+    <!-- ORDER DETAILS -->
+    <th>PLANNED FG</th>
+    <th>PLANNED SFG</th>
+    <th>PLANNED PMX</th>
+    <th>PROD. ORDER FG1</th>
+    <th>PROD. ORDER SFG1</th>
+    <th>PROD. ORDER SFGPMX</th>
+    <th>MAT. CODE (SFG)</th>
+    <th>MAT. CODE (FG)</th>
+    <th>ITEM DESCRIPTION</th>
+    <!-- PRODUCTION PARAMETERS -->
+    <th>FORM</th>
+    <th>VOLUME (MT)</th>
+    <th>BATCH SIZE</th>
+    <th>BATCHES</th>
+    <th>BAGS</th>
+    <th>PROD. TIME</th>
+    <!-- MIXER DETAILS -->
+    <th>HA INFO</th>
+    <th>HA PREP</th>
+    <!-- OPERATOR -->
+    <th>STATUS</th>
+    <!-- SCHEDULING -->
+    <th>START DATE</th>
+    <th>START TIME</th>
+    <th>AVAIL DATE</th>
+    <th>COMPLETION DATE</th>
+    <!-- NOTES -->
+    <th>FPR NOTES</th>
+    <th>SPECIAL REMARKS</th>
+    <!-- BAGGER DETAILS -->
+    <th>THREADS</th>
+    <th>SACKS</th>
+    <th>MARKINGS</th>
+    <th>TAGS</th>
+    <!-- COMPLETION & TRACKING -->
+    <th>END DATE</th>
+    <th>HISTORY</th>
+  </tr>
+</thead>
+```
+
+### DYNAMIC COLSPAN
+
+When columns are hidden, the colspan of the parent group header must decrease:
+
+```javascript
+function getGroupColspan(groupName, visibleColumns) {
+  const groupMap = {
+    'order_details': ['planned_fg', 'planned_sfg', 'planned_pmx', 'prod_fg1', 'prod_sfg1', 'prod_sfgpmx', 'mat_code_sfg', 'mat_code_fg', 'item_desc'],
+    'production_parameters': ['form', 'volume', 'batch_size', 'batches', 'bags', 'prod_time'],
+    'mixer_details': ['ha_info', 'ha_prep'],
+    'operator': ['status'],
+    'scheduling': ['start_date', 'start_time', 'avail_date', 'completion_date'],
+    'notes': ['fpr_notes', 'special_remarks'],
+    'bagger_details': ['threads', 'sacks', 'markings', 'tags'],
+    'completion_tracking': ['end_date', 'history']
+  };
+  
+  const groupCols = groupMap[groupName] || [];
+  return groupCols.filter(col => visibleColumns.includes(col)).length;
+}
+```
+
+If all columns in a group are hidden, the group header also hides.
+
+---
+
+## 3. HIDE BUTTONS — ◁ ICON ON BOTH MAIN HEADERS AND SUB-HEADERS
+
+Replace the "Hide" text with a small icon button in the top-right corner of each header cell. Use a chevron or collapse icon instead of ✕ to avoid confusion with "delete."
+
+### HIDE ICON — INDIVIDUAL COLUMN HEADERS
+
+A small collapse/hide icon appears in the top-right corner of every sub-header cell on hover.
+
+**Icon options (pick one that best fits the app):**
+
+| Option | Icon | Meaning |
+|---|---|---|
+| A | ◂ (left-pointing triangle) | "Collapse this column" |
+| B | ≪ (double left chevron) | "Shrink/hide" |
+| C | 👁‍🗨 with a slash (eye-slash) | "Hide from view" |
+| D | ⊟ (minus in box) | "Remove from view" |
+
+**Recommended: Option A — ◂ (left-pointing triangle)** or a small eye-slash icon. Both clearly suggest "hide/collapse" without implying "delete."
+
+**Icon styling:**
+
+| Property | Value |
+|---|---|
+| Icon | ◂ or eye-slash icon |
+| Size | 10px |
+| Color | Grey (#9ca3af) |
+| Background | White (#ffffff) |
+| Border | 1px solid #d1d5db |
+| Border radius | 3px |
+| Padding | 2px 4px |
+| Position | Top-right corner of the header cell, absolutely positioned |
+| Visibility | Appears on hover over the header cell (200ms delay) |
+| Cursor | Pointer |
+| Hover background | Light red (#fef2f2) |
+| Hover icon color | Red (#e53935) |
+| Hover border | 1px solid #fecaca |
+| Tooltip | "Hide [Column Name]" — e.g., "Hide Volume (MT)" |
+
+**On click:**
+- That individual column hides.
+- Thin indicator sliver appears in its place.
+- Same behavior as previously defined.
+
+### HIDE ICON — MAIN HEADER GROUPS
+
+Same icon but slightly larger, appears in the top-right corner of the main header group cell.
+
+| Property | Value |
+|---|---|
+| Icon | ◂ or eye-slash icon |
+| Size | 12px |
+| Color | Grey (#9ca3af) |
+| Background | White (#ffffff) |
+| Border | 1px solid #d1d5db |
+| Border radius | 3px |
+| Padding | 2px 6px |
+| Position | Top-right corner of the main header cell |
+| Visibility | Appears on hover over the main header cell (200ms delay) |
+| Cursor | Pointer |
+| Hover background | Light red (#fef2f2) |
+| Hover icon color | Red (#e53935) |
+| Hover border | 1px solid #fecaca |
+| Tooltip | "Hide [Group Name] (X columns)" — e.g., "Hide Order Details (9 columns)" |
+
+**On click:**
+- ALL sub-columns under that group hide at once.
+- A single thin indicator sliver replaces the entire group.
+- Same behavior as previously defined for group hiding.
+
+### BOTH ICONS VISIBLE SIMULTANEOUSLY
+
+When hovering over a sub-header cell:
+- The individual column hide icon (◂) appears on that sub-header cell.
+
+When hovering over a main header group cell:
+- The group hide icon (◂) appears on the main header cell.
+- Individual sub-header icons do NOT appear at the same time (to avoid confusion).
+
+### UNHIDE — INDICATOR TOOLTIP
+
+When hovering over the thin hidden indicator:
+
+| Property | Value |
+|---|---|
+| Tooltip text | "Show [Column/Group Name]" |
+| Tooltip icon | ▸ (right-pointing triangle) or eye icon |
+| Tooltip background | White, border 1px solid #d1d5db |
+| Tooltip hover | Light green (#dcfce7), green text (#166534) |
+
+**Double-click or single-click on indicator:**
+- Column or group expands back to full width.
+
+---
+
+## 4. STANDALONE COLUMN HEADERS — ALIGNMENT
+
+For standalone columns (Readiness, Drag Handle, Prio, FPR), the main header row cell above them is EMPTY — no text, no background color.
+
+```
+┌────┬────┬──────┬──────┬───────────────────────────┬─────────────────────────┬─────────────┬──────────┬─────────────┬───────┬─────────────┬─────────────────────┐
+│    │    │      │      │      ORDER DETAILS        │ PRODUCTION PARAMETERS   │MIXER DETAILS│ OPERATOR │  SCHEDULING │ NOTES │BAGGER DETAIL│COMPLETION & TRACKING│
+├────┼────┼──────┼──────┼───┬───┬───┬───┬───┬───┬───┼───┬───┬───┬───┬───┬────┼─────┬───────┼──────────┼───┬───┬───┬─┼───┬───┼───┬───┬───┬─┼───────┬─────────────┤
+│ ●  │ ⠿ │ PRIO │ FPR  │PFG│PSG│PMX│FG1│SG1│PMX│SFG│FRM│VOL│BSZ│BAT│BAG│TIME│HA-I│HA-P   │  STATUS  │S.D│S.T│AVL│CMP│FPR│SPR│THR│SCK│MRK│TAG│E.DATE│ HISTORY    │
+└────┴────┴──────┴──────┴───┴───┴───┴───┴───┴───┴───┴───┴───┴───┴───┴───┴────┴─────┴───────┴──────────┴───┴───┴───┴─┴───┴───┴───┴───┴───┴─┴───────┴─────────────┘
+```
+
+**Standalone header cells:**
+- Empty (no text)
+- No background color
+- Border-bottom aligns with the main header row's border
+- These cells span the same height as the main header group cells
+
+---
+
+## 5. OTHER FONT SIZE CHANGES (FROM PREVIOUS PROMPT)
+
+Apply 12px to all other areas as specified:
+
+**Key Metric Cards (Orders, Analytics):**
+- Values: 24px, font-weight 700
+- Labels: 12px, grey (#6b7280)
+
+**Buttons (Auto-Sequence, Upload, Export):**
+- Text: 12px, font-weight 500
+- Padding: 8px 16px
+
+**Line Tabs (Orders, Order History):**
+- Labels: 12px
+- Active: 12px, font-weight 600
+
+**Smart Insights (Analytics):**
+- Title: 14px, font-weight 600
+- Body: 12px
+
+**Line Capacity Monitoring (Overview):**
+- Line labels: 12px
+- Status text: 12px
+- Percentage: 12px, font-weight 600
+
+**Knowledge Base tab (except upload history):**
+- All fonts smaller than 12px → resize to 12px
+
+**Next 10 Days tab (except upload history):**
+- All fonts smaller than 12px → resize to 12px
+
+---
+
+## 6. RENAME "AI STOCK INSIGHTS" TO "SAFETY STOCK INSIGHTS"
+
+| Location | Current | Updated |
+|---|---|---|
+| Next 10 Days page title | "✨ AI Stock Insights" | "✨ Safety Stock Insights" |
+| All references | "AI Stock Insights" | "Safety Stock Insights" |
+
+Keep the ✨ sparkle icon.
+
+---
+
+## 7. FPR NOTES AND SPECIAL REMARKS — PLACEHOLDERS
+
+**FPR Notes empty state:**
+- Placeholder: "Add note..." in grey (#9ca3af), 10px, italic
+
+**Special Remarks empty state:**
+- Placeholder: "Add remark..." in grey (#9ca3af), 10px, italic
+```

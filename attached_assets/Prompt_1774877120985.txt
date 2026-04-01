@@ -1,0 +1,599 @@
+```
+Implement the following changes to the NexFeed application:
+
+---
+
+## SMART INSIGHT — SINGLE SOURCE OF TRUTH FROM N10D
+
+Generate AI insights once in the N10D tab, cache them, and reuse across Auto-Sequence tooltip and Smart Insight column in the order table.
+
+---
+
+### 1. DATA FLOW
+
+```
+N10D file uploaded / "Re-apply to Existing Orders" clicked
+    ↓
+AI generates 3-5 sentence insight per product (by material code)
+    ↓
+Cache insights in global store
+    ↓
+Auto-Sequence tooltip → reads from cache via material code
+    ↓
+Smart Insight column → reads from cache via material code
+```
+
+Avail Date icon tooltip — remains as-is (simple text), just ensure status alignment with N10D.
+
+---
+
+### 2. AI INSIGHT GENERATION — ON N10D
+
+Generate when:
+- N10D file is uploaded
+- User clicks "Re-apply to Existing Orders"
+
+### PRE-CALCULATE ENRICHED DATA
+
+```javascript
+function enrichProductData(product, dailyColumns) {
+  const availDate = product.availDate ? new Date(product.availDate) : null;
+  const daysUntilBreach = availDate 
+    ? Math.ceil((availDate - new Date()) / (1000 * 60 * 60 * 24)) 
+    : null;
+  
+  let totalDemand = 0;
+  let daysWithDemand = 0;
+  dailyColumns.forEach(col => {
+    const val = parseFloat(product[col.key]) || 0;
+    if (val > 0) {
+      totalDemand += val;
+      daysWithDemand++;
+    }
+  });
+  const avgDailyDemand = daysWithDemand > 0 
+    ? (totalDemand / daysWithDemand).toFixed(1) 
+    : 0;
+  
+  const buffer = product.inventory > 0 
+    ? (((product.inventory - product.due_for_loading) / product.inventory) * 100).toFixed(1)
+    : '-100.0';
+  
+  return {
+    ...product,
+    daysUntilBreach: daysUntilBreach,
+    avgDailyDemand: avgDailyDemand,
+    buffer: buffer
+  };
+}
+```
+
+### GENERATE AND CACHE
+
+```javascript
+async function generateAndCacheInsights(n10dProducts, allOrders, today, dailyColumns) {
+  const insightCache = {};
+  
+  // Enrich products with additional calculations
+  const enrichedProducts = n10dProducts.map(
+    p => enrichProductData(p, dailyColumns)
+  );
+  
+  // === PART A: Products WITH N10D data (stock-based) ===
+  const n10dResponse = await generateN10DInsights(enrichedProducts, today);
+  parseInsightResponse(n10dResponse, insightCache);
+  
+  // === PART B: Dated MTO orders WITHOUT N10D data ===
+  const datedOrders = allOrders.filter(order => {
+    const hasN10D = n10dProducts.some(
+      p => String(p.material_code_fg) === String(order.material_code_fg)
+    );
+    return !hasN10D && order.avail_date && 
+           order.avail_date !== 'prio replenish' && 
+           order.avail_date !== 'safety stocks';
+  });
+  
+  if (datedOrders.length > 0) {
+    const datedResponse = await generateDatedOrderInsights(datedOrders, today);
+    parseInsightResponse(datedResponse, insightCache);
+  }
+  
+  // === PART C: Orders with NO N10D and NO avail date ===
+  allOrders.forEach(order => {
+    if (!insightCache[order.material_code_fg]) {
+      insightCache[order.material_code_fg] = getTemplateInsight(order);
+    }
+  });
+  
+  setInsightCache(insightCache);
+}
+
+function parseInsightResponse(response, cache) {
+  const lines = response.split('\n').filter(l => l.trim());
+  lines.forEach(line => {
+    const match = line.match(/^\[?(\d+)\]?:\s*(.+)/);
+    if (match) {
+      cache[match[1]] = match[2].trim();
+    }
+  });
+}
+
+function getTemplateInsight(order) {
+  const volume = order.volume || 0;
+  const line = order.line || 'unassigned';
+  return `This order is scheduled for ${volume} MT on ${line}. No stock level data available from Next 10 Days.`;
+}
+```
+
+---
+
+### 3. AI PROMPTS — ACTIONABLE AND BENEFICIAL
+
+### FOR PRODUCTS WITH N10D DATA (STOCK-BASED)
+
+```javascript
+async function generateN10DInsights(products, today) {
+  const prompt = `
+You are a production planning advisor for a feed manufacturing plant.
+Generate a helpful 3-5 sentence production insight for each product.
+
+RULES:
+- Do NOT just restate the data. Provide actionable advice.
+- Tell the planner WHEN to act, WHAT to do, and WHY.
+- Include how many days remain before stockout.
+- Mention risk level in plain language.
+- Suggest specific actions based on the status.
+- Use full month names (e.g., "April 5, 2026").
+- Be direct and practical — write as if advising a colleague.
+
+TONE GUIDE PER STATUS:
+
+Critical:
+- Urgent tone. Emphasize immediate action.
+- State the deficit clearly.
+- Recommend producing NOW or within 24 hours.
+- Warn about consequences of delay.
+- Mention if other orders should be deprioritized.
+
+Urgent:
+- Firm tone. Emphasize short timeline.
+- State exactly how many days remain before stockout.
+- Recommend scheduling production within 1-2 days.
+- Mention the last safe production date (Completion date).
+- Suggest checking line availability.
+
+Monitor:
+- Advisory tone. Production needed but not immediate.
+- State the window available (X days).
+- Recommend planning production within the coming week.
+- Note that buffer exists but is shrinking.
+- Suggest monitoring daily demand trends.
+
+Sufficient:
+- Reassuring tone. No urgency.
+- Confirm stock comfortably covers demand.
+- State how long current inventory will last.
+- Recommend routine monitoring only.
+- Mention if buffer is strong or just barely sufficient.
+
+EXAMPLE OUTPUTS:
+
+Critical example:
+"Immediate production is required. Current inventory (181.5 MT) has already fallen below the required demand (194.2 MT), creating a 12.7 MT deficit. Every hour of delay risks stockout and potential delivery failures. Prioritize this product on the next available line and consider bumping lower-priority orders if necessary. Coordinate with warehouse to confirm if any incoming transfers can partially cover the gap while production ramps up."
+
+Urgent example:
+"Stock will run out by April 5, 2026 — only 3 days remaining. Production must be scheduled no later than April 4, 2026 to avoid a shortfall. The current buffer of 15.2% is thin and will erode quickly with daily demand averaging 45 MT. Check Line 1 and Line 3 availability for the earliest possible slot. If production cannot start within 48 hours, consider partial fulfillment or expediting raw materials."
+
+Monitor example:
+"Demand is projected to exceed inventory by April 9, 2026, giving approximately 7 days to schedule production. The 40.0% buffer provides a comfortable window, but daily demand is steadily consuming stock. Plan to begin production by the first week of April to stay ahead of the curve. Monitor the next 2-3 days of actual demand — if it spikes above forecast, escalate to Urgent priority."
+
+Sufficient example:
+"No immediate production action needed. Current inventory (310.6 MT) comfortably exceeds demand (92.3 MT) with a healthy 70.3% buffer that will last well beyond the 10-day window. Continue routine monitoring and focus production resources on higher-priority products. Revisit this product's status when the next N10D file is uploaded to confirm demand trends remain stable."
+
+PRODUCTS:
+${products.map(p => `
+[${p.material_code_fg}] ${p.item_description}
+DFL: ${p.due_for_loading} MT | Inventory: ${p.inventory} MT
+Status: ${p.status} | Buffer: ${p.buffer}%
+Completion: ${p.completionDate ? formatDateFull(p.completionDate) : 'N/A'}
+Avail: ${p.availDate ? formatDateFull(p.availDate) : 'N/A'}
+Bal to Prod: ${p.balanceToProduce} MT
+Days until stockout: ${p.daysUntilBreach || 'N/A (no breach in 10 days)'}
+Daily avg demand: ${p.avgDailyDemand || 'N/A'} MT
+`).join('\n')}
+
+Output format — one per line:
+[material_code]: [3-5 sentence insight]
+  `;
+
+  return await callAI(prompt);
+}
+```
+
+### FOR DATED MTO ORDERS (DEADLINE-BASED)
+
+```javascript
+async function generateDatedOrderInsights(orders, today) {
+  const prompt = `
+You are a production planning advisor for a feed manufacturing plant.
+Generate a helpful 3-5 sentence production insight for each order.
+These are dated Make-to-Order (MTO) orders with specific deadlines.
+
+RULES:
+- Focus on whether the order is on track to meet its deadline.
+- Calculate backward from the deadline: when must production START.
+- Factor in production time and changeover.
+- Mention days remaining until the deadline.
+- Recommend specific actions if the deadline is at risk.
+- Use full month names.
+- Be direct and practical.
+
+TONE GUIDE:
+
+Deadline at risk (< 2 days remaining):
+- Urgent. State production must start immediately.
+- Calculate if there's enough time based on production hours.
+- Warn about consequences if delayed.
+- Suggest line priority or overtime if needed.
+
+Tight timeline (2-5 days remaining):
+- Firm. Schedule production soon.
+- Confirm estimated completion vs deadline.
+- Recommend reserving a production slot.
+- Mention any dependencies or risks.
+
+Comfortable timeline (> 5 days remaining):
+- Reassuring. On track.
+- Confirm production can be completed in time.
+- Suggest optimal start date for efficiency.
+- Note it can be sequenced after more urgent orders.
+
+EXAMPLE OUTPUT:
+
+Tight timeline example:
+"This order has a deadline of April 11, 2026 — 4 days away. With an estimated production time of 4.19 hours plus changeover, production should start no later than April 10, 2026 to ensure on-time completion. At the current queue position on Line 1, the order is on track, but any upstream delays could push it past the deadline. Recommend locking in the production slot and avoiding rearranging orders above it. Confirm raw material availability by end of day tomorrow."
+
+ORDERS:
+${orders.map(o => {
+  const deadline = parseDate(o.avail_date);
+  const daysRemaining = deadline 
+    ? Math.ceil((deadline - today) / (1000 * 60 * 60 * 24)) 
+    : 'Unknown';
+  const completionDate = deadline 
+    ? new Date(deadline.getTime() - 24 * 60 * 60 * 1000) 
+    : null;
+  
+  return `
+[${o.material_code_fg}] ${o.item_description}
+Volume: ${o.volume} MT | Line: ${o.line}
+Deadline (Avail Date): ${formatDateFull(o.avail_date)}
+Expected Completion: ${completionDate ? formatDateFull(completionDate) : 'N/A'}
+Production Time: ${o.production_time || 'N/A'} hrs
+Changeover: ${o.changeover || 'N/A'} hrs
+Days remaining: ${daysRemaining}
+Current status: ${o.status}
+Queue position: Priority ${o.prio || 'N/A'}
+`;
+}).join('\n')}
+
+Output format — one per line:
+[material_code]: [3-5 sentence insight]
+  `;
+
+  return await callAI(prompt);
+}
+```
+
+---
+
+### 4. INSIGHT CACHE — GLOBAL STORE
+
+```javascript
+const insightCache = {};
+
+function getSmartInsight(materialCode) {
+  return insightCache[materialCode] || 'No insight available.';
+}
+
+function hasInsights() {
+  return Object.keys(insightCache).length > 0;
+}
+```
+
+---
+
+### 5. AVAIL DATE CELL — HOVER ON ENTIRE CELL
+
+Instead of requiring precise hover on the small icon, the entire Avail Date cell triggers the tooltip.
+
+```jsx
+function AvailDateCell({ order, n10dData }) {
+  const [showTooltip, setShowTooltip] = useState(false);
+  const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
+  const timeoutRef = useRef(null);
+  
+  function handleCellMouseEnter(e) {
+    timeoutRef.current = setTimeout(() => {
+      const pos = clampToViewport(e.clientX + 12, e.clientY + 12, 280, 120);
+      setTooltipPos(pos);
+      setShowTooltip(true);
+    }, 300);
+  }
+  
+  function handleCellMouseMove(e) {
+    if (showTooltip) {
+      const pos = clampToViewport(e.clientX + 12, e.clientY + 12, 280, 120);
+      setTooltipPos(pos);
+    }
+  }
+  
+  function handleCellMouseLeave() {
+    clearTimeout(timeoutRef.current);
+    setShowTooltip(false);
+  }
+  
+  return (
+    <td
+      onMouseEnter={handleCellMouseEnter}
+      onMouseMove={handleCellMouseMove}
+      onMouseLeave={handleCellMouseLeave}
+      style={{ cursor: 'pointer' }}
+    >
+      <span className="avail-date-text">{order.avail_date}</span>
+      {order.stockIcon && (
+        <span className="avail-date-icon" style={{ cursor: 'pointer' }}>
+          {order.stockIcon}
+        </span>
+      )}
+      
+      {showTooltip && (
+        <TooltipPortal>
+          <AvailDateTooltip order={order} n10dData={n10dData} position={tooltipPos} />
+        </TooltipPortal>
+      )}
+    </td>
+  );
+}
+```
+
+---
+
+### 6. AVAIL DATE ICON — ALIGN STATUS WITH N10D
+
+Fix instances where the icon shows a warning but N10D status is Sufficient.
+
+```javascript
+function getAvailDateIcon(order, n10dData) {
+  const product = n10dData.find(
+    p => String(p.material_code_fg) === String(order.material_code_fg)
+  );
+  
+  if (!product) return null;
+  
+  const status = product.status;
+  
+  switch (status) {
+    case 'Critical':
+      return { icon: '⚠', color: '#dc2626' };
+    case 'Urgent':
+      return { icon: '⚠', color: '#ea580c' };
+    case 'Monitor':
+      return { icon: '⚠', color: '#ca8a04' };
+    case 'Sufficient':
+      return { icon: '✅', color: '#16a34a' };
+    default:
+      return null;
+  }
+}
+```
+
+---
+
+### 7. AVAIL DATE ICON — LARGER HOVER TARGET
+
+```css
+.avail-date-icon {
+  cursor: pointer;
+  padding: 4px;
+  margin: -4px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.avail-date-icon:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+```
+
+---
+
+### 8. SMART INSIGHT COLUMN — ORDER TABLE
+
+Add a new "Smart Insight" column between Completion Date and FPR Notes, under the NOTES header group. Shows FULL AI insight text — no truncation, no hover tooltip needed.
+
+### TABLE HEADER
+
+```
+┌───────────────────────────────────────────────────────────────────────────┐
+│                                NOTES                                      │
+├──────────────────┬──────────────────────────────┬───────────┬─────────────┤
+│ Completion Date  │ ✨ Smart Insight              │ FPR Notes │ Sp. Remarks │
+```
+
+NOTES header colspan must now be **4** (was 3):
+- Completion Date
+- Smart Insight (NEW)
+- FPR Notes
+- Special Remarks
+
+### CELL COMPONENT
+
+```jsx
+function SmartInsightCell({ order }) {
+  const insight = getSmartInsight(order.material_code_fg);
+  
+  return (
+    <td className="smart-insight-cell">
+      <div className="smart-insight-text">
+        {insight}
+      </div>
+    </td>
+  );
+}
+```
+
+### CELL STYLING — FULL TEXT, NO TRUNCATION
+
+```css
+.smart-insight-cell {
+  user-select: none;
+  vertical-align: top;
+  padding: 8px 10px;
+}
+
+.smart-insight-text {
+  font-size: 10px;
+  color: #4b5563;
+  line-height: 1.5;
+  white-space: normal;
+  word-wrap: break-word;
+}
+```
+
+| Property | Value |
+|---|---|
+| Font size | 10px |
+| Color | Dark grey (#4b5563) |
+| Line height | 1.5 |
+| White space | Normal (wraps freely) |
+| Word wrap | Break word |
+| Overflow | Visible — no clipping |
+| Max height | None — grows with content |
+| Truncation | ❌ None — full text always visible |
+| Ellipsis | ❌ None |
+| Hover tooltip | ❌ None — not needed |
+| Editable | ❌ No — read only |
+| Right-click | No context menu for this cell |
+
+### COLUMN WIDTH
+
+```css
+th.smart-insight-header,
+td.smart-insight-cell {
+  width: 300px;
+  min-width: 250px;
+  max-width: 400px;
+}
+```
+
+### COLUMN HEADER
+
+| Property | Value |
+|---|---|
+| Text | "✨ Smart Insight" |
+| Font size | 11px |
+| Font weight | 600 |
+| Alignment | Left |
+
+### NO INSIGHT STATE
+
+When no N10D data uploaded:
+
+```css
+.smart-insight-empty {
+  font-size: 10px;
+  color: #d1d5db;
+  font-style: italic;
+}
+```
+
+```
+No insight available
+```
+
+For orders without N10D match:
+
+```
+This order is scheduled for 80 MT on Line 1. 
+No stock level data available from Next 10 Days.
+```
+
+---
+
+### 9. CACHE TRIGGER — "RE-APPLY TO EXISTING ORDERS"
+
+When user clicks "Re-apply to Existing Orders" in the N10D tab:
+
+```javascript
+async function handleReapplyToOrders() {
+  // 1. Recalculate all N10D statuses
+  const updatedProducts = recalculateN10DStatuses(n10dData, today);
+  
+  // 2. Regenerate AI insights and cache
+  await generateAndCacheInsights(updatedProducts, allOrders, today, dailyColumns);
+  
+  // 3. Update avail date icons on order table
+  updateAvailDateIcons(allOrders, updatedProducts);
+  
+  // 4. Trigger re-render of Smart Insight column
+  triggerOrderTableRefresh();
+}
+```
+
+This single button:
+- ✅ Recalculates N10D statuses
+- ✅ Regenerates AI insights
+- ✅ Updates avail date icons
+- ✅ Refreshes Smart Insight column
+- ✅ Updates auto-sequence tooltip data
+
+---
+
+### 10. APPLY TO — SUMMARY
+
+| Component | Source | Trigger |
+|---|---|---|
+| N10D product tooltip — Smart Insight | AI generated in N10D tab | N10D upload / Re-apply |
+| Auto-Sequence tooltip — Smart Insight | Reads from cache | Same cache |
+| Smart Insight column in order table | Reads from cache | Same cache |
+| Avail Date icon + tooltip | N10D status data (not AI) | Same cache |
+
+---
+
+### 11. VERIFICATION
+
+1. Upload N10D file
+   - ✅ AI insights generated for all products
+   - ✅ Cached in global store
+   - ✅ 3-5 sentences per product, actionable and beneficial
+
+2. Open order table
+   - ✅ Smart Insight column shows FULL AI text (no truncation)
+   - ✅ Column width 300px, text wraps naturally
+   - ✅ Cell is NOT editable
+   - ✅ No hover tooltip on this column
+   - ✅ Avail Date icons match N10D status (Sufficient = ✅, not ⚠)
+   - ✅ Hovering Avail Date cell shows tooltip (not just icon)
+
+3. Open Auto-Sequence preview
+   - ✅ Hover tooltip shows same insight from cache
+
+4. Click "Re-apply to Existing Orders"
+   - ✅ All insights regenerate
+   - ✅ Smart Insight column updates
+   - ✅ Avail Date icons update
+   - ✅ Auto-Sequence tooltip updates
+
+5. Orders without N10D data
+   - ✅ Dated MTO orders show deadline-based AI insight (3-5 sentences)
+   - ✅ Other orders show "No stock data available from Next 10 Days."
+
+6. Smart Insight content quality
+   - ✅ Critical: Urgent tone, deficit stated, immediate action recommended
+   - ✅ Urgent: Days remaining, last safe date, line availability check
+   - ✅ Monitor: Window stated, plan within the week, monitor trends
+   - ✅ Sufficient: Reassuring, confirm buffer, routine monitoring
+   - ✅ Dated orders: Deadline focus, production start date, on-track assessment
+```

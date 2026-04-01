@@ -1,0 +1,335 @@
+```
+Implement the following change to the N10D table:
+
+---
+
+## ADD RATIO AND BUFFER — HOVER TOOLTIP ON PRODUCT ROW
+
+Show the DFL ÷ Inventory ratio and Buffer percentage when the user hovers over a product row in the N10D table. These values are NOT displayed as columns — only visible on hover.
+
+---
+
+### HOVER TOOLTIP
+
+When user hovers over any cell in a product row, a tooltip appears showing:
+
+```
+┌─────────────────────────────────────┐
+│ Ave Max Duck Layex 2 Pellet, 50kg   │
+│                                     │
+│ DFL:           194.2 MT             │
+│ Inventory:     181.5 MT             │
+│ Ratio:         1.07                 │
+│ Buffer:        -7.0%               │
+│ Status:        Critical             │
+│                                     │
+│ Completion:    —                    │
+│ Avail:         Mar 29               │
+│ Bal. to Prod:  -205.2 MT            │
+└─────────────────────────────────────┘
+```
+
+---
+
+### CALCULATIONS
+
+```javascript
+function getProductTooltipData(product) {
+  const dfl = product.due_for_loading;
+  const inventory = product.inventory;
+  
+  // Ratio: DFL ÷ Inventory
+  // Higher = more urgent, 1.0+ = deficit
+  const ratio = inventory > 0 
+    ? (dfl / inventory).toFixed(2) 
+    : '∞';
+  
+  // Buffer: (Inventory - DFL) / Inventory × 100
+  // Positive = sufficient, Negative = deficit
+  const buffer = inventory > 0 
+    ? (((inventory - dfl) / inventory) * 100).toFixed(1) 
+    : '-100.0';
+  
+  return {
+    name: product.item_description,
+    dfl: dfl,
+    inventory: inventory,
+    ratio: ratio,
+    buffer: buffer,
+    status: product.status,
+    completionDate: product.completionDate,
+    availDate: product.availDate,
+    balToProd: product.balanceToProduce
+  };
+}
+```
+
+---
+
+### TOOLTIP TRIGGER
+
+- Hover over any cell in the product row
+- Tooltip appears after 300ms delay
+- Tooltip disappears when mouse leaves the row
+- Tooltip follows the mouse cursor (positioned near cursor)
+- Tooltip does NOT block interaction with the table
+
+```jsx
+function N10DTableRow({ product }) {
+  const [showTooltip, setShowTooltip] = useState(false);
+  const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
+  const timeoutRef = useRef(null);
+  
+  function handleMouseEnter(e) {
+    timeoutRef.current = setTimeout(() => {
+      setShowTooltip(true);
+    }, 300);
+  }
+  
+  function handleMouseMove(e) {
+    setTooltipPos({ x: e.clientX + 12, y: e.clientY + 12 });
+  }
+  
+  function handleMouseLeave() {
+    clearTimeout(timeoutRef.current);
+    setShowTooltip(false);
+  }
+  
+  return (
+    <>
+      <tr
+        onMouseEnter={handleMouseEnter}
+        onMouseMove={handleMouseMove}
+        onMouseLeave={handleMouseLeave}
+      >
+        {/* ... row cells ... */}
+      </tr>
+      
+      {showTooltip && (
+        <ProductTooltip 
+          product={product} 
+          position={tooltipPos} 
+        />
+      )}
+    </>
+  );
+}
+```
+
+---
+
+### TOOLTIP STYLING
+
+| Property | Value |
+|---|---|
+| Background | Dark (#1a1a1a) |
+| Color | White (#ffffff) |
+| Border-radius | 8px |
+| Padding | 12px 16px |
+| Box shadow | 0 4px 12px rgba(0,0,0,0.2) |
+| Min width | 260px |
+| Max width | 320px |
+| Z-index | 1000 |
+| Pointer events | None (doesn't block clicks) |
+| Position | Fixed, near mouse cursor |
+
+### TOOLTIP CONTENT STYLING
+
+**Product name (header):**
+
+| Property | Value |
+|---|---|
+| Font size | 12px |
+| Font weight | 700 |
+| Color | White |
+| Margin-bottom | 8px |
+| Border-bottom | 1px solid rgba(255,255,255,0.15) |
+| Padding-bottom | 8px |
+
+**Data rows:**
+
+| Property | Value |
+|---|---|
+| Display | Grid, 2 columns (label: value) |
+| Row gap | 4px |
+| Label font | 11px, font-weight 400, color rgba(255,255,255,0.6) |
+| Value font | 11px, font-weight 600, color white |
+
+**Status value — colored:**
+
+| Status | Color in tooltip |
+|---|---|
+| Critical | Red (#fca5a5) |
+| Urgent | Orange (#fdba74) |
+| Monitor | Yellow (#fde047) |
+| Sufficient | Green (#86efac) |
+
+**Ratio value — colored:**
+
+| Condition | Color |
+|---|---|
+| Ratio > 1.0 | Red (#fca5a5) — deficit |
+| Ratio 0.8 - 1.0 | Yellow (#fde047) — approaching |
+| Ratio < 0.8 | Green (#86efac) — sufficient |
+
+**Buffer value — colored:**
+
+| Condition | Color |
+|---|---|
+| Buffer < 0% | Red (#fca5a5) — deficit |
+| Buffer 0-20% | Yellow (#fde047) — low buffer |
+| Buffer > 20% | Green (#86efac) — sufficient |
+
+---
+
+### TOOLTIP COMPONENT
+
+```jsx
+function ProductTooltip({ product, position }) {
+  const data = getProductTooltipData(product);
+  
+  const ratioColor = parseFloat(data.ratio) > 1.0 ? '#fca5a5' :
+                     parseFloat(data.ratio) > 0.8 ? '#fde047' : '#86efac';
+  
+  const bufferColor = parseFloat(data.buffer) < 0 ? '#fca5a5' :
+                      parseFloat(data.buffer) < 20 ? '#fde047' : '#86efac';
+  
+  const statusColor = {
+    'Critical': '#fca5a5',
+    'Urgent': '#fdba74',
+    'Monitor': '#fde047',
+    'Sufficient': '#86efac'
+  }[data.status] || '#ffffff';
+  
+  return (
+    <div 
+      className="product-tooltip"
+      style={{
+        position: 'fixed',
+        left: position.x,
+        top: position.y,
+        background: '#1a1a1a',
+        color: '#ffffff',
+        borderRadius: '8px',
+        padding: '12px 16px',
+        boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+        minWidth: '260px',
+        maxWidth: '320px',
+        zIndex: 1000,
+        pointerEvents: 'none'
+      }}
+    >
+      {/* Product name */}
+      <div style={{
+        fontSize: '12px',
+        fontWeight: 700,
+        marginBottom: '8px',
+        paddingBottom: '8px',
+        borderBottom: '1px solid rgba(255,255,255,0.15)'
+      }}>
+        {data.name}
+      </div>
+      
+      {/* Data grid */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: '110px 1fr',
+        rowGap: '4px'
+      }}>
+        <span className="tooltip-label">DFL:</span>
+        <span className="tooltip-value">{data.dfl.toLocaleString()} MT</span>
+        
+        <span className="tooltip-label">Inventory:</span>
+        <span className="tooltip-value">{data.inventory.toLocaleString()} MT</span>
+        
+        <span className="tooltip-label">Ratio:</span>
+        <span className="tooltip-value" style={{ color: ratioColor }}>
+          {data.ratio}
+        </span>
+        
+        <span className="tooltip-label">Buffer:</span>
+        <span className="tooltip-value" style={{ color: bufferColor }}>
+          {data.buffer}%
+        </span>
+        
+        <span className="tooltip-label">Status:</span>
+        <span className="tooltip-value" style={{ color: statusColor }}>
+          {data.status}
+        </span>
+        
+        {/* Separator */}
+        <div style={{ 
+          gridColumn: '1 / -1', 
+          borderTop: '1px solid rgba(255,255,255,0.1)',
+          margin: '4px 0'
+        }} />
+        
+        <span className="tooltip-label">Completion:</span>
+        <span className="tooltip-value">
+          {data.completionDate || '—'}
+        </span>
+        
+        <span className="tooltip-label">Avail:</span>
+        <span className="tooltip-value">
+          {data.availDate || '—'}
+        </span>
+        
+        <span className="tooltip-label">Bal. to Prod:</span>
+        <span className="tooltip-value" style={{ 
+          color: data.balToProd < 0 ? '#fca5a5' : '#86efac' 
+        }}>
+          {data.balToProd.toLocaleString()} MT
+        </span>
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+### TOOLTIP CSS HELPERS
+
+```css
+.tooltip-label {
+  font-size: 11px;
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.tooltip-value {
+  font-size: 11px;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.product-tooltip {
+  animation: tooltipFadeIn 0.15s ease;
+}
+
+@keyframes tooltipFadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+```
+
+---
+
+### EDGE CASES
+
+| Case | Tooltip behavior |
+|---|---|
+| Inventory = 0 | Ratio shows "∞", Buffer shows "-100.0%" |
+| DFL = 0 | Ratio shows "0.00", Buffer shows "100.0%" |
+| No completion date | Shows "—" |
+| No avail date | Shows "—" |
+| Scroll while tooltip visible | Tooltip repositions or hides |
+
+---
+
+### APPLY ONLY TO
+
+- ✅ N10D table rows
+- ❌ Not on column headers
+- ❌ Not on the Tracking section header
+```

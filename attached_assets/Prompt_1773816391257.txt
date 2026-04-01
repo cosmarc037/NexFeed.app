@@ -1,0 +1,155 @@
+Yes, much simpler! Here's the updated approach:
+
+```
+Implement the following change to the NexFeed application:
+
+---
+
+## AVAIL DATE — EDIT MODE WITH DONE, CANCEL, AND REVERT BUTTONS
+
+When the user edits the Avail Date cell, show three action buttons below the input.
+
+---
+
+### EDIT MODE LAYOUT
+
+```
+┌─────────────────────────────────┐
+│ March 22, 2026          📅      │   ← date picker / input
+├─────────────────────────────────┤
+│   [Revert]  [Cancel]  [Done]   │   ← three action buttons
+└─────────────────────────────────┘
+```
+
+---
+
+### BUTTON DETAILS
+
+**[Done] button:**
+- Confirms and saves the new value.
+- Orange filled (#fd5108), white text.
+- Font size: 11px, padding: 3px 10px, border-radius: 4px.
+- Keyboard shortcut: Enter.
+
+**[Cancel] button:**
+- Discards the current edit. Reverts to the value BEFORE this edit session started.
+- Grey outline (#d1d5db), grey text (#6b7280).
+- Font size: 11px, padding: 3px 10px, border-radius: 4px.
+- Keyboard shortcut: Escape.
+
+**[Revert] button:**
+- Reverts to the ORIGINAL SAP upload value (stored in `original_avail_date`).
+- Light red outline (#fecaca), red text (#e53935).
+- Font size: 11px, padding: 3px 10px, border-radius: 4px.
+- Tooltip on hover: "Revert to original: [original value]"
+  - e.g., "Revert to original: prio replenish"
+  - e.g., "Revert to original: March 22, 2026"
+
+**Button order (left to right):** [Revert] [Cancel] [Done]
+- Revert on far left (destructive/reset action).
+- Cancel in the middle (neutral action).
+- Done on far right (primary/confirm action).
+
+---
+
+### REVERT BUTTON VISIBILITY
+
+| Condition | [Revert] visible? |
+|---|---|
+| Current value = original SAP value | ❌ Hidden (nothing to revert to) |
+| Current value ≠ original SAP value | ✅ Shown |
+| Order was never edited | ❌ Hidden |
+
+When [Revert] is hidden, only [Cancel] and [Done] show:
+```
+┌─────────────────────────────────┐
+│ prio replenish                  │
+├─────────────────────────────────┤
+│           [Cancel]  [Done]      │
+└─────────────────────────────────┘
+```
+
+---
+
+### REVERT BUTTON FLOW
+
+**Step 1:** User is in edit mode. [Revert] is visible because value differs from original.
+
+**Step 2:** User clicks [Revert].
+
+**Step 3:** Confirmation dialog appears:
+
+```
+╔══════════════════════════════════════════════════╗
+║  ↩ Revert Availability Date                      ║
+║                                                   ║
+║  Revert to the original SAP value?                ║
+║                                                   ║
+║  Current:    March 25, 2026                       ║
+║  Original:   prio replenish                       ║
+║                                                   ║
+║           [Go Back]    [Confirm Revert]           ║
+╚══════════════════════════════════════════════════╝
+```
+
+- [Go Back]: Grey outline. Closes dialog, returns to edit mode.
+- [Confirm Revert]: Orange filled (#fd5108), white text.
+
+**Step 4:** On confirm:
+- Avail Date is set to `original_avail_date`.
+- Edit mode closes.
+- Auto-sort runs if needed (date changed to non-date or vice versa).
+- Cascade recalculates.
+
+---
+
+### REVERT EXAMPLES
+
+**Example 1:**
+```
+Original: "prio replenish"
+User changed to: "March 18, 2026"
+User clicks [Revert] → confirms → value becomes "prio replenish"   ✅
+```
+
+**Example 2:**
+```
+Original: "safety stocks"
+User changed to: "March 18, 2026", then to "March 25, 2026"
+User clicks [Revert] → confirms → value becomes "safety stocks"    ✅
+(Always reverts to ORIGINAL, not previous edit)
+```
+
+**Example 3:**
+```
+Original: "March 22, 2026"
+User changed to: "prio replenish"
+User clicks [Revert] → confirms → value becomes "March 22, 2026"   ✅
+```
+
+---
+
+### ORIGINAL VALUE STORAGE
+
+- Field: `original_avail_date`
+- Set ONCE during the first SAP upload for that order.
+- NEVER changes — regardless of user edits, subsequent uploads, combine, cut, etc.
+- Stores the exact parsed value including non-date text.
+
+---
+
+### NON-EDIT MODE — VISUAL INDICATOR
+
+When the Avail Date has been modified from its original value (outside of edit mode), show a subtle indicator:
+
+```
+┌─────────────────────────────────┐
+│ March 25, 2026          📅      │   ← current value
+│ Originally: prio replenish      │   ← small grey text, 10px, italic
+└─────────────────────────────────┘
+```
+
+- "Originally: [value]" shown in grey (#9ca3af), 10px, italic.
+- Only shown when current value ≠ original value.
+- When current = original, this line does not appear.
+```

@@ -1,0 +1,338 @@
+```
+Implement the following fix:
+
+---
+
+## FIX: AUTO-SEQUENCE — READ CORRECT AVAIL DATE AND STATUS FROM N10D
+
+The auto-sequence is assigning wrong avail dates and wrong stock status to non-dated orders (prio replenish / safety stocks). It should read the Avail date and status DIRECTLY from the N10D tab.
+
+---
+
+### THE PROBLEM
+
+| Product | N10D Avail | N10D Status | Auto-Sequence Shows | Issue |
+|---|---|---|---|---|
+| Gall 21 Chicken Layer | Mar 30 (today) | Critical | "Stock sufficient", placed last | WRONG — should get Mar 30 as avail, placed near top |
+| Elite XP Startex | — (never breaches) | Sufficient | Apr 9, placed high | WRONG — should be placed lower since no urgency |
+
+The auto-sequence is either:
+1. Not reading the N10D Avail date correctly
+2. Using the OLD inverted logic to determine the avail date
+3. Assigning the wrong status label
+
+---
+
+### FIX 1: ASSIGN AVAIL DATE FROM N10D FOR NON-DATED ORDERS
+
+When the auto-sequence processes non-dated orders (prio replenish / safety stocks), it must look up the N10D Avail date and use it as the order's avail date for sorting.
+
+```javascript
+function assignAvailDatesFromN10D(orders, n10dData, today) {
+  return orders.map(order => {
+    const updatedOrder = { ...order };
+    
+    // Skip dated orders — they already have avail dates
+    if (order.avail_date && 
+        order.avail_date !== 'prio replenish' && 
+        order.avail_date !== 'safety stocks') {
+      updatedOrder._sortDate = parseDate(order.avail_date);
+      updatedOrder._dateSource = 'dated';
+      return updatedOrder;
+    }
+    
+    // Non-dated orders — look up N10D Avail date
+    if (!n10dData || n10dData.length === 0) {
+      updatedOrder._sortDate = null;
+      updatedOrder._dateSource = 'none';
+      return updatedOrder;
+    }
+    
+    const product = n10dData.find(
+      p => String(p.material_code_fg) === String(order.material_code_fg)
+    );
+    
+    if (!product) {
+      updatedOrder._sortDate = null;
+      updatedOrder._dateSource = 'none';
+      return updatedOrder;
+    }
+    
+    // CORRECT LOGIC:
+    // N10D Avail date = date when cumulative DFL exceeds inventory
+    // For Critical products: Avail = today (DFL already exceeds inventory)
+    // For Urgent: Avail = within 3 days
+    // For Monitor: Avail = within 4-10 days
+    // For Sufficient: Avail = null (never breaches)
+    
+    const n10dAvailDate = product.availDate ? parseDate(product.availDate) : null;
+    const n10dStatus = product.status;
+    
+    if (n10dStatus === 'Critical') {
+      // Critical = DFL already exceeds Inventory = needs production TODAY
+      updatedOrder._sortDate = today;
+      updatedOrder._assignedAvailDate = formatDateFull(today);
+      updatedOrder._n10dStatus = 'Critical';
+    } else if (n10dAvailDate) {
+      // Urgent / Monitor = has a breach date
+      updatedOrder._sortDate = n10dAvailDate;
+      updatedOrder._assignedAvailDate = formatDateFull(n10dAvailDate);
+      updatedOrder._n10dStatus = n10dStatus;
+    } else {
+      // Sufficient = no breach date, no urgency
+      updatedOrder._sortDate = null;
+      updatedOrder._assignedAvailDate = null;
+      updatedOrder._n10dStatus = 'Sufficient';
+    }
+    
+    updatedOrder._dateSource = 'n10d';
+    return updatedOrder;
+  });
+}
+```
+
+### FIX 2: SORT ALL ORDERS CHRONOLOGICALLY
+
+After all orders have avail dates (either original or from N10D), sort chronologically:
+
+```javascript
+function sortOrdersChronologically(orders) {
+  return orders.sort((a, b) => {
+    const dateA = a._sortDate;
+    const dateB = b._sortDate;
+    
+    // Orders with dates come before orders without dates
+    if (dateA && !dateB) return -1;
+    if (!dateA && dateB) return 1;
+    if (!dateA && !dateB) return 0;
+    
+    // Both have dates — sort chronologically (earliest first)
+    const diff = dateA.getTime() - dateB.getTime();
+    if (diff !== 0) return diff;
+    
+    // Same date — tiebreaker: higher DFL/Inventory ratio first
+    const ratioA = a._n10dRatio || 0;
+    const ratioB = b._n10dRatio || 0;
+    return ratioB - ratioA;
+  });
+}
+```
+
+### FIX 3: COMPLETE AUTO-SEQUENCE FLOW
+
+```javascript
+function runAutoSequence(orders, n10dData) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  
+  // Step 1: Assign avail dates from N10D for non-dated orders
+  const ordersWithDates = assignAvailDatesFromN10D(orders, n10dData, today);
+  
+  // Step 2: Add DFL/Inventory ratio for tiebreaking
+  ordersWithDates.forEach(order => {
+    const product = n10dData?.find(
+      p => String(p.material_code_fg) === String(order.material_code_fg)
+    );
+    if (product && product.inventory > 0) {
+      order._n10dRatio = product.due_for_loading / product.inventory;
+    } else if (product && product.inventory === 0) {
+      order._n10dRatio = Infinity;
+    } else {
+      order._n10dRatio = 0;
+    }
+  });
+  
+  // Step 3: Sort chronologically
+  const sorted = sortOrdersChronologically(ordersWithDates);
+  
+  // Step 4: Assign priorities
+  sorted.forEach((order, index) => {
+    order.prio = index + 1;
+  });
+  
+  return sorted;
+}
+```
+
+### FIX 4: DISPLAY CORRECT AVAIL DATE AND STATUS IN PREVIEW
+
+When showing the avail date in the auto-sequence preview:
+
+```javascript
+function getAutoSequenceAvailDisplay(order) {
+  // Dated orders — show original avail date
+  if (order._dateSource === 'dated') {
+    return {
+      text: formatDateFull(order._sortDate),
+      subtext: null,
+      color: '#1a1a1a',
+      icon: null
+    };
+  }
+  
+  // Non-dated from N10D
+  if (order._dateSource === 'n10d') {
+    switch (order._n10dStatus) {
+      case 'Critical':
+        return {
+          text: order._assignedAvailDate || 'Today',
+          subtext: order.avail_date,  // 'prio replenish' or 'safety stocks'
+          color: '#dc2626',
+          icon: '⚠'
+        };
+      case 'Urgent':
+        return {
+          text: order._assignedAvailDate,
+          subtext: order.avail_date,
+          color: '#ea580c',
+          icon: '⚠'
+        };
+      case 'Monitor':
+        return {
+          text: order._assignedAvailDate,
+          subtext: order.avail_date,
+          color: '#ca8a04',
+          icon: '⚠'
+        };
+      case 'Sufficient':
+        return {
+          text: 'Stock sufficient',
+          subtext: order.avail_date,
+          color: '#16a34a',
+          icon: '✅'
+        };
+      default:
+        return {
+          text: order.avail_date || '—',
+          subtext: null,
+          color: '#6b7280',
+          icon: null
+        };
+    }
+  }
+  
+  // No data
+  return {
+    text: order.avail_date || '—',
+    subtext: null,
+    color: '#6b7280',
+    icon: null
+  };
+}
+```
+
+### FIX 5: WHEN USER APPLIES AUTO-SEQUENCE
+
+When user clicks "Apply to Schedule", the assigned avail dates replace the original:
+
+```javascript
+function applyAutoSequence(sortedOrders) {
+  sortedOrders.forEach(order => {
+    // Update priority
+    order.prio = order.prio;
+    
+    // For non-dated orders, update the avail date with N10D date
+    if (order._dateSource === 'n10d' && order._assignedAvailDate) {
+      // Critical/Urgent/Monitor — assign the N10D avail date
+      if (order._n10dStatus !== 'Sufficient') {
+        order.avail_date = order._assignedAvailDate;
+      }
+      // Sufficient — keep original 'safety stocks' or 'prio replenish'
+      // OR assign a late date so it sorts at the bottom
+    }
+  });
+}
+```
+
+### FIX 6: REMOVE OLD INVERTED LOGIC
+
+Search the entire auto-sequence codebase and REMOVE any of these old patterns:
+
+```javascript
+// DELETE — OLD WRONG LOGIC
+if (dfl > inventory) { status = 'stock_sufficient'; }
+if (dfl < inventory) { status = 'needs_production'; }
+const isStockSufficient = dfl > inventory;
+const needsProduction = dfl < inventory;
+
+// DELETE — OLD INVERTED COMPARISONS
+if (fulfillment > threshold) { /* sufficient */ }
+if (gap > 0) { /* needs production */ }
+```
+
+### FIX 7: METRIC CARDS — CORRECT COUNTS
+
+```javascript
+function calculateAutoSequenceMetrics(orders) {
+  let withDeadline = 0;
+  let noDeadline = 0;
+  let stockSufficient = 0;
+  let conflicts = 0;
+  
+  orders.forEach(order => {
+    if (order._dateSource === 'dated') {
+      withDeadline++;
+    } else if (order._n10dStatus === 'Sufficient') {
+      stockSufficient++;
+    } else if (order._n10dStatus) {
+      // Critical, Urgent, Monitor — these have N10D deadlines
+      withDeadline++;
+    } else {
+      noDeadline++;
+    }
+  });
+  
+  return { total: orders.length, withDeadline, noDeadline, stockSufficient, conflicts };
+}
+```
+
+---
+
+### EXPECTED RESULT AFTER FIX
+
+Based on N10D data:
+
+| Product | N10D Status | N10D Avail | Assigned Avail | Expected Priority |
+|---|---|---|---|---|
+| Gall 21 Chicken Layer | Critical | Mar 30 | Mar 30 (today) | HIGH — near top |
+| Gallimax 3 Maintenance | Urgent | Apr 1 | Apr 1 | Early |
+| Salto Conditioner (dated) | — | — | Apr 11 (original) | Middle |
+| Elite XP Startex (×6) | Sufficient | — | Stock sufficient | Bottom |
+| Gallimax Pigeon Pellet | Sufficient | — | Stock sufficient | Bottom |
+
+Sorted chronologically:
+```
+1. Gall 21 Chicken Layer — Mar 30 (Critical, today)
+2. Gallimax 3 Maintenance — Apr 1 (Urgent)
+3. [other Monitor orders by their N10D Avail dates]
+4. Salto Conditioner — Apr 11 (dated)
+5-10. Elite XP Startex, Gallimax Pigeon — Stock sufficient (bottom)
+```
+
+---
+
+### VERIFICATION
+
+1. Gall 21 Chicken Layer (Critical, DFL 24.0, Inv 0.7)
+   - ✅ Assigned avail date: today (Mar 30)
+   - ✅ Shows near the TOP of auto-sequence
+   - ✅ Label: date + "safety stocks" with ⚠ red icon
+   - ✅ NOT labeled "Stock sufficient"
+
+2. Elite XP Startex (Sufficient, DFL 92.3, Inv 310.6)
+   - ✅ No assigned avail date (never breaches)
+   - ✅ Shows near the BOTTOM
+   - ✅ Label: "Stock sufficient ✅"
+
+3. Chronological sort
+   - ✅ All orders with dates (original or N10D) sorted earliest first
+   - ✅ Stock sufficient orders at the bottom
+
+4. Metric cards
+   - ✅ "Stock Sufficient" count = only Sufficient products
+   - ✅ "With Deadline" includes Critical/Urgent/Monitor + dated orders
+
+5. After applying
+   - ✅ Non-dated orders get their N10D avail dates
+   - ✅ Order table reflects correct priority
+```

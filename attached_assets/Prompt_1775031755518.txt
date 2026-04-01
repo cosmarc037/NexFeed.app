@@ -1,0 +1,297 @@
+```
+Implement the following changes to the Done orders behavior:
+
+---
+
+## DONE ORDERS — TOP 3 RECENT, FIFO ROTATION
+
+Only the 3 most recent Done orders are shown at the top of the order table per line. When a 4th order is marked as Done, the oldest Done order is removed from the table and moved to Order History.
+
+---
+
+### THE RULE
+
+```
+Maximum 3 Done orders visible at the top of each line at any time.
+Sorted by completion timestamp: oldest → middle → newest (top to bottom).
+When a new order is marked Done, the oldest Done is pushed out to Order History.
+```
+
+### EXAMPLE FLOW
+
+**Initial state — 3 Done orders:**
+```
+Prio 1: Order A → Done (completed at 8:00 AM) — oldest
+Prio 2: Order B → Done (completed at 9:30 AM) — middle
+Prio 3: Order C → Done (completed at 11:00 AM) — newest
+Prio 4: Order D → In Production
+Prio 5: Order E → Plotted
+```
+
+**Order D is marked as Done:**
+```
+Prio 1: Order B → Done (9:30 AM) — now oldest
+Prio 2: Order C → Done (11:00 AM) — now middle
+Prio 3: Order D → Done (2:00 PM) — newest
+Prio 4: Order E → Plotted
+```
+
+Order A is removed from the table and moved to Order History.
+
+**Order E is marked as Done:**
+```
+Prio 1: Order C → Done (11:00 AM) — now oldest
+Prio 2: Order D → Done (2:00 PM) — now middle
+Prio 3: Order E → Done (4:00 PM) — newest
+```
+
+Order B is removed from the table and moved to Order History.
+
+---
+
+### TRACK COMPLETION TIMESTAMP
+
+When an order is marked as Done, store the timestamp:
+
+```javascript
+function handleStatusChange(order, newStatus, allOrders, currentLine) {
+  // ... existing logic ...
+  
+  if (newStatus === 'Done') {
+    order.status = 'Done';
+    order._doneTimestamp = new Date().toISOString();
+    
+    // Enforce top 3 rule
+    enforceTop3DoneRule(allOrders, currentLine);
+  }
+  
+  // ... rest of logic ...
+}
+```
+
+### ENFORCE TOP 3 RULE
+
+```javascript
+function enforceTop3DoneRule(allOrders, currentLine) {
+  const MAX_VISIBLE_DONE = 3;
+  
+  // Get all Done orders on this line
+  const doneOrders = allOrders.filter(
+    o => o.status === 'Done' && o.line === currentLine
+  );
+  
+  if (doneOrders.length <= MAX_VISIBLE_DONE) {
+    // 3 or fewer — no action needed
+    return;
+  }
+  
+  // Sort by completion timestamp — oldest first
+  doneOrders.sort((a, b) => {
+    const timeA = a._doneTimestamp ? new Date(a._doneTimestamp).getTime() : 0;
+    const timeB = b._doneTimestamp ? new Date(b._doneTimestamp).getTime() : 0;
+    return timeA - timeB;
+  });
+  
+  // Remove oldest Done orders beyond the limit
+  const ordersToRemove = doneOrders.slice(0, doneOrders.length - MAX_VISIBLE_DONE);
+  
+  ordersToRemove.forEach(order => {
+    // Move to Order History
+    moveToOrderHistory(order);
+    
+    // Remove from order table
+    const index = allOrders.findIndex(o => o.id === order.id);
+    if (index !== -1) {
+      allOrders.splice(index, 1);
+    }
+  });
+  
+  // Renumber priorities
+  allOrders.forEach((o, i) => {
+    o.prio = i + 1;
+  });
+}
+```
+
+### MOVE TO ORDER HISTORY
+
+```javascript
+function moveToOrderHistory(order) {
+  const historyEntry = {
+    ...order,
+    _movedToHistoryAt: new Date().toISOString(),
+    _reason: 'Completed — rotated out of top 3 Done orders',
+    _finalStatus: 'Done',
+    _completedAt: order._doneTimestamp
+  };
+  
+  // Add to Order History store
+  addToOrderHistory(historyEntry);
+}
+```
+
+### DONE ORDER SORTING AT TOP
+
+The 3 visible Done orders are always sorted by timestamp — oldest first, newest last:
+
+```javascript
+function sortDoneOrdersAtTop(allOrders, currentLine) {
+  const doneOrders = allOrders.filter(
+    o => o.status === 'Done' && o.line === currentLine
+  );
+  const nonDoneOrders = allOrders.filter(
+    o => o.status !== 'Done' || o.line !== currentLine
+  );
+  
+  // Sort Done by timestamp — oldest first
+  doneOrders.sort((a, b) => {
+    const timeA = a._doneTimestamp ? new Date(a._doneTimestamp).getTime() : 0;
+    const timeB = b._doneTimestamp ? new Date(b._doneTimestamp).getTime() : 0;
+    return timeA - timeB;
+  });
+  
+  // Done at top, then non-done in their existing order
+  const result = [...doneOrders, ...nonDoneOrders];
+  result.forEach((o, i) => {
+    o.prio = i + 1;
+  });
+  
+  return result;
+}
+```
+
+---
+
+### APPLIES TO ALL LINES INDEPENDENTLY
+
+Each line has its own top 3 count:
+
+```
+Line 1: max 3 Done orders visible
+Line 2: max 3 Done orders visible
+Line 3: max 3 Done orders visible
+...
+```
+
+```javascript
+function enforceTop3DoneRule(allOrders, currentLine) {
+  // Only count Done orders on the CURRENT line
+  const doneOrders = allOrders.filter(
+    o => o.status === 'Done' && o.line === currentLine
+  );
+  
+  // ... rest of logic only affects this line's Done orders
+}
+```
+
+---
+
+### TIMESTAMP DISPLAY
+
+The completion timestamp should be visible in the Completion Date column:
+
+```javascript
+function getCompletionDateDisplay(order) {
+  if (order.status === 'Done' && order._doneTimestamp) {
+    const date = new Date(order._doneTimestamp);
+    return formatDateFull(date) + ' ' + formatTime(date);
+    // e.g., "April 11, 2026 02:00 PM"
+  }
+  return order.completion_date || 'Set completion';
+}
+```
+
+---
+
+### EDGE CASES
+
+| Scenario | Behavior |
+|---|---|
+| First order marked Done | Shows 1 Done order at top |
+| Second order marked Done | Shows 2 Done orders at top (oldest first) |
+| Third order marked Done | Shows 3 Done orders at top |
+| Fourth order marked Done | Oldest removed to Order History, 3 remain |
+| Order reverted from Done to Plotted | Returns to original position, Done count decreases |
+| All 3 Done orders reverted | No Done orders at top |
+| Done order on Line 1 doesn't affect Line 2 | Independent per line |
+
+### REVERT DONE — INTERACTION WITH TOP 3
+
+When a Done order is reverted to Plotted (or other movable status):
+
+```javascript
+function handleDoneRevert(order, newStatus, allOrders) {
+  // Remove done timestamp
+  order._doneTimestamp = null;
+  order.status = newStatus;
+  
+  // Return to original position
+  if (order._originalPrioBeforeLock) {
+    const targetPrio = order._originalPrioBeforeLock;
+    order._originalPrioBeforeLock = null;
+    const maxPrio = allOrders.length;
+    const finalPrio = Math.min(targetPrio, maxPrio);
+    moveOrderToPrio(order, finalPrio, allOrders);
+  }
+  
+  // No need to pull back from Order History — 
+  // only the 3 visible Done orders can be reverted
+  // Orders already in Order History cannot be reverted from the order table
+}
+```
+
+---
+
+### ORDER HISTORY — DONE ENTRY FORMAT
+
+When a Done order is moved to Order History, it should show:
+
+```
+┌──────────────────────────────────────────────────────────┐
+│ Elite XP Startex, Mini-pellet 50kg                       │
+│                                                          │
+│ Status: Done                                             │
+│ Completed: April 11, 2026, 8:00 AM                      │
+│ Moved to history: April 11, 2026, 2:00 PM               │
+│ Reason: Completed — rotated out of top 3 Done orders     │
+│ Line: Line 1                                             │
+│ Volume: 80 MT                                            │
+│ FPR: 260330                                              │
+└──────────────────────────────────────────────────────────┘
+```
+
+---
+
+## VERIFICATION
+
+1. Top 3 rule
+   - ✅ Maximum 3 Done orders visible per line
+   - ✅ Sorted oldest → middle → newest (by completion timestamp)
+   - ✅ 4th Done pushes oldest to Order History
+   - ✅ Removed from order table completely
+   - ✅ Added to Order History with timestamp and reason
+
+2. FIFO rotation
+   - ✅ Order A (8am), B (9:30am), C (11am) visible
+   - ✅ D marked Done → A removed, B/C/D visible
+   - ✅ E marked Done → B removed, C/D/E visible
+
+3. Per line
+   - ✅ Line 1 has its own top 3
+   - ✅ Line 2 has its own top 3
+   - ✅ Marking Done on Line 1 doesn't affect Line 2
+
+4. Revert
+   - ✅ Reverting Done → Plotted returns to original position
+   - ✅ Done count decreases
+   - ✅ No pull-back from Order History
+
+5. Timestamp
+   - ✅ Completion timestamp stored when marked Done
+   - ✅ Visible in Completion Date column
+   - ✅ Used for sorting (oldest first)
+
+6. Order History
+   - ✅ Removed Done orders appear in Order History
+   - ✅ Shows completion time, moved time, reason
+```

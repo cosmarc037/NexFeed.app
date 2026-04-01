@@ -1,0 +1,276 @@
+```
+Implement the following fix to the Safety Stock Insights:
+
+---
+
+## FIX: SAFETY STOCK INSIGHTS — INCORRECT OUTPUT
+
+The AI is generating incorrect insights that don't match the actual N10D table data. Products are missing, wrong products are in wrong sections, and buffer calculations are off.
+
+---
+
+### THE PROBLEMS
+
+1. **Gallimax 3 Maintenance (Target: March 19) is completely missing** from the urgent section despite being the MOST urgent product — already past target date
+2. **"Upcoming Production" says no products in 4-7 day window** when there are clearly products like Basic Broiler Finex Crumble (Target: March 24), Ave Max Duck Layex 50kg (Target: March 25), Elite XP GestaPro (Target: March 26)
+3. **Stock Sufficient includes wrong products** — Ave Max Duck Layex 2 Pellet has Due for Loading (194.2) GREATER than Inventory (181.5), meaning it's NOT stock sufficient
+4. **Buffer calculations incorrect**
+
+---
+
+### THE FIX — PASS PRE-CALCULATED DATA TO AI
+
+Similar to how we fixed the Impact Analysis, the APP should pre-calculate everything and pass it to the AI. The AI should NOT calculate target dates, buffer percentages, or categorize products itself.
+
+---
+
+### STEP 1: APP PRE-CALCULATES EVERYTHING
+
+```javascript
+function prepareStockInsightData(next10DaysData, today) {
+  
+  const products = next10DaysData.map(product => {
+    const inventory = product.inventory || 0;
+    const dueForLoading = product.due_for_loading || 0;
+    const targetDate = product.target_date; // from the Target column in N10D table
+    const status = product.status; // "Needs Production" or "Stock Sufficient"
+    
+    // Buffer calculation
+    // Buffer% = (Inventory - Due for Loading) / Inventory × 100
+    let bufferPct = 0;
+    let bufferStatus = 'deficit';
+    
+    if (inventory > 0) {
+      bufferPct = Math.round(((inventory - dueForLoading) / inventory) * 100);
+      
+      if (bufferPct > 50) bufferStatus = 'comfortable';
+      else if (bufferPct > 20) bufferStatus = 'moderate';
+      else if (bufferPct > 0) bufferStatus = 'low';
+      else bufferStatus = 'deficit';
+    } else {
+      bufferPct = -100;
+      bufferStatus = 'no_inventory';
+    }
+    
+    // Days until target
+    let daysUntilTarget = null;
+    let urgencyCategory = 'none';
+    
+    if (targetDate) {
+      const target = new Date(targetDate);
+      const diffMs = target.getTime() - today.getTime();
+      daysUntilTarget = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+      
+      if (daysUntilTarget <= 0) urgencyCategory = 'overdue';
+      else if (daysUntilTarget <= 3) urgencyCategory = 'urgent';
+      else if (daysUntilTarget <= 7) urgencyCategory = 'upcoming';
+      else if (daysUntilTarget <= 10) urgencyCategory = 'extended';
+    }
+    
+    return {
+      name: product.item_description,
+      dueForLoading: dueForLoading,
+      inventory: inventory,
+      bufferPct: bufferPct,
+      bufferStatus: bufferStatus,
+      targetDate: targetDate,
+      daysUntilTarget: daysUntilTarget,
+      urgencyCategory: urgencyCategory,
+      status: status // "Needs Production" or "Stock Sufficient"
+    };
+  });
+  
+  // Categorize
+  const overdue = products.filter(p => p.urgencyCategory === 'overdue');
+  const urgent = products.filter(p => p.urgencyCategory === 'urgent');
+  const upcoming = products.filter(p => p.urgencyCategory === 'upcoming');
+  const extended = products.filter(p => p.urgencyCategory === 'extended');
+  const stockSufficient = products.filter(p => p.status === 'Stock Sufficient');
+  const needsProduction = products.filter(p => p.status === 'Needs Production');
+  
+  // Total deficit
+  const totalDeficit = products.reduce((sum, p) => {
+    const deficit = p.dueForLoading - p.inventory;
+    return deficit > 0 ? sum + deficit : sum;
+  }, 0);
+  
+  return {
+    totalProducts: products.length,
+    needsProductionCount: needsProduction.length,
+    stockSufficientCount: stockSufficient.length,
+    totalDeficit: Math.round(totalDeficit * 10) / 10,
+    overdue: overdue.sort((a, b) => a.daysUntilTarget - b.daysUntilTarget),
+    urgent: urgent.sort((a, b) => a.daysUntilTarget - b.daysUntilTarget),
+    upcoming: upcoming.sort((a, b) => a.daysUntilTarget - b.daysUntilTarget),
+    extended: extended.sort((a, b) => a.daysUntilTarget - b.daysUntilTarget),
+    stockSufficient: stockSufficient
+  };
+}
+```
+
+---
+
+### STEP 2: PASS PRE-CALCULATED DATA TO AI
+
+```javascript
+function buildStockInsightPrompt(data) {
+  return `
+Generate a safety stock insight narrative based on the 
+PRE-CALCULATED data below. Do NOT recalculate any buffer 
+percentages, target dates, or product categorizations. 
+Use ONLY the data provided.
+
+RULES:
+- Do NOT recalculate buffers — use the provided buffer percentages
+- Do NOT re-categorize products — use the provided categories
+- Do NOT skip any product listed in the data
+- Use product names only — no material codes
+- Format dates as "March 22" not "2026-03-22"
+- Topic headings on their OWN LINE, content on the next line
+- Only bold topic headings and product names
+- Skip sections with zero products
+- Use flowing narrative paragraphs, not bullet points
+
+=== PRE-CALCULATED DATA (do NOT display this) ===
+
+OVERVIEW:
+Total products: ${data.totalProducts}
+Needs production: ${data.needsProductionCount}
+Stock sufficient: ${data.stockSufficientCount}
+Total deficit: ${data.totalDeficit} MT
+
+${data.overdue.length > 0 ? `
+OVERDUE (past target date — include in Urgent section):
+${data.overdue.map(p => 
+  `- ${p.name}: Target ${p.targetDate} (${Math.abs(p.daysUntilTarget)} days overdue). Demand: ${p.dueForLoading} MT | Inventory: ${p.inventory} MT | Buffer: ${p.bufferPct}%`
+).join('\n')}
+` : ''}
+
+${data.urgent.length > 0 ? `
+URGENT (target within 1-3 days):
+${data.urgent.map(p => 
+  `- ${p.name}: Target ${p.targetDate} (${p.daysUntilTarget} days). Demand: ${p.dueForLoading} MT | Inventory: ${p.inventory} MT | Buffer: ${p.bufferPct}%`
+).join('\n')}
+` : ''}
+
+${data.upcoming.length > 0 ? `
+UPCOMING (target within 4-7 days):
+${data.upcoming.map(p => 
+  `- ${p.name}: Target ${p.targetDate} (${p.daysUntilTarget} days). Demand: ${p.dueForLoading} MT | Inventory: ${p.inventory} MT | Buffer: ${p.bufferPct}%`
+).join('\n')}
+` : ''}
+
+${data.extended.length > 0 ? `
+EXTENDED (target within 8-10 days):
+${data.extended.map(p => 
+  `- ${p.name}: Target ${p.targetDate} (${p.daysUntilTarget} days). Demand: ${p.dueForLoading} MT | Inventory: ${p.inventory} MT | Buffer: ${p.bufferPct}%`
+).join('\n')}
+` : ''}
+
+${data.stockSufficient.length > 0 ? `
+STOCK SUFFICIENT:
+${data.stockSufficient.map(p => 
+  `- ${p.name}: Demand: ${p.dueForLoading} MT | Inventory: ${p.inventory} MT`
+).join('\n')}
+` : ''}
+
+=== GENERATE NARRATIVE ===
+
+Topics to include (skip if section has zero products):
+
+📊 **Overview**
+(new line)
+Summary of total products, how many need production, 
+how many sufficient, total deficit.
+
+🔴 **Urgent Production**
+(new line)
+Combine OVERDUE and URGENT products into this section. 
+Mention OVERDUE products FIRST with a note they are 
+past their target date. Then mention urgent ones.
+Include EVERY product listed — do not skip any.
+For each: name, target date, demand, inventory, buffer%.
+
+🟡 **Upcoming Production**
+(new line)
+Products in the UPCOMING category. Include ALL of them.
+For each: name, target date, demand, inventory, buffer%.
+
+🟠 **Extended Production**
+(new line)
+Products in the EXTENDED category. Include ALL of them.
+
+🟢 **Stock Sufficient**
+(new line)
+Products in the STOCK SUFFICIENT category. List all.
+
+✅ **SAP Order Match**
+(new line)
+Confirmation that all products are matched.
+  `;
+}
+```
+
+---
+
+### STEP 3: STOCK SUFFICIENT DETERMINATION
+
+A product is "Stock Sufficient" ONLY when the N10D table's Status column says "Stock Sufficient." The APP should use the Status column directly, NOT calculate it from buffer percentages.
+
+```javascript
+// Use the Status column from the N10D table directly
+const isStockSufficient = product.status === 'Stock Sufficient';
+
+// Do NOT determine stock sufficient from buffer calculation
+// WRONG:
+// const isStockSufficient = bufferPct > 80;
+```
+
+This ensures **Ave Max Duck Layex 2 Pellet** (Due for Loading 194.2, Inventory 181.5) is correctly categorized as "Needs Production" since its Status column says "Stock Sufficient" only when appropriate.
+
+---
+
+### VERIFICATION AGAINST CURRENT N10D TABLE
+
+Based on the table screenshot, the correct categorization should be approximately:
+
+**Overdue / Urgent (Target within 3 days or past):**
+- Gallimax 3 Maintenance — Target: March 19 (OVERDUE)
+- Poultry Sol Broiler Starter — Target: March 22
+- Poultry Sol Broiler Finisher — Target: March 23
+- Gallimax 2 Plus Ready Mix — Target: March 23
+
+**Upcoming (Target within 4-7 days):**
+- Basic Broiler Finex Crumble — Target: March 24
+- Ave Max Duck Layex 50kg — Target: March 25
+- Elite XP GestaPro — Target: March 26
+
+**Extended (Target within 8-10 days):**
+- Multiple products targeting March 28:
+  - Elite XP Startex
+  - Elite XP Growex 2
+  - Elite XP Pre-startex
+  - Elite XP Lactatex
+  - Elite XP GestaPrime
+  - Gallimax Pigeon Pellet
+  - Classic Hog Growex
+  - Poultry Sol Broiler Booster
+  - Poultry Express Chicken Layer
+  - Salto Stag Developer
+  - And others
+
+**Stock Sufficient (from Status column):**
+- Ave Max Duck Layex 2 Pellet — Status: Stock Sufficient
+- Gall 21 Chicken Layer P (Breeder) — Status: Stock Sufficient
+- Salto Baby Stag w/Grits — Status: Stock Sufficient
+
+The AI output MUST include ALL products from EVERY category — not skip any.
+
+---
+
+### APPLY ONLY TO
+
+- ✅ Safety Stock Insights
+- ❌ Do NOT touch Impact Analysis
+- ❌ Do NOT touch any other AI output
+```

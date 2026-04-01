@@ -1,0 +1,104 @@
+```
+Implement the following changes to the NexFeed application:
+
+---
+
+## UPLOAD HISTORY TABLE — SMALLER AND MORE COMPACT
+
+The upload history table is too large for its purpose. It's just reference/history data — make it significantly more compact.
+
+---
+
+### FONT SIZES — REDUCE EVERYTHING
+
+| Element | Current | Updated |
+|---|---|---|
+| Section title "Upload History" | 14px | 12px |
+| Search input text | 12px | 10px |
+| Search input placeholder | 12px | 10px |
+| Date filter text | 12px | 10px |
+| "Showing X of Y uploads" | 12px | 10px |
+| Table header text | 10px | 9px |
+| Table data cell text | 12px | 10px |
+| "Active" badge text | 10px | 9px |
+| Action icons | 14px | 12px |
+
+---
+
+### ROW HEIGHT — REDUCE PADDING
+
+| Element | Current | Updated |
+|---|---|---|
+| Table header padding | 10px 12px | 6px 10px |
+| Table data cell padding | 10px 12px | 6px 10px |
+| Row height | ~40-44px | ~28-32px |
+
+---
+
+### SEARCH BAR AND DATE FILTER — SMALLER
+
+| Element | Current | Updated |
+|---|---|---|
+| Search input height | ~36px | ~28px |
+| Search input width | ~250px | ~200px |
+| Search input font | 12px | 10px |
+| Search input padding | 8px 12px | 5px 10px |
+| Date filter height | ~36px | ~28px |
+| Date filter width | ~200px | ~160px |
+| Date filter font | 12px | 10px |
+| Date filter padding | 8px 12px | 5px 10px |
+| Border radius | 6px | 4px |
+| Gap between search and date filter | 12px | 8px |
+| Margin below (before table) | 12px | 8px |
+
+---
+
+### "ACTIVE" BADGE — SMALLER
+
+| Property | Current | Updated |
+|---|---|---|
+| Font size | 10px | 9px |
+| Padding | 2px 8px | 2px 6px |
+| Border radius | 4px | 3px |
+
+---
+
+### ACTION ICONS — SMALLER
+
+| Property | Current | Updated |
+|---|---|---|
+| Icon size | 14px | 12px |
+| Gap between icons | 10px | 8px |
+| Clickable area | 28px | 24px |
+
+---
+
+### SECTION TITLE — SMALLER
+
+| Property | Current | Updated |
+|---|---|---|
+| "Upload History" font size | 14px | 12px |
+| Font weight | 600 | 600 (keep) |
+| Margin top | 24px | 16px |
+| Margin bottom | 12px | 8px |
+
+---
+
+### TABLE MAX HEIGHT — REDUCE
+
+| Property | Current | Updated |
+|---|---|---|
+| Max height | 300px | 200px |
+
+Since rows are smaller, 200px still fits ~6-7 rows before scrolling.
+
+---
+
+### OVERALL VISUAL FEEL
+
+The upload history should feel like a small, secondary reference section — not a primary data table. It should take up minimal vertical space on the page, leaving the main content (data preview table) as the focus.
+
+**Apply these changes to BOTH:**
+- Knowledge Base upload history
+- Next 10 Days upload history
+```

@@ -1,0 +1,126 @@
+```
+Implement the following fix to the NexFeed application:
+
+---
+
+## FIX: TOAST NOTIFICATIONS — IMPROVE TEXT CONTRAST AND READABILITY
+
+The toast notification text is too light and hard to read against the light green background. Improve contrast and readability.
+
+---
+
+### CURRENT (HARD TO READ)
+
+- Background: Light green (#dcfce7)
+- Text color: Light green (#166534) — too similar to background, low contrast
+- Font size: small, hard to read
+- Long text runs together without clear structure
+
+### UPDATED — BETTER CONTRAST
+
+**Success toast (green):**
+
+| Property | Current | Updated |
+|---|---|---|
+| Background | #dcfce7 (light green) | #f0fdf4 (very light green — lighter for more contrast) |
+| Title text color | #166534 | #111827 (near black — maximum contrast) |
+| Title font weight | 600 | 700 (bolder) |
+| Title font size | ~13px | 14px |
+| Body text color | #166534 (dark green) | #374151 (dark grey — high contrast) |
+| Body font size | ~12px | 13px |
+| Body line height | ~1.4 | 1.6 (more breathing room) |
+| Border-left | 3px solid #43a047 | 4px solid #43a047 (slightly thicker) |
+| Icon color | Green | #43a047 (keep) |
+| Padding | ~12px | 16px |
+| Max width | ~300px | 400px (wider for long text) |
+
+**Also improve text structure for long content:**
+
+Instead of running all lines together as one paragraph, break them into a structured list:
+
+**Current (hard to read):**
+```
+Line 4: 7 dated orders merged into schedule, 3 non-dated orders added to bottom Line 1: 1 dated order merged into schedule, 9 non-dated orders added to bottom Line 2: 1 dated order...
+```
+
+**Updated (structured):**
+```
+✅ SAP Upload Complete
+
+• Line 4: 7 dated orders merged, 3 non-dated added to bottom
+• Line 1: 1 dated order merged, 9 non-dated added to bottom
+• Line 2: 1 dated order merged, 8 non-dated added to bottom
+• Line 7: 3 dated orders merged, 3 non-dated added to bottom
+• Line 3: 4 dated orders merged, 2 non-dated added to bottom
+• Line 6: 1 dated order merged, 2 non-dated added to bottom
+• Line 5: 2 non-dated orders added to bottom
+```
+
+- Each line item is on its own bullet point.
+- Easier to scan.
+- Clear separation between lines.
+
+---
+
+### APPLY TO ALL TOAST NOTIFICATION TYPES
+
+**Success toast (green):**
+
+| Property | Value |
+|---|---|
+| Background | #f0fdf4 |
+| Border-left | 4px solid #43a047 |
+| Title color | #111827 (near black) |
+| Title font | 14px, font-weight 700 |
+| Body color | #374151 (dark grey) |
+| Body font | 13px, font-weight 400, line-height 1.6 |
+| Icon | ✅ green (#43a047) |
+
+**Warning toast (amber):**
+
+| Property | Value |
+|---|---|
+| Background | #fffbeb |
+| Border-left | 4px solid #f59e0b |
+| Title color | #111827 |
+| Title font | 14px, font-weight 700 |
+| Body color | #374151 |
+| Body font | 13px, font-weight 400, line-height 1.6 |
+| Icon | ⚠ amber (#f59e0b) |
+
+**Error toast (red):**
+
+| Property | Value |
+|---|---|
+| Background | #fef2f2 |
+| Border-left | 4px solid #e53935 |
+| Title color | #111827 |
+| Title font | 14px, font-weight 700 |
+| Body color | #374151 |
+| Body font | 13px, font-weight 400, line-height 1.6 |
+| Icon | ❌ red (#e53935) |
+
+**Info toast (blue):**
+
+| Property | Value |
+|---|---|
+| Background | #eff6ff |
+| Border-left | 4px solid #3b82f6 |
+| Title color | #111827 |
+| Title font | 14px, font-weight 700 |
+| Body color | #374151 |
+| Body font | 13px, font-weight 400, line-height 1.6 |
+| Icon | ℹ blue (#3b82f6) |
+
+---
+
+### KEY PRINCIPLE
+
+**Title text: near-black (#111827)** — always maximum contrast regardless of toast type.
+
+**Body text: dark grey (#374151)** — always high contrast, never matches the background tint color.
+
+**Background: very light tint** — light enough that dark text stands out clearly.
+
+The background color provides the TYPE indicator (green = success, amber = warning, etc.), while the TEXT is always dark and readable.
+```

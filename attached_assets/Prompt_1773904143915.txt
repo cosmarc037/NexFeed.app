@@ -1,0 +1,202 @@
+```
+Implement the following critical fix to the NexFeed application:
+
+---
+
+## FIX: AUTO-SEQUENCE — SORT BY EFFECTIVE DATE ONLY, NOT BY AVAIL TYPE
+
+The auto-sequence is incorrectly grouping orders by avail date TYPE (actual dates first, then prio replenish, then safety stocks). This is WRONG.
+
+The auto-sequence must sort ALL orders by their EFFECTIVE DATE chronologically, regardless of whether the date comes from an actual avail date or an inferred target date from Next 10 Days. The avail date label (prio replenish, safety stocks, actual date) is IRRELEVANT for sorting — only the effective date matters.
+
+---
+
+### THE BUG
+
+Current behavior (WRONG):
+```
+Group 1: Orders with actual avail dates (sorted by date)
+Group 2: Orders with "prio replenish" (no date-based sorting)
+Group 3: Orders with "safety stocks" (no date-based sorting)
+```
+
+This means:
+- Gallimax 3 Maintenance (safety stocks, Target: Mar 19) is at Prio 10
+- Salto Conditioner (Avail: Mar 22) is at Prio 1
+- Mar 19 should come BEFORE Mar 22, but it doesn't because the app sorts by type first
+
+---
+
+### THE FIX — ONE UNIFIED SORT BY EFFECTIVE DATE
+
+**Remove ALL type-based grouping.** There is no "avail dates first" or "prio replenish second" or "safety stocks third." There is ONLY one sort: chronological by effective date.
+
+```
+function autoSequence(orders, next10DaysData) {
+  
+  // STEP 1: Assign effective date to every order
+  const ordersWithDates = orders.map(order => {
+    let effectiveDate = null;
+    let source = 'none';
+    let priority = 4; // default: lowest (no date)
+    
+    // Check for actual avail date
+    if (isDateValue(order.avail_date)) {
+      effectiveDate = parseDate(order.avail_date);
+      source = 'avail_date';
+      priority = 1; // has a date
+    }
+    // Check for inferred target date from Next 10 Days
+    else if (next10DaysData) {
+      const stockMatch = next10DaysData.find(
+        s => s.material_code === order.material_code_fg
+      );
+      
+      if (stockMatch && stockMatch.target_date) {
+        effectiveDate = parseDate(stockMatch.target_date);
+        source = 'target_date';
+        priority = 1; // has a date (SAME priority as actual avail date)
+      } else if (stockMatch && stockMatch.status === 'stock_sufficient') {
+        effectiveDate = null;
+        source = 'stock_sufficient';
+        priority = 3; // stock sufficient = near bottom
+      } else {
+        effectiveDate = null;
+        source = 'none';
+        priority = 2; // no match, gap filler
+      }
+    }
+    
+    return { ...order, effectiveDate, dateSource: source, sortPriority: priority };
+  });
+  
+  // STEP 2: Sort — ONE unified chronological sort
+  ordersWithDates.sort((a, b) => {
+    
+    // Both have effective dates — sort chronologically
+    if (a.effectiveDate && b.effectiveDate) {
+      const dateCompare = a.effectiveDate - b.effectiveDate;
+      if (dateCompare !== 0) return dateCompare;
+      
+      // Same effective date — keep original relative order
+      return 0;
+    }
+    
+    // One has a date, the other doesn't — dated comes first
+    if (a.effectiveDate && !b.effectiveDate) return -1;
+    if (!a.effectiveDate && b.effectiveDate) return 1;
+    
+    // Neither has a date — sort by priority
+    // Gap fillers (priority 2) before stock sufficient (priority 3)
+    return a.sortPriority - b.sortPriority;
+  });
+  
+  return ordersWithDates;
+}
+```
+
+**CRITICAL:** The sort does NOT check `order.avail_date` type (prio replenish vs safety stocks vs actual date). It ONLY checks the `effectiveDate`. An order with "safety stocks" and Target: Mar 19 sorts BEFORE an order with Avail: Mar 22 because Mar 19 < Mar 22. Period.
+
+---
+
+### CORRECT EXAMPLE WITH YOUR DATA
+
+**Orders on Line 1:**
+```
+Salto Conditioner P 1kg        | Avail: Mar 22      | Effective: Mar 22 (avail)
+Gallimax Pigeon Pellet          | Avail: prio rep     | Target: Mar 28        | Effective: Mar 28
+Elite XP Startex 80MT           | Avail: prio rep     | Target: Mar 28        | Effective: Mar 28
+Elite XP Startex 80MT           | Avail: safety stk   | Target: Mar 28        | Effective: Mar 28
+Elite XP Startex 5MT            | Avail: safety stk   | Target: Mar 28        | Effective: Mar 28
+Elite XP Startex 10MT           | Avail: safety stk   | Target: Mar 28        | Effective: Mar 28
+Elite XP Startex 30MT           | Avail: safety stk   | Target: Mar 28        | Effective: Mar 28
+Elite XP Startex 20MT           | Avail: safety stk   | Target: Mar 28        | Effective: Mar 28
+Gall 21 Chicken Layer           | Avail: safety stk   | Stock Sufficient      | Effective: null
+Gallimax 3 Maintenance 80MT    | Avail: safety stk   | Target: Mar 19        | Effective: Mar 19
+```
+
+**CORRECT auto-sequence output:**
+```
+Prio 1:  Gallimax 3 Maintenance    | Effective: Mar 19 ← FIRST (earliest date!)
+Prio 2:  Salto Conditioner         | Effective: Mar 22
+Prio 3:  Gallimax Pigeon Pellet    | Effective: Mar 28
+Prio 4:  Elite XP Startex 80MT     | Effective: Mar 28
+Prio 5:  Elite XP Startex 80MT     | Effective: Mar 28
+Prio 6:  Elite XP Startex 5MT      | Effective: Mar 28
+Prio 7:  Elite XP Startex 10MT     | Effective: Mar 28
+Prio 8:  Elite XP Startex 30MT     | Effective: Mar 28
+Prio 9:  Elite XP Startex 20MT     | Effective: Mar 28
+Prio 10: Gall 21 Chicken Layer     | Effective: null (Stock Sufficient) ← LAST
+```
+
+**Notice:**
+- Gallimax 3 Maintenance is FIRST even though its avail date says "safety stocks" — because its effective date (Mar 19) is the earliest.
+- Salto Conditioner (actual avail: Mar 22) is SECOND — it doesn't get automatic first place just because it has an actual avail date.
+- Gall 21 Chicken Layer is LAST because it's stock sufficient (no production urgency).
+
+---
+
+### WHAT THE AUTO-SEQUENCE IS REALLY DOING
+
+Think of it this way: The auto-sequence answers the question:
+
+**"In what order should I produce these orders so that everything is ready when it needs to be?"**
+
+It does NOT answer: "Which orders have actual dates vs prio replenish vs safety stocks?"
+
+The avail date label is just a label. What matters is WHEN the order needs to be ready — whether that date comes from SAP (actual avail date) or from the Next 10 Days stock level file (inferred target date).
+
+---
+
+### DRAG-AND-DROP AFTER AUTO-SEQUENCE
+
+After auto-sequence is applied, the chronological enforcement applies to ALL orders with effective dates:
+
+- Gallimax 3 Maint (Effective: Mar 19) CANNOT be dragged below Salto Conditioner (Effective: Mar 22).
+- Salto Conditioner (Effective: Mar 22) CANNOT be dragged above Gallimax 3 Maint (Effective: Mar 19).
+- Both actual avail dates and inferred target dates are treated equally for drag-and-drop validation.
+- Stock Sufficient orders and unmatched gap fillers remain freely movable.
+
+---
+
+### SUMMARY BAR UPDATE
+
+Remove the misleading "Dated" label. Use clearer categories:
+
+```
+Orders: 10 | With deadline: 9 (1 avail + 8 stock-target) | No deadline: 0 | Stock sufficient: 1 | Conflicts: 0
+```
+
+- **With deadline:** All orders that have an effective date (actual avail OR stock target). Shows breakdown in parentheses.
+- **No deadline:** Orders with no effective date and no stock match.
+- **Stock sufficient:** Orders with no production urgency.
+
+---
+
+### AI INSIGHTS — UPDATED
+
+**Insight explaining the reordering:**
+```
+📊 Reordered by Production Urgency
+
+Gallimax 3 Maintenance (FPR: 260309, 80 MT) moved 
+from Prio 10 to Prio 1. Even though its avail date 
+says "safety stocks," stock level data shows warehouse 
+loading will reach the 74.9 MT inventory target by 
+March 20. This order must be produced before March 19 
+to prevent a stockout.
+
+Salto Conditioner (Avail: Mar 22) moved from Prio 1 
+to Prio 2 — its March 22 deadline is still met since 
+production completes well before that date.
+```
+
+**Insight explaining stock sufficient:**
+```
+📊 Gall 21 Chicken Layer (FPR: 260309, 39 MT) moved 
+to last position. Warehouse already has 24.0 MT 
+against a 0.7 MT target — stock is more than sufficient. 
+This order can be produced last when all urgent 
+production is complete.
+```
+```

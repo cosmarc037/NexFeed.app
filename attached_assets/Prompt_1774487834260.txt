@@ -1,0 +1,301 @@
+```
+Implement the following fix to the NexFeed application:
+
+---
+
+## FIX: COMMENT TRIANGLE INDICATOR — NOT SHOWING
+
+The triangle indicator is not appearing on cells where comments have been left. Fix this to ensure the triangle always shows on the specific cell that has comments.
+
+---
+
+### THE PROBLEM
+
+1. User leaves a comment on a cell → no triangle appears
+2. Triangle should show per CELL, not per row
+3. Each cell independently tracks its own comments and shows its own triangle
+
+---
+
+### THE FIX
+
+### STEP 1: EVERY CELL MUST BE position: relative
+
+For the triangle to appear in the top-right corner, the cell container MUST have `position: relative`:
+
+```css
+/* Every cell in the order table */
+td,
+.table-cell,
+.order-cell {
+  position: relative;
+  overflow: visible; /* triangle must not be clipped */
+}
+```
+
+### STEP 2: TRIANGLE INDICATOR — CSS
+
+```css
+.cell-comment-indicator {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 0;
+  height: 0;
+  border-left: 8px solid transparent;
+  border-top: 8px solid #fd5108;
+  pointer-events: auto;
+  cursor: pointer;
+  z-index: 5;
+}
+```
+
+| Property | Value |
+|---|---|
+| Position | Absolute — relative to the cell |
+| Top | 0 |
+| Right | 0 |
+| Size | 8px × 8px triangle |
+| Color | Orange (#fd5108) |
+| Z-index | 5 (above cell content but below menus) |
+| Pointer events | Auto (hoverable and clickable) |
+| Cursor | Pointer |
+
+### STEP 3: RENDER TRIANGLE WHEN CELL HAS COMMENTS
+
+```jsx
+function TableCell({ orderId, columnName, children }) {
+  const comments = getCommentsForCell(orderId, columnName);
+  const hasComments = comments && comments.length > 0;
+  
+  return (
+    <td 
+      className="order-cell" 
+      style={{ position: 'relative', overflow: 'visible' }}
+      onContextMenu={(e) => handleRightClick(e, orderId, columnName)}
+    >
+      {/* Triangle indicator — ONLY on cells with comments */}
+      {hasComments && (
+        <div 
+          className="cell-comment-indicator"
+          title={`${comments.length} comment${comments.length > 1 ? 's' : ''}`}
+          onClick={(e) => openCommentPopover(e, orderId, columnName)}
+        />
+      )}
+      
+      {/* Cell content */}
+      {children}
+    </td>
+  );
+}
+```
+
+### STEP 4: COMMENT DATA STRUCTURE — PER CELL
+
+Comments are stored per cell, keyed by order ID + column name:
+
+```javascript
+// Data structure
+const comments = {
+  "order_123__volume_mt": [
+    {
+      id: "comment_1",
+      user: "John",
+      text: "Volume adjusted due to client request",
+      timestamp: "2026-03-25T10:30:00",
+      edited: false
+    },
+    {
+      id: "comment_2",
+      user: "Maria",
+      text: "Confirmed with warehouse",
+      timestamp: "2026-03-25T14:15:00",
+      edited: false
+    }
+  ],
+  "order_123__avail_date": [
+    {
+      id: "comment_3",
+      user: "John",
+      text: "Date changed per client request",
+      timestamp: "2026-03-25T11:00:00",
+      edited: false
+    }
+  ]
+};
+
+// Key format: {orderId}__{columnName}
+function getCommentKey(orderId, columnName) {
+  return `${orderId}__${columnName}`;
+}
+
+function getCommentsForCell(orderId, columnName) {
+  const key = getCommentKey(orderId, columnName);
+  return comments[key] || [];
+}
+```
+
+### STEP 5: TRIANGLE SHOWS ON EVERY CELL THAT HAS COMMENTS
+
+**Example — Order has comments on 3 different cells:**
+
+```
+┌──────┬────────┬───────────┬──────────┬────────────┐
+│      │        │           │          │        ▲   │  ← triangle on Avail Date
+│ Prio │ FPR    │ Item Desc │ Volume ▲ │ Avail Date │
+│      │        │           │          │            │
+│  1   │ 260309 │ Elite XP  │ 80 MT    │ Mar 22     │
+│      │        │       ▲   │          │            │  ← triangle on Item Desc
+└──────┴────────┴───────────┴──────────┴────────────┘
+```
+
+- Volume cell has ▲ → this cell has comments
+- Item Description cell has ▲ → this cell has comments
+- Avail Date cell has ▲ → this cell has comments
+- Prio and FPR cells have NO ▲ → no comments on those cells
+
+Each triangle is independent per cell.
+
+### STEP 6: TRIANGLE HOVER — TOOLTIP PREVIEW
+
+When hovering over the triangle:
+
+```css
+.cell-comment-indicator:hover::after {
+  content: attr(data-preview);
+  position: absolute;
+  top: 12px;
+  right: 0;
+  background: #1a1a1a;
+  color: white;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: pre-line;
+  max-width: 250px;
+  z-index: 100;
+  pointer-events: none;
+}
+```
+
+Or better — use a proper tooltip component:
+
+```jsx
+{hasComments && (
+  <div 
+    className="cell-comment-indicator"
+    onMouseEnter={(e) => showCommentPreview(e, orderId, columnName)}
+    onMouseLeave={() => hideCommentPreview()}
+    onClick={(e) => openCommentPopover(e, orderId, columnName)}
+  />
+)}
+```
+
+**Tooltip content:**
+```
+John — March 25, 10:30 AM
+Volume adjusted due to client request
+
++ 1 more comment
+```
+
+| Property | Value |
+|---|---|
+| Background | Dark (#1a1a1a) |
+| Text color | White |
+| Font size | 11px |
+| Padding | 8px 12px |
+| Border-radius | 6px |
+| Max width | 250px |
+| Delay | 300ms before showing |
+| Position | Below the triangle, right-aligned |
+
+### STEP 7: CLICKING TRIANGLE OPENS COMMENT POPOVER
+
+Clicking the triangle opens the same comment popover as right-click → "Leave a comment":
+
+```jsx
+<div 
+  className="cell-comment-indicator"
+  onClick={(e) => {
+    e.stopPropagation();
+    openCommentPopover(e, orderId, columnName);
+  }}
+/>
+```
+
+### STEP 8: ADDING COMMENT → TRIANGLE APPEARS IMMEDIATELY
+
+When user posts a new comment:
+
+```javascript
+function postComment(orderId, columnName, text) {
+  const key = getCommentKey(orderId, columnName);
+  
+  if (!comments[key]) {
+    comments[key] = [];
+  }
+  
+  comments[key].push({
+    id: generateId(),
+    user: getCurrentUser(),
+    text: text,
+    timestamp: new Date().toISOString(),
+    edited: false
+  });
+  
+  // Trigger re-render of the cell so triangle appears
+  updateCellState(orderId, columnName);
+}
+```
+
+The triangle MUST appear immediately after posting — no page refresh needed.
+
+### STEP 9: DELETING LAST COMMENT → TRIANGLE DISAPPEARS
+
+When the last comment on a cell is deleted:
+
+```javascript
+function deleteComment(orderId, columnName, commentId) {
+  const key = getCommentKey(orderId, columnName);
+  comments[key] = comments[key].filter(c => c.id !== commentId);
+  
+  // If no comments left, remove the key
+  if (comments[key].length === 0) {
+    delete comments[key];
+  }
+  
+  // Trigger re-render — triangle disappears if no comments left
+  updateCellState(orderId, columnName);
+}
+```
+
+---
+
+### DEBUGGING CHECKLIST
+
+If the triangle still doesn't show, check:
+
+| Check | What to verify |
+|---|---|
+| Cell position | `position: relative` on the `<td>` or cell container |
+| Cell overflow | `overflow: visible` — NOT `overflow: hidden` |
+| Triangle z-index | Must be above cell content (z-index: 5+) |
+| Triangle size | 8px × 8px — small but visible |
+| Conditional render | `hasComments` is correctly evaluating to `true` after posting |
+| State update | Cell re-renders after comment is posted |
+| Data persistence | Comments are saved to state/storage, not lost on re-render |
+| Border-top color | `#fd5108` — visible orange, not transparent |
+
+---
+
+### APPLY TO
+
+- ✅ All cells in the order table (all columns)
+- ✅ All line tabs
+- ✅ All feedmill tabs
+- ✅ "All" tab
+- ❌ NOT on column headers
+- ❌ NOT on table header container
+```

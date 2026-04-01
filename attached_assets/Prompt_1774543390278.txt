@@ -1,0 +1,183 @@
+```
+Implement the following fixes to the Production Status Monitoring:
+
+---
+
+## 1. RENAME TITLE
+
+Change "Production Status Monitoring" to "Line Status Monitoring"
+
+| Property | Value |
+|---|---|
+| Text | "Line Status Monitoring" |
+| Font size | 14px |
+| Font weight | 700 |
+| Color | Dark text (#1a1a1a) |
+
+---
+
+## 2. EXPORT REPORT BUTTON — MATCH APP STYLE
+
+Match the Export button style from the Orders tab (the grey outlined "Export" button, not the orange filled one).
+
+| Property | Value |
+|---|---|
+| Text | "📄 Export Report" |
+| Font size | 12px |
+| Font weight | 500 |
+| Color | Dark text (#374151) |
+| Background | White |
+| Border | 1px solid #d1d5db |
+| Border-radius | 6px |
+| Padding | 8px 16px |
+| Cursor | Pointer |
+| Hover background | Light grey (#f9fafb) |
+| Hover border | 1px solid #9ca3af |
+
+NOT the orange bordered/filled style. Match the subtle grey "Export" button.
+
+---
+
+## 3. STACKED BAR SEGMENT ORDER — SCHEDULED AS BASE (RIGHT)
+
+The stacked bar segment order should treat "Scheduled" as the base/foundation on the RIGHT side. All other statuses stack from the LEFT.
+
+### SEGMENT ORDER (left to right)
+
+```
+[Completed][In Progress][On Hold][Cancelled][Scheduled]
+```
+
+**Scheduled is always the rightmost segment** — it represents the remaining/baseline production.
+
+The left side shows what has already happened or been changed:
+- Completed (furthest left — fully done)
+- In Progress (next — currently happening)
+- On Hold (paused)
+- Cancelled (removed)
+- Scheduled (rightmost — still to be produced, the base)
+
+### VISUAL
+
+```
+[██ Done ██│█ In Prog █│Hold│Can│░░░░ Scheduled ░░░░]
+   30%        15%       5%  5%        45%
+```
+
+### UPDATED COMPONENT
+
+```jsx
+function StackedBar({ data, height = 24 }) {
+  // Order: Completed → In Progress → On Hold → Cancelled → Scheduled
+  const segments = [
+    { key: 'completed', color: '#4ade80', textColor: '#ffffff', label: 'Done' },
+    { key: 'in_progress', color: '#fb923c', textColor: '#ffffff', label: 'In Prog' },
+    { key: 'on_hold', color: '#9ca3af', textColor: '#ffffff', label: 'Hold' },
+    { key: 'cancelled', color: '#f87171', textColor: '#ffffff', label: 'Cancel' },
+    { key: 'scheduled', color: '#e5e7eb', textColor: '#374151', label: 'Sched' },
+  ];
+  
+  return (
+    <div style={{
+      display: 'flex',
+      width: '100%',
+      height: `${height}px`,
+      borderRadius: '6px',
+      overflow: 'hidden'
+    }}>
+      {segments.map(seg => {
+        const pct = data[`${seg.key}_pct`] || 0;
+        if (pct === 0) return null;
+        
+        return (
+          <div
+            key={seg.key}
+            style={{
+              width: `${pct}%`,
+              minWidth: pct > 0 ? '2%' : '0',
+              backgroundColor: seg.color,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer'
+            }}
+            title={`${seg.label}: ${data[seg.key].toLocaleString()} MT (${pct}%)`}
+          >
+            {pct >= 8 && (
+              <span style={{
+                fontSize: '9px',
+                fontWeight: 600,
+                color: seg.textColor,
+                whiteSpace: 'nowrap'
+              }}>
+                {pct}%
+              </span>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+```
+
+### EXAMPLES
+
+**FM1 — All scheduled (100%):**
+```
+[░░░░░░░░░░░░░ 100% Scheduled ░░░░░░░░░░░░░]
+```
+
+**FM2 — 12% completed, 88% scheduled:**
+```
+[██ 12% ██│░░░░░░░░ 88% Scheduled ░░░░░░░░]
+ Done
+```
+
+**FM4 — 95% scheduled, 5% cancelled:**
+```
+[░░░░░░░░░ 95% Scheduled ░░░░░░░░░│█ 5% █]
+                                    Cancel
+```
+
+Wait — cancelled should be LEFT of scheduled based on the new order. Let me correct:
+
+```
+[█ 5% Cancel █│░░░░░░░ 95% Scheduled ░░░░░░░]
+```
+
+### LEGEND ORDER — MATCH SEGMENT ORDER
+
+```
+■ Completed  ■ In Progress  ■ On Hold  ■ Cancelled  ■ Scheduled
+```
+
+Left to right, matching the stacked bar segment order.
+
+---
+
+## 4. CATEGORY BREAKDOWN — ALSO MATCH NEW ORDER
+
+When expanded, the category breakdown individual bars should also follow the same order:
+
+```
+Category Breakdown
+
+● Completed
+[████████████████████████]  2,400 MT
+
+● In Progress
+[████████████████]          1,200 MT
+
+● On Hold
+[██████]                     300 MT
+
+● Cancelled
+[████]                       200 MT
+
+● Scheduled
+[████████████]               800 MT
+```
+
+Scheduled at the bottom — matching the stacked bar where it's the rightmost (base).
+```

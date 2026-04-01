@@ -1,0 +1,144 @@
+```
+Implement the following fix to the NexFeed application:
+
+---
+
+## FIX: SMART COMBINE PANEL — CARD DETAIL ALIGNMENT
+
+The Smart Combine panel cards have misaligned and cramped label-value pairs. Fix the layout to be a clean, consistent 2-column alignment.
+
+---
+
+### CURRENT (MESSY)
+
+```
+Elite XP Startex, Mini-pellet 50kg | Combine Group 1
+
+Material Code (FG)1000000000241
+Category       Hogs
+Form           MP
+Batch Size     4.00
+Line           Line 1
+```
+
+- "Material Code (FG)" label runs into the value with no spacing
+- Labels and values not consistently aligned
+- Cramped, no visual harmony
+
+---
+
+### FIXED (CLEAN 2-COLUMN)
+
+```
+Elite XP Startex, Mini-pellet 50kg | Combine Group 1
+
+Material Code (FG):    1000000000241
+Category:              Hogs
+Form:                  MP
+Batch Size:            4.00
+Line:                  Line 1
+```
+
+---
+
+### LAYOUT STRUCTURE
+
+Use a consistent 2-column layout with labels on the left and values on the right:
+
+```css
+.combine-card-details {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  row-gap: 8px;
+  column-gap: 16px;
+  padding: 12px 16px;
+}
+```
+
+| Property | Value |
+|---|---|
+| Grid columns | 140px (labels) + 1fr (values) |
+| Row gap | 8px |
+| Column gap | 16px |
+| Padding | 12px 16px |
+
+---
+
+### LABEL STYLING
+
+| Property | Value |
+|---|---|
+| Font size | 12px |
+| Color | Grey (#6b7280) |
+| Font weight | 400 |
+| Text align | Left |
+| Suffix | Colon (:) after every label |
+| White-space | Nowrap (labels don't wrap) |
+
+---
+
+### VALUE STYLING
+
+| Property | Value |
+|---|---|
+| Font size | 12px |
+| Color | Dark text (#1a1a1a) |
+| Font weight | 600 |
+| Text align | Left |
+
+---
+
+### CARD HEADER
+
+```
+Elite XP Startex, Mini-pellet 50kg | Combine Group 1
+```
+
+| Element | Styling |
+|---|---|
+| Product name | 13px, font-weight 600, dark text (#1a1a1a) |
+| " | " separator | Grey (#d1d5db) |
+| "Combine Group 1" | 12px, font-weight 400, grey (#6b7280) |
+| Padding | 12px 16px |
+| Border-bottom | 1px solid #f3f4f6 (separates header from details) |
+
+---
+
+### COMPLETE CARD LAYOUT
+
+```
+┌──────────────────────────────────────────────────────┐
+│ Elite XP Startex, Mini-pellet 50kg | Combine Group 1 │
+├──────────────────────────────────────────────────────┤
+│                                                      │
+│  Material Code (FG):    1000000000241                │
+│  Category:              Hogs                         │
+│  Form:                  MP                           │
+│  Batch Size:            4.00                         │
+│  Line:                  Line 1                       │
+│                                                      │
+└──────────────────────────────────────────────────────┘
+```
+
+---
+
+### CARD CONTAINER STYLING
+
+| Property | Value |
+|---|---|
+| Background | White (#ffffff) |
+| Border | 1px solid #e5e7eb |
+| Border-radius | 8px |
+| Box shadow | 0 1px 3px rgba(0,0,0,0.05) |
+| Margin-bottom | 12px (gap between cards) |
+| Overflow | Hidden |
+
+---
+
+### APPLY TO ALL COMBINE CARDS
+
+Every card in the Smart Combine panel should use this same clean layout:
+- Combine suggestion cards
+- Combine group detail cards
+- Any card showing product details in the Smart Combine panel
+```

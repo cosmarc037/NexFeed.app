@@ -1,0 +1,200 @@
+Clear. Here's the updated prompt:
+
+```
+Implement the following changes to the NexFeed application:
+
+---
+
+## SMART COMBINE — UPDATED ORDER ROW LAYOUT (FINAL)
+
+Redesign the individual order rows within each Smart Combine recommendation card.
+
+**New layout structure:**
+
+Each order within a combine card is a bordered card (3 rows × 3 columns):
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│ FPR: 260309         │  25 min              │  8 MT           │ ×
+│ FG: 5873012         │  CD: March 19, 2026  │  Availability:  │
+│ SFG: 5920950        │  CT: 01:43 AM        │  safety stocks  │
+└──────────────────────────────────────────────────────────────┘
+```
+
+No separate Availability line below the card — everything is contained WITHIN the bordered card.
+
+---
+
+### COLUMN 1 — Order Identifiers (left-aligned)
+
+Row 1: **FPR: [value]**
+- "FPR:" label in regular grey text (#6b7280)
+- Value in bold, dark text (#1a1a1a)
+
+Row 2: **FG: [value]**
+- "FG:" label in regular grey text (#6b7280)
+- Value in smaller, lighter grey text (#9ca3af)
+
+Row 3: **SFG: [value]**
+- "SFG:" label in regular grey text (#6b7280)
+- Value in smaller, lighter grey text (#9ca3af)
+
+---
+
+### COLUMN 2 — Production & Completion (left-aligned)
+
+Row 1: **Production time**
+- Display the production hours/minutes for this individual order
+- Format: "25 min", "1 hr 3 min", "4 hrs 18 min"
+- Regular text, dark grey (#4b5563)
+
+Row 2: **CD: [Completion Date]**
+- "CD:" label in grey text (#6b7280)
+- Completion Date value in dark text (#4b5563)
+- Format: "CD: March 19, 2026"
+- If no Completion Date calculated: "CD: —" in grey (#a1a8b3)
+
+Row 3: **CT: [Completion Time]**
+- "CT:" label in grey text (#6b7280)
+- Completion Time value in dark text (#4b5563)
+- Format: "CT: 01:43 AM" (12-hour format with AM/PM)
+- If no Completion Time calculated: "CT: —" in grey (#a1a8b3)
+
+---
+
+### COLUMN 3 — Volume & Availability (right-aligned)
+
+Row 1: **[number] MT**
+- Volume number followed by "MT"
+- Bold, dark text (#1a1a1a)
+- Right-aligned
+- Example: "8 MT", "12 MT", "20 MT", "80 MT"
+
+Row 2: **Availability:**
+- Static label "Availability:" in grey text (#6b7280)
+- Right-aligned
+
+Row 3: **[avail date value]**
+- The actual availability value, right-aligned
+- Valid date: dark text (#4b5563) — e.g., "March 19, 2026"
+- Non-date values in orange text (#fd5108):
+  - "prio replenish"
+  - "safety stocks"
+  - "for sched"
+
+---
+
+### REMOVE BUTTON (×)
+
+- Positioned at the top-right corner of the bordered card
+- Top: ~8px from card top
+- Right: ~8px from card right
+- Size: 16px × 16px clickable area
+- Grey (#a1a8b3) by default, red (#e53935) on hover
+- Click to exclude order from combine group
+
+---
+
+### COMPLETE CARD EXAMPLES
+
+**Example 1 — All safety stocks, no completion date yet:**
+
+```
+╔═══════════════════════════════════════════════════════════════════╗
+║  Elite XP Startex, Mini-pellet 50kg | Combine Group 1            ║
+║                                                                   ║
+║  Material Code (FG)    1000000000241                              ║
+║  Category              Hogs                                       ║
+║  Form                  MP                                         ║
+║  Batch Size            4.00                                       ║
+║  Line                  Line 1                                     ║
+║                                                                   ║
+║  ┌───────────────────────────────────────────────────────────┐    ║
+║  │ FPR: 260309    │ 25 min             │              8 MT   │ ×  ║
+║  │ FG: 5873012    │ CD: —              │     Availability:   │    ║
+║  │ SFG: 5920950   │ CT: —              │     safety stocks   │    ║
+║  └───────────────────────────────────────────────────────────┘    ║
+║                                                                   ║
+║  ┌───────────────────────────────────────────────────────────┐    ║
+║  │ FPR: 260309    │ 38 min             │             12 MT   │ ×  ║
+║  │ FG: 5873009    │ CD: —              │     Availability:   │    ║
+║  │ SFG: 5920947   │ CT: —              │     safety stocks   │    ║
+║  └───────────────────────────────────────────────────────────┘    ║
+║                                                                   ║
+║  ┌───────────────────────────────────────────────────────────┐    ║
+║  │ FPR: 260309    │ 1 hr 3 min         │             20 MT   │ ×  ║
+║  │ FG: 5873011    │ CD: —              │     Availability:   │    ║
+║  │ SFG: 5920949   │ CT: —              │     safety stocks   │    ║
+║  └───────────────────────────────────────────────────────────┘    ║
+║                                                                   ║
+║  Combined Volume: 40 MT                                           ║
+║                                                                   ║
+║  📊 Combined Production Summary                                   ║
+║  Combined Volume:              40 MT                              ║
+║  Batch Size:                   4.00                               ║
+║  Combined Batches:             10                                 ║
+║  Total Bags:                   800                                ║
+║                                                                   ║
+║  ⏱ Changeover Savings                                            ║
+║  Changeovers eliminated:       2 × 30 min = 1 hr saved           ║
+║  Production Time (separate):   2 hrs 36 min                      ║
+║  Production Time (combined):   1 hr 36 min                       ║
+║  Time saved:                   ✅ 1 hr saved by eliminating       ║
+║                                   changeover                      ║
+║                                                                   ║
+║  [Approve]  [Dismiss]                                             ║
+╚═══════════════════════════════════════════════════════════════════╝
+```
+
+**Example 2 — Mixed availability types, with completion dates:**
+
+```
+  ┌───────────────────────────────────────────────────────────┐
+  │ FPR: 260309    │ 25 min             │              8 MT   │ ×
+  │ FG: 5873012    │ CD: March 19, 2026 │     Availability:   │
+  │ SFG: 5920950   │ CT: 01:43 AM       │  March 19, 2026    │
+  └───────────────────────────────────────────────────────────┘
+
+  ┌───────────────────────────────────────────────────────────┐
+  │ FPR: 260309    │ 38 min             │             12 MT   │ ×
+  │ FG: 5873009    │ CD: March 19, 2026 │     Availability:   │
+  │ SFG: 5920947   │ CT: 02:06 AM       │  prio replenish    │
+  └───────────────────────────────────────────────────────────┘
+
+  ┌───────────────────────────────────────────────────────────┐
+  │ FPR: 260309    │ 1 hr 3 min         │             20 MT   │ ×
+  │ FG: 5873011    │ CD: March 19, 2026 │     Availability:   │
+  │ SFG: 5920949   │ CT: 05:10 AM       │  safety stocks     │
+  └───────────────────────────────────────────────────────────┘
+```
+
+---
+
+### SPACING AND ALIGNMENT SPECIFICATIONS
+
+- **Bordered card:**
+  - Border: 1px solid #e0e0e0
+  - Border radius: 6px
+  - Internal padding: 12px horizontal, 8px vertical
+  - Column 1 width: ~30% of card width
+  - Column 2 width: ~38% of card width
+  - Column 3 width: ~32% of card width
+  - Row height: auto, based on content (~20-24px per row)
+  - Vertical separation between rows within card: ~2-4px
+
+- **Between order cards:**
+  - Vertical spacing: 12-16px between cards
+
+- **Column 3 alignment:**
+  - All values in Column 3 are right-aligned
+  - "Availability:" label right-aligned
+  - Avail date value right-aligned
+  - Volume (MT) right-aligned
+
+- **× button:**
+  - Position: absolute, top-right of the bordered card
+  - Top: ~8px from card top
+  - Right: ~8px from card right
+  - Size: 16px × 16px clickable area
+  - Does not overlap with Column 3 content
+```

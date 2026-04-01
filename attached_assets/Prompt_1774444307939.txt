@@ -1,0 +1,183 @@
+```
+Implement the following changes to the Safety Stock Insights:
+
+---
+
+## 1. FONT SIZE — 11px
+
+Change all text in the Safety Stock Insights container to 11px.
+
+```css
+.safety-stock-insights-container {
+  font-size: 11px;
+}
+
+.safety-stock-insights-container strong {
+  font-size: 11px;
+}
+```
+
+| Element | Updated Size |
+|---|---|
+| Section headers | 11px, font-weight 700 |
+| Body text | 11px, font-weight 400 |
+| Product names in bullets | 11px, font-weight 700 |
+| Data labels | 11px, font-weight 400 |
+| Everything | 11px |
+
+---
+
+## 2. OUTPUT FORMAT — MATCH AUTO-SEQUENCE AI INSIGHTS STYLE
+
+Change the Safety Stock Insights output from the current section-based layout to a flowing narrative style with topic headings, similar to how the Auto-Sequence AI Analysis works.
+
+### DROP THESE
+
+- ❌ Lettered sections (A, B, C, D, E)
+- ❌ Bullet points for individual products
+- ❌ Excessive spacing between sections
+- ❌ "These products need immediate attention:" intro lines
+- ❌ Pipe-separated data format (Demand: X | Inventory: X | Buffer: X)
+
+### USE INSTEAD
+
+- ✅ Topic headings with emoji icons (like auto-sequence)
+- ✅ Flowing narrative paragraphs
+- ✅ Products mentioned naturally within sentences
+- ✅ Data woven into the narrative
+- ✅ Separated by dashed lines between topics
+- ✅ Compact and scannable
+
+### UPDATED AI PROMPT
+
+```
+Generate a safety stock insight analysis. Write as a flowing 
+narrative with topic headings — similar to a production analyst's 
+briefing note. Do NOT use lettered sections (A, B, C) or bullet 
+points for individual products. Instead, weave products naturally 
+into paragraphs.
+
+FORMAT:
+- Use topic headings with emoji icons
+- Write flowing paragraphs, not lists
+- Mention products by name (bold) naturally in sentences
+- Include data (demand, inventory, buffer) inline
+- Separate topics with --- (horizontal rule)
+- Keep it compact and scannable
+- Use 2-3 sentences per topic maximum
+- Only bold product names and topic headings
+- Everything else is regular weight
+- Dates as "March 22" not "2026-03-22"
+- No material codes
+- Skip topics with nothing to report
+
+TOPICS:
+
+📊 **Overview**
+Brief summary — total products, how many need production, 
+how many sufficient, total deficit. 2-3 sentences.
+
+---
+
+🔴 **Urgent Production**
+Products needing production within 3 days. Mention each 
+product naturally: "**Product Name** needs attention with 
+a target of March 22, carrying 127.8 MT demand against 
+376.4 MT inventory (66% buffer)." Flow from most urgent 
+to least.
+
+---
+
+🟡 **Upcoming Production**
+Products needing production within 4-7 days. Same flowing 
+style. Group similar target dates together in sentences.
+
+---
+
+🟢 **Stock Sufficient**
+Products with adequate inventory. Brief — just name them 
+and note they're sufficient. Can be one sentence listing 
+all of them.
+
+---
+
+✅ **SAP Order Match**
+One sentence about matching status.
+
+EXAMPLE OUTPUT:
+
+📊 **Overview**
+
+Analysis of 20 products shows 17 requiring production with a 
+total deficit of approximately 403 MT. Three products currently 
+have sufficient stock levels.
+
+---
+
+🔴 **Urgent Production**
+
+**Gallimax 3 Maintenance (Natural) P, 50Kg** is the most critical 
+— already past its target of March 19 with 46.3 MT demand against 
+74.9 MT inventory (38% buffer). **Poultry Sol Broiler Starter Cr 
+MD 50kg** follows closely with a March 22 target, carrying 127.8 MT 
+demand against 376.4 MT inventory (66% buffer). **Poultry Sol 
+Broiler Finisher MP MD 50kg** targets March 23 with 217.7 MT 
+demand and 405.9 MT inventory (46% buffer) — high volume requires 
+prompt scheduling.
+
+---
+
+🟡 **Upcoming Production**
+
+Several products target March 28, led by **Elite XP Startex, 
+Mini-pellet 50kg** with 92.3 MT demand against 310.6 MT inventory 
+(70% buffer). **Classic Hog Growex, Pellet 50kg** carries a 
+comfortable 91% buffer but should still be scheduled within the 
+normal cycle. **Poultry Sol Broiler Booster Cr MD 50kg** and 
+**Poultry Express Chicken Layer Cr 50kg** also target March 28 
+with buffers of 67% and 57% respectively.
+
+---
+
+🟢 **Stock Sufficient**
+
+**Gall 21 Chicken Layer P (Breeder) 50Kg**, **Ave Max Duck Layex 
+2 Pellet, 50kg**, and **Salto Baby Stag w/Grits 1kg** all have 
+adequate inventory levels — no immediate production needed.
+
+---
+
+✅ **SAP Order Match**
+
+All 20 products are matched with SAP orders. No discrepancies found.
+```
+
+---
+
+## 3. TOPIC SEPARATOR STYLING
+
+The --- between topics renders as a horizontal rule:
+
+```css
+.safety-stock-insights-container hr {
+  border: none;
+  border-top: 1px dashed #d1d5db;
+  margin: 12px 0;
+}
+```
+
+| Property | Value |
+|---|---|
+| Border | 1px dashed #d1d5db |
+| Margin | 12px top and bottom |
+| No visible line height | Just the dashed border |
+
+---
+
+## 4. DO NOT CHANGE
+
+- ❌ Impact Analysis — keep current styling and format
+- ❌ Auto-Sequence Analysis — already okay
+- ❌ Production Insights — already okay
+- ❌ Smart Insights (Analytics) — already okay
+```

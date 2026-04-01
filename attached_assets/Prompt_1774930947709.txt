@@ -1,0 +1,241 @@
+```
+Implement the following fixes:
+
+---
+
+## FIX 1: REPLACE "STOCK SUFFICIENT" WITH ACTUAL N10D AVAIL DATE
+
+In the auto-sequence preview, orders labeled "Stock sufficient" should instead show the actual Avail date from the N10D tab. If no Avail date exists in N10D (never breaches), use the last day of the 10-day window as the date.
+
+### THE PROBLEM
+
+Orders like Elite XP Startex and Gallimax Pigeon Pellet show "Stock sufficient ✅" in the Avail Date column. When "Apply to Schedule" is clicked, this text gets applied instead of an actual date.
+
+### THE FIX
+
+```javascript
+function getAvailDateForAutoSequence(order, n10dData, dailyColumns, today) {
+  // Dated orders — keep original avail date
+  if (order.avail_date && 
+      order.avail_date !== 'prio replenish' && 
+      order.avail_date !== 'safety stocks') {
+    return {
+      sortDate: parseDate(order.avail_date),
+      displayDate: formatDateFull(order.avail_date),
+      source: 'dated'
+    };
+  }
+  
+  // Non-dated orders — get date from N10D
+  const product = n10dData?.find(
+    p => String(p.material_code_fg) === String(order.material_code_fg)
+  );
+  
+  if (!product) return { sortDate: null, displayDate: null, source: 'none' };
+  
+  const status = getProductStatus(
+    product.due_for_loading,
+    product.inventory,
+    dailyColumns,
+    product,
+    today
+  );
+  
+  if (status === 'Critical') {
+    // Critical — avail is today
+    return {
+      sortDate: today,
+      displayDate: formatDateFull(today),
+      source: 'n10d'
+    };
+  }
+  
+  if (product.availDate) {
+    // Urgent / Monitor — use N10D avail date
+    return {
+      sortDate: parseDate(product.availDate),
+      displayDate: formatDateFull(product.availDate),
+      source: 'n10d'
+    };
+  }
+  
+  // Sufficient — never breaches, use LAST day of 10-day window as date
+  if (dailyColumns && dailyColumns.length > 0) {
+    const lastDay = dailyColumns[dailyColumns.length - 1].date;
+    return {
+      sortDate: parseDate(lastDay),
+      displayDate: formatDateFull(lastDay),
+      source: 'n10d_last_day'
+    };
+  }
+  
+  return { sortDate: null, displayDate: null, source: 'none' };
+}
+```
+
+### DISPLAY IN AUTO-SEQUENCE PREVIEW
+
+ALL orders show actual dates — no "Stock sufficient" text:
+
+```javascript
+function renderAvailDateInPreview(order) {
+  // Always show the date, never show "Stock sufficient" text
+  const avail = order._availData;
+  
+  if (!avail || !avail.displayDate) {
+    return <span className="avail-empty">—</span>;
+  }
+  
+  return (
+    <div>
+      <span>{avail.displayDate}</span>
+      {/* Keep the original label as subtitle */}
+      {order.avail_date === 'prio replenish' && (
+        <div className="avail-sublabel" style={{ color: '#ea580c', fontSize: '10px' }}>
+          prio replenish
+        </div>
+      )}
+      {order.avail_date === 'safety stocks' && (
+        <div className="avail-sublabel" style={{ color: '#ea580c', fontSize: '10px' }}>
+          safety stocks
+        </div>
+      )}
+    </div>
+  );
+}
+```
+
+### WHEN "APPLY TO SCHEDULE" IS CLICKED
+
+The actual date is written to the order's avail date:
+
+```javascript
+function applyAutoSequence(sortedOrders) {
+  sortedOrders.forEach((order, index) => {
+    order.prio = index + 1;
+    
+    // For non-dated orders, replace text with actual date
+    if (order._availData && order._availData.source !== 'dated') {
+      if (order._availData.displayDate) {
+        order.avail_date = order._availData.displayDate;
+      }
+    }
+  });
+}
+```
+
+### VISUAL — BEFORE FIX
+
+```
+4. Gallimax Pigeon Pellet    | Stock sufficient ✅  ← NO DATE
+5. Elite XP Startex 80 MT    | Stock sufficient ✅  ← NO DATE
+6. Elite XP Startex 80 MT    | Stock sufficient ✅  ← NO DATE
+```
+
+### VISUAL — AFTER FIX
+
+```
+4. Gallimax Pigeon Pellet    | Apr 9, 2026          ← ACTUAL DATE
+                               prio replenish
+5. Elite XP Startex 80 MT    | Apr 9, 2026          ← ACTUAL DATE
+                               safety stocks
+6. Elite XP Startex 80 MT    | Apr 9, 2026          ← ACTUAL DATE
+                               safety stocks
+```
+
+---
+
+## FIX 2: AUTO-UPDATE WHEN N10D IS REFRESHED
+
+When a new N10D file is uploaded (daily update), the avail dates for non-dated orders should automatically update.
+
+```javascript
+// When N10D file is uploaded
+async function handleN10DUpload(file) {
+  const parsedData = parseN10DFile(file);
+  setN10dData(parsedData);
+  
+  // Auto-generate templates
+  autoGenerateTemplates(parsedData, allOrders, new Date(), dailyColumns);
+  
+  // Auto-update avail dates for non-dated orders that were previously assigned N10D dates
+  updateNonDatedOrderAvailDates(allOrders, parsedData, dailyColumns, new Date());
+}
+
+function updateNonDatedOrderAvailDates(allOrders, n10dData, dailyColumns, today) {
+  allOrders.forEach(order => {
+    // Only update orders that originally had 'prio replenish' or 'safety stocks'
+    // AND were previously assigned an N10D date
+    const originalAvail = order._originalAvailDate || order.avail_date;
+    
+    if (originalAvail === 'prio replenish' || originalAvail === 'safety stocks') {
+      // Store original label if not already stored
+      if (!order._originalAvailDate) {
+        order._originalAvailDate = order.avail_date;
+      }
+      
+      // Get updated date from new N10D data
+      const availData = getAvailDateForAutoSequence(
+        { ...order, avail_date: originalAvail },
+        n10dData,
+        dailyColumns,
+        today
+      );
+      
+      if (availData.displayDate) {
+        order.avail_date = availData.displayDate;
+      }
+    }
+  });
+  
+  triggerOrderTableRefresh();
+}
+```
+
+### "RE-APPLY TO EXISTING ORDERS" ALSO UPDATES
+
+```javascript
+async function handleReapplyToOrders() {
+  const updatedProducts = recalculateN10DStatuses(n10dData, new Date());
+  
+  // Regenerate templates
+  autoGenerateTemplates(updatedProducts, allOrders, new Date(), dailyColumns);
+  
+  // Update avail date icons
+  updateAvailDateIcons(allOrders, updatedProducts);
+  
+  // Update non-dated order avail dates with latest N10D data
+  updateNonDatedOrderAvailDates(allOrders, updatedProducts, dailyColumns, new Date());
+  
+  // Regenerate AI if previously enhanced
+  const hasAI = Object.values(insightCache).some(e => e.ai !== null);
+  if (hasAI) {
+    await handleEnhanceWithAI();
+  }
+}
+```
+
+---
+
+## VERIFICATION
+
+1. Auto-sequence preview
+   - ✅ NO "Stock sufficient" text anywhere in Avail Date column
+   - ✅ All orders show actual dates
+   - ✅ Sufficient orders show last N10D day date (e.g., Apr 9, 2026)
+   - ✅ Original label ("prio replenish" / "safety stocks") shown as small subtitle
+
+2. Apply to Schedule
+   - ✅ Non-dated orders get actual dates written to avail_date
+   - ✅ Order table shows dates, not "Stock sufficient"
+
+3. N10D daily update
+   - ✅ Upload new N10D file → non-dated order avail dates automatically update
+   - ✅ Orders that were previously assigned dates get new dates from new N10D
+   - ✅ No manual action needed
+
+4. Re-apply to Existing Orders
+   - ✅ Avail dates refresh with latest N10D data
+   - ✅ Icons update
+   - ✅ Templates update
+```

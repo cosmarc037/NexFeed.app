@@ -1,0 +1,307 @@
+
+```
+Implement the following fix to the NexFeed application:
+
+---
+
+## FIX: NEXT 10 DAYS — TARGET DATE AND STATUS LOGIC
+
+The target date calculation and status assignment is incorrect. Fix it based on the correct logic.
+
+---
+
+### CORRECT LOGIC — HOW IT WORKS
+
+The system adds up volumes cumulatively: Due for loading + daily values, day by day. The moment the cumulative total MEETS or EXCEEDS the Inventory, that's where the "red zone" starts. The order should be produced BEFORE that red zone.
+
+---
+
+### STATUS DETERMINATION
+
+**Stock Sufficient — No production needed:**
+- If Due for loading ALONE is already >= Inventory → Stock Sufficient
+  - Example: Due for loading = 25.2, Inventory = 23.4 → 25.2 >= 23.4 → Stock Sufficient
+- If Bal. to produce is negative or blank → Stock Sufficient
+- The product already has enough stock from day one
+
+**Needs Production — Production required:**
+- If Due for loading is BELOW Inventory → Needs Production
+- A target date must be calculated
+- The order should be produced BEFORE the date when cumulative loading meets/exceeds inventory
+
+**Needs Production (Extended) — Production needed but won't complete in 10 days:**
+- If cumulative loading never reaches Inventory within the 10-day window → special case
+- Status = "Needs Production"
+- Target date = last date in the range
+- Add a note: "⚠ Inventory target unlikely to be met within the next 10 days. Production should start as early as possible."
+
+---
+
+### TARGET DATE CALCULATION
+
+```
+function calculateTargetDate(product) {
+  const dueForLoading = product.due_for_loading;
+  const inventory = product.inventory;
+  const dailyValues = product.daily_values; // [{date, value}, ...]
+  
+  // STOCK SUFFICIENT CHECK
+  // If due for loading already meets or exceeds inventory
+  if (dueForLoading >= inventory) {
+    return { 
+      targetDate: null, 
+      status: 'stock_sufficient',
+      note: null
+    };
+  }
+  
+  // NEEDS PRODUCTION — calculate target date
+  let cumulative = dueForLoading;
+  let previousDate = null;
+  let previousCumulative = dueForLoading;
+  
+  for (const day of dailyValues) {
+    // Add this day's value (treat blank/null/0 as 0)
+    const dayValue = day.value || 0;
+    
+    if (dayValue === 0) {
+      // No loading this day, skip but track as potential previous date
+      previousDate = day.date;
+      continue;
+    }
+    
+    const newCumulative = cumulative + dayValue;
+    
+    if (newCumulative >= inventory) {
+      // This day hits or exceeds inventory — RED ZONE starts here
+      // Target date = the day BEFORE this (last non-red day)
+      
+      if (previousDate) {
+        return { 
+          targetDate: previousDate, 
+          status: 'needs_production',
+          note: null
+        };
+      } else {
+        // Very first day already exceeds — target is before the first day
+        const dayBefore = subtractOneDay(dailyValues[0].date);
+        return { 
+          targetDate: dayBefore, 
+          status: 'needs_production',
+          note: null
+        };
+      }
+    }
+    
+    cumulative = newCumulative;
+    previousDate = day.date;
+  }
+  
+  // Never reached inventory within 10 days
+  // Target = last date, but add warning note
+  return { 
+    targetDate: dailyValues[dailyValues.length - 1].date, 
+    status: 'needs_production',
+    note: 'Inventory target unlikely to be met within the next 10 days as of ' + 
+          formatDate(today) + '. Production should start as early as possible.'
+  };
+}
+```
+
+---
+
+### VERIFICATION WITH ACTUAL DATA
+
+**Gallimax 2 Plus Ready Mix (455.3 / 759.3):**
+```
+455.3 (Due) — not >= 759.3, needs production
++ 10.0 (Mar 18) = 465.3 — below 759.3
++ 29.0 (Mar 19) = 494.3 — below
++ 51.7 (Mar 20) = 546.0 — below
++ 110.5 (Mar 21) = 656.5 — below
++ 29.0 (Mar 22) = 685.5 — below
++ 10.0 (Mar 23) = 695.5 — below
++ 150.0 (Mar 24) = 845.5 — EXCEEDS 759.3 ← red starts Mar 24
+
+Target date = March 23 (last day before red)
+Status = Needs Production ✅
+```
+
+**Salto Baby Stag w/Grits (25.2 / 23.4):**
+```
+25.2 (Due) — 25.2 >= 23.4 → Stock Sufficient immediately
+
+Target date = —
+Status = Stock Sufficient ✅
+```
+
+**Gall 21 Chicken Layer P (24.0 / 0.7):**
+```
+24.0 (Due) — 24.0 >= 0.7 → Stock Sufficient immediately
+
+Target date = —
+Status = Stock Sufficient ✅
+```
+
+**Gallimax 3 Maintenance (46.3 / 74.9):**
+```
+46.3 (Due) — below 74.9, needs production
++ 18.0 (Mar 19) = 64.3 — below
++ 16.3 (Mar 20) = 80.6 — EXCEEDS 74.9 ← red starts Mar 20
+
+Target date = March 19 (last day before red)
+Status = Needs Production ✅
+```
+
+**Elite XP Startex (92.3 / 310.6):**
+```
+92.3 (Due) — below 310.6, needs production
++ 10.5 (Mar 18) = 102.8 — below
++ 15.0 (Mar 19) = 117.8 — below
++ 22.8 (Mar 20) = 140.6 — below
++ 18.5 (Mar 21) = 159.1 — below
++ 9.5 (Mar 22) = 168.6 — below
++ 8.0 (Mar 23) = 176.6 — below
++ 25.0 (Mar 24) = 201.6 — below
++ 12.0 (Mar 25) = 213.6 — below
++ 8.5 (Mar 26) = 222.1 — below
++ 5.0 (Mar 27) = 227.1 — below
++ 4.5 (Mar 28) = 231.6 — below 310.6, NEVER reaches
+
+Target date = March 28 (last date)
+Status = Needs Production
+Note = "⚠ Inventory target unlikely to be met within the next 10 days..."
+✅
+```
+
+**Salto Stag Developer (1.4 / 23.9):**
+```
+1.4 (Due) — below 23.9, needs production
++ 0.5 (Mar 19) = 1.9 — below
++ 0.3 (Mar 20) = 2.2 — below
++ 0.5 (Mar 21) = 2.7 — below
++ 2.5 (Mar 24) = 5.2 — below
++ 0.3 (Mar 25) = 5.5 — below
++ 0.5 (Mar 27) = 6.0 — below 23.9, NEVER reaches
+
+Target date = March 28 (last date)
+Status = Needs Production
+Note = "⚠ Inventory target unlikely to be met within the next 10 days..."
+✅
+```
+
+**Ave Max Duck Layex 2 Pellet (194.2 / 181.5):**
+```
+194.2 (Due) — 194.2 >= 181.5 → Stock Sufficient immediately
+
+Target date = —
+Status = Stock Sufficient ✅
+```
+
+---
+
+### EXPECTED RESULTS TABLE
+
+| Material Code | Item Description | Due | Inventory | Target Date | Status | Note |
+|---|---|---|---|---|---|---|
+| 1000000000543 | Salto Stag Developer | 1.4 | 23.9 | Mar 28 | Needs Production | ⚠ unlikely within 10 days |
+| 1000000000934 | Gallimax Pigeon Pellet | 2.5 | 27.3 | Mar 28 | Needs Production | ⚠ unlikely within 10 days |
+| 1000000000915 | Salto Baby Stag w/Grits | 25.2 | 23.4 | — | Stock Sufficient | |
+| 1000000000039 | Gallimax 2 Plus Ready Mix | 455.3 | 759.3 | Mar 23 | Needs Production | |
+| 1000000000594 | Gall 21 Chicken Layer P | 24.0 | 0.7 | — | Stock Sufficient | |
+| 1000000000219 | Gallimax 3 Maintenance | 46.3 | 74.9 | Mar 19 | Needs Production | |
+| 1000000000233 | Elite XP GestaPrime | 15.8 | 48.2 | Mar 28 | Needs Production | ⚠ unlikely within 10 days |
+| 1000000000237 | Elite XP Lactatex | 32.5 | 89.7 | Mar 28 | Needs Production | ⚠ unlikely within 10 days |
+| 1000000000235 | Elite XP GestaPro | 28.4 | 72.5 | Mar 23 | Needs Production | |
+| 1000000000240 | Elite XP Pre-startex | 37.8 | 153.1 | Mar 28 | Needs Production | ⚠ unlikely within 10 days |
+| 1000000000244 | Elite XP Growex 2 | 68.5 | 215.4 | Mar 28 | Needs Production | ⚠ unlikely within 10 days |
+| 1000000000241 | Elite XP Startex | 92.3 | 310.6 | Mar 28 | Needs Production | ⚠ unlikely within 10 days |
+| 1000000000939 | Classic Hog Growex | 20.5 | 217.6 | Mar 28 | Needs Production | ⚠ unlikely within 10 days |
+| 1000000000517 | Ave Max Duck Layex 50 kg | 38.7 | 95.3 | Mar 23 | Needs Production | |
+| 1000000000528 | Ave Max Duck Layex 2 Pellet | 194.2 | 181.5 | — | Stock Sufficient | |
+| 1000000000043 | Basic Broiler Finex Crumble | 158.4 | 342.8 | Mar 24 | Needs Production | |
+| 1000000000011 | Poultry Sol Broiler Booster | 95.6 | 285.3 | Mar 28 | Needs Production | ⚠ unlikely within 10 days |
+| 1000000000012 | Poultry Sol Broiler Starter | 127.8 | 376.4 | Mar 28 | Needs Production | ⚠ unlikely within 10 days |
+| 1000000000013 | Poultry Sol Broiler Finisher | 217.7 | 405.9 | Mar 23 | Needs Production | |
+| 1000000001497 | Poultry Express Chicken Layer | 85.2 | 198.5 | Mar 28 | Needs Production | ⚠ unlikely within 10 days |
+
+---
+
+### PREVIEW TABLE — RED HIGHLIGHT
+
+In the preview table on the Next 10 Days configuration page, replicate the red highlighting from the client's Excel:
+
+**Red highlight rule:**
+- For each product row, calculate the running cumulative total starting from Due for loading.
+- Add each day's value cumulatively.
+- The moment the cumulative total MEETS or EXCEEDS the Inventory value:
+  - That cell and ALL subsequent date cells in the row get a red background tint (#fef2f2) with red text (#e53935).
+- If the Due for loading itself >= Inventory:
+  - The Due for loading cell AND all date cells are red.
+
+**Non-red cells:**
+- Normal display (dark text, white background).
+
+**Example row — Gallimax 2 Plus Ready Mix:**
+```
+Due: 455.3   Mar-18: 10.0   Mar-19: 29.0   Mar-20: 51.7   
+Mar-21: 110.5   Mar-22: 29.0   Mar-23: 10.0   
+Mar-24: 150.0 (RED)   Mar-25: 35.0 (RED)   Mar-26: 20.0 (RED)   
+Mar-27: 15.0 (RED)   Mar-28: 10.0 (RED)
+```
+
+**Example row — Salto Baby Stag (Due >= Inventory):**
+```
+Due: 25.2 (RED)   Mar-18: 1.8 (RED)   Mar-19: 0.5 (RED)   
+Mar-20: 5.5 (RED)   ... all RED
+```
+
+---
+
+### INTERACTIVE TABLE — AVAIL DATE DISPLAY
+
+**Needs Production with target date (within 10 days):**
+```
+┌─────────────────────────────────┐
+│ prio replenish                  │   ← orange text
+│ 📊 Target: Mar 23              │   ← blue text (#3b82f6), 10px
+└─────────────────────────────────┘
+```
+
+**Needs Production with target date (unlikely within 10 days):**
+```
+┌─────────────────────────────────┐
+│ prio replenish                  │   ← orange text
+│ 📊 Target: Mar 28              │   ← blue text
+│ ⚠ May not meet target in 10d   │   ← amber text (#92400e), 9px, italic
+└─────────────────────────────────┘
+```
+
+**Stock Sufficient:**
+```
+┌─────────────────────────────────┐
+│ safety stocks                   │   ← orange text
+│ 📊 Stock sufficient             │   ← green text (#43a047), 10px, italic
+└─────────────────────────────────┘
+```
+
+**No match in Next 10 Days data:**
+```
+┌─────────────────────────────────┐
+│ prio replenish                  │   ← orange text, no secondary line
+└─────────────────────────────────┘
+```
+
+---
+
+### SEQUENCING PRIORITY HIERARCHY (UPDATED)
+
+```
+1. Orders with actual avail dates (from SAP) — sorted chronologically
+2. Orders with "Needs Production" target dates (from Next 10 Days) — 
+   sorted chronologically, INTERLEAVED with actual dated orders
+3. Non-dated orders WITHOUT any target date (no match in Next 10 Days) — 
+   placed after all dated/targeted orders
+4. Orders with "Stock Sufficient" — placed at the very bottom (lowest priority)
+```
+```

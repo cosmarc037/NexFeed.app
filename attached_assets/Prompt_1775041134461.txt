@@ -1,0 +1,236 @@
+```
+Implement the following fixes:
+
+---
+
+## FIX 1: CORRECT FEEDMILL-LINE MAPPING
+
+The line assignment to feedmills is incorrect. Fix the mapping:
+
+### CURRENT (WRONG)
+
+```
+FM1: Line 1, Line 2
+FM2: Line 3, Line 4
+FM3: Line 5, Line 6
+PMX: Line 7
+```
+
+### CORRECT
+
+```
+FM1: Line 1, Line 2
+FM2: Line 3, Line 4
+FM3: Line 6, Line 7
+PMX: Line 5
+```
+
+### UPDATE THE MAPPING
+
+Search the entire codebase for feedmill-to-line mapping and replace:
+
+```javascript
+const FEEDMILL_LINE_MAP = {
+  'Feedmill 1': ['Line 1', 'Line 2'],
+  'Feedmill 2': ['Line 3', 'Line 4'],
+  'Feedmill 3': ['Line 6', 'Line 7'],
+  'Powermix': ['Line 5']
+};
+
+const LINE_TO_FEEDMILL_MAP = {
+  'Line 1': 'Feedmill 1',
+  'Line 2': 'Feedmill 1',
+  'Line 3': 'Feedmill 2',
+  'Line 4': 'Feedmill 2',
+  'Line 5': 'Powermix',
+  'Line 6': 'Feedmill 3',
+  'Line 7': 'Feedmill 3'
+};
+```
+
+### APPLY TO ALL LOCATIONS
+
+| Location | What to fix |
+|---|---|
+| Overview — Line Status Monitoring | FM3 should show Line 6 and Line 7, PMX should show Line 5 |
+| Overview — Feedmill cards | Correct lines per feedmill |
+| Orders tab — Feedmill tabs | FM3 tab shows Line 6 and Line 7, PMX shows Line 5 |
+| Auto-Sequence | Correct feedmill grouping |
+| Shutdown feature | Correct lines per feedmill |
+| Divert feature | Correct line alternatives per feedmill |
+| Knowledge Base | Line mapping for run rates |
+| PDF Export | Correct feedmill-line grouping |
+| Any hardcoded mapping | Update everywhere |
+
+### SEARCH AND REPLACE
+
+```
+SEARCH: 'Line 5' associated with 'Feedmill 3'
+REPLACE: 'Line 5' associated with 'Powermix'
+
+SEARCH: 'Line 6' associated with 'Powermix' or missing
+REPLACE: 'Line 6' associated with 'Feedmill 3'
+
+SEARCH: 'Line 7' associated with 'Powermix'
+REPLACE: 'Line 7' associated with 'Feedmill 3'
+```
+
+---
+
+## FIX 2: VOLUME COUNTING — EXCLUDE DONE AND CANCELLED
+
+The feedmill cards in the Overview are not counting volume properly. The total volume should only include active orders — exclude Done and Cancelled.
+
+### CURRENT (WRONG)
+
+Possibly counting all orders including Done/Cancelled, or not counting some statuses.
+
+### CORRECT
+
+Count volume from active orders only:
+
+```javascript
+function calculateLineVolume(orders, line) {
+  const activeOrders = orders.filter(order => {
+    // Must be on this line
+    if (order.line !== line) return false;
+    
+    // Exclude Done and Cancelled
+    if (order.status === 'Done') return false;
+    if (order.status === 'Cancel PO') return false;
+    
+    // Include everything else
+    // Plotted, Planned, Hold, Cut, In Production, On-going, 
+    // Uncombine, Merge Back, Custom
+    return true;
+  });
+  
+  const totalVolume = activeOrders.reduce((sum, order) => {
+    return sum + (parseFloat(order.volume) || 0);
+  }, 0);
+  
+  return totalVolume;
+}
+```
+
+### APPLY TO FEEDMILL CARD CALCULATIONS
+
+```javascript
+function calculateFeedmillMetrics(allOrders, feedmill) {
+  const lines = FEEDMILL_LINE_MAP[feedmill];
+  let totalVolume = 0;
+  let totalRate = 0;
+  
+  const lineMetrics = lines.map(line => {
+    const lineOrders = allOrders.filter(o => o.line === line);
+    
+    // Active orders only — exclude Done and Cancelled
+    const activeOrders = lineOrders.filter(o => 
+      o.status !== 'Done' && o.status !== 'Cancel PO'
+    );
+    
+    const lineVolume = activeOrders.reduce((sum, o) => 
+      sum + (parseFloat(o.volume) || 0), 0
+    );
+    
+    const lineRate = calculateLineRate(line); // existing rate calculation
+    
+    totalVolume += lineVolume;
+    totalRate += lineRate;
+    
+    return {
+      line: line,
+      volume: lineVolume,
+      rate: lineRate,
+      orderCount: activeOrders.length,
+      hasOrders: activeOrders.length > 0
+    };
+  });
+  
+  return {
+    feedmill: feedmill,
+    totalVolume: totalVolume,
+    totalRate: totalRate,
+    lines: lineMetrics
+  };
+}
+```
+
+### CATEGORY BREAKDOWN — ALSO EXCLUDE DONE AND CANCELLED FROM SCHEDULED
+
+```javascript
+function calculateCategoryBreakdown(allOrders, feedmill) {
+  const lines = FEEDMILL_LINE_MAP[feedmill];
+  const feedmillOrders = allOrders.filter(o => lines.includes(o.line));
+  
+  const completed = feedmillOrders
+    .filter(o => o.status === 'Done')
+    .reduce((sum, o) => sum + (parseFloat(o.volume) || 0), 0);
+  
+  const inProgress = feedmillOrders
+    .filter(o => o.status === 'In Production' || o.status.startsWith('On-going'))
+    .reduce((sum, o) => sum + (parseFloat(o.volume) || 0), 0);
+  
+  const onHold = feedmillOrders
+    .filter(o => o.status === 'Hold')
+    .reduce((sum, o) => sum + (parseFloat(o.volume) || 0), 0);
+  
+  const cancelled = feedmillOrders
+    .filter(o => o.status === 'Cancel PO')
+    .reduce((sum, o) => sum + (parseFloat(o.volume) || 0), 0);
+  
+  const scheduled = feedmillOrders
+    .filter(o => ['Plotted', 'Planned', 'Cut', 'Uncombine', 'Merge Back'].includes(o.status) || isCustomStatus(o.status))
+    .reduce((sum, o) => sum + (parseFloat(o.volume) || 0), 0);
+  
+  // Total = active only (exclude Done and Cancelled)
+  const total = inProgress + onHold + scheduled;
+  
+  return {
+    completed,
+    inProgress,
+    onHold,
+    cancelled,
+    scheduled,
+    total  // Only active orders
+  };
+}
+```
+
+### LINE DISPLAY — NO ORDERS STATE
+
+If a line has no active orders after excluding Done and Cancelled:
+
+```jsx
+{lineMetrics.hasOrders ? (
+  <div>
+    <div className="progress-bar">{/* ... */}</div>
+    <div>{lineMetrics.volume} MT · {lineMetrics.rate} MT/hr</div>
+  </div>
+) : (
+  <div className="no-orders">No orders.</div>
+)}
+```
+
+---
+
+## VERIFICATION
+
+### Feedmill-Line mapping
+1. ✅ FM1 card shows Line 1 and Line 2
+2. ✅ FM2 card shows Line 3 and Line 4
+3. ✅ FM3 card shows Line 6 and Line 7
+4. ✅ PMX card shows Line 5
+5. ✅ Orders tab FM3 shows Line 6 and Line 7 tabs
+6. ✅ Orders tab PMX shows Line 5 tab
+7. ✅ Shutdown FM3 shuts down Line 6 and Line 7
+8. ✅ Shutdown PMX shuts down Line 5
+
+### Volume counting
+9. ✅ Total volume excludes Done orders
+10. ✅ Total volume excludes Cancelled orders
+11. ✅ Total volume includes Plotted, Planned, Hold, In Production, On-going, Cut, Custom
+12. ✅ Category breakdown shows correct MT per category
+13. ✅ Line-level volume matches sum of active orders on that line
+14. ✅ Feedmill total = sum of all line volumes (active only)
+```

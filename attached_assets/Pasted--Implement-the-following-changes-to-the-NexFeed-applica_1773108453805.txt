@@ -1,0 +1,174 @@
+```
+Implement the following changes to the NexFeed application:
+
+---
+
+## 1. COMBINE CRITERIA UPDATE
+
+Update the combining criteria. Orders can be combined if they share ALL of the following:
+- Material Code (FG)
+- Form
+- Line (same feedmill line)
+- Batch Size
+
+**Remove "Category" from the combine criteria.** Category was previously listed as a required match — it is no longer required. Only the four fields above need to match.
+
+This applies to:
+- Smart Combine panel AI recommendations (criteria for identifying eligible groups)
+- Manual combine validation (if the user attempts to combine manually)
+- Combine failure error messages (remove any reference to Category mismatch)
+- Pre-Combine Insights & Warnings section (remove Category from validation checks)
+
+---
+
+## 2. SMART COMBINE RECOMMENDATION CARD — NO TEXT WRAPPING ON LABELS
+
+In the Smart Combine right-side panel, the shared detail labels in each recommendation card must NOT wrap to multiple lines. Each label and its value should be on a single line.
+
+**Current behavior (incorrect):**
+```
+Material Code
+(FG)              1000000000244
+
+Item
+Description        Elite XP Growex 2, Pellet 50kg
+
+Form               P
+Line               Line 2
+```
+
+**Correct behavior:**
+```
+Material Code (FG)     1000000000244
+Item Description       Elite XP Growex 2, Pellet 50kg
+Form                   P
+Line                   Line 2
+```
+
+**Rules:**
+- Labels must display on a single line with no wrapping: "Material Code (FG)", "Item Description", "Form", "Line", "Batch Size"
+- Use `white-space: nowrap` on label elements to prevent wrapping.
+- If the panel width is too narrow to fit the label and value on one line, the VALUE may truncate with an ellipsis (...) and show the full value on hover via a tooltip. But the LABEL must never wrap.
+- Ensure sufficient width allocation for labels — minimum label column width should accommodate "Material Code (FG)" as the longest label without breaking.
+
+---
+
+## 3. PLANNED ORDER AND PRODUCTION ORDER — REMOVE LINE LABELS
+
+Remove the prefix labels (FG:, SFG:, PMX:, FG1:, SFG1:, SFGPMX:) from the Planned Order and Production Order column cells. Display only the raw values stacked on separate lines.
+
+**Planned Order column — All tabs (Feedmill 1, 2, 3):**
+
+Current (incorrect):
+```
+FG: 000060031753
+SFG: 000060031754
+```
+
+Correct:
+```
+000060031753
+000060031754
+```
+
+**Planned Order column — Powermix tab:**
+
+Current (incorrect):
+```
+FG: 000060031753
+SFG: 000060031754
+PMX: 000060031755
+```
+
+Correct:
+```
+000060031753
+000060031754
+000060031755
+```
+
+**Production Order column — All tabs (Feedmill 1, 2, 3):**
+
+Current (incorrect):
+```
+FG1: 000012345
+SFG1: 000012346
+```
+
+Correct:
+```
+000012345
+000012346
+```
+
+**Production Order column — Powermix tab:**
+
+Current (incorrect):
+```
+FG1: 000012345
+SFG1: 000012346
+SFGPMX: 000012347
+```
+
+Correct:
+```
+000012345
+000012346
+000012347
+```
+
+**Differentiation between lines:**
+- Users differentiate which value is FG, SFG, PMX by their position (Line 1 = FG/FG1, Line 2 = SFG/SFG1, Line 3 = PMX/SFGPMX).
+- The column HEADER already indicates the order: [FG | SFG] or [FG | SFG | PMX] and [FG1 | SFG1] or [FG1 | SFG1 | SFGPMX]. This is sufficient context.
+
+**On hover tooltip (optional aid):**
+- When hovering over the Planned Order or Production Order cell, show a tooltip that labels each line:
+  "FG: 000060031753
+   SFG: 000060031754
+   PMX: 000060031755"
+  This provides clarity without cluttering the cell display.
+
+---
+
+## 4. DRAG AND DROP — CURSOR BEHAVIOR OVER TEXT
+
+Update the cursor behavior so that drag-and-drop does not conflict with text selection and copying.
+
+**Current behavior (problematic):**
+- When hovering anywhere on a row, the `grab` cursor appears, making it difficult to select and copy text values.
+
+**Updated behavior:**
+
+**Over text content:**
+- When the cursor hovers over any text content within a cell (Material Code, Item Description, FPR values, Planned Order numbers, Production Order numbers, FPR Notes, Special Remarks, Volume values, date values, or any other displayed text), the cursor changes to `text` (I-beam / typeface cursor).
+- The user can click and drag to select text for copying. This takes priority over drag-and-drop initiation.
+- Text selection works normally: click-drag to select, double-click to select a word, triple-click to select a line. Right-click context menu for Copy is available.
+
+**Over non-text areas (empty cell space, row background, padding):**
+- When the cursor hovers over empty/non-text areas of a row (cell padding, whitespace, row background between columns), the `grab` cursor appears, indicating the row can be dragged.
+- Click-and-hold in these areas initiates the drag-and-drop operation.
+
+**Over interactive elements:**
+- Dropdowns, input fields, buttons, lock icons, calendar pickers: Standard cursors for their respective element types (`pointer` for buttons/icons, `text` for input fields, etc.). These do NOT initiate drag-and-drop (as previously defined).
+
+**Over the drag handle icon (grip dots on the left):**
+- The drag handle icon always shows the `grab` cursor.
+- Click-and-hold on the drag handle always initiates drag-and-drop regardless of nearby text.
+- This serves as the guaranteed drag initiation point for users who want to drag from a specific spot.
+
+**Implementation approach:**
+- Text elements within cells should have `cursor: text` and should stop event propagation for mousedown/dragstart to prevent the row-level drag handler from activating.
+- Non-text areas and the drag handle retain the row-level drag behavior with `cursor: grab` (and `cursor: grabbing` while dragging).
+- Ensure that after text selection is complete (mouseup), the drag functionality is not accidentally triggered.
+
+**Summary of cursor mapping:**
+| Area                          | Cursor    | Click behavior              |
+|-------------------------------|-----------|-----------------------------|
+| Text content in cells         | `text`    | Text selection / copy       |
+| Empty cell space / padding    | `grab`    | Drag-and-drop initiation    |
+| Drag handle icon (left side)  | `grab`    | Drag-and-drop initiation    |
+| Buttons / lock icons          | `pointer` | Button action               |
+| Input fields                  | `text`    | Focus / edit                |
+| Dropdowns                     | `pointer` | Open dropdown               |
+| Calendar / time pickers       | `pointer` | Open picker                 |
+```

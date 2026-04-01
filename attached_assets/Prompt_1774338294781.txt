@@ -1,0 +1,504 @@
+```
+Implement the following changes to the Add New Order dialog:
+
+---
+
+## 1. FPR — EDITABLE, NO AUTO-GENERATED TEXT
+
+| Property | Value |
+|---|---|
+| Pre-filled value | Today's date in YYMMDD format (e.g., 260324) |
+| Editable | ✅ Yes — user can click and change |
+| Input style | Same as other inputs in the dialog |
+| No helper text | No "(auto-generated)" label |
+
+**Display:**
+```
+FPR
+[260324]     ← editable input, pre-filled
+```
+
+---
+
+## 2. ITEM DESCRIPTION — SEARCHABLE DROPDOWN WITH LINE FILTERING
+
+### DROPDOWN BEHAVIOR
+
+| Property | Value |
+|---|---|
+| Input type | Searchable dropdown with down arrow (▼) icon on the right |
+| Down arrow icon | Right side of input, grey (#9ca3af), clickable |
+| Click arrow | Opens full dropdown list |
+| Type in input | Filters/searches the dropdown list |
+| Placeholder | "Search or select product..." |
+
+### LINE-BASED FILTERING
+
+The dropdown content depends on WHERE the user opened the dialog:
+
+**From a specific line tab (e.g., Line 1):**
+- Show ONLY products that have a run rate > 0 on Line 1 (L1 Rate > 0) from Knowledge Base
+- Products without L1 Rate are NOT shown
+
+**From a feedmill "All" tab (e.g., Feedmill 1 All):**
+- Show products that have a run rate > 0 on ANY line within that feedmill
+- Feedmill 1 = Line 1 and Line 2 → show products where L1 Rate > 0 OR L2 Rate > 0
+- Feedmill 2 = Line 3 and Line 4 → show products where L3 Rate > 0 OR L4 Rate > 0
+- Feedmill 3 = Line 5 and Line 6 → show products where L5 Rate > 0 OR L6 Rate > 0
+- Powermix = Line 7 → show products where L7 Rate > 0
+
+**Only show products with at least one line's run rate > 0.** Products with no run rate on any line are NOT shown in the dropdown.
+
+### DROPDOWN OPTION FORMAT
+
+```
+┌──────────────────────────────────────────────────────┐
+│ Elite XP Startex, Mini-pellet 50kg                    │
+│ 1000000000241 · Hogs · Lines: 1, 2, 7                │
+├──────────────────────────────────────────────────────┤
+│ Lakas Gatas Pellet 50kg                               │
+│ 1000000000936 · Hogs · Lines: 1, 2, 6                │
+├──────────────────────────────────────────────────────┤
+│ Gallimax 3 Maintenance (Natural) P, 50Kg              │
+│ 1000000000219 · Gamefowl · Lines: 1, 5               │
+└──────────────────────────────────────────────────────┘
+```
+
+- Line 1: Product name (12px, dark text)
+- Line 2: Material Code · Category · Available lines (11px, grey #6b7280)
+
+### ON SELECTION
+
+When user selects a product:
+- Item Description fills in
+- Material Code (FG) auto-populates
+- Material Code (SFG) auto-populates
+- Form auto-populates
+- Batch Size auto-populates (based on selected line — see Section 8)
+- Line auto-suggests (based on best run rate — see Section 5)
+- Threads, Sacks, Tags auto-populate (if available in KB)
+- Batches recalculates (if Volume is already entered)
+- HA Info updates to match Batches
+- Production Time calculates based on Batches and Run Rate
+
+### EMPTY STATE
+
+If no products have a run rate on the current line:
+```
+No products found for this line.
+Try adding from the "All" tab to see all products.
+```
+
+### USER OVERRIDE — PRODUCT NOT ON CURRENT LINE
+
+If user types a product name that doesn't have a rate on the current line:
+- The product still appears in search results but with a ⚠ icon
+- On selection, a warning appears in the Line field (see Section 5 Scenario D)
+
+---
+
+## 3. MATERIAL CODE — SEARCHABLE, REVERSE-LOOKUP
+
+Material Code (FG) works the same as Item Description — user can type a material code and the app reverse-lookups the product.
+
+### BEHAVIOR
+
+| Property | Value |
+|---|---|
+| Input type | Searchable input |
+| Editable | ✅ Yes — user can type directly |
+| On type | Searches Knowledge Base by material code |
+| On match | Auto-populates Item Description, Form, Batch Size, Line, etc. |
+
+**Flow A — User starts with Item Description:**
+1. User selects "Elite XP Startex" from dropdown
+2. Material Code auto-fills: "1000000000241"
+
+**Flow B — User starts with Material Code:**
+1. User types "1000000000241"
+2. App matches to "Elite XP Startex, Mini-pellet 50kg"
+3. Item Description auto-fills
+4. Form, Batch Size, Line all auto-populate
+
+**Either field can be the starting point — both trigger Knowledge Base lookup.**
+
+---
+
+## 4. VOLUME WARNING — BELOW BATCH SIZE AND BATCHES
+
+Move the batch size divisibility warning below the Batch Size and Batches fields.
+
+### LAYOUT
+
+```
+┌──────────────────────────────────────────────┐
+│ Volume (MT) *                                 │
+│ [30]                                          │
+│                                               │
+│ Batch Size          Batches                   │
+│ 4.00                8                         │
+│                                               │
+│ ┌──────────────────────────────────────────┐  │
+│ │ ⚠ 30 MT is not divisible by batch size  │  │
+│ │   4.00. Suggested: 32 MT (8 batches)    │  │
+│ │   Use 32 MT                             │  │
+│ └──────────────────────────────────────────┘  │
+└──────────────────────────────────────────────┘
+```
+
+**Batch Size and Batches on the same row:**
+
+| Element | Width | Editable |
+|---|---|---|
+| Batch Size | 50% of row | ❌ Read-only, auto-populated from KB |
+| Batches | 50% of row | ❌ Read-only, auto-calculated |
+| Background | Light grey (#f9fafb) | |
+
+**Warning styling:**
+
+| Property | Value |
+|---|---|
+| Background | Light orange (#fff7ed) |
+| Border | 1px solid #fed7aa |
+| Border-radius | 6px |
+| Padding | 8px 12px |
+| Text | 11px, dark orange (#c2410c) |
+| "Use XX MT" link | 11px, orange (#fd5108), cursor pointer, underline on hover |
+
+**When volume IS divisible:** No warning shown.
+
+---
+
+## 5. LINE — AUTO-SUGGEST BASED ON HIGHEST RUN RATE
+
+### LINE DROPDOWN — FILTERED BY FEEDMILL
+
+The Line dropdown only shows lines that belong to the current feedmill:
+
+| Feedmill | Lines shown |
+|---|---|
+| Feedmill 1 (Line 1 tab, Line 2 tab, or Feedmill 1 All tab) | Line 1, Line 2 |
+| Feedmill 2 (Line 3 tab, Line 4 tab, or Feedmill 2 All tab) | Line 3, Line 4 |
+| Feedmill 3 (Line 5 tab, Line 6 tab, or Feedmill 3 All tab) | Line 5, Line 6 |
+| Powermix (Line 7) | Line 7 |
+
+### RUN RATE LOGIC — HIGHER IS BETTER
+
+```javascript
+function suggestLine(product, feedmillLines) {
+  // feedmillLines = ['Line 1', 'Line 2'] for Feedmill 1
+  
+  const rateMap = {
+    'Line 1': product.l1_rate || 0,
+    'Line 2': product.l2_rate || 0,
+    'Line 3': product.l3_rate || 0,
+    'Line 4': product.l4_rate || 0,
+    'Line 5': product.l5_rate || 0,
+    'Line 6': product.l6_rate || 0,
+    'Line 7': product.l7_rate || 0,
+  };
+  
+  // Filter to only feedmill's lines AND lines with rate > 0
+  const availableLines = feedmillLines
+    .filter(line => rateMap[line] > 0)
+    .map(line => ({ line, rate: rateMap[line] }))
+    .sort((a, b) => b.rate - a.rate); // higher rate = better
+  
+  // Also find lines OUTSIDE the feedmill that have rates (for AI insight)
+  const otherLines = Object.entries(rateMap)
+    .filter(([line, rate]) => rate > 0 && !feedmillLines.includes(line))
+    .map(([line, rate]) => ({ line, rate }))
+    .sort((a, b) => b.rate - a.rate);
+  
+  return { availableLines, otherLines };
+}
+```
+
+### DISPLAY SCENARIOS
+
+**Scenario A — Product has rates on multiple feedmill lines:**
+
+```
+Line *
+[▼ Line 1]  (auto-suggested)
+
+💡 Recommended: Line 1 (rate: 20.22 min/batch)
+   Also available: Line 2 (rate: 20.15 min/batch)
+```
+
+- Auto-selects line with highest rate
+- Shows other available lines within the feedmill
+
+**Scenario B — Product has rate on only one feedmill line:**
+
+```
+Line *
+[▼ Line 2]  (auto-suggested)
+
+💡 This product can be produced on Line 2 (rate: 20.15 min/batch)
+```
+
+**Scenario C — Product has NO rate on any feedmill line:**
+
+```
+Line *
+[▼ Select line...]
+
+⚠ This product has no production history on Line 1 or Line 2.
+   Please select a line manually. Run rate will need to be configured.
+```
+
+- Dropdown NOT auto-selected
+- User must manually choose
+
+**Scenario D — User is on a specific line tab AND product has rate on that line:**
+
+```
+Line *
+[▼ Line 1]  (pre-selected from current tab)
+
+💡 Line 1 rate: 20.22 min/batch
+   Also available: Line 2 (rate: 20.15 min/batch)
+```
+
+**Scenario E — User is on a specific line tab AND product has NO rate on that line:**
+
+```
+Line *
+[▼ Line 1]  (pre-selected from current tab)
+
+⚠ This product has no production history on Line 1.
+   Consider Line 2 (rate: 20.15 min/batch) where it has been produced before.
+```
+
+### AI ANALYSIS — OTHER FEEDMILL LINES
+
+The Impact Analysis section should mention if the product can also be produced on lines in OTHER feedmills:
+
+```
+💡 Note: This product can also be produced on Line 5 
+   (rate: 8.31, Feedmill 3) and Line 7 (rate: 7.09, Powermix), 
+   but these are in different feedmills and are not recommended 
+   for this scheduling context.
+```
+
+---
+
+## 6. AVAILABILITY DROPDOWN — REMOVE EMOJIS
+
+Remove all emojis from the dropdown options.
+
+**Updated options:**
+```
+Select type...
+Set specific date...
+Prio replenish
+Safety stocks
+For sched
+Custom text...
+```
+
+No emojis. Clean text only.
+
+---
+
+## 7. ITEM DESCRIPTION — FILTER BY LINE RUN RATE
+
+When adding an order from a specific line tab, the Item Description dropdown only shows products that can be produced on that line.
+
+### FILTERING LOGIC
+
+```javascript
+function getProductsForLine(knowledgeBase, lineNumber) {
+  const rateField = `l${lineNumber}_rate`;
+  return knowledgeBase.filter(product => {
+    const rate = parseFloat(product[rateField]);
+    return rate && rate > 0;
+  });
+}
+
+function getProductsForFeedmill(knowledgeBase, feedmillLines) {
+  // feedmillLines = [1, 2] for Feedmill 1
+  return knowledgeBase.filter(product => {
+    return feedmillLines.some(lineNum => {
+      const rate = parseFloat(product[`l${lineNum}_rate`]);
+      return rate && rate > 0;
+    });
+  });
+}
+```
+
+### CONTEXT MAPPING
+
+| User is viewing | Dropdown shows products with rate on |
+|---|---|
+| Feedmill 1 > Line 1 | L1 Rate > 0 only |
+| Feedmill 1 > Line 2 | L2 Rate > 0 only |
+| Feedmill 1 > All | L1 Rate > 0 OR L2 Rate > 0 |
+| Feedmill 2 > Line 3 | L3 Rate > 0 only |
+| Feedmill 2 > Line 4 | L4 Rate > 0 only |
+| Feedmill 2 > All | L3 Rate > 0 OR L4 Rate > 0 |
+| Feedmill 3 > Line 5 | L5 Rate > 0 only |
+| Feedmill 3 > Line 6 | L6 Rate > 0 only |
+| Feedmill 3 > All | L5 Rate > 0 OR L6 Rate > 0 |
+| Powermix > Line 7 | L7 Rate > 0 only |
+
+---
+
+## 8. BATCH SIZE — UPDATES BASED ON SELECTED LINE
+
+The Batch Size auto-populates from the Knowledge Base based on which LINE is selected, because different feedmills/lines may have different batch sizes.
+
+### LINE TO BATCH SIZE MAPPING
+
+| Line | Feedmill | KB Field |
+|---|---|---|
+| Line 1 | Feedmill 1 | Batch FM1 |
+| Line 2 | Feedmill 1 | Batch FM1 |
+| Line 3 | Feedmill 2 | Batch FM2 |
+| Line 4 | Feedmill 2 | Batch FM2 |
+| Line 5 | Feedmill 3 | Batch FM3 |
+| Line 6 | Feedmill 3 | Batch FM3 |
+| Line 7 | Powermix | Batch PMX |
+
+Wait — Lines 1 and 2 are BOTH in Feedmill 1, so they both use Batch FM1. But do they share the same batch size? Or does each line within a feedmill have its own batch size?
+
+Based on the Knowledge Base data provided:
+- Batch FM1 = 4.000 (Feedmill 1, Lines 1-2)
+- Batch FM2 = 2.000 (Feedmill 2, Lines 3-4)
+- Batch FM3 = 2.000 (Feedmill 3, Lines 5-6)
+- Batch PMX = varies (Powermix, Line 7)
+
+### BEHAVIOR WHEN LINE CHANGES
+
+When the user changes the Line selection:
+
+1. Batch Size updates to the correct value for that line/feedmill
+2. Batches recalculates: Volume ÷ new Batch Size
+3. HA Info updates to match new Batches
+4. Production Time recalculates based on new Batches × new Run Rate
+5. Divisibility warning re-evaluates with the new Batch Size
+6. Bags recalculates
+
+**Example:**
+```
+Product: Lakas Gatas Pellet 50kg
+Volume: 80 MT
+
+User selects Line 1 (Feedmill 1):
+  Batch Size = 4.00 (from Batch FM1)
+  Batches = 80 ÷ 4 = 20
+  Run Rate = 20.13 min/batch
+  Production Time = 20 × 20.13 = 402.6 min = 6.71 hrs
+
+User changes to Line 6 (Feedmill 3):
+  Batch Size = 2.00 (from Batch FM3)
+  Batches = 80 ÷ 2 = 40
+  Run Rate = 7.16 min/batch
+  Production Time = 40 × 7.16 = 286.4 min = 4.77 hrs
+```
+
+---
+
+## 9. COMPLETE DIALOG LAYOUT
+
+```
+╔══════════════════════════════════════════════════════════════╗
+║                                                              ║
+║  + Add New Order                                        ✕    ║
+║  Manually create a new production order                      ║
+║                                                              ║
+║  ┌─ ORDER DETAILS ───────────────────────────────────────┐   ║
+║  │                                                       │   ║
+║  │  FPR *                                                │   ║
+║  │  [260324]                                             │   ║
+║  │                                                       │   ║
+║  │  Item Description *                                   │   ║
+║  │  [Search or select product...                    ▼]   │   ║
+║  │                                                       │   ║
+║  │  Material Code (FG)          Form                     │   ║
+║  │  [1000000000241]             MP (auto)                │   ║
+║  │                                                       │   ║
+║  └───────────────────────────────────────────────────────┘   ║
+║                                                              ║
+║  ┌─ PRODUCTION PARAMETERS ───────────────────────────────┐   ║
+║  │                                                       │   ║
+║  │  Volume (MT) *                                        │   ║
+║  │  [80]                                                 │   ║
+║  │                                                       │   ║
+║  │  Batch Size          Batches                          │   ║
+║  │  4.00 (auto)         20 (auto)                        │   ║
+║  │                                                       │   ║
+║  │  (divisibility warning appears here if needed)        │   ║
+║  │                                                       │   ║
+║  └───────────────────────────────────────────────────────┘   ║
+║                                                              ║
+║  ┌─ SCHEDULING ──────────────────────────────────────────┐   ║
+║  │                                                       │   ║
+║  │  Line *                                               │   ║
+║  │  [▼ Line 1]  (auto-suggested)                         │   ║
+║  │  💡 Recommended: Line 1 (rate: 20.22)                 │   ║
+║  │     Also available: Line 2 (rate: 20.15)              │   ║
+║  │                                                       │   ║
+║  │  Availability *                                       │   ║
+║  │  [▼ Select type...]                                   │   ║
+║  │                                                       │   ║
+║  └───────────────────────────────────────────────────────┘   ║
+║                                                              ║
+║  ┌─ PLANNED ORDERS (Optional) ───────────────────────────┐   ║
+║  │                                                       │   ║
+║  │  Planned Order FG    Planned Order SFG                │   ║
+║  │  [Enter 10 digits]   [Enter 10 digits]                │   ║
+║  │                                                       │   ║
+║  │  Planned Order PMX                                    │   ║
+║  │  [Enter 10 digits]                                    │   ║
+║  │                                                       │   ║
+║  └───────────────────────────────────────────────────────┘   ║
+║                                                              ║
+║  ┌─ 🤖 Impact Analysis ─────────────────────────────────┐   ║
+║  │                                                       │   ║
+║  │  (AI-generated analysis appears when all required     │   ║
+║  │   fields are filled)                                  │   ║
+║  │                                                       │   ║
+║  └───────────────────────────────────────────────────────┘   ║
+║                                                              ║
+║                         [Cancel]    [Add Order]              ║
+║                                                              ║
+╚══════════════════════════════════════════════════════════════╝
+```
+
+---
+
+## 10. IMPACT ANALYSIS — INCLUDE LINE RECOMMENDATIONS
+
+The AI Impact Analysis should include insights about line recommendations when relevant:
+
+```
+🤖 Impact Analysis
+
+📍 Insertion Position
+This order will be placed at Prio 3, between Salto 
+Conditioner (Mar 22) and Elite XP Startex (Mar 28), 
+based on its availability date of March 25.
+
+⏱ Production Impact
+Adding 80 MT (20 batches) of Lakas Gatas Pellet will 
+add approximately 6.71 hours of production time to 
+Line 1 at a run rate of 20.13 min/batch.
+
+💡 Line Recommendation
+Line 1 is recommended with the highest run rate of 
+20.22 min/batch. Line 2 is also available (20.15 
+min/batch). This product can also be produced on 
+Line 6 (Feedmill 3, rate: 7.16) but is not 
+recommended for this scheduling context.
+
+⚠ Downstream Effects
+Orders at Prio 3 and below will shift down by 1 
+position. Completion dates for 7 downstream orders 
+will be delayed by approximately 6.9 hours.
+
+📅 Deadline Risk
+No orders are at risk of missing their deadlines.
+```
+```

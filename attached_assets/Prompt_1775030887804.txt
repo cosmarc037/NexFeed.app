@@ -1,0 +1,321 @@
+```
+Update the following in the previous prompt:
+
+---
+
+## UPDATED: CRITICAL OVERRIDES PLANNED IN AUTO-SEQUENCE
+
+Critical orders are more important than Planned orders. In the auto-sequence, Critical orders should be placed BEFORE Planned orders if they need immediate production.
+
+### SORTING PRIORITY (HIGHEST TO LOWEST)
+
+```
+1. CRITICAL orders (DFL >= Inventory, need production NOW)
+   - Among themselves: sorted by DFL/Inventory ratio (highest deficit first)
+2. PLANNED orders (locked by planner, but Critical overrides)
+3. URGENT orders + DATED orders (sorted chronologically)
+4. MONITOR orders (sorted chronologically)
+5. SUFFICIENT orders (sorted chronologically)
+```
+
+### UPDATED SORTING LOGIC
+
+```javascript
+movableWithDates.sort((a, b) => {
+  const statusOrder = { 'Critical': 0, 'Urgent': 1, 'Monitor': 2, 'Sufficient': 3 };
+  const statusA = statusOrder[a._n10dStatus] ?? 3;
+  const statusB = statusOrder[b._n10dStatus] ?? 3;
+  
+  const isCriticalA = statusA === 0;
+  const isCriticalB = statusB === 0;
+  
+  // Rule 1: Critical ALWAYS comes first
+  if (isCriticalA && !isCriticalB) return -1;
+  if (!isCriticalA && isCriticalB) return 1;
+  
+  // Rule 2: Both Critical — sort by DFL/Inventory ratio (highest deficit first)
+  if (isCriticalA && isCriticalB) {
+    const ratioA = a._n10dRatio || 0;
+    const ratioB = b._n10dRatio || 0;
+    return ratioB - ratioA; // Higher ratio = more urgent
+  }
+  
+  // Rule 3: Neither Critical — sort chronologically
+  const dateA = a._sortDate;
+  const dateB = b._sortDate;
+  
+  if (dateA && !dateB) return -1;
+  if (!dateA && dateB) return 1;
+  if (!dateA && !dateB) return 0;
+  
+  const dateDiff = dateA.getTime() - dateB.getTime();
+  if (dateDiff !== 0) return dateDiff;
+  
+  // Rule 4: Same date — Urgent before Monitor before Sufficient
+  if (statusA !== statusB) return statusA - statusB;
+  
+  // Rule 5: Same date, same status — higher volume first
+  const volA = parseFloat(a.volume) || 0;
+  const volB = parseFloat(b.volume) || 0;
+  return volB - volA;
+});
+```
+
+### UPDATED AUTO-SEQUENCE — CRITICAL OVERRIDES PLANNED
+
+```javascript
+function runAutoSequence(allOrders, n10dData, dailyColumns, today) {
+  const excludedOrders = [];
+  const plannedOrders = [];
+  const movableOrders = [];
+  
+  allOrders.forEach((order) => {
+    const realPrio = order.prio;
+    
+    if (['Done', 'Cancel PO', 'In Production',
+         'On-going batching', 'On-going pelleting', 'On-going bagging'
+        ].includes(order.status)) {
+      excludedOrders.push({ ...order, _realPrio: realPrio });
+    } else if (order.status === 'Planned') {
+      const lockedPrio = order._plannedPrio || realPrio;
+      plannedOrders.push({ ...order, _realPrio: lockedPrio });
+    } else {
+      movableOrders.push({ ...order, _realPrio: realPrio });
+    }
+  });
+  
+  // Get excluded prio slots
+  const excludedPrios = new Set(excludedOrders.map(o => o._realPrio));
+  
+  // Available slots = all real prios NOT excluded
+  const totalOrders = allOrders.length;
+  const availableSlots = [];
+  for (let i = 1; i <= totalOrders; i++) {
+    if (!excludedPrios.has(i)) {
+      availableSlots.push(i);
+    }
+  }
+  
+  // Sort movable orders (Critical first, then chronological)
+  const movableWithDates = assignAvailDates(movableOrders, n10dData, dailyColumns, today);
+  
+  // Add ratio for Critical tiebreaking
+  movableWithDates.forEach(order => {
+    const product = n10dData?.find(
+      p => String(p.material_code_fg) === String(order.material_code_fg)
+    );
+    if (product && product.inventory > 0) {
+      order._n10dRatio = product.due_for_loading / product.inventory;
+    } else if (product && product.inventory <= 0) {
+      order._n10dRatio = Infinity;
+    } else {
+      order._n10dRatio = 0;
+    }
+  });
+  
+  movableWithDates.sort((a, b) => {
+    const statusOrder = { 'Critical': 0, 'Urgent': 1, 'Monitor': 2, 'Sufficient': 3 };
+    const statusA = statusOrder[a._n10dStatus] ?? 3;
+    const statusB = statusOrder[b._n10dStatus] ?? 3;
+    
+    const isCriticalA = statusA === 0;
+    const isCriticalB = statusB === 0;
+    
+    if (isCriticalA && !isCriticalB) return -1;
+    if (!isCriticalA && isCriticalB) return 1;
+    
+    if (isCriticalA && isCriticalB) {
+      return (b._n10dRatio || 0) - (a._n10dRatio || 0);
+    }
+    
+    const dateA = a._sortDate;
+    const dateB = b._sortDate;
+    if (dateA && !dateB) return -1;
+    if (!dateA && dateB) return 1;
+    if (!dateA && !dateB) return 0;
+    
+    const dateDiff = dateA.getTime() - dateB.getTime();
+    if (dateDiff !== 0) return dateDiff;
+    
+    if (statusA !== statusB) return statusA - statusB;
+    
+    const volA = parseFloat(a.volume) || 0;
+    const volB = parseFloat(b.volume) || 0;
+    return volB - volA;
+  });
+  
+  // Separate Critical from the rest of sorted movable
+  const criticalOrders = movableWithDates.filter(o => o._n10dStatus === 'Critical');
+  const nonCriticalOrders = movableWithDates.filter(o => o._n10dStatus !== 'Critical');
+  
+  // Build planned prio map
+  const plannedPrioMap = {};
+  plannedOrders.forEach(o => {
+    plannedPrioMap[o._realPrio] = o;
+  });
+  
+  // Build preview:
+  // 1. Critical orders fill the FIRST available slots (before Planned)
+  // 2. Planned orders at their locked slots (shifted down if Critical takes their spot)
+  // 3. Non-critical movable orders fill remaining slots
+  
+  const previewResult = [];
+  let criticalIndex = 0;
+  let nonCriticalIndex = 0;
+  
+  // First pass: assign Critical to earliest available slots
+  const criticalSlots = [];
+  const remainingSlots = [];
+  
+  for (const slot of availableSlots) {
+    if (criticalIndex < criticalOrders.length) {
+      // Critical takes this slot — even if Planned was here
+      if (plannedPrioMap[slot]) {
+        // Planned order gets bumped — move it to next available
+        // Store it to place after critical
+        const bumpedPlanned = plannedPrioMap[slot];
+        delete plannedPrioMap[slot];
+        // Re-add planned to be placed after critical orders
+        plannedOrders.push(bumpedPlanned);
+      }
+      
+      previewResult.push({
+        ...criticalOrders[criticalIndex],
+        prio: slot,
+        _isLocked: false,
+        _isCritical: true
+      });
+      criticalIndex++;
+    } else {
+      remainingSlots.push(slot);
+    }
+  }
+  
+  // Second pass: place Planned and non-critical in remaining slots
+  // Rebuild planned map with remaining planned orders
+  const remainingPlannedMap = {};
+  plannedOrders.forEach(o => {
+    // Find the best remaining slot for bumped planned orders
+    if (!remainingPlannedMap[o._realPrio] && remainingSlots.includes(o._realPrio)) {
+      remainingPlannedMap[o._realPrio] = o;
+    } else {
+      // Find nearest available slot
+      const nearestSlot = remainingSlots.find(s => s >= o._realPrio && !remainingPlannedMap[s]);
+      if (nearestSlot) {
+        remainingPlannedMap[nearestSlot] = o;
+      }
+    }
+  });
+  
+  for (const slot of remainingSlots) {
+    if (remainingPlannedMap[slot]) {
+      previewResult.push({
+        ...remainingPlannedMap[slot],
+        prio: slot,
+        _isLocked: true
+      });
+    } else {
+      if (nonCriticalIndex < nonCriticalOrders.length) {
+        previewResult.push({
+          ...nonCriticalOrders[nonCriticalIndex],
+          prio: slot,
+          _isLocked: false
+        });
+        nonCriticalIndex++;
+      }
+    }
+  }
+  
+  // Sort by prio number for display
+  previewResult.sort((a, b) => a.prio - b.prio);
+  
+  return { previewResult, excludedOrders };
+}
+```
+
+### EXAMPLE — CRITICAL OVERRIDES PLANNED
+
+Order table:
+```
+Prio 1: Salto Conditioner → In Production (excluded)
+Prio 2: Gallimax Pigeon → Planned (locked at 2)
+Prio 3: Elite XP Startex → Plotted
+Prio 4: Gall 21 Chicken → Plotted (Critical)
+Prio 5: Gallimax 3 Maintenance → Plotted (Urgent)
+```
+
+Preview:
+```
+1 order excluded (In Production)
+
+Prio 2: Gall 21 Chicken Layer → Apr 1 (CRITICAL — takes first available slot)
+Prio 3: Gallimax Pigeon → Planned 🔒 (bumped from 2 to 3)
+Prio 4: Gallimax 3 Maintenance → Mar 31 (Urgent)
+Prio 5: Elite XP Startex → Apr 9 (Sufficient)
+```
+
+Critical (Gall 21) takes Prio 2 even though Planned was there, pushing Planned to Prio 3.
+
+---
+
+## UPDATED: REVERT STATUS — OPTION A OR B
+
+```javascript
+function handleStatusRevert(order, newStatus, allOrders) {
+  if (isLockedStatus(order.status) && !isLockedStatus(newStatus)) {
+    if (order._originalPrioBeforeLock) {
+      const targetPrio = order._originalPrioBeforeLock;
+      order._originalPrioBeforeLock = null;
+      
+      // Option A: Try original position, push others down
+      // Option B: If original position > total orders, use nearest
+      const maxPrio = allOrders.length;
+      const finalPrio = Math.min(targetPrio, maxPrio);
+      
+      moveOrderToPrio(order, finalPrio, allOrders);
+    }
+  }
+  
+  order.status = newStatus;
+}
+```
+
+---
+
+## UPDATED: PLANNED LABEL — ONLY IN PREVIEW
+
+The "Planned — locked" label and blue left border only appear in the auto-sequence preview, NOT in the order table.
+
+```jsx
+// ONLY in auto-sequence preview
+{order._isLocked && (
+  <div className="planned-label">🔒 Planned — locked</div>
+)}
+
+// NOT in order table — just show normal "Planned" badge
+```
+
+---
+
+## VERIFICATION
+
+### Critical sorting
+1. ✅ Critical orders placed FIRST among all movable orders
+2. ✅ Critical overrides Planned — pushes Planned down
+3. ✅ Multiple Critical orders sorted by DFL/Inventory ratio (highest first)
+4. ✅ Non-Critical orders sorted chronologically after Critical
+5. ✅ Same date: Urgent > Monitor > Sufficient
+
+### Preview prio numbers
+6. ✅ Excluded orders hidden, their prio slots skipped
+7. ✅ Planned shows at REAL prio (or shifted if Critical took its spot)
+8. ✅ Prio numbers in preview match order table positions
+
+### Revert status
+9. ✅ Done → Plotted: returns to original prio, not bottom
+10. ✅ If original prio > total orders: goes to nearest available
+
+### Planned label
+11. ✅ "Planned — locked" label only in preview
+12. ✅ Order table shows normal "Planned" badge
+```

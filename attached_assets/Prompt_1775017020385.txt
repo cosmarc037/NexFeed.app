@@ -1,0 +1,446 @@
+```
+Implement the following changes to the NexFeed application:
+
+---
+
+## 1. ADD "PLANNED" STATUS
+
+Add a new status option called "Planned" to the status dropdown.
+
+### DROPDOWN ORDER
+
+```
+Plotted
+(Uncombine — only for combined orders)
+(Merge Back — only for cut orders)
+Planned ← NEW
+Hold
+Cut
+In Production
+On-going batching
+On-going pelleting
+On-going bagging
+Done
+Cancel PO
+─────────────────────
+[Type custom status...] ← Free text input
+```
+
+### PLANNED STATUS STYLING
+
+| Property | Value |
+|---|---|
+| Background | Light blue (#eff6ff) |
+| Text color | Blue (#2563eb) |
+| Font weight | 500 |
+| Border | 1px solid #bfdbfe |
+| Border-radius | 4px |
+| Padding | 2px 8px |
+
+---
+
+## 2. ADD CUSTOM FREE TEXT STATUS
+
+Add a free text input at the bottom of the status dropdown.
+
+### BEHAVIOR
+
+- Text input field at the bottom of the dropdown
+- User types and presses Enter to apply
+- Only applies to that specific order — not saved as a reusable option for other orders
+- Treated as MOVABLE (same behavior as Plotted — can be sorted, can't go above locked orders)
+
+### STYLING
+
+```
+┌────────────────────────────┐
+│ Plotted                     │
+│ Planned                     │
+│ Hold                        │
+│ Cut                         │
+│ In Production               │
+│ On-going batching           │
+│ On-going pelleting          │
+│ On-going bagging            │
+│ Done                        │
+│ Cancel PO                   │
+├────────────────────────────┤
+│ Type custom status... [⏎]  │
+└────────────────────────────┘
+```
+
+### INPUT STYLING
+
+```css
+.custom-status-input {
+  width: 100%;
+  padding: 6px 10px;
+  font-size: 12px;
+  border: none;
+  border-top: 1px solid #e5e7eb;
+  outline: none;
+  background: #ffffff;
+}
+
+.custom-status-input::placeholder {
+  color: #9ca3af;
+  font-style: italic;
+}
+
+.custom-status-input:focus {
+  background: #f9fafb;
+}
+```
+
+### CUSTOM STATUS DISPLAY
+
+| Property | Value |
+|---|---|
+| Background | Transparent / none |
+| Text color | Dark text (#374151) |
+| Font weight | 400 |
+| No border | Just plain text |
+| No badge styling | Unlike other statuses |
+
+---
+
+## 3. STATUS GROUPS — LOCKED VS MOVABLE
+
+### LOCKED STATUSES (cannot be moved, stick in place)
+
+| Status | Behavior |
+|---|---|
+| Done | Locked at top — already implemented |
+| Cancel PO | Locked at bottom — already implemented |
+| In Production | Locked — only 1 per line at a time |
+| On-going batching | Locked — can coexist with In Production |
+| On-going pelleting | Locked — can coexist with In Production |
+| On-going bagging | Locked — can coexist with In Production |
+| Planned | Locked — stays at its current priority position |
+
+### MOVABLE STATUSES (can be sorted/sequenced)
+
+| Status | Behavior |
+|---|---|
+| Plotted | Sortable, cannot go above locked orders |
+| Hold | Sortable, cannot go above locked orders |
+| Cut | Sortable, cannot go above locked orders |
+| Uncombine | Sortable, cannot go above locked orders |
+| Merge Back | Sortable, cannot go above locked orders |
+| Custom (free text) | Sortable, cannot go above locked orders |
+
+### STATUS GROUP FUNCTION
+
+```javascript
+function isLockedStatus(status) {
+  const lockedStatuses = [
+    'Done',
+    'Cancel PO',
+    'In Production',
+    'On-going batching',
+    'On-going pelleting',
+    'On-going bagging',
+    'Planned'
+  ];
+  
+  return lockedStatuses.includes(status);
+}
+
+function isMovableStatus(status) {
+  return !isLockedStatus(status);
+}
+```
+
+---
+
+## 4. AUTO-SEQUENCE — RESPECT LOCKED ORDERS
+
+When running auto-sequence, locked orders stay at their positions. Movable orders are sorted chronologically in the remaining positions.
+
+```javascript
+function runAutoSequence(orders, n10dData, dailyColumns, today) {
+  // Step 1: Separate locked and movable orders
+  const lockedOrders = [];
+  const movableOrders = [];
+  
+  orders.forEach((order, index) => {
+    if (isLockedStatus(order.status)) {
+      lockedOrders.push({ ...order, _originalPrio: index + 1 });
+    } else {
+      movableOrders.push({ ...order });
+    }
+  });
+  
+  // Step 2: Assign avail dates to movable orders
+  const movableWithDates = movableOrders.map(order => {
+    const updatedOrder = { ...order };
+    
+    if (order.avail_date && 
+        order.avail_date !== 'prio replenish' && 
+        order.avail_date !== 'safety stocks' &&
+        !order.avail_date.toLowerCase().includes('stock sufficient')) {
+      updatedOrder._sortDate = parseDate(order.avail_date);
+      return updatedOrder;
+    }
+    
+    const product = n10dData?.find(
+      p => String(p.material_code_fg) === String(order.material_code_fg)
+    );
+    
+    if (product) {
+      const status = getProductStatus(
+        product.due_for_loading,
+        product.inventory,
+        dailyColumns,
+        product,
+        today
+      );
+      
+      updatedOrder._n10dStatus = status;
+      
+      if (status === 'Critical') {
+        updatedOrder._sortDate = new Date(today);
+        updatedOrder._displayAvailDate = formatDateFull(today);
+      } else if (product.availDate) {
+        updatedOrder._sortDate = parseDate(product.availDate);
+        updatedOrder._displayAvailDate = formatDateFull(product.availDate);
+      } else if (dailyColumns && dailyColumns.length > 0) {
+        const lastDay = dailyColumns[dailyColumns.length - 1].date;
+        updatedOrder._sortDate = parseDate(lastDay);
+        updatedOrder._displayAvailDate = formatDateFull(lastDay);
+      }
+    }
+    
+    return updatedOrder;
+  });
+  
+  // Step 3: Sort movable orders chronologically
+  movableWithDates.sort((a, b) => {
+    const dateA = a._sortDate;
+    const dateB = b._sortDate;
+    
+    if (dateA && !dateB) return -1;
+    if (!dateA && dateB) return 1;
+    if (!dateA && !dateB) return 0;
+    
+    const dateDiff = dateA.getTime() - dateB.getTime();
+    if (dateDiff !== 0) return dateDiff;
+    
+    const statusOrder = { 'Critical': 0, 'Urgent': 1, 'Monitor': 2, 'Sufficient': 3 };
+    const statusA = statusOrder[a._n10dStatus] ?? 2;
+    const statusB = statusOrder[b._n10dStatus] ?? 2;
+    if (statusA !== statusB) return statusA - statusB;
+    
+    const volA = parseFloat(a.volume) || 0;
+    const volB = parseFloat(b.volume) || 0;
+    return volB - volA;
+  });
+  
+  // Step 4: Merge — locked orders stay at their positions, movable fill the gaps
+  const totalSlots = orders.length;
+  const result = new Array(totalSlots).fill(null);
+  
+  // Place locked orders at their original positions
+  lockedOrders.forEach(order => {
+    const pos = order._originalPrio - 1; // 0-indexed
+    if (pos >= 0 && pos < totalSlots) {
+      result[pos] = order;
+    }
+  });
+  
+  // Fill remaining slots with sorted movable orders
+  let movableIndex = 0;
+  for (let i = 0; i < totalSlots; i++) {
+    if (result[i] === null && movableIndex < movableWithDates.length) {
+      result[i] = movableWithDates[movableIndex];
+      movableIndex++;
+    }
+  }
+  
+  // Step 5: Assign priorities
+  result.forEach((order, index) => {
+    if (order) {
+      order.prio = index + 1;
+    }
+  });
+  
+  return result.filter(o => o !== null);
+}
+```
+
+### EXAMPLE
+
+Before auto-sequence:
+```
+Prio 1: Product A — Done
+Prio 2: Product B — Done
+Prio 3: Product C — Done
+Prio 4: Product D — In Production
+Prio 5: Product E — On-going batching
+Prio 6: Product F — Planned
+Prio 7: Product G — Plotted (avail: Apr 9)
+Prio 8: Product H — Plotted (avail: Apr 5)
+Prio 9: Product I — Hold (avail: Apr 7)
+Prio 10: Product J — Cancel PO
+```
+
+After auto-sequence:
+```
+Prio 1: Product A — Done (LOCKED, stays at 1)
+Prio 2: Product B — Done (LOCKED, stays at 2)
+Prio 3: Product C — Done (LOCKED, stays at 3)
+Prio 4: Product D — In Production (LOCKED, stays at 4)
+Prio 5: Product E — On-going batching (LOCKED, stays at 5)
+Prio 6: Product F — Planned (LOCKED, stays at 6)
+Prio 7: Product H — Plotted (SORTED, Apr 5 — earliest)
+Prio 8: Product I — Hold (SORTED, Apr 7)
+Prio 9: Product G — Plotted (SORTED, Apr 9)
+Prio 10: Product J — Cancel PO (LOCKED, stays at 10)
+```
+
+---
+
+## 5. DRAG AND DROP — BLOCK MOVING ABOVE LOCKED ORDERS
+
+When a user tries to drag a MOVABLE order above a LOCKED order, block it and show a warning.
+
+```javascript
+function canMoveOrderToPosition(order, targetPosition, allOrders) {
+  if (!isMovableStatus(order.status)) {
+    // Locked orders can't be moved at all
+    return {
+      allowed: false,
+      message: `This order is "${order.status}" and cannot be moved.`
+    };
+  }
+  
+  // Check if any locked order is at or above the target position
+  const orderAbove = allOrders[targetPosition - 1]; // order at target position
+  
+  if (orderAbove && isLockedStatus(orderAbove.status) && 
+      orderAbove.status !== 'Cancel PO') { // Can go above cancelled
+    return {
+      allowed: false,
+      message: `Cannot place above "${orderAbove.item_description}" which is "${orderAbove.status}". Orders with locked statuses (Done, In Production, On-going, Planned) cannot be overtaken.`
+    };
+  }
+  
+  return { allowed: true };
+}
+```
+
+### WARNING DIALOG
+
+```
+╔════════════════════════════════════════════════════╗
+║                                                    ║
+║  ⚠ Cannot Move Order                         ✕   ║
+║                                                    ║
+║  This order cannot be placed above                 ║
+║  "Product D" which is currently                    ║
+║  "In Production."                                  ║
+║                                                    ║
+║  Orders with locked statuses (Done, In             ║
+║  Production, On-going, Planned) cannot be          ║
+║  overtaken by movable orders.                      ║
+║                                                    ║
+║                              [OK]                  ║
+║                                                    ║
+╚════════════════════════════════════════════════════╝
+```
+
+---
+
+## 6. IN PRODUCTION — ONLY 1 PER LINE
+
+When a user tries to set an order to "In Production" while another order on the same line is already "In Production", show a warning.
+
+```javascript
+function canSetStatus(order, newStatus, allOrders, currentLine) {
+  if (newStatus === 'In Production') {
+    const existingInProduction = allOrders.find(
+      o => o.line === currentLine && 
+           o.status === 'In Production' && 
+           o.id !== order.id
+    );
+    
+    if (existingInProduction) {
+      return {
+        allowed: false,
+        message: `"${existingInProduction.item_description}" is currently In Production on ${currentLine}. Mark it as Done or On-going before setting another order to In Production.`
+      };
+    }
+  }
+  
+  return { allowed: true };
+}
+```
+
+### ON-GOING — CAN COEXIST WITH IN PRODUCTION
+
+```javascript
+// On-going statuses do NOT have the single-order restriction
+// Order A can be "In Production" while Order B is "On-going batching"
+// Multiple orders can be "On-going" at the same time
+
+if (newStatus.startsWith('On-going')) {
+  // No restriction — allow it
+  return { allowed: true };
+}
+```
+
+### WARNING DIALOG — IN PRODUCTION CONFLICT
+
+```
+╔════════════════════════════════════════════════════╗
+║                                                    ║
+║  ⚠ In Production Conflict                    ✕   ║
+║                                                    ║
+║  "Elite XP Startex, Mini-pellet 50kg" is           ║
+║  currently In Production on Line 1.                ║
+║                                                    ║
+║  Consider marking it as Done or changing to        ║
+║  On-going before setting another order to          ║
+║  In Production.                                    ║
+║                                                    ║
+║                              [OK]                  ║
+║                                                    ║
+╚════════════════════════════════════════════════════╝
+```
+
+---
+
+## 7. VERIFICATION
+
+### Status dropdown
+1. ✅ "Planned" appears after Plotted/Uncombine/Merge Back
+2. ✅ Custom free text input at the bottom after separator
+3. ✅ Custom status applies only to that order
+4. ✅ Planned has light blue badge
+
+### Auto-sequence
+5. ✅ Done orders stay at top (already implemented)
+6. ✅ Cancel PO stays at bottom (already implemented)
+7. ✅ In Production stays at its position
+8. ✅ On-going stays at its position
+9. ✅ Planned stays at its position
+10. ✅ Movable orders sorted chronologically in remaining slots
+11. ✅ No movable order placed above a locked order
+
+### Drag and drop
+12. ✅ Dragging Plotted above In Production → blocked with warning
+13. ✅ Dragging Plotted above Planned → blocked with warning
+14. ✅ Dragging Plotted above Done → blocked with warning
+15. ✅ Dragging movable orders among themselves → allowed
+
+### In Production limit
+16. ✅ Setting 2nd order to In Production → warning shown
+17. ✅ Setting order to On-going while another is In Production → allowed
+18. ✅ Multiple On-going orders allowed simultaneously
+
+### Custom status
+19. ✅ Typing custom text and pressing Enter → applies to order
+20. ✅ Custom status displays as plain text (no badge)
+21. ✅ Custom status treated as MOVABLE
+22. ✅ Custom status only for that order (not saved globally)
+```

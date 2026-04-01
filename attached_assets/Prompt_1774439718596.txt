@@ -1,0 +1,400 @@
+```
+Implement the following fixes to the NexFeed application:
+
+---
+
+## 1. FIX: IMPACT ANALYSIS — SHOWING RAW DEBUG DATA
+
+The Impact Analysis is displaying raw pre-calculated data directly to the user instead of sending it to the AI for narrative generation.
+
+### THE BUG
+
+Current output shows:
+```
+📍 Insertion Position Priority: 11 Reason: non_dated_bottom 
+Inserts AFTER: "Elite XP Startex, Mini-pellet 50kg" (safety stocks) 
+Inserts at bottom of list
+```
+
+This is the raw calculation object being rendered as text. The user should see a clean narrative like:
+```
+📍 Insertion Position
+Lakas Gatas Pellet (8 MT) will be inserted at Priority 11, 
+at the bottom of the current schedule...
+```
+
+### THE FIX
+
+The pre-calculated data must be sent to the AI as CONTEXT, and ONLY the AI's generated narrative should be rendered to the user.
+
+```javascript
+// WRONG — displaying raw calculations
+function renderImpactAnalysis(calculations) {
+  return `Insertion Position Priority: ${calculations.position} 
+    Reason: ${calculations.reason}...`;
+}
+
+// CORRECT — send calculations to AI, display AI's response
+async function renderImpactAnalysis(calculations, newOrder, existingOrders) {
+  
+  const prompt = buildImpactAnalysisPrompt(calculations, newOrder, existingOrders);
+  const aiResponse = await callAI(prompt);
+  
+  // Display ONLY the AI's narrative response
+  return aiResponse;
+}
+```
+
+### THE AI PROMPT
+
+```
+Generate a clean, readable impact analysis narrative based on 
+the pre-calculated data below. Do NOT show any raw data, codes, 
+variable names, or technical labels. Write as a professional 
+production planning summary.
+
+RULES:
+- Write in complete, clear sentences
+- Use proper paragraph breaks between sections
+- Bold the section icons and labels
+- Format dates as "March 23, 2026"
+- Use product names only — no material codes
+- Priority numbers are whole numbers
+- Do NOT output any raw data like "Reason: non_dated_bottom"
+- Do NOT output any field names like "insertBeforeOrder:"
+
+PRE-CALCULATED DATA (for context only — do NOT display this):
+${JSON.stringify(calculations, null, 2)}
+
+NEW ORDER:
+Product: ${newOrder.itemDescription}
+Volume: ${newOrder.volume} MT
+Production Time: ${newOrder.productionTime} hrs
+Changeover: ${newOrder.changeover} hrs
+Avail Date: ${newOrder.availDate}
+Line: ${newOrder.line}
+
+CURRENT ORDERS:
+${existingOrders.map((o, i) => 
+  `Prio ${i+1}: ${o.item_description} | ${o.volume} MT | Avail: ${o.avail_date}`
+).join('\n')}
+
+Generate these sections:
+
+**📍 Insertion Position**
+Where the order will be placed and why. Reference the orders 
+before and after it.
+
+**⏱ Production Impact**
+How much production time is added. Include production hours 
+and changeover.
+
+**⚠ Downstream Effects**
+How many orders shift and by how much. List the first 3-5 
+affected orders, then summarize the rest.
+
+**📅 Deadline Risk**
+Any orders at risk of missing deadlines. If no start dates 
+are set, note that completion dates cannot be calculated.
+```
+
+---
+
+## 2. FIX: SAFETY STOCK INSIGHTS — FORMATTING AND RENDERING
+
+The Safety Stock Insights output has multiple formatting issues:
+- No bold rendering
+- Bullet points inline instead of separate lines
+- Material codes cluttering the text
+- Everything in dense paragraphs
+- Raw link syntax showing `[Name](code)`
+
+### FIX THE AI PROMPT
+
+Replace the Safety Stock Insights AI prompt:
+
+```
+Generate a safety stock insight analysis based on the Next 10 Days 
+data provided. Follow these formatting rules STRICTLY:
+
+OUTPUT FORMAT RULES:
+- Use proper paragraph breaks between sections
+- Each bullet point product MUST be on its own separate line
+- Bold section headers: wrap in ** like **A) Overview**
+- Bold product names: wrap in ** like **Poultry Sol Broiler**
+- Format dates as "March 23, 2026" — NEVER "2026-03-23"
+- Do NOT include material codes anywhere in the output
+- Do NOT use link syntax like [Name](code)
+- Just use the product name in bold
+- Use proper punctuation and grammar
+- Use • for bullet points, each on a new line
+- Keep sentences short and scannable
+
+SECTION RULES:
+- SKIP sections that have zero products — do NOT show them
+- Sections are labeled A, B, C, etc. in order of appearance
+- Re-letter sections based on what's shown (skip letters for hidden sections)
+
+GAP CALCULATION:
+The gap percentage shows how much production is still needed.
+Formula: Gap% = ((Inventory - Due for Loading) / Inventory) × 100
+
+If Gap% is high (e.g., 80%) → most of inventory is untouched, 
+  lots still needed relative to demand
+If Gap% is low (e.g., 10%) → inventory is mostly consumed by 
+  loading, very little buffer
+If Due for Loading > Inventory → negative gap, stock insufficient
+
+Example:
+- Inventory: 50 MT, Due for Loading: 25 MT
+  Gap = (50 - 25) / 50 × 100 = 50% buffer remaining
+- Inventory: 100 MT, Due for Loading: 90 MT
+  Gap = (100 - 90) / 100 × 100 = 10% buffer remaining (urgent)
+- Inventory: 20 MT, Due for Loading: 30 MT
+  Gap = (20 - 30) / 20 × 100 = -50% (stock deficit, very urgent)
+
+SECTIONS:
+
+**A) Overview**
+2-3 sentence summary. Total products, how many need production, 
+how many sufficient, total deficit.
+
+**B) Urgent — Production Needed Soon**
+Products with target dates within the next 3 days.
+Each product on its own bullet line:
+
+• **Product Name** — Target: March 22, 2026.
+  Demand: X MT | Inventory: X MT | Buffer: X%.
+  Brief urgency note.
+
+• **Product Name** — Target: March 23, 2026.
+  Demand: X MT | Inventory: X MT | Buffer: X%.
+  Brief urgency note.
+
+**C) Production Needed**
+Products with target dates within 4-7 days. Same bullet format.
+
+**D) Extended Production Needed**
+Products with target dates within 8-10 days. Same format.
+SKIP if no products in this window.
+
+**E) Stock Sufficient — No Immediate Action**
+Products with sufficient inventory. Same bullet format but note 
+they need no action:
+
+• **Product Name** — Inventory: X MT | Demand: X MT.
+  Currently sufficient, no production needed.
+
+**F) SAP Order Match**
+Brief confirmation about SAP matching status.
+
+EXAMPLE OUTPUT:
+
+**A) Overview**
+
+Analysis of 20 products shows 17 requiring production with a total 
+deficit of approximately 403 MT. Three products have sufficient 
+stock. Seven products have urgent needs within the next three days.
+
+**B) Urgent — Production Needed Soon**
+
+These products need immediate attention:
+
+• **Poultry Sol Broiler Starter Cr MD 50kg** — Target: March 22, 2026.
+  Demand: 127.8 MT | Inventory: 376.4 MT | Buffer: 66%.
+  Approaching target date — schedule production promptly.
+
+• **Poultry Sol Broiler Finisher MP MD 50kg** — Target: March 23, 2026.
+  Demand: 217.7 MT | Inventory: 405.9 MT | Buffer: 46%.
+  High volume demand with limited buffer. Prioritize scheduling.
+
+• **Gallimax 3 Maintenance (Natural) P, 50Kg** — Target: March 19, 2026.
+  Demand: 46.3 MT | Inventory: 74.9 MT | Buffer: 38%.
+  Already past target date — requires immediate scheduling.
+
+**C) Production Needed**
+
+These products require production within the next 4-7 days:
+
+• **Elite XP Startex, Mini-pellet 50kg** — Target: March 28, 2026.
+  Demand: 92.3 MT | Inventory: 310.6 MT | Buffer: 70%.
+  Moderate buffer but high volume — plan ahead.
+
+• **Classic Hog Growex, Pellet 50kg** — Target: March 28, 2026.
+  Demand: 20.5 MT | Inventory: 217.6 MT | Buffer: 91%.
+  Comfortable buffer. Schedule within normal cycle.
+
+**D) Stock Sufficient — No Immediate Action**
+
+These products have adequate inventory:
+
+• **Gall 21 Chicken Layer P (Breeder) 50Kg** — 
+  Inventory: 0.7 MT | Demand: 24.0 MT.
+  Currently sufficient. Continue monitoring.
+
+• **Ave Max Duck Layex 2 Pellet, 50kg** — 
+  Inventory: 181.5 MT | Demand: 194.2 MT.
+  Ample inventory. No immediate action needed.
+
+**E) SAP Order Match**
+
+All products are currently matched with SAP orders. No discrepancies 
+found between stock requirements and production orders.
+```
+
+---
+
+## 3. FIX: FULFILLMENT / GAP CALCULATION
+
+The fulfillment percentages are incorrect — showing values like 1707%, 1061%, 295% which don't make sense.
+
+### THE CORRECT CALCULATION
+
+```javascript
+function calculateGapPercentage(product) {
+  const inventory = product.inventory;
+  const dueForLoading = product.due_for_loading;
+  
+  if (!inventory || inventory === 0) {
+    return { buffer: 0, status: 'no_inventory' };
+  }
+  
+  // Buffer = how much of inventory remains after loading
+  // Buffer% = (Inventory - Due for Loading) / Inventory × 100
+  const buffer = ((inventory - dueForLoading) / inventory) * 100;
+  
+  return {
+    buffer: Math.round(buffer * 10) / 10, // 1 decimal
+    status: buffer > 20 ? 'sufficient_buffer' : 
+            buffer > 0 ? 'low_buffer' : 'deficit'
+  };
+}
+```
+
+### EXAMPLES
+
+```
+Product A: Inventory = 376.4, Due for Loading = 127.8
+Buffer = (376.4 - 127.8) / 376.4 × 100 = 66.1%
+→ 66% buffer remaining
+
+Product B: Inventory = 217.6, Due for Loading = 20.5
+Buffer = (217.6 - 20.5) / 217.6 × 100 = 90.6%
+→ 91% buffer remaining
+
+Product C: Inventory = 74.9, Due for Loading = 46.3
+Buffer = (74.9 - 46.3) / 74.9 × 100 = 38.2%
+→ 38% buffer remaining
+
+Product D: Inventory = 0.7, Due for Loading = 24.0
+Buffer = (0.7 - 24.0) / 0.7 × 100 = -3328.6%
+→ This is a massive deficit — stock insufficient
+→ For display: "Deficit — inventory far below demand"
+
+Product E: Inventory = 23.9, Due for Loading = 1.4
+Buffer = (23.9 - 1.4) / 23.9 × 100 = 94.1%
+→ 94% buffer — stock sufficient
+```
+
+### PASS CORRECT VALUES TO AI
+
+When building the AI prompt, pass the correctly calculated buffer percentages:
+
+```javascript
+const products = next10DaysData.map(product => {
+  const buffer = calculateGapPercentage(product);
+  return {
+    name: product.item_description,
+    demand: product.due_for_loading,
+    inventory: product.inventory,
+    bufferPct: buffer.buffer,
+    bufferStatus: buffer.status,
+    targetDate: product.target_date,
+    status: product.status
+  };
+});
+```
+
+### DISPLAY IN INSIGHTS
+
+| Buffer % | Display | Category |
+|---|---|---|
+| > 50% | "Buffer: 66%" | Comfortable — can be in Production Needed |
+| 20-50% | "Buffer: 38%" | Low buffer — should be prioritized |
+| 0-20% | "Buffer: 8%" | Very low — urgent |
+| < 0% | "Deficit — inventory below demand" | Critical — immediate action |
+
+Do NOT show raw negative percentages like "-3328%". Instead say:
+```
+Deficit — inventory significantly below demand
+```
+
+---
+
+## 4. FIX: MARKDOWN RENDERING — ALL AI OUTPUTS
+
+Ensure ALL AI-generated text in the app properly renders markdown bold.
+
+### THE FIX
+
+Apply markdown-to-HTML conversion to every AI output before rendering:
+
+```javascript
+function renderAIText(rawText) {
+  let html = rawText;
+  
+  // Convert **bold** to <strong>
+  html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+  
+  // Convert *italic* to <em>
+  html = html.replace(/\*(.*?)\*/g, '<em>$1</em>');
+  
+  // Remove any leftover link syntax [text](code)
+  html = html.replace(/\[(.*?)\]\([\d]*\)/g, '<strong>$1</strong>');
+  
+  // Remove any raw material codes in parentheses
+  html = html.replace(/\(\d{10,}\)/g, '');
+  
+  // Ensure line breaks are rendered
+  html = html.replace(/\n\n/g, '</p><p>');
+  html = html.replace(/\n/g, '<br>');
+  
+  // Convert bullet points to proper list items
+  html = html.replace(/• /g, '<br>• ');
+  
+  // Clean up any double breaks
+  html = html.replace(/<br><br>/g, '<br>');
+  
+  return html;
+}
+```
+
+### APPLY TO
+
+| AI Output | Apply fix? |
+|---|---|
+| Safety Stock Insights | ✅ Yes |
+| Impact Analysis (Add New Order) | ✅ Yes |
+| Auto-Sequence AI Analysis | ✅ Yes |
+| Any other AI-generated text | ✅ Yes |
+
+---
+
+## 5. REMOVE CLICKABLE LINKS FROM SAFETY STOCK INSIGHTS
+
+Remove all clickable product links from the Safety Stock Insights output. Just show bold product names as plain text.
+
+### REMOVE
+
+- ❌ Clickable product names
+- ❌ Material codes in the text
+- ❌ Link syntax `[Name](code)`
+- ❌ `data-material-code` attributes
+- ❌ Orange link styling on product names
+
+### KEEP
+
+- ✅ Bold product names using `<strong>`
+- ✅ Product names only — no codes
+- ✅ All other formatting (sections, bullets, dates)
+```

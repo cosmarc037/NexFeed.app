@@ -1,0 +1,332 @@
+```
+Implement the following changes to the NexFeed application:
+
+---
+
+## 1. COMBINED ORDERS — 200 MT CEILING WARNING
+
+Add a warning in the Smart Combine panel when the total combined volume exceeds 200 MT. This is NOT a hard block — just a reminder/notification. Users can still proceed.
+
+### WHEN TO SHOW
+
+When the sum of all selected orders' volumes exceeds 200 MT.
+
+```javascript
+const totalVolume = selectedOrders.reduce((sum, o) => sum + (o.volume || 0), 0);
+const exceedsCeiling = totalVolume > 200;
+```
+
+### WHERE TO SHOW
+
+Inside the Smart Combine panel, alongside the combined production summary and scheduling impact:
+
+```
+┌─ Smart Combine Panel ────────────────────────────────────┐
+│                                                          │
+│  📦 Combined Production Summary                          │
+│  Total Volume: 240 MT                                    │
+│  Total Batches: 60                                       │
+│  Total Production Time: 12.63 hrs                        │
+│  Changeover: 0.17 hrs                                    │
+│  Total Time: 12.80 hrs                                   │
+│                                                          │
+│  ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─                │
+│                                                          │
+│  ⚠ Volume Ceiling Warning                                │
+│                                                          │
+│  The combined total of 240 MT exceeds the recommended    │
+│  ceiling of 200 MT. Large combined orders may impact     │
+│  scheduling flexibility and downstream production.       │
+│  Are you sure you want to proceed?                       │
+│                                                          │
+│  ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─                │
+│                                                          │
+│  📍 Scheduling Impact                                     │
+│  ...                                                     │
+│                                                          │
+└──────────────────────────────────────────────────────────┘
+```
+
+### WARNING STYLING
+
+| Property | Value |
+|---|---|
+| Container background | Light amber (#fffbeb) |
+| Container border | 1px solid #fcd34d |
+| Container border-radius | 6px |
+| Container padding | 10px 14px |
+| Title | "⚠ Volume Ceiling Warning" |
+| Title font size | 12px |
+| Title font weight | 600 |
+| Title color | Dark amber (#92400e) |
+| Body text font size | 11px |
+| Body text color | Dark amber (#92400e) |
+| Body line height | 1.5 |
+
+### LOGIC
+
+```javascript
+function getCeilingWarning(totalVolume) {
+  const CEILING = 200;
+  
+  if (totalVolume > CEILING) {
+    return {
+      show: true,
+      message: `The combined total of ${totalVolume.toLocaleString()} MT exceeds the recommended ceiling of ${CEILING} MT. Large combined orders may impact scheduling flexibility and downstream production. Are you sure you want to proceed?`
+    };
+  }
+  
+  return { show: false, message: null };
+}
+```
+
+### DO NOT BLOCK
+
+- ✅ Show warning in the panel
+- ✅ User can still click "Confirm Combine"
+- ❌ Do NOT disable the combine button
+- ❌ Do NOT prevent combining
+
+---
+
+## 2. COMBINE CRITERIA — ADD SCADA AND SFG
+
+Update the combine matching criteria to include SCADA (from Mixer Details) and Material Code (SFG).
+
+### CURRENT COMBINE CRITERIA
+
+Orders can be combined if they share the same:
+1. Material Code (FG)
+2. Category
+3. Form
+4. Batch Size
+5. Line
+
+### UPDATED COMBINE CRITERIA
+
+Orders can be combined if they share the same:
+1. Material Code (FG)
+2. Material Code (SFG)
+3. Category
+4. Form
+5. Batch Size
+6. Line
+7. SCADA (Formula Version)
+
+### MATCHING LOGIC
+
+```javascript
+function canOrdersBeCombined(orderA, orderB) {
+  // All criteria must match
+  const criteria = [
+    { field: 'material_code_fg', label: 'Material Code (FG)' },
+    { field: 'material_code_sfg', label: 'Material Code (SFG)' },
+    { field: 'category', label: 'Category' },
+    { field: 'form', label: 'Form' },
+    { field: 'batch_size', label: 'Batch Size' },
+    { field: 'line', label: 'Line' },
+    { field: 'scada', label: 'SCADA' },
+  ];
+  
+  for (const c of criteria) {
+    const valA = normalizeValue(orderA[c.field]);
+    const valB = normalizeValue(orderB[c.field]);
+    
+    if (valA !== valB) {
+      return {
+        canCombine: false,
+        mismatch: c.label,
+        valueA: valA,
+        valueB: valB
+      };
+    }
+  }
+  
+  return { canCombine: true };
+}
+
+function normalizeValue(val) {
+  if (val === null || val === undefined || val === '' || val === '-') {
+    return ''; // Treat empty, null, dash as same (empty)
+  }
+  return String(val).trim().toLowerCase();
+}
+```
+
+### SCADA MATCHING RULES
+
+| Order A SCADA | Order B SCADA | Can combine? |
+|---|---|---|
+| 26031 | 26031 | ✅ Yes — same value |
+| 26031 | 26032 | ❌ No — different value |
+| empty/- | empty/- | ✅ Yes — both empty, treated as same |
+| 26031 | empty/- | ❌ No — one has value, other is empty |
+
+### SFG MATCHING RULES
+
+| Order A SFG | Order B SFG | Can combine? |
+|---|---|---|
+| 3000000000571 | 3000000000571 | ✅ Yes — same |
+| 3000000000571 | 3000000000234 | ❌ No — different |
+| empty | empty | ✅ Yes — both empty |
+| 3000000000571 | empty | ❌ No — mismatch |
+
+### LEAD ORDER — INHERITS SCADA AND SFG
+
+When a lead order is generated from combining:
+
+```javascript
+const leadOrder = {
+  ...baseOrder,
+  material_code_fg: childOrders[0].material_code_fg,
+  material_code_sfg: childOrders[0].material_code_sfg,
+  scada: childOrders[0].scada,
+  // ... other combined fields
+};
+```
+
+The lead order uses the same SCADA and SFG as the children (since they all match).
+
+---
+
+## 3. SMART COMBINE PANEL — SHOW SFG AND SCADA
+
+Update the Smart Combine panel to display Material Code (SFG) and SCADA in the order details.
+
+### CURRENT ORDER DETAILS
+
+```
+Material Code: 1000000000241
+Category: Hogs
+Form: MP
+Batch Size: 4.00
+Line: Line 1
+```
+
+### UPDATED ORDER DETAILS
+
+```
+Material Code (FG): 1000000000241
+Material Code (SFG): 3000000000571
+Category: Hogs
+Form: MP
+Batch Size: 4.00
+Line: Line 1
+SCADA: 26031
+```
+
+### WHEN SCADA OR SFG IS EMPTY
+
+```
+Material Code (FG): 1000000000241
+Material Code (SFG): —
+Category: Hogs
+Form: MP
+Batch Size: 4.00
+Line: Line 1
+SCADA: —
+```
+
+---
+
+## 4. COMBINE MISMATCH MESSAGE — UPDATED
+
+When a user tries to combine orders that don't match, update the error message to include the new criteria:
+
+### CURRENT
+
+```
+Cannot combine: Orders have different Form values 
+(MP vs MP-CS)
+```
+
+### UPDATED — INCLUDES SCADA AND SFG
+
+```
+Cannot combine: Orders have different SCADA values 
+(26031 vs 26032)
+```
+
+```
+Cannot combine: Orders have different Material Code (SFG) 
+values (3000000000571 vs 3000000000234)
+```
+
+---
+
+## 5. SMART COMBINE PANEL — COMPLETE LAYOUT
+
+```
+┌─ Smart Combine Panel ────────────────────────────────────┐
+│                                                          │
+│  📋 Order Details                                        │
+│  Material Code (FG):  1000000000241                      │
+│  Material Code (SFG): 3000000000571                      │
+│  Category:            Hogs                               │
+│  Form:                MP                                 │
+│  Batch Size:          4.00                               │
+│  Line:                Line 1                             │
+│  SCADA:               26031                              │
+│                                                          │
+│  ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─                │
+│                                                          │
+│  📦 Combined Production Summary                          │
+│  Total Volume: 240 MT                                    │
+│  Total Batches: 60                                       │
+│  Total Production Time: 12.63 hrs                        │
+│  Changeover: 0.17 hrs                                    │
+│  Total Time: 12.80 hrs                                   │
+│                                                          │
+│  ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─                │
+│                                                          │
+│  ⚠ Volume Ceiling Warning                                │
+│  The combined total of 240 MT exceeds the recommended    │
+│  ceiling of 200 MT. Large combined orders may impact     │
+│  scheduling flexibility and downstream production.       │
+│  Are you sure you want to proceed?                       │
+│                                                          │
+│  ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─                │
+│                                                          │
+│  📍 Scheduling Impact                                     │
+│  ✅ Lead order can be inserted at Priority 3 without      │
+│  causing delays to downstream orders.                    │
+│                                                          │
+│  ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─                │
+│                                                          │
+│  🤖 AI Analysis                                          │
+│  ...                                                     │
+│                                                          │
+└──────────────────────────────────────────────────────────┘
+```
+
+Note: The ⚠ Volume Ceiling Warning section only appears when total volume exceeds 200 MT. If under 200 MT, this section is hidden.
+
+---
+
+## 6. VERIFICATION
+
+### Combine criteria
+1. Select two orders with same FG, SFG, category, form, batch size, line, SCADA
+   - ✅ Can combine
+
+2. Select two orders with same everything but different SCADA
+   - ❌ Cannot combine — error shows "different SCADA values"
+
+3. Select two orders with same everything but different SFG
+   - ❌ Cannot combine — error shows "different Material Code (SFG) values"
+
+4. Select two orders with both SCADA empty
+   - ✅ Can combine — both empty treated as matching
+
+5. Select two orders with both SFG empty
+   - ✅ Can combine — both empty treated as matching
+
+### Volume ceiling
+6. Combine orders totaling 180 MT
+   - ✅ No warning shown
+
+7. Combine orders totaling 240 MT
+   - ✅ Warning shown in Smart Combine panel
+   - ✅ User can still proceed with combine
+   - ✅ Combine button NOT disabled
+```

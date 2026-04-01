@@ -1,0 +1,791 @@
+```
+Implement the following feature in the NexFeed application:
+
+---
+
+## FEEDMILL SHUTDOWN AND ORDER DIVERSION
+
+A feature that allows planners to shut down a feedmill, stopping production on all its lines, and divert affected orders to other available lines based on Knowledge Base run rate history.
+
+---
+
+### 1. SHUTDOWN CLICKABLE TEXT — INSIDE EXPANDED FEEDMILL CARD
+
+Add a "Shutdown" clickable text at the bottom of each expanded feedmill card, below the category breakdown.
+
+### LOCATION
+
+```
+┌─────────────────────────────────────┐
+│ FM1                             ▼   │
+├─────────────────────────────────────┤
+│                                     │
+│ [stacked bar]                       │
+│ 2,306 MT total · 40 MT/hr          │
+│                                     │
+│ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─    │
+│                                     │
+│ Line 1                              │
+│ [stacked bar]                       │
+│ 822 MT · 20 MT/hr                   │
+│                                     │
+│ Line 2                              │
+│ [stacked bar]                       │
+│ 1,484 MT · 20 MT/hr                 │
+│                                     │
+│ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─    │
+│                                     │
+│ Category Breakdown                  │
+│ ● Completed          2,400 MT       │
+│ ● In Progress        1,200 MT       │
+│ ● Scheduled            800 MT       │
+│ ● On Hold              300 MT       │
+│ ● Cancelled            200 MT       │
+│ ─────────────────────────           │
+│ Total                4,900 MT       │
+│                                     │
+│ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─    │
+│                                     │
+│ ⏻ Shutdown                          │
+│                                     │
+└─────────────────────────────────────┘
+```
+
+- Only visible in expanded state
+- Hidden when card is collapsed
+
+### SHUTDOWN TEXT STYLING
+
+| Property | Value |
+|---|---|
+| Text | "⏻ Shutdown" |
+| Font size | 11px |
+| Font weight | 500 |
+| Color | Red (#e53935) |
+| Cursor | Pointer |
+| Hover | Darker red (#c62828), underline |
+| Padding-top | 8px |
+| Border-top | 1px dashed #e5e7eb |
+| Margin-top | 8px |
+| Text align | Center |
+
+---
+
+### 2. SHUTDOWN REASON DIALOG
+
+When planner clicks "⏻ Shutdown", a reason dialog appears.
+
+### DIALOG LAYOUT
+
+```
+╔══════════════════════════════════════════════════════════╗
+║                                                          ║
+║  ⚠ Shutdown Feedmill 1                              ✕   ║
+║                                                          ║
+║  You are about to shut down Feedmill 1, which will       ║
+║  stop production on Line 1 and Line 2.                   ║
+║                                                          ║
+║  Reason for shutdown: *                                  ║
+║  ┌──────────────────────────────────────────────┐        ║
+║  │ Select a reason...                        ▼  │        ║
+║  └──────────────────────────────────────────────┘        ║
+║                                                          ║
+║  Additional notes (optional):                            ║
+║  ┌──────────────────────────────────────────────┐        ║
+║  │                                              │        ║
+║  │                                              │        ║
+║  └──────────────────────────────────────────────┘        ║
+║                                                          ║
+║  ⚠ This will affect X active orders on Line 1           ║
+║  and Y active orders on Line 2.                          ║
+║                                                          ║
+║                    [Cancel]    [Confirm Shutdown]         ║
+║                                                          ║
+╚══════════════════════════════════════════════════════════╝
+```
+
+### PREDEFINED REASONS DROPDOWN
+
+```
+┌──────────────────────────────────────┐
+│ Scheduled maintenance                 │
+│ Equipment breakdown                   │
+│ Natural disaster                      │
+│ Power outage                          │
+│ Supply shortage                       │
+│ Staff shortage                        │
+│ Quality issue                         │
+│ Regulatory compliance                 │
+│ Other (specify in notes)              │
+└──────────────────────────────────────┘
+```
+
+### DIALOG STYLING
+
+| Property | Value |
+|---|---|
+| Max width | 480px |
+| Background | White |
+| Border-radius | 12px |
+| Padding | 24px 28px |
+| Overlay | rgba(0,0,0,0.4) |
+| Close on background click | ❌ No |
+
+### TITLE
+
+| Property | Value |
+|---|---|
+| Icon | ⚠ amber |
+| Text | "Shutdown [Feedmill Name]" |
+| Font size | 16px |
+| Font weight | 700 |
+| Color | Dark text (#1a1a1a) |
+
+### DESCRIPTION
+
+| Property | Value |
+|---|---|
+| Font size | 12px |
+| Color | Dark grey (#4b5563) |
+| Line height | 1.6 |
+
+### REASON DROPDOWN
+
+| Property | Value |
+|---|---|
+| Width | 100% |
+| Border | 1px solid #d1d5db |
+| Border-radius | 6px |
+| Padding | 8px 12px |
+| Font size | 12px |
+| Required | Yes (*) |
+
+### ADDITIONAL NOTES
+
+| Property | Value |
+|---|---|
+| Type | Textarea |
+| Width | 100% |
+| Height | 80px |
+| Border | 1px solid #d1d5db |
+| Border-radius | 6px |
+| Padding | 8px 12px |
+| Font size | 12px |
+| Placeholder | "Enter additional details..." |
+| Resizable | Vertical only |
+
+### AFFECTED ORDERS WARNING
+
+| Property | Value |
+|---|---|
+| Background | Light amber (#fffbeb) |
+| Border | 1px solid #fcd34d |
+| Border-radius | 6px |
+| Padding | 10px 14px |
+| Font size | 11px |
+| Color | Dark amber (#92400e) |
+| Icon | ⚠ |
+| Margin-top | 12px |
+
+### BUTTONS
+
+| Button | Styling |
+|---|---|
+| Cancel | Grey outlined. Border: 1px solid #d1d5db. Text: grey (#374151) |
+| Confirm Shutdown | Red filled (#e53935). White text, font-weight 600. Disabled until reason is selected |
+
+---
+
+### 3. FEEDMILL CARD — SHUTDOWN STATE
+
+When a feedmill is shutdown, the card changes appearance.
+
+### SHUTDOWN CARD — COLLAPSED
+
+```
+┌─────────────────────────────────────┐
+│ FM1  🔴 SHUTDOWN                ▶   │
+├─────────────────────────────────────┤
+│                                     │
+│ [stacked bar — greyed out]          │
+│ 2,306 MT total · 40 MT/hr          │
+│                                     │
+└─────────────────────────────────────┘
+```
+
+### SHUTDOWN CARD STYLING
+
+| Property | Value |
+|---|---|
+| Background | Light grey (#f3f4f6) |
+| Border | 2px solid #e53935 (red) |
+| Opacity | 0.85 |
+| Stacked bar | Greyed out — all segments become #d1d5db |
+
+### SHUTDOWN BADGE
+
+| Property | Value |
+|---|---|
+| Text | "🔴 SHUTDOWN" |
+| Font size | 10px |
+| Font weight | 700 |
+| Color | Red (#e53935) |
+| Background | Light red (#fef2f2) |
+| Padding | 2px 8px |
+| Border-radius | 4px |
+| Position | After feedmill label in header |
+
+### EXPANDED SHUTDOWN CARD — REACTIVATE BUTTON
+
+When expanded, the "⏻ Shutdown" text changes to "✅ Reactivate":
+
+```
+│ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─    │
+│                                     │
+│ Shutdown on: March 25, 2026         │
+│ Reason: Equipment breakdown         │
+│ Notes: Motor replacement needed     │
+│                                     │
+│ ✅ Reactivate                        │
+│                                     │
+```
+
+**Shutdown info:**
+
+| Property | Value |
+|---|---|
+| Font size | 11px |
+| Color | Grey (#6b7280) |
+| Labels | "Shutdown on:", "Reason:", "Notes:" — font-weight 500 |
+| Values | font-weight 400 |
+
+**Reactivate text:**
+
+| Property | Value |
+|---|---|
+| Text | "✅ Reactivate" |
+| Font size | 11px |
+| Font weight | 500 |
+| Color | Green (#16a34a) |
+| Cursor | Pointer |
+| Hover | Darker green (#15803d), underline |
+
+### REACTIVATE CONFIRMATION
+
+```
+╔══════════════════════════════════════════════════════════╗
+║                                                          ║
+║  ✅ Reactivate Feedmill 1                           ✕   ║
+║                                                          ║
+║  This will bring Feedmill 1 back online, resuming        ║
+║  production on Line 1 and Line 2.                        ║
+║                                                          ║
+║  Previously diverted orders can be reverted back         ║
+║  to their original lines via right-click → Revert.       ║
+║                                                          ║
+║                    [Cancel]    [Confirm Reactivate]       ║
+║                                                          ║
+╚══════════════════════════════════════════════════════════╝
+```
+
+| Button | Styling |
+|---|---|
+| Confirm Reactivate | Green filled (#16a34a). White text, font-weight 600 |
+
+---
+
+### 4. YELLOW/GOLD LEFT BORDER — DIVERTABLE ORDERS
+
+When a feedmill is shutdown, orders on the affected lines that CAN be diverted (have run rates on other lines in KB) get a thick yellow/gold left border.
+
+### WHICH ORDERS GET THE BORDER
+
+```javascript
+function canOrderBeDiverted(order, shutdownLines, knowledgeBase) {
+  // Check if the order is on a shutdown line
+  if (!shutdownLines.includes(order.line)) return false;
+  
+  // Check if order is active (not Done, not Cancelled)
+  if (order.status === 'Done' || order.status === 'Cancel PO') return false;
+  
+  // Check Knowledge Base for run rates on OTHER lines (not in shutdown feedmill)
+  const product = knowledgeBase.find(p => p.material_code === order.material_code);
+  if (!product) return false;
+  
+  const rateMap = {
+    'Line 1': product.l1_rate || 0,
+    'Line 2': product.l2_rate || 0,
+    'Line 3': product.l3_rate || 0,
+    'Line 4': product.l4_rate || 0,
+    'Line 5': product.l5_rate || 0,
+    'Line 6': product.l6_rate || 0,
+    'Line 7': product.l7_rate || 0,
+  };
+  
+  // Find lines NOT in the shutdown feedmill that have rate > 0
+  const availableLines = Object.entries(rateMap)
+    .filter(([line, rate]) => rate > 0 && !shutdownLines.includes(line))
+    .map(([line, rate]) => ({ line, rate }));
+  
+  return availableLines.length > 0;
+}
+```
+
+### BORDER STYLING
+
+```css
+.order-row-divertable {
+  border-left: 4px solid #eab308 !important; /* gold/yellow */
+}
+```
+
+| Property | Value |
+|---|---|
+| Border-left | 4px solid #eab308 (gold) |
+| Applied to | Entire row (all cells) |
+| Only on | Orders that can be diverted (active + has alternative lines) |
+| NOT on | Done orders, Cancelled orders, orders with no alternative lines |
+
+### ORDERS WITHOUT ALTERNATIVE — NO BORDER
+
+Orders on shutdown lines that have NO run rate history on other lines:
+- No yellow/gold border
+- No divert option in right-click menu
+- They stay in place but are effectively blocked
+- Consider showing a subtle red/amber indicator that production is halted
+
+```css
+.order-row-blocked {
+  background: #fef2f2; /* very light red */
+  opacity: 0.7;
+}
+```
+
+---
+
+### 5. RIGHT-CLICK MENU — DIVERT ORDER OPTION
+
+When user right-clicks on a row with yellow/gold border (divertable):
+
+```
+┌────────────────────────────────────┐
+│ 💬 Leave a comment                  │
+│ 🕐 View order history               │
+│ 🔄 Divert order                     │
+├────────────────────────────────────┤
+│ ○  🟣  🟢  🟠                       │
+└────────────────────────────────────┘
+```
+
+- "🔄 Divert order" ONLY appears for divertable rows (yellow/gold border)
+- NOT visible for non-divertable rows or normal rows
+
+### DIVERT MENU ITEM STYLING
+
+| Property | Value |
+|---|---|
+| Icon | 🔄 |
+| Text | "Divert order" |
+| Font size | 12px |
+| Color | Gold (#b45309) |
+| Hover background | Light gold (#fef9c3) |
+
+---
+
+### 6. RIGHT-CLICK MENU — REVERT ORDER OPTION
+
+For orders that were previously diverted AND the original feedmill is now reactivated:
+
+```
+┌────────────────────────────────────┐
+│ 💬 Leave a comment                  │
+│ 🕐 View order history               │
+│ ↩ Revert order                      │
+├────────────────────────────────────┤
+│ ○  🟣  🟢  🟠                       │
+└────────────────────────────────────┘
+```
+
+For orders that were diverted AND want to divert again to another line (original still shutdown):
+
+```
+┌────────────────────────────────────┐
+│ 💬 Leave a comment                  │
+│ 🕐 View order history               │
+│ 🔄 Divert order                     │
+├────────────────────────────────────┤
+│ ○  🟣  🟢  🟠                       │
+└────────────────────────────────────┘
+```
+
+### RIGHT-CLICK MENU LOGIC
+
+```javascript
+function getRightClickOptions(order) {
+  const options = ['comment', 'history'];
+  
+  if (order.isDiverted && isOriginalFeedmillActive(order.originalLine)) {
+    // Original feedmill is back — offer revert
+    options.push('revert');
+  }
+  
+  if (order.isDivertable && !order.isDiverted) {
+    // On shutdown line, can be diverted
+    options.push('divert');
+  }
+  
+  if (order.isDiverted && !isOriginalFeedmillActive(order.originalLine)) {
+    // Already diverted but original still shutdown — can divert again to different line
+    options.push('divert');
+  }
+  
+  return options;
+}
+```
+
+### REVERT MENU ITEM STYLING
+
+| Property | Value |
+|---|---|
+| Icon | ↩ |
+| Text | "Revert order" |
+| Font size | 12px |
+| Color | Green (#16a34a) |
+| Hover background | Light green (#f0fdf4) |
+
+---
+
+### 7. DIVERSION DIALOG
+
+When user clicks "🔄 Divert order", a dialog opens showing the order details, available lines, AI impact assessment, and confirmation.
+
+### DIALOG LAYOUT
+
+```
+╔══════════════════════════════════════════════════════════════╗
+║                                                              ║
+║  🔄 Divert Order                                        ✕   ║
+║                                                              ║
+║  ┌─ Order Summary ────────────────────────────────────────┐  ║
+║  │                                                        │  ║
+║  │  Material Code:    1000000000241     Volume: 80 MT     │  ║
+║  │  Item:             Elite XP Startex  Batches: 20       │  ║
+║  │  Form:             MP                Prod Time: 4.19h  │  ║
+║  │  Current Line:     Line 1 (SHUTDOWN) Avail: Mar 28     │  ║
+║  │                                                        │  ║
+║  └────────────────────────────────────────────────────────┘  ║
+║                                                              ║
+║  ┌─ Available Lines ──────────────────────────────────────┐  ║
+║  │                                                        │  ║
+║  │  ⭐ Recommended: Line 3 (rate: 22.80 MT/hr)           │  ║
+║  │     Feedmill 2 · Best run rate among available lines   │  ║
+║  │     AI: "Line 3 offers the fastest production rate.    │  ║
+║  │     Inserting at Priority 5 accommodates the order     │  ║
+║  │     without delays to existing schedule."              │  ║
+║  │                                                        │  ║
+║  │  ○ Line 4 (rate: 18.70 MT/hr)                         │  ║
+║  │    Feedmill 2 · Also available in same feedmill        │  ║
+║  │    AI: "Line 4 is a viable alternative in the same     │  ║
+║  │    feedmill. Slightly lower rate but no scheduling     │  ║
+║  │    conflicts."                                         │  ║
+║  │                                                        │  ║
+║  │  ○ Line 6 (rate: 12.50 MT/hr)                         │  ║
+║  │    Feedmill 3 · Different feedmill                     │  ║
+║  │    AI: "Line 6 can produce this product but at a       │  ║
+║  │    significantly lower rate. Consider only if Lines    │  ║
+║  │    3 and 4 are at capacity."                           │  ║
+║  │                                                        │  ║
+║  └────────────────────────────────────────────────────────┘  ║
+║                                                              ║
+║  ┌─ 🤖 Impact Analysis ──────────────────────────────────┐  ║
+║  │                                                        │  ║
+║  │  📍 Insertion Position:                                │  ║
+║  │  Order will be placed at Priority 5 on Line 3,        │  ║
+║  │  between "Gallimax Pigeon Pellet" and "Elite XP        │  ║
+║  │  Growex."                                              │  ║
+║  │                                                        │  ║
+║  │  ⏱ Production Impact:                                 │  ║
+║  │  Production time on Line 3: 3.51 hours (vs 4.19       │  ║
+║  │  hours on original Line 1). Changeover: 0.17 hours.   │  ║
+║  │                                                        │  ║
+║  │  ⚠ Downstream Effects:                                │  ║
+║  │  3 orders on Line 3 will shift down by 1 position.    │  ║
+║  │                                                        │  ║
+║  │  📅 Deadline Risk:                                     │  ║
+║  │  No orders at risk of missing deadlines.               │  ║
+║  │                                                        │  ║
+║  └────────────────────────────────────────────────────────┘  ║
+║                                                              ║
+║                      [Cancel]    [Confirm Diversion]         ║
+║                                                              ║
+╚══════════════════════════════════════════════════════════════╝
+```
+
+### DIALOG STYLING
+
+| Property | Value |
+|---|---|
+| Max width | 600px |
+| Max height | 80vh |
+| Overflow-y | Auto (scrollable) |
+| Background | White |
+| Border-radius | 12px |
+| Padding | 24px 28px |
+| Overlay | rgba(0,0,0,0.4) |
+| Close on background | ❌ No |
+
+### ORDER SUMMARY SECTION
+
+| Property | Value |
+|---|---|
+| Background | Light grey (#f9fafb) |
+| Border | 1px solid #e5e7eb |
+| Border-radius | 8px |
+| Padding | 14px 18px |
+| Grid | 2 columns (label: value, label: value) |
+| Labels | 11px, grey (#6b7280), font-weight 400 |
+| Values | 12px, dark text (#1a1a1a), font-weight 600 |
+| "SHUTDOWN" badge | Red (#e53935), 9px, font-weight 700, bg light red (#fef2f2), padding 2px 6px, border-radius 3px |
+
+### AVAILABLE LINES SECTION
+
+| Property | Value |
+|---|---|
+| Background | White |
+| Border | 1px solid #e5e7eb |
+| Border-radius | 8px |
+| Padding | 14px 18px |
+
+**Recommended line (top):**
+
+| Property | Value |
+|---|---|
+| Left indicator | ⭐ star icon |
+| Label | "Recommended: [Line] (rate: X MT/hr)" |
+| Label font | 12px, font-weight 600, dark blue (#1e40af) |
+| Feedmill note | 11px, grey (#6b7280) |
+| AI comment | 11px, italic, grey (#4b5563), light blue background (#eff6ff), padding 8px, border-radius 4px, margin-top 6px |
+| Radio button | Filled/selected by default |
+| Border-left | 3px solid #3b82f6 (blue) |
+| Padding | 12px |
+
+**Other available lines:**
+
+| Property | Value |
+|---|---|
+| Left indicator | ○ empty radio |
+| Label | "[Line] (rate: X MT/hr)" |
+| Label font | 12px, font-weight 500, dark text (#374151) |
+| Feedmill note | 11px, grey (#6b7280) |
+| AI comment | 11px, italic, grey (#4b5563), light grey background (#f9fafb), padding 8px, border-radius 4px |
+| Radio button | Empty — clickable to select |
+| Border-left | 3px solid #e5e7eb (grey) |
+| Padding | 12px |
+| Separator | 1px solid #f3f4f6 between lines |
+
+**When user selects a different line:**
+- Radio fills for selected line
+- Impact Analysis section below re-generates for the selected line
+- Recommended line keeps ⭐ but radio becomes empty
+
+### IMPACT ANALYSIS SECTION
+
+Same format as the Add New Order impact analysis:
+
+| Property | Value |
+|---|---|
+| Background | Light orange (#fff7ed) |
+| Border | 1px solid #fed7aa |
+| Border-radius | 8px |
+| Padding | 14px 18px |
+| Font size | 11px |
+| Content | App pre-calculates, AI generates narrative |
+
+Topics:
+- 📍 **Insertion Position:** — where it will be placed on the target line
+- ⏱ **Production Impact:** — time comparison (original vs new line)
+- ⚠ **Downstream Effects:** — orders that shift on the target line
+- 📅 **Deadline Risk:** — any deadline concerns
+
+### BUTTONS
+
+| Button | Styling |
+|---|---|
+| Cancel | Grey outlined. Border: 1px solid #d1d5db |
+| Confirm Diversion | Gold filled (#eab308). Dark text (#1a1a1a), font-weight 600 |
+
+---
+
+### 8. REVERT DIALOG
+
+When user right-clicks a diverted order and selects "↩ Revert order":
+
+```
+╔══════════════════════════════════════════════════════════════╗
+║                                                              ║
+║  ↩ Revert Order                                         ✕   ║
+║                                                              ║
+║  ┌─ Order Summary ────────────────────────────────────────┐  ║
+║  │                                                        │  ║
+║  │  Item:             Elite XP Startex  Volume: 80 MT     │  ║
+║  │  Original Line:    Line 1 (Feedmill 1) ✅ Active       │  ║
+║  │  Current Line:     Line 3 (Feedmill 2)                 │  ║
+║  │  Diverted on:      March 25, 2026                      │  ║
+║  │  Reason:           Equipment breakdown                 │  ║
+║  │                                                        │  ║
+║  └────────────────────────────────────────────────────────┘  ║
+║                                                              ║
+║  ┌─ 🤖 Impact Analysis ──────────────────────────────────┐  ║
+║  │                                                        │  ║
+║  │  📍 Insertion Position:                                │  ║
+║  │  Order will return to Line 1 at Priority 3...          │  ║
+║  │                                                        │  ║
+║  │  ⏱ Production Impact:                                 │  ║
+║  │  Production time on Line 1: 4.19 hours...              │  ║
+║  │                                                        │  ║
+║  │  ⚠ Effects on Line 3 (current):                       │  ║
+║  │  Removing this order frees 3.51 hours on Line 3...     │  ║
+║  │                                                        │  ║
+║  │  ⚠ Effects on Line 1 (target):                        │  ║
+║  │  2 orders will shift down by 1 position...             │  ║
+║  │                                                        │  ║
+║  └────────────────────────────────────────────────────────┘  ║
+║                                                              ║
+║                      [Cancel]    [Confirm Revert]            ║
+║                                                              ║
+╚══════════════════════════════════════════════════════════════╝
+```
+
+### REVERT DIALOG — SPECIAL FIELDS
+
+| Field | Value |
+|---|---|
+| "Original Line" | Shows line name + feedmill + ✅ Active badge (green) |
+| "Current Line" | Shows current diverted line + feedmill |
+| "Diverted on" | Date when diversion happened |
+| "Reason" | Original shutdown reason |
+
+### CONFIRM REVERT BUTTON
+
+| Property | Value |
+|---|---|
+| Background | Green (#16a34a) |
+| Text | White, font-weight 600 |
+
+---
+
+### 9. DATA TRACKING — DIVERTED ORDERS
+
+Store diversion history on each order:
+
+```javascript
+order.diversion = {
+  isDiverted: true,
+  originalLine: 'Line 1',
+  originalFeedmill: 'Feedmill 1',
+  currentLine: 'Line 3',
+  currentFeedmill: 'Feedmill 2',
+  divertedAt: '2026-03-25T10:30:00',
+  shutdownReason: 'Equipment breakdown',
+  shutdownNotes: 'Motor replacement needed',
+  history: [
+    { from: 'Line 1', to: 'Line 3', date: '2026-03-25', reason: 'Feedmill 1 shutdown' },
+  ]
+};
+```
+
+### FEEDMILL SHUTDOWN STATE
+
+```javascript
+const feedmillStatus = {
+  'FM1': { 
+    isShutdown: true, 
+    shutdownDate: '2026-03-25',
+    reason: 'Equipment breakdown',
+    notes: 'Motor replacement needed',
+    affectedLines: ['Line 1', 'Line 2'],
+    affectedOrders: 15,
+    divertableOrders: 12,
+    blockedOrders: 3
+  },
+  'FM2': { isShutdown: false },
+  'FM3': { isShutdown: false },
+  'PMX': { isShutdown: false }
+};
+```
+
+---
+
+### 10. AI PROMPT FOR DIVERSION IMPACT
+
+```javascript
+function buildDiversionPrompt(order, selectedLine, calculations) {
+  return `
+Generate an impact analysis for diverting a production order.
+Use ONLY the pre-calculated data provided.
+
+RULES:
+- Do NOT recalculate positions or impacts
+- Use product names, not codes
+- Dates as "March 25"
+- Mention both the original and target lines
+- Compare production times between lines
+- Topic headings on their own line
+- Only bold headings
+
+PRE-CALCULATED DATA:
+${JSON.stringify(calculations)}
+
+ORDER:
+Product: ${order.itemDescription}
+Volume: ${order.volume} MT
+Original Line: ${order.originalLine} (SHUTDOWN)
+Target Line: ${selectedLine.line}
+Target Rate: ${selectedLine.rate} MT/hr
+Original Rate: ${order.originalRate} MT/hr
+New Production Time: ${calculations.newProductionTime} hrs
+Original Production Time: ${calculations.originalProductionTime} hrs
+Insertion Position: Priority ${calculations.insertPosition}
+Orders Shifted: ${calculations.downstream.totalAffected}
+
+GENERATE:
+📍 **Insertion Position:**
+Where it goes on the target line and between which orders.
+
+⏱ **Production Impact:**
+Compare original vs new production time. Note if faster or slower.
+
+⚠ **Downstream Effects:**
+How many orders shift on the target line.
+
+📅 **Deadline Risk:**
+Any deadline concerns.
+  `;
+}
+```
+
+---
+
+### 11. ORDER TABLE — DIVERTED ORDER INDICATOR
+
+Orders that have been diverted show a subtle indicator in the order table:
+
+```
+┌──────┬────────┬─────────────────────────────────────────┬──────────┐
+│ Prio │ FPR    │ Item Description                         │ Volume   │
+├──────┼────────┼─────────────────────────────────────────┼──────────┤
+│  5   │ 260325 │ Elite XP Startex, Mini-pellet 50kg       │ 80 MT    │
+│      │        │ Hogs · ↩ Diverted from Line 1            │          │
+└──────┴────────┴─────────────────────────────────────────┴──────────┘
+```
+
+**"↩ Diverted from Line 1" subtitle:**
+
+| Property | Value |
+|---|---|
+| Font size | 10px |
+| Color | Gold (#b45309) |
+| Font weight | 400 |
+| Icon | ↩ |
+| Position | Below the category text in Item Description |
+```

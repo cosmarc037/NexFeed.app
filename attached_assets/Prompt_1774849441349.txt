@@ -1,0 +1,289 @@
+```
+Implement the following fix to the NexFeed application:
+
+---
+
+## FIX: DATE PARSING — SUPPORT ALL MONTHS, NOT JUST MARCH
+
+The app is currently only correctly parsing dates with "Mar" (March). When uploading files in April or other months, dates are not parsed correctly. Fix the date parsing to support ALL months consistently.
+
+---
+
+### THE PROBLEM
+
+- "Mar 28" → ✅ Correctly parsed as March 28
+- "Apr 15" → ❌ Not parsed correctly
+- "May 10" → ❌ Not parsed correctly
+- Any non-March month → ❌ Fails
+
+---
+
+### THE FIX
+
+Replace any hardcoded or March-specific date parsing with a universal parser that handles ALL month formats.
+
+### SUPPORTED DATE FORMATS
+
+The app should correctly parse ALL of these formats:
+
+| Format | Example |
+|---|---|
+| "MMM DD" | "Mar 28", "Apr 15", "May 10" |
+| "MMM DD, YYYY" | "Mar 28, 2026", "Apr 15, 2026" |
+| "MM/DD/YYYY" | "03/28/2026", "04/15/2026" |
+| "YYYY-MM-DD" | "2026-03-28", "2026-04-15" |
+| "Month DD" | "March 28", "April 15" |
+| "Month DD, YYYY" | "March 28, 2026", "April 15, 2026" |
+| "DD-MMM-YY" | "28-Mar-26", "15-Apr-26" |
+| "DD-MMM-YYYY" | "28-Mar-2026", "15-Apr-2026" |
+| "M/D/YYYY" | "3/28/2026", "4/15/2026" |
+| "MM-DD-YYYY" | "03-28-2026", "04-15-2026" |
+
+### MONTH MAPPING
+
+```javascript
+const MONTH_MAP = {
+  // Full names
+  'january': 0, 'february': 1, 'march': 2, 'april': 3,
+  'may': 4, 'june': 5, 'july': 6, 'august': 7,
+  'september': 8, 'october': 9, 'november': 10, 'december': 11,
+  
+  // 3-letter abbreviations
+  'jan': 0, 'feb': 1, 'mar': 2, 'apr': 3,
+  'may': 4, 'jun': 5, 'jul': 6, 'aug': 7,
+  'sep': 8, 'oct': 9, 'nov': 10, 'dec': 11,
+};
+```
+
+### UNIVERSAL DATE PARSER
+
+```javascript
+function parseDate(dateStr) {
+  if (!dateStr) return null;
+  
+  // If already a Date object
+  if (dateStr instanceof Date) {
+    return isNaN(dateStr.getTime()) ? null : dateStr;
+  }
+  
+  // Convert to string and trim
+  const str = String(dateStr).trim();
+  if (!str || str === '' || str === '-' || str === '—') return null;
+  
+  // Skip non-date strings
+  const nonDateValues = [
+    'prio replenish', 'safety stocks', 'safety stock',
+    'n/a', 'na', 'tbd', 'tba', 'none', 'null', 'undefined'
+  ];
+  if (nonDateValues.includes(str.toLowerCase())) return null;
+  
+  // Try multiple parsing strategies
+  let date = null;
+  
+  // Strategy 1: ISO format "YYYY-MM-DD"
+  date = tryParseISO(str);
+  if (date) return date;
+  
+  // Strategy 2: "MMM DD" or "MMM DD, YYYY" (e.g., "Mar 28" or "Apr 15, 2026")
+  date = tryParseMonthNameFirst(str);
+  if (date) return date;
+  
+  // Strategy 3: "DD-MMM-YY" or "DD-MMM-YYYY" (e.g., "28-Mar-26" or "15-Apr-2026")
+  date = tryParseDayMonthName(str);
+  if (date) return date;
+  
+  // Strategy 4: "MM/DD/YYYY" or "M/D/YYYY"
+  date = tryParseSlashFormat(str);
+  if (date) return date;
+  
+  // Strategy 5: "MM-DD-YYYY"
+  date = tryParseDashNumeric(str);
+  if (date) return date;
+  
+  // Strategy 6: Native Date.parse as fallback
+  date = tryParseNative(str);
+  if (date) return date;
+  
+  return null;
+}
+
+// ISO: "2026-03-28" or "2026-04-15"
+function tryParseISO(str) {
+  const match = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (match) {
+    const year = parseInt(match[1]);
+    const month = parseInt(match[2]) - 1;
+    const day = parseInt(match[3]);
+    const date = new Date(year, month, day);
+    if (!isNaN(date.getTime())) return date;
+  }
+  return null;
+}
+
+// "Mar 28", "March 28", "Apr 15, 2026", "April 15, 2026"
+function tryParseMonthNameFirst(str) {
+  const match = str.match(/^([a-zA-Z]+)\s+(\d{1,2})(?:\s*,?\s*(\d{4}))?/);
+  if (match) {
+    const monthStr = match[1].toLowerCase();
+    const day = parseInt(match[2]);
+    let year = match[3] ? parseInt(match[3]) : new Date().getFullYear();
+    
+    const month = MONTH_MAP[monthStr];
+    if (month !== undefined) {
+      const date = new Date(year, month, day);
+      if (!isNaN(date.getTime())) return date;
+    }
+  }
+  return null;
+}
+
+// "28-Mar-26", "15-Apr-2026", "28 Mar 2026"
+function tryParseDayMonthName(str) {
+  const match = str.match(/^(\d{1,2})[\s\-\/]([a-zA-Z]+)[\s\-\/]?(\d{2,4})?/);
+  if (match) {
+    const day = parseInt(match[1]);
+    const monthStr = match[2].toLowerCase();
+    let year = match[3] ? parseInt(match[3]) : new Date().getFullYear();
+    
+    // Handle 2-digit year
+    if (year < 100) {
+      year += 2000;
+    }
+    
+    const month = MONTH_MAP[monthStr];
+    if (month !== undefined) {
+      const date = new Date(year, month, day);
+      if (!isNaN(date.getTime())) return date;
+    }
+  }
+  return null;
+}
+
+// "03/28/2026", "3/28/2026", "04/15/2026"
+function tryParseSlashFormat(str) {
+  const match = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
+  if (match) {
+    const month = parseInt(match[1]) - 1;
+    const day = parseInt(match[2]);
+    let year = parseInt(match[3]);
+    
+    if (year < 100) year += 2000;
+    
+    if (month >= 0 && month <= 11 && day >= 1 && day <= 31) {
+      const date = new Date(year, month, day);
+      if (!isNaN(date.getTime())) return date;
+    }
+  }
+  return null;
+}
+
+// "03-28-2026", "04-15-2026"
+function tryParseDashNumeric(str) {
+  const match = str.match(/^(\d{1,2})-(\d{1,2})-(\d{2,4})/);
+  if (match) {
+    const first = parseInt(match[1]);
+    const second = parseInt(match[2]);
+    let year = parseInt(match[3]);
+    
+    if (year < 100) year += 2000;
+    
+    // Assume MM-DD-YYYY
+    if (first >= 1 && first <= 12 && second >= 1 && second <= 31) {
+      const date = new Date(year, first - 1, second);
+      if (!isNaN(date.getTime())) return date;
+    }
+  }
+  return null;
+}
+
+// Fallback: native Date.parse
+function tryParseNative(str) {
+  const timestamp = Date.parse(str);
+  if (!isNaN(timestamp)) {
+    return new Date(timestamp);
+  }
+  return null;
+}
+```
+
+---
+
+### APPLY EVERYWHERE
+
+Search the ENTIRE codebase for any date parsing and replace with the universal `parseDate()` function. Common places to check:
+
+| Location | What to fix |
+|---|---|
+| SAP order upload | Parsing avail dates from uploaded files |
+| N10D file upload | Parsing dates from Next 10 Days file |
+| Order table display | Formatting dates for display |
+| Auto-sequence | Sorting by avail date |
+| Impact analysis | Calculating deadlines |
+| Safety stock insights | Target date parsing |
+| FPR date parsing | Converting YYMMDD FPR codes |
+| Add New Order | Parsing user-entered avail dates |
+| Combine orders | Comparing avail dates |
+| Diversion feature | Checking dates for diverted orders |
+| Export/PDF report | Filtering orders by month |
+| Line Status Monitoring | Grouping orders by month |
+
+### SEARCH FOR THESE PATTERNS AND REPLACE
+
+```javascript
+// WRONG — hardcoded March or limited parsing
+if (dateStr.includes('Mar')) { ... }
+if (dateStr.startsWith('Mar')) { ... }
+new Date(dateStr) // unreliable, browser-dependent
+Date.parse(dateStr) // unreliable as sole method
+
+// CORRECT — use universal parser
+const date = parseDate(dateStr);
+```
+
+---
+
+### DISPLAY FORMAT
+
+When displaying dates, use a consistent format:
+
+```javascript
+function formatDate(date) {
+  if (!date || isNaN(date.getTime())) return '—';
+  
+  const months = [
+    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+  ];
+  
+  return `${months[date.getMonth()]} ${date.getDate()}, ${date.getFullYear()}`;
+}
+
+// Examples:
+// formatDate(new Date(2026, 2, 28)) → "Mar 28, 2026"
+// formatDate(new Date(2026, 3, 15)) → "Apr 15, 2026"
+// formatDate(new Date(2026, 11, 25)) → "Dec 25, 2026"
+```
+
+---
+
+### VERIFICATION
+
+After fix, test with these dates:
+
+| Input | Expected output |
+|---|---|
+| "Mar 28" | March 28, 2026 ✅ |
+| "Apr 15" | April 15, 2026 ✅ |
+| "May 10" | May 10, 2026 ✅ |
+| "Jun 1" | June 1, 2026 ✅ |
+| "Jul 22, 2026" | July 22, 2026 ✅ |
+| "August 5" | August 5, 2026 ✅ |
+| "Sep 30, 2026" | September 30, 2026 ✅ |
+| "10/15/2026" | October 15, 2026 ✅ |
+| "2026-11-20" | November 20, 2026 ✅ |
+| "25-Dec-2026" | December 25, 2026 ✅ |
+| "prio replenish" | null (not a date) ✅ |
+| "safety stocks" | null (not a date) ✅ |
+| "" | null ✅ |
+| null | null ✅ |
+```

@@ -1,0 +1,88 @@
+Implement the following changes to the NexFeed application:
+
+---
+
+## 1. COMPLETION DATE — INCREASE FONT SIZE
+
+Increase the font size of the Completion Date column values to improve readability.
+
+- Line 1 (date — MMMM DD, YYYY): Increase font size to match the same size as other primary column values like Start Date and Avail Date Line 1. Ensure it is NOT smaller or lighter than other date columns.
+- Line 2 (Time: HH:MM AM/PM): Remains smaller grey text (#a1a8b3) but should also be slightly larger than its current size for better readability.
+- The Completion Date column width should accommodate the larger text without truncation.
+
+---
+
+## 2. AVAIL DATE — FPR-BASED YEAR INFERENCE LOGIC
+
+The current Avail Date parsing is incorrectly assigning years (e.g., "TLD | Jan 02" with FPR "251229" is being parsed as January 2027 instead of January 2026). Implement the following year inference logic:
+
+**Step 1 — Extract the FPR date context:**
+- The FPR column contains a date in YYMMDD format (e.g., "251229" = December 29, 2025).
+- Parse the FPR value to extract the FPR year and FPR month.
+- Example: FPR "251229" → FPR Year = 2025, FPR Month = December.
+
+**Step 2 — Extract the parsed month from Remarks:**
+- From the Remarks date text (e.g., "Jan 02"), extract the target month and day.
+- Example: "Jan 02" → Target Month = January, Target Day = 2.
+
+**Step 3 — Determine the correct year using these rules (applied in order):**
+
+**Rule A — Same year as FPR:**
+If the target month is the SAME as or LATER than the FPR month within the same calendar year, AND the resulting date is reasonable (not more than 6 months after the FPR date), assign the FPR year.
+Example: FPR = "251015" (Oct 15, 2025), Remarks = "TLD | Nov 10" → Avail Date = November 10, 2025.
+
+**Rule B — Next year (cross-year rollover):**
+If the target month is EARLIER than the FPR month (suggesting a year rollover), assign the NEXT calendar year after the FPR year.
+Example: FPR = "251229" (Dec 29, 2025), Remarks = "TLD | Jan 02" → Avail Date = January 02, 2026.
+Example: FPR = "251115" (Nov 15, 2025), Remarks = "TLD | Feb 10" → Avail Date = February 10, 2026.
+
+**Rule C — Reasonableness check:**
+The inferred Avail Date must NOT be more than 6 months after the FPR date. If it exceeds 6 months, flag it with a warning icon (⚠) in the Avail Date cell and display a tooltip: "Inferred date is more than 6 months from order date — please verify."
+The date is still stored and displayed, but the warning alerts the user to verify.
+
+**Rule D — Current date cross-check:**
+If the current real-world date is available, use it as an additional reference:
+- The inferred Avail Date should generally be in the future or very recent past relative to the current date.
+- If the inferred date is more than 3 months in the PAST relative to the current date, flag it with the same warning icon and tooltip: "Inferred date appears to be in the past — please verify."
+
+**Summary of year inference examples:**
+- FPR "251229", Remarks "TLD | Jan 02" → January 02, 2026 ✓ (Rule B: Jan < Dec, next year)
+- FPR "251229", Remarks "TLD | Jan 06" → January 06, 2026 ✓ (Rule B: Jan < Dec, next year)
+- FPR "251015", Remarks "TLD | Nov 10" → November 10, 2025 ✓ (Rule A: Nov ≥ Oct, same year)
+- FPR "250305", Remarks "TLD | Mar 15" → March 15, 2025 ✓ (Rule A: Mar = Mar, same year)
+- FPR "250305", Remarks "TLD | Jan 10" → January 10, 2026 ✓ (Rule B: Jan < Mar, next year)
+- FPR "251229", Remarks "TLD | Dec 30" → December 30, 2025 ✓ (Rule A: Dec = Dec, same year)
+
+**Display when flagged with warning (Rules C or D):**
+- Line 1: January 02, 2026 (formatted date)
+- Line 2: ⚠ TLD | Jan 02 (original Remarks text with warning indicator, smaller grey text)
+- Tooltip on the ⚠ icon explains the specific concern.
+
+---
+
+## 3. SFG1 FROM SAP — DO NOT MAP TO PRODUCTION ORDER SFG1
+
+The SAP file contains a column called "SFG1". This column must NOT be mapped to the Production Order SFG1 column in the application. They are different fields.
+
+**Changes:**
+
+**SAP SFG1 column:**
+- During file parsing, the SAP "SFG1" value must be extracted and stored temporarily in a holding field (e.g., internal field "SAP_SFG1" or similar).
+- It is NOT discarded — it will be mapped to a new column in a future update. For now, store it but do not display it in any existing column.
+- Do NOT place it in the Production Order SFG1 column.
+
+**Production Order SFG1 column:**
+- This column is now a blank, user-entered editable text field (same behavior as Production Order FG1).
+- Blank by default on upload.
+- Editable by the user.
+
+**Editability by status (same as FG1):**
+- Plotted, In production, On-going *, Cut, Combine, Hold: Editable
+- Done, Cancel PO: Read-only
+
+**Update the Editability Matrix to include SFG1:**
+
+Field              Plotted  InProd  On-going*  Done  Cut  Combine  Hold  Cancel
+-----------------  ------   ------  ---------  ----  ---  -------  ----  ------
+FG1 (Prod Order)   E        E       E          R     E    E        E     R
+SFG1 (Prod Order)  E        E       E          R     E    E        E     R

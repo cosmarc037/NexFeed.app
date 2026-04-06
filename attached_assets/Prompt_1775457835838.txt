@@ -1,0 +1,819 @@
+```
+Implement the following fixes to the Smart Assistant chatbot:
+
+---
+
+## FIX: CHATBOT RESPONSE FORMATTING — VISUALLY STRUCTURED AND READABLE
+
+The chatbot responses currently display as raw text with broken markdown tables and unformatted lists. Fix the response rendering to display structured, visually appealing content.
+
+---
+
+### 1. RESPONSE RENDERER — PARSE AND FORMAT AI OUTPUT
+
+Replace the simple text display with a rich content renderer:
+
+```jsx
+function ChatMessage({ message }) {
+  if (message.role === 'user') {
+    return (
+      <div className="chat-msg chat-msg-user">
+        <div className="chat-msg-bubble">
+          <p>{message.content}</p>
+        </div>
+      </div>
+    );
+  }
+  
+  return (
+    <div className="chat-msg chat-msg-assistant">
+      <div className="chat-msg-bubble">
+        <FormattedResponse content={message.content} />
+      </div>
+    </div>
+  );
+}
+
+function FormattedResponse({ content }) {
+  const sections = parseResponseContent(content);
+  
+  return (
+    <div className="chat-formatted">
+      {sections.map((section, index) => {
+        switch (section.type) {
+          case 'text':
+            return <p key={index} className="chat-text">{section.content}</p>;
+          
+          case 'table':
+            return <ChatTable key={index} headers={section.headers} rows={section.rows} />;
+          
+          case 'list':
+            return <ChatList key={index} items={section.items} ordered={section.ordered} />;
+          
+          case 'lineCard':
+            return <LineCard key={index} data={section.data} />;
+          
+          case 'productCard':
+            return <ProductCard key={index} data={section.data} />;
+          
+          case 'header':
+            return <div key={index} className="chat-section-header">{section.content}</div>;
+          
+          case 'divider':
+            return <div key={index} className="chat-divider" />;
+          
+          case 'highlight':
+            return <div key={index} className={`chat-highlight chat-highlight-${section.level}`}>{section.content}</div>;
+          
+          default:
+            return <p key={index} className="chat-text">{section.content}</p>;
+        }
+      })}
+    </div>
+  );
+}
+```
+
+---
+
+### 2. CONTENT PARSER
+
+```javascript
+function parseResponseContent(content) {
+  if (!content) return [{ type: 'text', content: '' }];
+  
+  const sections = [];
+  const lines = content.split('\n');
+  let i = 0;
+  
+  while (i < lines.length) {
+    const line = lines[i].trim();
+    
+    // Skip empty lines
+    if (!line) {
+      i++;
+      continue;
+    }
+    
+    // Detect markdown table
+    if (line.includes('|') && lines[i + 1] && lines[i + 1].includes('---')) {
+      const table = parseMarkdownTable(lines, i);
+      if (table) {
+        sections.push(table.section);
+        i = table.endIndex + 1;
+        continue;
+      }
+    }
+    
+    // Detect line-by-line data blocks (Line 1: ... pattern)
+    if (line.match(/^(Line \d+|Feedmill \d+|Powermix)/i) && line.includes(':')) {
+      const block = parseDataBlock(lines, i);
+      sections.push(block.section);
+      i = block.endIndex + 1;
+      continue;
+    }
+    
+    // Detect numbered lists
+    if (line.match(/^\d+\.\s/)) {
+      const list = parseNumberedList(lines, i);
+      sections.push(list.section);
+      i = list.endIndex + 1;
+      continue;
+    }
+    
+    // Detect bullet lists
+    if (line.match(/^[-•*]\s/)) {
+      const list = parseBulletList(lines, i);
+      sections.push(list.section);
+      i = list.endIndex + 1;
+      continue;
+    }
+    
+    // Detect headers (bold text or text ending with :)
+    if (line.match(/^\*\*.*\*\*$/) || line.match(/^#+\s/)) {
+      const headerText = line.replace(/\*\*/g, '').replace(/^#+\s/, '').trim();
+      sections.push({ type: 'header', content: headerText });
+      i++;
+      continue;
+    }
+    
+    // Regular text
+    let textBlock = line;
+    i++;
+    while (i < lines.length && lines[i].trim() && 
+           !lines[i].trim().match(/^[\|#*\-•\d]/) &&
+           !lines[i].trim().match(/^(Line \d+|Feedmill \d+|Powermix)/i)) {
+      textBlock += ' ' + lines[i].trim();
+      i++;
+    }
+    sections.push({ type: 'text', content: textBlock });
+  }
+  
+  return sections.length > 0 ? sections : [{ type: 'text', content: content }];
+}
+
+function parseMarkdownTable(lines, startIndex) {
+  try {
+    const headerLine = lines[startIndex].trim();
+    const separatorLine = lines[startIndex + 1].trim();
+    
+    if (!headerLine.includes('|') || !separatorLine.includes('---')) return null;
+    
+    const headers = headerLine.split('|').map(h => h.trim()).filter(h => h);
+    
+    const rows = [];
+    let i = startIndex + 2;
+    while (i < lines.length && lines[i].trim().includes('|')) {
+      const cells = lines[i].trim().split('|').map(c => c.trim()).filter(c => c);
+      if (cells.length > 0) {
+        rows.push(cells);
+      }
+      i++;
+    }
+    
+    return {
+      section: { type: 'table', headers, rows },
+      endIndex: i - 1
+    };
+  } catch (e) {
+    return null;
+  }
+}
+
+function parseDataBlock(lines, startIndex) {
+  const items = [];
+  let i = startIndex;
+  
+  while (i < lines.length) {
+    const line = lines[i].trim();
+    
+    if (!line) {
+      i++;
+      continue;
+    }
+    
+    // Check if this line is a data header (Line 1:, Feedmill 1:, etc.)
+    const headerMatch = line.match(/^(Line \d+|Feedmill \d+|Powermix)[\s(:]*(.*)/i);
+    if (headerMatch) {
+      const item = { title: headerMatch[1], details: {} };
+      
+      // If there's inline data after the colon
+      if (headerMatch[2]) {
+        item.subtitle = headerMatch[2].replace(/^[:\s]+/, '').trim();
+      }
+      
+      // Collect sub-lines (indented or key-value pairs)
+      i++;
+      while (i < lines.length && lines[i].trim() && 
+             !lines[i].trim().match(/^(Line \d+|Feedmill \d+|Powermix)/i) &&
+             !lines[i].trim().match(/^(This|These|If|The|Overall|Total)/i)) {
+        const subLine = lines[i].trim();
+        const kvMatch = subLine.match(/^([^:]+):\s*(.+)/);
+        if (kvMatch) {
+          item.details[kvMatch[1].trim()] = kvMatch[2].trim();
+        }
+        i++;
+      }
+      
+      items.push(item);
+    } else {
+      break;
+    }
+  }
+  
+  return {
+    section: { type: 'lineCard', data: items },
+    endIndex: i - 1
+  };
+}
+
+function parseNumberedList(lines, startIndex) {
+  const items = [];
+  let i = startIndex;
+  
+  while (i < lines.length) {
+    const line = lines[i].trim();
+    const match = line.match(/^\d+\.\s+(.*)/);
+    if (match) {
+      items.push(match[1]);
+      i++;
+    } else {
+      break;
+    }
+  }
+  
+  return {
+    section: { type: 'list', items, ordered: true },
+    endIndex: i - 1
+  };
+}
+
+function parseBulletList(lines, startIndex) {
+  const items = [];
+  let i = startIndex;
+  
+  while (i < lines.length) {
+    const line = lines[i].trim();
+    const match = line.match(/^[-•*]\s+(.*)/);
+    if (match) {
+      items.push(match[1]);
+      i++;
+    } else {
+      break;
+    }
+  }
+  
+  return {
+    section: { type: 'list', items, ordered: false },
+    endIndex: i - 1
+  };
+}
+```
+
+---
+
+### 3. VISUAL COMPONENTS
+
+### CHAT TABLE
+
+```jsx
+function ChatTable({ headers, rows }) {
+  return (
+    <div className="chat-table-wrapper">
+      <table className="chat-table">
+        <thead>
+          <tr>
+            {headers.map((header, i) => (
+              <th key={i}>{header}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, rowIndex) => (
+            <tr key={rowIndex}>
+              {row.map((cell, cellIndex) => (
+                <td key={cellIndex}>
+                  {formatCellValue(cell, headers[cellIndex])}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function formatCellValue(value, header) {
+  if (!value) return '—';
+  
+  // Detect status values and add color
+  const lowerVal = value.toLowerCase();
+  if (lowerVal === 'critical') return <span className="chat-status-critical">{value}</span>;
+  if (lowerVal === 'urgent') return <span className="chat-status-urgent">{value}</span>;
+  if (lowerVal === 'monitor') return <span className="chat-status-monitor">{value}</span>;
+  if (lowerVal === 'sufficient') return <span className="chat-status-sufficient">{value}</span>;
+  
+  // Detect negative numbers
+  if (value.startsWith('-')) return <span className="chat-value-negative">{value}</span>;
+  
+  return value;
+}
+```
+
+### LINE CARDS
+
+```jsx
+function LineCard({ data }) {
+  return (
+    <div className="chat-line-cards">
+      {data.map((item, index) => (
+        <div key={index} className="chat-line-card">
+          <div className="chat-line-card-header">
+            <span className="chat-line-card-title">{item.title}</span>
+            {item.subtitle && (
+              <span className="chat-line-card-subtitle">{item.subtitle}</span>
+            )}
+          </div>
+          {Object.keys(item.details).length > 0 && (
+            <div className="chat-line-card-details">
+              {Object.entries(item.details).map(([key, value], i) => (
+                <div key={i} className="chat-line-card-detail">
+                  <span className="chat-detail-key">{key}</span>
+                  <span className="chat-detail-value">{value}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+```
+
+### PRODUCT CARDS
+
+```jsx
+function ProductCard({ data }) {
+  return (
+    <div className="chat-product-cards">
+      {data.map((product, index) => (
+        <div key={index} className={`chat-product-card chat-product-${(product.status || '').toLowerCase()}`}>
+          <div className="chat-product-header">
+            <span className="chat-product-name">{product.name}</span>
+            {product.status && (
+              <span className={`chat-product-status chat-status-${product.status.toLowerCase()}`}>
+                {product.status}
+              </span>
+            )}
+          </div>
+          <div className="chat-product-details">
+            {product.code && <span>Code: {product.code}</span>}
+            {product.dfl && <span>DFL: {product.dfl} MT</span>}
+            {product.inventory && <span>Inv: {product.inventory} MT</span>}
+            {product.balance && <span>Bal: {product.balance} MT</span>}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+```
+
+### CHAT LIST
+
+```jsx
+function ChatList({ items, ordered }) {
+  if (ordered) {
+    return (
+      <ol className="chat-ordered-list">
+        {items.map((item, index) => (
+          <li key={index}>{item}</li>
+        ))}
+      </ol>
+    );
+  }
+  
+  return (
+    <ul className="chat-bullet-list">
+      {items.map((item, index) => (
+        <li key={index}>{item}</li>
+      ))}
+    </ul>
+  );
+}
+```
+
+---
+
+### 4. STYLING
+
+```css
+/* Formatted response container */
+.chat-formatted {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Text */
+.chat-text {
+  font-size: 12px;
+  color: #374151;
+  line-height: 1.6;
+  margin: 0;
+}
+
+/* Section header */
+.chat-section-header {
+  font-size: 12px;
+  font-weight: 700;
+  color: #1a1a1a;
+  margin-top: 4px;
+}
+
+/* Divider */
+.chat-divider {
+  height: 1px;
+  background: #e5e7eb;
+  margin: 4px 0;
+}
+
+/* ==================== */
+/* TABLE                */
+/* ==================== */
+.chat-table-wrapper {
+  overflow-x: auto;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+}
+
+.chat-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.chat-table thead th {
+  background: #f9fafb;
+  padding: 8px 10px;
+  text-align: left;
+  font-weight: 600;
+  color: #374151;
+  border-bottom: 2px solid #e5e7eb;
+  white-space: nowrap;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.chat-table tbody td {
+  padding: 7px 10px;
+  border-bottom: 1px solid #f3f4f6;
+  color: #374151;
+  font-size: 11px;
+}
+
+.chat-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.chat-table tbody tr:hover {
+  background: #f9fafb;
+}
+
+/* Status badges in tables */
+.chat-status-critical {
+  color: #dc2626;
+  font-weight: 600;
+  font-size: 10px;
+  background: #fef2f2;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.chat-status-urgent {
+  color: #ea580c;
+  font-weight: 600;
+  font-size: 10px;
+  background: #fff7ed;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.chat-status-monitor {
+  color: #ca8a04;
+  font-weight: 600;
+  font-size: 10px;
+  background: #fefce8;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.chat-status-sufficient {
+  color: #16a34a;
+  font-weight: 600;
+  font-size: 10px;
+  background: #f0fdf4;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.chat-value-negative {
+  color: #dc2626;
+  font-weight: 600;
+}
+
+/* ==================== */
+/* LINE CARDS           */
+/* ==================== */
+.chat-line-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.chat-line-card {
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.chat-line-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: #f3f4f6;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.chat-line-card-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #1a1a1a;
+}
+
+.chat-line-card-subtitle {
+  font-size: 11px;
+  color: #6b7280;
+}
+
+.chat-line-card-details {
+  padding: 6px 12px;
+}
+
+.chat-line-card-detail {
+  display: flex;
+  justify-content: space-between;
+  padding: 3px 0;
+  font-size: 11px;
+}
+
+.chat-detail-key {
+  color: #6b7280;
+}
+
+.chat-detail-value {
+  color: #1a1a1a;
+  font-weight: 600;
+}
+
+/* ==================== */
+/* PRODUCT CARDS        */
+/* ==================== */
+.chat-product-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.chat-product-card {
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+  padding: 10px 12px;
+  background: #ffffff;
+}
+
+.chat-product-card.chat-product-critical {
+  border-left: 3px solid #dc2626;
+  background: #fef2f2;
+}
+
+.chat-product-card.chat-product-urgent {
+  border-left: 3px solid #ea580c;
+  background: #fff7ed;
+}
+
+.chat-product-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.chat-product-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: #1a1a1a;
+}
+
+.chat-product-status {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.chat-product-details {
+  display: flex;
+  gap: 12px;
+  margin-top: 6px;
+  font-size: 10px;
+  color: #6b7280;
+}
+
+/* ==================== */
+/* LISTS                */
+/* ==================== */
+.chat-ordered-list {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.chat-ordered-list li {
+  font-size: 12px;
+  color: #374151;
+  line-height: 1.6;
+  padding: 2px 0;
+}
+
+.chat-bullet-list {
+  margin: 0;
+  padding-left: 16px;
+  list-style: disc;
+}
+
+.chat-bullet-list li {
+  font-size: 12px;
+  color: #374151;
+  line-height: 1.6;
+  padding: 2px 0;
+}
+
+/* ==================== */
+/* HIGHLIGHT BOXES      */
+/* ==================== */
+.chat-highlight {
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.chat-highlight-info {
+  background: #eff6ff;
+  color: #1e40af;
+  border-left: 3px solid #3b82f6;
+}
+
+.chat-highlight-warning {
+  background: #fff7ed;
+  color: #92400e;
+  border-left: 3px solid #f59e0b;
+}
+
+.chat-highlight-danger {
+  background: #fef2f2;
+  color: #991b1b;
+  border-left: 3px solid #dc2626;
+}
+
+.chat-highlight-success {
+  background: #f0fdf4;
+  color: #166534;
+  border-left: 3px solid #16a34a;
+}
+```
+
+---
+
+### 5. UPDATE SYSTEM PROMPT — INSTRUCT AI TO USE STRUCTURED FORMAT
+
+Add to the chatbot system prompt:
+
+```
+RESPONSE FORMATTING RULES:
+- For tabular data (line loads, order lists, product comparisons), use markdown tables with | separators
+- For line-by-line breakdowns, use this format:
+  Line 1:
+  Orders: 10
+  Volume: 371 MT
+  Hours: 19.74
+
+- For lists of actions or recommendations, use numbered lists:
+  1. First action
+  2. Second action
+
+- For critical/urgent items, start with the status clearly:
+  Critical: Product Name — explanation
+
+- Keep text paragraphs short — 2-3 sentences maximum per paragraph
+- Add a brief summary sentence at the end of data-heavy responses
+- Use bold (**text**) for emphasis on product names and key numbers
+- Do NOT output raw unformatted data dumps
+- Structure responses so they are scannable — headers, cards, tables, lists
+
+EXAMPLE RESPONSES:
+
+User: "Show me the current load for all feedmill lines"
+Response:
+Here's the current production load across all lines:
+
+| Line | Orders | Volume | Est. Hours |
+|------|--------|--------|------------|
+| Line 1 | 10 | 371 MT | 19.7 hrs |
+| Line 2 | 9 | 408 MT | 20.3 hrs |
+| Line 3 | 6 | 218 MT | 26.6 hrs |
+| Line 4 | 10 | 364 MT | 43.7 hrs |
+| Line 5 | 2 | 208 MT | 10.6 hrs |
+| Line 6 | 3 | 142 MT | 17.7 hrs |
+| Line 7 | 6 | 318 MT | 39.5 hrs |
+
+Line 4 has the heaviest load at 43.7 hours. Consider redistributing orders to Line 5 which has the lightest load at 10.6 hours.
+
+User: "Which products are critical right now?"
+Response:
+There are 2 products in Critical status — their demand exceeds current inventory:
+
+1. **Gall 21 Chicken Layer P (Breeder) 50Kg** — DFL: 24.0 MT, Inventory: 0.7 MT (deficit: 23.3 MT). Immediate production needed.
+2. **Ave Max Duck Layex 2 Pellet, 50kg** — DFL: 194.2 MT, Inventory: 181.5 MT (deficit: 12.7 MT). Stock will run out today without production.
+
+Both products require immediate scheduling. Gall 21 has the larger deficit relative to inventory.
+```
+
+---
+
+### 6. ALSO UPDATE ASSISTANT BUBBLE STYLING
+
+Make the assistant message bubble wider to accommodate tables and cards:
+
+```css
+.chat-msg-assistant .chat-msg-bubble {
+  background: #f3f4f6;
+  color: #374151;
+  border-bottom-left-radius: 4px;
+  max-width: 95%;
+  padding: 10px 14px;
+}
+
+.chat-msg-user .chat-msg-bubble {
+  max-width: 80%;
+}
+```
+
+---
+
+## VERIFICATION
+
+### Table rendering
+1. ✅ Markdown tables render as styled HTML tables
+2. ✅ Table has header row with uppercase text and grey background
+3. ✅ Table rows have hover state
+4. ✅ Status values (Critical, Urgent, etc.) show colored badges
+5. ✅ Negative numbers show in red
+6. ✅ Table is scrollable horizontally if too wide
+
+### Line cards
+7. ✅ Line-by-line data renders as individual cards
+8. ✅ Each card has a header (Line name) and key-value details
+9. ✅ Cards are compact and scannable
+
+### Lists
+10. ✅ Numbered lists render as ordered lists
+11. ✅ Bullet points render as unformatted lists
+12. ✅ List items have proper spacing
+
+### Text formatting
+13. ✅ Regular paragraphs display cleanly
+14. ✅ Headers display as bold section titles
+15. ✅ Short paragraphs, not wall-of-text
+
+### Critical products response
+16. ✅ Products show as numbered items with bold names
+17. ✅ Status badge visible
+18. ✅ DFL, Inventory, and deficit shown clearly
+19. ✅ Summary sentence at the end
+
+### Line load response
+20. ✅ All 7 lines shown in a clean table
+21. ✅ Highest/lowest load mentioned in summary
+22. ✅ Recommendation included
+
+### Edge cases
+23. ✅ Very long responses don't break the layout
+24. ✅ Empty or error responses display gracefully
+25. ✅ Mixed content (text + table + list) renders correctly
+26. ✅ Scrollable within the chat window
+```

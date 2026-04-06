@@ -1,0 +1,229 @@
+```
+Implement the following change to the NexFeed application:
+
+---
+
+## HIDEABLE COLUMN GROUPS IN INTERACTIVE TABLE
+
+Users can hide and show column groups in the interactive table, similar to how Excel hides columns — with a subtle visual indicator that hidden columns exist.
+
+---
+
+### HIDEABLE COLUMN GROUPS
+
+Only the following main header groups can be hidden/shown:
+
+| # | Column Group | Hideable |
+|---|---|---|
+| 1 | Prio | ❌ Always visible |
+| 2 | Drag Handle | ❌ Always visible |
+| 3 | FPR | ❌ Always visible |
+| 4 | Status | ❌ Always visible |
+| 5 | Order Details (FG, SFG, PMX, Material Code, Item, Volume, Form, Batch Size, Availability) | ❌ Always visible |
+| 6 | Mixer Details | ✅ Hideable |
+| 7 | Notes | ✅ Hideable |
+| 8 | Bagger Details | ✅ Hideable |
+| 9 | Completion & Tracking | ✅ Hideable |
+
+---
+
+### HOW TO HIDE A COLUMN GROUP
+
+**Double-click on the column group header** to hide it.
+
+- User double-clicks on "Mixer Details" header → the entire Mixer Details column group collapses and hides.
+- User double-clicks on "Notes" header → the entire Notes column group collapses and hides.
+- Same for Bagger Details and Completion & Tracking.
+
+**Single click does nothing special** (normal behavior — selecting, sorting if applicable).
+
+**Tooltip on hover over hideable column group headers:**
+```
+"Double-click to hide"
+```
+- Grey text (#9ca3af), 11px, appears after 0.5s hover delay.
+
+---
+
+### HIDDEN COLUMN INDICATOR — EXCEL-STYLE
+
+When a column group is hidden, a thin visual indicator appears in its place, showing that hidden columns exist.
+
+**Hidden indicator styling:**
+
+```
+                    ┆
+Visible columns     ┆     Visible columns
+                    ┆
+```
+
+| Property | Value |
+|---|---|
+| Width | 6px (thin sliver) |
+| Background | Transparent |
+| Border-left | 2px solid #e5e7eb (light grey) |
+| Border-right | 2px solid #e5e7eb (light grey) |
+| Height | Full table height (header to last row) |
+| Cursor on hover | col-resize (↔ left-right arrow) |
+| Hover background | Light blue (#eff6ff) |
+| Hover border color | Blue (#3b82f6) |
+
+**The indicator spans the full height of the table** — from the header row down through all data rows. It's a thin vertical sliver that signals "there are hidden columns here."
+
+---
+
+### HOW TO SHOW A HIDDEN COLUMN GROUP
+
+**Double-click on the hidden column indicator** to expand/show the column group.
+
+- User sees the thin sliver between two visible column groups.
+- User hovers over it → cursor changes to ↔ (col-resize), sliver highlights blue.
+- User double-clicks → the hidden column group expands back to full width.
+- Smooth expand animation (~200ms).
+
+**Tooltip on hover over the hidden indicator:**
+```
+"Double-click to show [Column Group Name]"
+```
+
+Example:
+```
+"Double-click to show Mixer Details"
+"Double-click to show Notes"
+"Double-click to show Bagger Details"
+"Double-click to show Completion & Tracking"
+```
+
+- Grey text (#9ca3af), 11px.
+- The tooltip tells the user WHICH column group is hidden here.
+
+---
+
+### ANIMATION
+
+**Hiding animation:**
+- The column group width animates from full width to 0 (~200-300ms).
+- Easing: ease-in-out.
+- The thin indicator appears after the collapse completes.
+- Adjacent columns smoothly fill the freed space.
+
+**Showing animation:**
+- The indicator expands from 6px to the column group's full width (~200-300ms).
+- Easing: ease-in-out.
+- The column group content fades in as it expands.
+- Adjacent columns smoothly shift to make room.
+
+---
+
+### MULTIPLE HIDDEN GROUPS
+
+Multiple column groups can be hidden at the same time. Each hidden group shows its own thin indicator.
+
+**Example — Mixer Details and Notes both hidden:**
+
+```
+┌───────────────────────┬──────┬┆┬┆┬──────────────┬─────────────────────┐
+│ Order Details         │Status│┆│┆│Bagger Details│Completion & Tracking│
+│                       │      │┆│┆│              │                     │
+│ ...                   │ ...  │┆│┆│ ...          │ ...                 │
+└───────────────────────┴──────┴┆┴┆┴──────────────┴─────────────────────┘
+                                ↑  ↑
+                         Mixer  Notes
+                         hidden hidden
+```
+
+- Each hidden group has its own independent indicator.
+- Each indicator has its own tooltip showing which group it represents.
+- Each can be expanded independently by double-clicking.
+
+**If two hidden groups are adjacent:**
+- Show two thin indicators side by side (two slivers next to each other).
+- Each has its own hover state and tooltip.
+- Hovering over the left sliver shows "Double-click to show Mixer Details".
+- Hovering over the right sliver shows "Double-click to show Notes".
+
+---
+
+### SESSION PERSISTENCE
+
+- Column visibility state is saved in localStorage.
+- Key: `nexfeed_hidden_columns`
+- Value: Array of hidden column group names, e.g., `["mixer_details", "notes"]`
+- On page load, read the stored state and apply it.
+- If no stored state, all columns are visible (default).
+- Persists across page refreshes and sessions.
+- Global — same visibility across all line tabs.
+
+---
+
+### DEFAULT STATE
+
+- All column groups are VISIBLE by default.
+- No columns are hidden on first use.
+
+---
+
+### VISUAL EXAMPLES
+
+**All columns visible (default):**
+```
+┌──────┬──────┬───────────────┬──────┬──────────────┬─────┬──────────────┬─────────────────────┐
+│ Prio │ FPR  │ Order Details │Status│Mixer Details │Notes│Bagger Details│Completion & Tracking│
+└──────┴──────┴───────────────┴──────┴──────────────┴─────┴──────────────┴─────────────────────┘
+```
+
+**Mixer Details hidden:**
+```
+┌──────┬──────┬───────────────┬──────┬┆┬─────┬──────────────┬─────────────────────┐
+│ Prio │ FPR  │ Order Details │Status│┆│Notes│Bagger Details│Completion & Tracking│
+└──────┴──────┴───────────────┴──────┴┆┴─────┴──────────────┴─────────────────────┘
+                                      ↑
+                              Mixer Details hidden
+```
+
+**Mixer Details + Notes + Bagger Details hidden:**
+```
+┌──────┬──────┬───────────────┬──────┬┆┬┆┬┆┬─────────────────────┐
+│ Prio │ FPR  │ Order Details │Status│┆│┆│┆│Completion & Tracking│
+└──────┴──────┴───────────────┴──────┴┆┴┆┴┆┴─────────────────────┘
+                                      ↑  ↑  ↑
+                               Mixer Notes Bagger
+```
+
+**All hideable columns hidden:**
+```
+┌──────┬──────┬───────────────┬──────┬┆┬┆┬┆┬┆┐
+│ Prio │ FPR  │ Order Details │Status│┆│┆│┆│┆│
+└──────┴──────┴───────────────┴──────┴┆┴┆┴┆┴┆┘
+                                      ↑  ↑  ↑  ↑
+                               Mixer Notes Bag Comp
+```
+
+---
+
+### TABLE RESPONSIVENESS
+
+When columns are hidden, the remaining visible columns should:
+
+- Expand proportionally to fill the available table width, OR
+- Maintain their original widths and leave the table narrower (with less horizontal scrolling needed).
+
+**Recommended:** Maintain original widths. This way, hiding columns reduces horizontal scrolling, which is the primary benefit for the user. The table becomes more compact and easier to work with.
+
+---
+
+### EDGE CASES
+
+**Edge case 1 — Hiding a column group that contains data the user is editing:**
+- If any cell in the column group is currently being edited (input focused), do NOT hide the column.
+- Show a toast: "Finish editing before hiding this column."
+
+**Edge case 2 — Print or export:**
+- When printing or exporting the table, include ALL columns regardless of hidden state.
+- Hidden columns should appear in exports/prints.
+
+**Edge case 3 — Column group with sub-columns:**
+- Hiding a main header group hides ALL sub-columns under it.
+- For example, hiding "Mixer Details" hides all sub-columns (Mixer Type, Mixer Capacity, etc.) under that header.
+- Showing it again restores all sub-columns.
+```

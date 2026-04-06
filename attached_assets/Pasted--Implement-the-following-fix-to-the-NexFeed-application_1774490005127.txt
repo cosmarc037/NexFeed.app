@@ -1,0 +1,141 @@
+```
+Implement the following fix to the NexFeed application:
+
+---
+
+## FIX: COMMENT INDICATOR — ORANGE DOT INSTEAD OF TRIANGLE ON READINESS COLUMN
+
+The comment indicator is rendering as an orange circle/dot on the readiness column instead of a triangle. All other columns correctly show the triangle. Fix the readiness column cell to also render the triangle correctly.
+
+---
+
+### THE PROBLEM
+
+- Most columns: comment indicator shows as ▲ triangle ✅
+- Readiness column: comment indicator shows as ● orange dot ❌
+
+The readiness column cell likely has CSS that is overriding or conflicting with the triangle's CSS. Common causes:
+
+1. The readiness cell has `overflow: hidden` clipping the triangle
+2. The readiness cell has `border-radius: 50%` turning the triangle into a circle
+3. The readiness cell has different positioning that breaks the triangle shape
+4. The readiness cell is using a different indicator element (like a `<span>` with `border-radius: 50%`) instead of the triangle CSS
+
+---
+
+### FIX 1: CHECK FOR CONFLICTING CSS ON READINESS COLUMN
+
+```css
+/* The readiness column cell might have this */
+.readiness-cell .cell-comment-indicator,
+.readiness-column .cell-comment-indicator {
+  /* REMOVE any of these if present */
+  border-radius: 50%;       /* ❌ REMOVE — turns triangle into circle */
+  width: 8px;               /* ❌ REMOVE — triangle uses border trick, not width */
+  height: 8px;              /* ❌ REMOVE — triangle uses border trick, not height */
+  background: #fd5108;      /* ❌ REMOVE — triangle uses border-top color, not background */
+}
+```
+
+### FIX 2: ENSURE TRIANGLE CSS IS CONSISTENT ACROSS ALL CELLS
+
+The triangle indicator must use the SAME CSS regardless of which column it's in:
+
+```css
+/* Triangle indicator — same for ALL cells, including readiness */
+.cell-comment-indicator {
+  position: absolute !important;
+  top: 0 !important;
+  right: 0 !important;
+  width: 0 !important;
+  height: 0 !important;
+  background: transparent !important;
+  border-left: 8px solid transparent !important;
+  border-top: 8px solid #fd5108 !important;
+  border-right: none !important;
+  border-bottom: none !important;
+  border-radius: 0 !important;
+  pointer-events: auto;
+  cursor: pointer;
+  z-index: 5;
+}
+```
+
+Key properties that make it a triangle (NOT a circle):
+- `width: 0` and `height: 0` — element has no dimensions
+- `background: transparent` — no background fill
+- `border-left: 8px solid transparent` — invisible left border creates the angle
+- `border-top: 8px solid #fd5108` — visible top border creates the triangle shape
+- `border-radius: 0` — NO rounding (this is likely the bug)
+
+### FIX 3: ALSO REMOVE ANY DUPLICATE INDICATOR
+
+Check if the readiness column has its OWN indicator element (separate from the comment indicator) that's rendering as a dot. If so, remove the duplicate:
+
+```jsx
+// WRONG — two separate indicators, one is a dot
+function ReadinessCell({ orderId }) {
+  const hasComments = cellHasComments(orderId, 'readiness');
+  
+  return (
+    <td style={{ position: 'relative' }}>
+      {/* This might be the orange dot — REMOVE if it's a duplicate */}
+      {hasComments && <span className="comment-dot" />}
+      
+      {/* This is the correct triangle — KEEP */}
+      {hasComments && <div className="cell-comment-indicator" />}
+      
+      {/* Readiness icon */}
+      <ReadinessIcon />
+    </td>
+  );
+}
+
+// CORRECT — only one indicator, the triangle
+function ReadinessCell({ orderId }) {
+  const hasComments = cellHasComments(orderId, 'readiness');
+  
+  return (
+    <td style={{ position: 'relative', overflow: 'visible' }}>
+      {/* Only the triangle indicator */}
+      {hasComments && (
+        <div 
+          className="cell-comment-indicator"
+          onClick={(e) => {
+            e.stopPropagation();
+            openCommentPopover(e, orderId, 'readiness');
+          }}
+        />
+      )}
+      
+      {/* Readiness icon */}
+      <ReadinessIcon />
+    </td>
+  );
+}
+```
+
+### FIX 4: CHECK FOR GLOBAL OVERRIDES
+
+Search the codebase for any CSS that might be turning the triangle into a dot on specific columns:
+
+```
+Search for:
+- "border-radius: 50%" near "comment" or "indicator"
+- "background: #fd5108" on small elements (8px)
+- Any ".readiness" CSS that affects child elements
+- Any column-specific CSS that overrides .cell-comment-indicator
+```
+
+---
+
+### VERIFICATION
+
+After fix:
+1. Leave a comment on the readiness column cell
+2. ✅ Triangle (▲) appears in top-right corner — NOT a circle/dot
+3. ✅ Triangle looks identical to triangles on all other columns
+4. ✅ Triangle is 8px, orange, top-right corner
+5. ✅ Hovering shows comment preview tooltip
+6. ✅ Clicking opens comment popover
+```

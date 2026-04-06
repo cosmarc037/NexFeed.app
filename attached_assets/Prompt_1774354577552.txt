@@ -1,0 +1,341 @@
+```
+Implement the following fix to the NexFeed application:
+
+---
+
+## FIX: ADD NEW ORDER — INSERTION POSITION CALCULATED BY APP, NOT AI
+
+The AI is incorrectly calculating the insertion position. Fix this by having the APP calculate the position FIRST using actual date comparison logic, then pass the pre-calculated result to the AI for reporting only.
+
+---
+
+### THE PROBLEM
+
+The AI is:
+- Placing dated orders at the bottom instead of chronologically
+- Saying "no orders affected" when 9 orders should shift
+- Not comparing dates correctly
+- Treating the position calculation as a text/language task instead of a math task
+
+### THE FIX
+
+**Split responsibilities:**
+- **APP** → calculates insertion position, downstream shifts, risk assessment (MATH)
+- **AI** → generates the narrative text based on the app's calculations (LANGUAGE)
+
+The AI should NEVER calculate the insertion position itself. It only describes what the app already determined.
+
+---
+
+### STEP 1: APP CALCULATES INSERTION POSITION
+
+```javascript
+function calculateInsertionPosition(newOrder, existingOrders) {
+  const newDate = parseDate(newOrder.avail_date);
+  
+  // Separate orders by type
+  const activeOrders = existingOrders.filter(
+    o => o.status !== 'Done' && o.status !== 'Cancel PO'
+  );
+  
+  // CASE 1: New order has an actual date
+  if (newDate) {
+    for (let i = 0; i < activeOrders.length; i++) {
+      const order = activeOrders[i];
+      const orderDate = parseDate(order.avail_date);
+      
+      // Skip non-dated orders (prio replenish, safety stocks, etc.)
+      // Dated orders are always above non-dated orders
+      if (!orderDate) {
+        // We've reached the non-dated section
+        // Insert HERE — after all dated orders with earlier/same dates
+        return {
+          position: i + 1, // 1-based Prio
+          insertBeforeOrder: order,
+          reason: 'after_last_dated_before_nondated'
+        };
+      }
+      
+      // Insert BEFORE the first dated order with a LATER date
+      if (orderDate > newDate) {
+        return {
+          position: i + 1, // 1-based Prio
+          insertBeforeOrder: order,
+          reason: 'chronological'
+        };
+      }
+      
+      // If same date, insert AFTER orders with the same date
+      // (new order goes after existing same-date orders)
+    }
+    
+    // If we get here, new order's date is after ALL dated orders
+    // but before non-dated orders
+    const lastDatedIndex = activeOrders.findLastIndex(
+      o => parseDate(o.avail_date) !== null
+    );
+    return {
+      position: lastDatedIndex + 2, // 1-based, after last dated
+      insertBeforeOrder: activeOrders[lastDatedIndex + 1] || null,
+      reason: 'after_all_dated'
+    };
+  }
+  
+  // CASE 2: New order is non-dated (prio replenish, safety stocks)
+  // Insert at the bottom of active orders
+  return {
+    position: activeOrders.length + 1,
+    insertBeforeOrder: null,
+    reason: 'non_dated_bottom'
+  };
+}
+```
+
+---
+
+### STEP 2: APP CALCULATES DOWNSTREAM EFFECTS
+
+```javascript
+function calculateDownstreamEffects(existingOrders, insertPosition) {
+  const activeOrders = existingOrders.filter(
+    o => o.status !== 'Done' && o.status !== 'Cancel PO'
+  );
+  
+  // All orders from insertPosition onward shift down by 1
+  const affectedOrders = activeOrders.slice(insertPosition - 1);
+  
+  const shifts = affectedOrders.map((order, index) => ({
+    product: order.item_description,
+    oldPrio: insertPosition + index,
+    newPrio: insertPosition + index + 1,
+    availDate: order.avail_date
+  }));
+  
+  return {
+    totalAffected: shifts.length,
+    shifts: shifts
+  };
+}
+```
+
+---
+
+### STEP 3: APP CALCULATES RISK ASSESSMENT
+
+```javascript
+function calculateDeadlineRisk(existingOrders, insertPosition, newOrderTotalTime) {
+  const risks = [];
+  const activeOrders = existingOrders.filter(
+    o => o.status !== 'Done' && o.status !== 'Cancel PO'
+  );
+  
+  let anyStartDatesSet = false;
+  
+  for (let i = insertPosition - 1; i < activeOrders.length; i++) {
+    const order = activeOrders[i];
+    
+    if (order.start_date) anyStartDatesSet = true;
+    
+    const deadline = parseDate(order.avail_date) || parseDate(order.target_date);
+    if (!deadline) continue;
+    
+    if (order.completion_date) {
+      const currentCompletion = new Date(order.completion_date);
+      const delayMs = newOrderTotalTime * 60 * 60 * 1000;
+      const newCompletion = new Date(currentCompletion.getTime() + delayMs);
+      
+      if (newCompletion > deadline) {
+        risks.push({
+          product: order.item_description,
+          deadline: deadline,
+          currentCompletion: currentCompletion,
+          newCompletion: newCompletion,
+          delayHours: newOrderTotalTime
+        });
+      }
+    }
+  }
+  
+  return {
+    hasStartDates: anyStartDatesSet,
+    riskyOrders: risks,
+    totalAtRisk: risks.length
+  };
+}
+```
+
+---
+
+### STEP 4: PASS PRE-CALCULATED DATA TO AI
+
+The AI receives ALL calculations already done. It only needs to write the narrative.
+
+```javascript
+function generateImpactAnalysisPrompt(calculations) {
+  return `
+    Generate a production impact analysis narrative based on the 
+    following PRE-CALCULATED data. Do NOT recalculate any positions, 
+    shifts, or risks. Use ONLY the data provided below.
+    
+    RULES:
+    - Do NOT calculate insertion position — use the provided position
+    - Do NOT calculate downstream shifts — use the provided shifts
+    - Do NOT calculate risk — use the provided risk assessment
+    - Use product names, not codes
+    - Format dates as "March 23" not "2026-03-23"
+    - Priority numbers are whole numbers only
+    - Be conversational and clear
+    
+    === PRE-CALCULATED DATA ===
+    
+    NEW ORDER:
+    Product: ${calculations.newOrder.product}
+    Volume: ${calculations.newOrder.volume} MT
+    Production Time: ${calculations.newOrder.productionTime} hrs
+    Changeover: ${calculations.newOrder.changeover} hrs
+    Total Time Added: ${calculations.newOrder.totalTime} hrs
+    Avail Date: ${calculations.newOrder.availDate}
+    Line: ${calculations.newOrder.line}
+    
+    INSERTION POSITION:
+    Priority: ${calculations.insertion.position}
+    Reason: ${calculations.insertion.reason}
+    Insert Before: ${calculations.insertion.insertBeforeOrder?.item_description || 'end of list'}
+    Insert After: ${calculations.insertion.insertAfterOrder?.item_description || 'start of list'}
+    
+    DOWNSTREAM SHIFTS:
+    Total Orders Affected: ${calculations.downstream.totalAffected}
+    Shifts:
+    ${calculations.downstream.shifts.map(s => 
+      `- ${s.product} (${s.availDate}): Prio ${s.oldPrio} → Prio ${s.newPrio}`
+    ).join('\n')}
+    
+    RISK ASSESSMENT:
+    Start Dates Set: ${calculations.risk.hasStartDates}
+    Orders At Risk: ${calculations.risk.totalAtRisk}
+    ${calculations.risk.riskyOrders.map(r =>
+      `- ${r.product}: Deadline ${r.deadline}, Current completion ${r.currentCompletion}, New completion ${r.newCompletion}, Delay: ${r.delayHours} hrs`
+    ).join('\n')}
+    ${!calculations.risk.hasStartDates ? 
+      'NOTE: No start dates are set. Completion dates cannot be calculated.' : ''}
+    
+    === GENERATE NARRATIVE ===
+    
+    Cover these topics:
+    1. 📍 Insertion Position — where the order goes and why
+    2. ⏱ Production Impact — time added to the line
+    3. ⚠ Downstream Effects — which orders shift and by how much
+    4. 📅 Deadline Risk — any orders at risk, or note about missing start dates
+  `;
+}
+```
+
+---
+
+### STEP 5: CORRECT AI OUTPUT EXAMPLES
+
+**Example A — Dated order inserted chronologically:**
+
+Current table:
+```
+Prio 1: Salto Conditioner | Mar 22
+Prio 2: Gallimax Pigeon   | Mar 28 (prio replenish)
+Prio 3: Elite XP Startex  | Mar 28 (prio replenish)
+Prio 4-10: Various         | safety stocks
+```
+
+New order: Classic Hog Growex | Mar 23
+
+App calculates: Position = Prio 2 (after Mar 22, before Mar 28)
+
+Correct AI output:
+```
+🤖 Impact Analysis
+
+📍 Insertion Position
+Classic Hog Growex (8 MT) will be inserted at Priority 2, 
+between Salto Conditioner (March 22) and Gallimax Pigeon 
+Pellet (March 28), based on its availability date of 
+March 23.
+
+⏱ Production Impact
+This order adds approximately 0.57 hours to Line 1 
+(0.40 hours production + 0.17 hours changeover).
+
+⚠ Downstream Effects
+9 orders will shift down by 1 position:
+• Gallimax Pigeon Pellet (Mar 28): Prio 2 → Prio 3
+• Elite XP Startex 80MT: Prio 3 → Prio 4
+• Gall 21 Chicken Layer: Prio 4 → Prio 5
+• Gallimax 3 Maintenance: Prio 5 → Prio 6
+• Elite XP Startex 80MT: Prio 6 → Prio 7
+• Elite XP Startex 8MT: Prio 7 → Prio 8
+• Elite XP Startex 12MT: Prio 8 → Prio 9
+• Elite XP Startex 32MT: Prio 9 → Prio 10
+• Elite XP Startex 20MT: Prio 10 → Prio 11
+
+📅 Deadline Risk
+No start dates are currently set for any orders. 
+Completion dates cannot be calculated until a start 
+date is configured for at least Priority 1. Once set, 
+all downstream completion dates will cascade 
+automatically.
+```
+
+**Example B — Non-dated order inserted at bottom:**
+
+New order: Classic Hog Growex | safety stocks
+
+App calculates: Position = Prio 11 (bottom of active orders)
+
+Correct AI output:
+```
+🤖 Impact Analysis
+
+📍 Insertion Position
+Classic Hog Growex (8 MT) will be inserted at Priority 11, 
+at the bottom of the current schedule. As a non-dated 
+order (safety stocks), it is placed after all dated and 
+previously prioritized orders.
+
+⏱ Production Impact
+This order adds approximately 0.57 hours to Line 1 
+(0.40 hours production + 0.17 hours changeover).
+
+⚠ Downstream Effects
+No existing orders are affected. The new order is added 
+at the end of the schedule.
+
+📅 Deadline Risk
+No start dates are currently set. Completion dates 
+cannot be calculated until start dates are configured.
+```
+
+**Example C — Dated order with actual risk:**
+
+App calculates risk: Elite XP Startex at Prio 4 will miss deadline.
+
+Correct AI output:
+```
+📅 Deadline Risk
+⚠ Elite XP Startex (80 MT, Prio 4) is at risk of 
+missing its March 28 deadline. Current estimated 
+completion is March 27 at 11:30 PM. With the added 
+0.57 hours, the new estimated completion is March 28 
+at 12:04 AM — exceeding the deadline by approximately 
+34 minutes.
+
+All other orders remain within their deadline windows.
+```
+
+---
+
+### IMPLEMENTATION ORDER
+
+1. **First:** Implement the app-side calculation functions (insertion, shifts, risk)
+2. **Second:** Call these functions when all required fields are filled in the Add New Order dialog
+3. **Third:** Pass the pre-calculated data to the AI prompt
+4. **Fourth:** AI generates ONLY the narrative text — no calculations
+
+This ensures the AI never gets the position wrong because it's not calculating it — the app is.
+```

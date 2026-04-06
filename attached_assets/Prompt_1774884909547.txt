@@ -1,0 +1,264 @@
+```
+Update the Smart Insight format across the application:
+
+---
+
+## SMART INSIGHT — UPDATED FORMAT
+
+### FORMAT
+
+```
+[Template-based text — 1-2 sentences using data]
+
+[AI-generated text — 3-5 sentences of actionable advice]
+```
+
+No emojis in the Smart Insight column in the order table.
+Emojis okay in N10D tooltip and Auto-Sequence tooltip.
+No bold text in the Smart Insight column.
+
+---
+
+### TEMPLATE LINE — UPDATED FORMAT
+
+The template line should read like a natural sentence, not a label.
+
+```javascript
+function generateTemplateLine(product, order, today, includeEmoji = false) {
+  const dfl = product?.due_for_loading;
+  const inventory = product?.inventory;
+  const status = product?.status;
+  const buffer = product?.buffer;
+  const availDate = product?.availDate;
+  const completionDate = product?.completionDate;
+  const daysUntilBreach = product?.daysUntilBreach;
+  
+  if (product && status) {
+    switch (status) {
+      case 'Critical': {
+        const deficit = (dfl - inventory).toFixed(1);
+        const prefix = includeEmoji ? '⚠ ' : '';
+        return `${prefix}This product is on Critical. Current inventory (${inventory} MT) has already fallen below the required demand (${dfl} MT), creating a ${deficit} MT deficit. Immediate production is needed to prevent stockout.`;
+      }
+      
+      case 'Urgent': {
+        const prefix = includeEmoji ? '⚠ ' : '';
+        return `${prefix}This product is on Urgent. Demand will exceed inventory by ${formatDateFull(availDate)}, with ${formatDateFull(completionDate)} as the last safe production date. The ${buffer}% buffer is thin and will erode quickly — production should be scheduled within 1-2 days.`;
+      }
+      
+      case 'Monitor': {
+        const prefix = includeEmoji ? '📋 ' : '';
+        return `${prefix}This product is on Monitor. Demand will exceed inventory by ${formatDateFull(availDate)}, with ${formatDateFull(completionDate)} as the last safe production date. The ${buffer}% buffer provides a window — production should be planned within the coming week.`;
+      }
+      
+      case 'Sufficient': {
+        const prefix = includeEmoji ? '✅ ' : '';
+        return `${prefix}This product is on Sufficient. Current inventory (${inventory} MT) comfortably covers the required demand (${dfl} MT) with a ${buffer}% buffer. No immediate production action is needed.`;
+      }
+      
+      default: {
+        return `This product has a status of ${status}. DFL: ${dfl} MT. Inventory: ${inventory} MT.`;
+      }
+    }
+  }
+  
+  if (order && order.avail_date && 
+      order.avail_date !== 'prio replenish' && 
+      order.avail_date !== 'safety stocks') {
+    const deadline = parseDate(order.avail_date);
+    const daysRemaining = deadline 
+      ? Math.ceil((deadline - today) / (1000 * 60 * 60 * 24)) 
+      : 'Unknown';
+    const prodTime = order.production_time || 'N/A';
+    const prefix = includeEmoji ? '📅 ' : '';
+    return `${prefix}This order has a deadline of ${formatDateFull(order.avail_date)} — ${daysRemaining} days remaining. Estimated production time is ${prodTime} hours.`;
+  }
+  
+  const volume = order?.volume || 0;
+  const line = order?.line || 'unassigned';
+  return `No stock level data available from Next 10 Days. This order is scheduled for ${volume} MT on ${line}.`;
+}
+```
+
+---
+
+### EXAMPLES — SMART INSIGHT COLUMN (NO EMOJI, NO BOLD)
+
+**Critical:**
+```
+This product is on Critical. Current inventory (181.5 MT) 
+has already fallen below the required demand (194.2 MT), 
+creating a 12.7 MT deficit. Immediate production is 
+needed to prevent stockout.
+
+Every hour of delay risks stockout and potential delivery 
+failures. Prioritize this product on the next available 
+line and consider bumping lower-priority orders if 
+necessary. Coordinate with warehouse to confirm if any 
+incoming transfers can partially cover the gap while 
+production ramps up.
+```
+
+**Urgent:**
+```
+This product is on Urgent. Demand will exceed inventory 
+by April 5, 2026, with April 4, 2026 as the last safe 
+production date. The 15.2% buffer is thin and will erode 
+quickly — production should be scheduled within 1-2 days.
+
+Production must be scheduled no later than April 4, 2026 
+to avoid a shortfall. Check Line 1 and Line 3 availability 
+for the earliest possible slot. If production cannot start 
+within 48 hours, consider partial fulfillment or expediting 
+raw materials.
+```
+
+**Monitor:**
+```
+This product is on Monitor. Demand will exceed inventory 
+by April 9, 2026, with April 8, 2026 as the last safe 
+production date. The 40.0% buffer provides a window — 
+production should be planned within the coming week.
+
+The buffer provides a comfortable window, but daily 
+demand is steadily consuming stock. Plan to begin 
+production by the first week of April to stay ahead of 
+the curve. Monitor the next 2-3 days of actual demand — 
+if it spikes above forecast, escalate to Urgent priority.
+```
+
+**Sufficient:**
+```
+This product is on Sufficient. Current inventory (310.6 MT) 
+comfortably covers the required demand (92.3 MT) with a 
+70.3% buffer. No immediate production action is needed.
+
+Continue routine monitoring and focus production resources 
+on higher-priority products. Revisit this product's status 
+when the next N10D file is uploaded to confirm demand 
+trends remain stable.
+```
+
+**Dated MTO:**
+```
+This order has a deadline of April 11, 2026 — 4 days 
+remaining. Estimated production time is 4.19 hours.
+
+Production should start no later than April 10, 2026 to 
+ensure on-time completion. At the current queue position 
+on Line 1, the order is on track, but any upstream delays 
+could push it past the deadline. Recommend locking in the 
+production slot and confirming raw material availability.
+```
+
+---
+
+### EXAMPLES — N10D TOOLTIP AND AUTO-SEQUENCE TOOLTIP (WITH EMOJI)
+
+Same text but with emojis:
+
+**Critical:**
+```
+⚠ This product is on Critical. Current inventory (181.5 MT) 
+has already fallen below the required demand (194.2 MT), 
+creating a 12.7 MT deficit. Immediate production is 
+needed to prevent stockout.
+
+Every hour of delay risks stockout and potential delivery 
+failures...
+```
+
+**Monitor:**
+```
+📋 This product is on Monitor. Demand will exceed inventory 
+by April 9, 2026, with April 8, 2026 as the last safe 
+production date. The 40.0% buffer provides a window — 
+production should be planned within the coming week.
+
+The buffer provides a comfortable window...
+```
+
+---
+
+### WHERE EACH FORMAT IS USED
+
+| Location | Emoji? | Bold? |
+|---|---|---|
+| Smart Insight column (order table) | ❌ No emoji | ❌ No bold |
+| N10D product hover tooltip | ✅ Emoji | ❌ No bold |
+| Auto-Sequence hover tooltip | ✅ Emoji | ❌ No bold |
+
+---
+
+### GENERATING WITH EMOJI FLAG
+
+```javascript
+// Smart Insight column — no emoji
+const templateLine = generateTemplateLine(product, null, today, false);
+
+// N10D tooltip — with emoji
+const templateLine = generateTemplateLine(product, null, today, true);
+
+// Auto-Sequence tooltip — with emoji
+const templateLine = generateTemplateLine(product, null, today, true);
+```
+
+---
+
+### CELL STYLING — NO BOLD
+
+```css
+/* Smart Insight column — both parts same weight */
+.smart-insight-template {
+  font-size: 10px;
+  font-weight: 400;    /* NOT 600, no bold */
+  color: #374151;
+  margin-bottom: 4px;
+}
+
+.smart-insight-ai {
+  font-size: 10px;
+  font-weight: 400;
+  color: #4b5563;
+  line-height: 1.5;
+}
+```
+
+### TOOLTIP STYLING — NO BOLD
+
+```css
+/* N10D and Auto-Sequence tooltips — same, no bold */
+.tooltip-insight-template {
+  font-size: 11px;
+  font-weight: 400;    /* no bold */
+  color: rgba(255, 255, 255, 0.9);
+  margin-bottom: 6px;
+}
+
+.tooltip-insight-ai {
+  font-size: 11px;
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.7);
+  line-height: 1.6;
+}
+```
+
+---
+
+### APPLY TO ALL THREE LOCATIONS
+
+1. **Smart Insight column** (order table)
+   - ❌ No emoji
+   - ❌ No bold
+   - Template + AI, full text
+
+2. **N10D product hover tooltip** (Smart Insight panel)
+   - ✅ Emoji
+   - ❌ No bold
+   - Template + AI, full text
+
+3. **Auto-Sequence hover tooltip** (Smart Insight panel)
+   - ✅ Emoji
+   - ❌ No bold
+   - Template + AI, full text
+```

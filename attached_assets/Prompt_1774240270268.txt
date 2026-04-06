@@ -1,0 +1,141 @@
+```
+Implement the following fix to the NexFeed application:
+
+---
+
+## FIX: AUTO-SEQUENCE — RECALCULATE ALL COMPLETION DATES AFTER APPLYING
+
+When the user clicks "Apply to Schedule" in the Auto-Sequence preview, the app must recalculate ALL completion dates based on the NEW order sequence. Old completion dates from the previous sequence must NOT be retained.
+
+---
+
+### THE BUG
+
+After auto-sequencing reorders the orders:
+- Orders that were previously in positions with cascaded completion dates RETAIN those old dates.
+- The old dates are based on the PREVIOUS sequence, not the new one.
+- Orders without start dates still show completion dates from the old cascade.
+- Combined orders show completion dates that don't align with their new position.
+
+**Example of the bug:**
+```
+Before auto-sequence:
+Prio 1: Order A | Start: Mar 24, 12:00 PM | Completion: Mar 24, 2:15 PM
+Prio 2: Order B | Start: (blank)          | Completion: Mar 24, 2:50 PM (cascaded from A)
+Prio 3: Order C | Start: (blank)          | Completion: Mar 24, 3:38 PM (cascaded from B)
+
+After auto-sequence reorders (Order C moved to Prio 1):
+Prio 1: Order C | Start: (blank)          | Completion: Mar 24, 3:38 PM ← WRONG! Old date retained
+Prio 2: Order A | Start: Mar 24, 12:00 PM | Completion: Mar 24, 2:15 PM ← WRONG! Should recalculate
+Prio 3: Order B | Start: (blank)          | Completion: Mar 24, 2:50 PM ← WRONG! Old date retained
+```
+
+---
+
+### THE FIX
+
+When "Apply to Schedule" is clicked, run the following steps IN ORDER:
+
+**Step 1: Apply the new sequence order**
+- Reorder all orders based on the auto-sequence preview positions.
+- Renumber all Prio values (1, 2, 3, ...).
+
+**Step 2: Clear ALL completion dates that were cascaded**
+- For every order in the line:
+  - If the order has NO user-set start date → clear its completion date (set to null/blank).
+  - If the order HAS a user-set start date → keep it (completion will be recalculated in Step 3).
+
+**Step 3: Recalculate the entire cascade from scratch**
+- Start from the FIRST order (Prio 1) and cascade downward:
+
+```
+for each order in sequence (Prio 1, 2, 3, ...):
+  
+  if order has a user-set start date AND start time:
+    order.completion = order.start + order.production_hours
+    anchor = order.completion
+  
+  else if anchor exists (previous order has completion):
+    order.start_cascaded = anchor + changeover_time
+    order.completion = order.start_cascaded + order.production_hours
+    anchor = order.completion
+  
+  else:
+    // No anchor yet (no start date set upstream)
+    order.completion = null (blank — "Set completion")
+    anchor = null
+```
+
+**Step 4: Update the display**
+- All orders now show correct completion dates based on the NEW sequence.
+- Orders without any upstream start date show blank completion ("Set completion").
+
+---
+
+### CORRECT BEHAVIOR AFTER FIX
+
+**Scenario 1: First order has a start date**
+```
+Prio 1: Order C | Start: Mar 24, 8:00 AM  | Completion: Mar 24, 12:18 PM (recalculated)
+Prio 2: Order A | Start: (blank)          | Completion: Mar 24, 2:48 PM (cascaded from C + changeover)
+Prio 3: Order B | Start: (blank)          | Completion: Mar 24, 5:23 PM (cascaded from A + changeover)
+```
+
+**Scenario 2: No orders have start dates**
+```
+Prio 1: Order C | Start: (blank) | Completion: (blank — "Set completion")
+Prio 2: Order A | Start: (blank) | Completion: (blank — "Set completion")
+Prio 3: Order B | Start: (blank) | Completion: (blank — "Set completion")
+```
+
+**Scenario 3: Middle order has a start date**
+```
+Prio 1: Order C | Start: (blank)          | Completion: (blank)
+Prio 2: Order A | Start: Mar 24, 12:00 PM | Completion: Mar 24, 2:15 PM (from its start)
+Prio 3: Order B | Start: (blank)          | Completion: Mar 24, 2:50 PM (cascaded from A)
+```
+
+**Scenario 4: Combined orders**
+```
+Prio 1: [Lead]  Order D | Start: Mar 24, 12:00 PM | Completion: Mar 24, 2:15 PM
+Prio 2: [Child] Order E | Start: (blank)          | Completion: Mar 24, 2:50 PM (cascaded)
+Prio 3: [Child] Order F | Start: (blank)          | Completion: Mar 24, 3:38 PM (cascaded)
+Prio 4: Order G          | Start: (blank)          | Completion: Mar 24, 4:21 PM (cascaded from F + changeover)
+```
+
+---
+
+### ALSO RECASCADE AFTER THESE EVENTS
+
+The full cascade recalculation should also run after:
+
+| Event | Recascade? |
+|---|---|
+| Auto-Sequence "Apply to Schedule" | ✅ Yes — full recascade |
+| Drag-and-drop reorder | ✅ Yes — full recascade |
+| Order set to Done (moved to top) | ✅ Yes — renumber + recascade |
+| Order set to Cancel PO (moved to bottom) | ✅ Yes — renumber + recascade |
+| Order reverted from Done/Cancel | ✅ Yes — renumber + recascade |
+| Combine orders | ✅ Yes — recascade |
+| Uncombine orders | ✅ Yes — recascade |
+| Cut order | ✅ Yes — recascade |
+| Merge back | ✅ Yes — recascade |
+| Start date/time changed by user | ✅ Yes — recascade from that order downward |
+| Volume changed | ✅ Yes — production hours change, recascade |
+| New SAP upload adds orders | ✅ Yes — recascade |
+
+---
+
+### IMPORTANT: DO NOT CLEAR USER-SET START DATES
+
+When clearing and recalculating:
+- ❌ Do NOT clear any start date or start time that the USER manually set.
+- ✅ Only clear COMPLETION dates that were previously cascaded.
+- ✅ Recalculate completion dates based on the new sequence.
+
+**How to distinguish user-set vs cascaded:**
+- User-set start dates are explicitly entered by the user (via date picker / time picker).
+- Cascaded values are calculated by the system.
+- Store a flag or separate field: `is_start_date_manual: true/false`
+- When clearing, only clear fields where `is_start_date_manual === false`.
+```

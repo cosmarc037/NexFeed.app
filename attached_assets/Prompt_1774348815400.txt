@@ -1,0 +1,345 @@
+```
+Implement the following fix to the NexFeed application:
+
+---
+
+## FIX: LINE RECOMMENDATION — SAME FEEDMILL AS GLOBAL BEST = OKAY
+
+The line recommendation must follow these rules:
+
+1. The line with the highest run rate across ALL lines globally = "Recommended"
+2. Other lines within the SAME feedmill as the recommended line (with rate > 0) = "Also available" — acceptable, NO "not recommended"
+3. Lines in DIFFERENT feedmills from the recommended line = "not recommended"
+4. Lines with 0 run rate = NOT shown at all, even if same feedmill
+5. Products with no run rate on ANY line = greyed out in Item Description dropdown, unselectable
+
+---
+
+### LOGIC
+
+```javascript
+function getLineRecommendation(product, currentFeedmillLines) {
+  const lineToFeedmill = {
+    'Line 1': 'Feedmill 1',
+    'Line 2': 'Feedmill 1',
+    'Line 3': 'Feedmill 2',
+    'Line 4': 'Feedmill 2',
+    'Line 5': 'Feedmill 3',
+    'Line 6': 'Feedmill 3',
+    'Line 7': 'Powermix',
+  };
+  
+  const feedmillToLines = {
+    'Feedmill 1': ['Line 1', 'Line 2'],
+    'Feedmill 2': ['Line 3', 'Line 4'],
+    'Feedmill 3': ['Line 5', 'Line 6'],
+    'Powermix': ['Line 7'],
+  };
+  
+  const rateMap = {
+    'Line 1': product.l1_rate || 0,
+    'Line 2': product.l2_rate || 0,
+    'Line 3': product.l3_rate || 0,
+    'Line 4': product.l4_rate || 0,
+    'Line 5': product.l5_rate || 0,
+    'Line 6': product.l6_rate || 0,
+    'Line 7': product.l7_rate || 0,
+  };
+  
+  // All lines with rate > 0, sorted descending (higher = better)
+  const allAvailable = Object.entries(rateMap)
+    .filter(([line, rate]) => rate > 0)
+    .map(([line, rate]) => ({ line, rate, feedmill: lineToFeedmill[line] }))
+    .sort((a, b) => b.rate - a.rate);
+  
+  if (allAvailable.length === 0) {
+    return { globalBest: null, sameFeedmillLines: [], differentFeedmillLines: [] };
+  }
+  
+  // Global best = highest run rate across ALL lines
+  const globalBest = allAvailable[0];
+  
+  // The feedmill that the global best belongs to
+  const recommendedFeedmill = globalBest.feedmill;
+  
+  // Other lines in the SAME feedmill as the global best (with rate > 0)
+  // These are "okay" / "Also available" — NO "not recommended"
+  const sameFeedmillLines = allAvailable
+    .filter(l => l.feedmill === recommendedFeedmill && l.line !== globalBest.line);
+  
+  // Lines in DIFFERENT feedmills from the global best (with rate > 0)
+  // These are "not recommended"
+  const differentFeedmillLines = allAvailable
+    .filter(l => l.feedmill !== recommendedFeedmill);
+  
+  // Lines within the CURRENT feedmill (what user is viewing)
+  const currentFeedmillAvailable = allAvailable
+    .filter(l => currentFeedmillLines.includes(l.line));
+  
+  return { 
+    globalBest, 
+    sameFeedmillLines, 
+    differentFeedmillLines,
+    currentFeedmillAvailable,
+    recommendedFeedmill
+  };
+}
+```
+
+---
+
+### DISPLAY SCENARIOS
+
+**Scenario A — Global best is within current feedmill, same-feedmill line also has rate:**
+
+Product: L1 Rate = 20.13, L2 Rate = 20.05, L6 Rate = 7.16
+Global best: Line 1 (Feedmill 1)
+User is on Feedmill 1, selected Line 1:
+
+```
+┌──────────────────────────────────────────────────────────┐
+│ ℹ Recommended: Line 1 (rate: 20.13 min/batch) ✓          │
+│                                                          │
+│   Also available: Line 2 (20.05 min/batch)               │
+│   ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─            │
+│   Also producible on Line 6 (7.16 min/batch)             │
+│   — not recommended                                      │
+│   Different feedmill — Feedmill 3                         │
+└──────────────────────────────────────────────────────────┘
+```
+
+- Line 1: "Recommended" ✓ (global best)
+- Line 2: "Also available" — NO "not recommended" (same feedmill as global best, rate > 0)
+- Line 6: "not recommended" (different feedmill from global best)
+
+**Scenario B — Global best is within current feedmill, user selected the other same-feedmill line:**
+
+User selected Line 2 (not the recommended Line 1):
+
+```
+┌──────────────────────────────────────────────────────────┐
+│ ℹ Recommended: Line 1 (rate: 20.13 min/batch)            │
+│                                                          │
+│   Also available: Line 2 (20.05 min/batch)               │
+│   ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─            │
+│   Also producible on Line 6 (7.16 min/batch)             │
+│   — not recommended                                      │
+│   Different feedmill — Feedmill 3                         │
+└──────────────────────────────────────────────────────────┘
+```
+
+- No ✓ (user selected Line 2, not the recommended Line 1)
+- Line 2 still has NO "not recommended" — same feedmill as global best, acceptable choice
+
+**Scenario C — Global best is in a DIFFERENT feedmill from current:**
+
+User is on Feedmill 3 (Line 5, Line 6). Product:
+- L1 Rate = 20.13 (global best, Feedmill 1)
+- L2 Rate = 20.05 (Feedmill 1)
+- L6 Rate = 7.16 (current feedmill, Feedmill 3)
+
+```
+┌──────────────────────────────────────────────────────────┐
+│ ⚠ Line 6 can produce this product (7.16 min/batch)       │
+│   but is not recommended.                                │
+│                                                          │
+│   No other lines available in this feedmill.             │
+│   ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─            │
+│   Better options in other feedmills:                     │
+│                                                          │
+│   Line 1 (20.13 min/batch) — Feedmill 1                 │
+│   — Recommended                                          │
+│                                                          │
+│   Line 2 (20.05 min/batch) — Feedmill 1                 │
+└──────────────────────────────────────────────────────────┘
+```
+
+- Line 6: "not recommended" (different feedmill from global best)
+- Line 1: "Recommended" (global best)
+- Line 2: NO "not recommended" (same feedmill as global best Line 1)
+- Line 1 and Line 2 are both clickable links
+
+**Scenario D — Global best is Line 3, other lines across feedmills:**
+
+Product: L2 Rate = 10, L3 Rate = 25, L7 Rate = 5
+Global best: Line 3 (Feedmill 2)
+User is on Feedmill 2:
+
+```
+┌──────────────────────────────────────────────────────────┐
+│ ℹ Recommended: Line 3 (rate: 25.00 min/batch) ✓          │
+│                                                          │
+│   No other lines available in this feedmill.             │
+│   ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─            │
+│   Also producible on Line 2 (10.00 min/batch)            │
+│   — not recommended                                      │
+│   Different feedmill — Feedmill 1                         │
+│                                                          │
+│   Also producible on Line 7 (5.00 min/batch)             │
+│   — not recommended                                      │
+│   Different feedmill — Powermix                           │
+└──────────────────────────────────────────────────────────┘
+```
+
+- Line 3: "Recommended" ✓
+- Line 4: NOT shown (rate = 0, cannot produce)
+- Line 2: "not recommended" (different feedmill from global best)
+- Line 7: "not recommended" (different feedmill from global best)
+- Line 2 and Line 7 are both clickable links
+
+**Scenario E — Global best is Line 3, Line 4 also has rate:**
+
+Product: L2 Rate = 10, L3 Rate = 25, L4 Rate = 18, L7 Rate = 5
+Global best: Line 3 (Feedmill 2)
+User is on Feedmill 2:
+
+```
+┌──────────────────────────────────────────────────────────┐
+│ ℹ Recommended: Line 3 (rate: 25.00 min/batch) ✓          │
+│                                                          │
+│   Also available: Line 4 (18.00 min/batch)               │
+│   ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─            │
+│   Also producible on Line 2 (10.00 min/batch)            │
+│   — not recommended                                      │
+│   Different feedmill — Feedmill 1                         │
+│                                                          │
+│   Also producible on Line 7 (5.00 min/batch)             │
+│   — not recommended                                      │
+│   Different feedmill — Powermix                           │
+└──────────────────────────────────────────────────────────┘
+```
+
+- Line 3: "Recommended" ✓
+- Line 4: "Also available" — NO "not recommended" (same feedmill as global best, rate > 0)
+- Line 2: "not recommended" (different feedmill)
+- Line 7: "not recommended" (different feedmill)
+
+**Scenario F — Only one line globally has rate:**
+
+```
+┌──────────────────────────────────────────────────────────┐
+│ ℹ Recommended: Line 5 (rate: 8.31 min/batch) ✓           │
+│                                                          │
+│   No other lines available.                              │
+└──────────────────────────────────────────────────────────┘
+```
+
+**Scenario G — Two lines tied for global best (same feedmill):**
+
+Product: L1 Rate = 20.00, L2 Rate = 20.00, L6 Rate = 7.16
+
+```
+┌──────────────────────────────────────────────────────────┐
+│ ℹ Both lines are equally recommended:                     │
+│   Line 1 (rate: 20.00 min/batch)                         │
+│   Line 2 (rate: 20.00 min/batch)                         │
+│   ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─            │
+│   Also producible on Line 6 (7.16 min/batch)             │
+│   — not recommended                                      │
+│   Different feedmill — Feedmill 3                         │
+└──────────────────────────────────────────────────────────┘
+```
+
+**Scenario H — No lines have rate:**
+
+```
+┌──────────────────────────────────────────────────────────┐
+│ ⚠ No production history found on any line.                │
+│   Run rate will need to be manually configured.           │
+└──────────────────────────────────────────────────────────┘
+```
+
+---
+
+### CONTAINER STYLING
+
+**Blue container (global best is within current feedmill):**
+
+| Property | Value |
+|---|---|
+| Background | #eff6ff |
+| Border | 1px solid #bfdbfe |
+| Border-radius | 8px |
+| Padding | 12px 16px |
+| Margin-top | 8px |
+
+**Amber container (global best is in different feedmill OR no lines available):**
+
+| Property | Value |
+|---|---|
+| Background | #fffbeb |
+| Border | 1px solid #fcd34d |
+| Border-radius | 8px |
+| Padding | 12px 16px |
+| Margin-top | 8px |
+
+---
+
+### TEXT STYLING
+
+| Element | Styling |
+|---|---|
+| "Recommended: Line X (rate: XX.XX min/batch)" | 12px, font-weight 600, dark blue (#1e40af) |
+| ✓ checkmark | Green (#43a047), shown ONLY when user's selection matches recommended line |
+| "Also available: Line X (XX.XX min/batch)" | 12px, font-weight 400, grey (#4b5563), indent 16px |
+| "Also producible on Line X (XX.XX min/batch)" | 12px, font-weight 400, grey (#4b5563), indent 16px. "Line X" = clickable orange link (#fd5108) |
+| "— not recommended" | 11px, font-weight 400, italic, red-grey (#9f1239) |
+| "— Recommended" (in other feedmill section) | 11px, font-weight 600, dark blue (#1e40af) |
+| "Different feedmill — [Name]" | 11px, font-weight 400, grey (#6b7280), indent 16px |
+| "can produce but not recommended" | 12px, font-weight 400, dark amber (#92400e) |
+| "No other lines available" | 11px, grey (#6b7280), indent 16px |
+| "Both lines are equally recommended" | 12px, font-weight 600, dark blue (#1e40af) |
+| Dashed separator | 1px dashed #bfdbfe (blue container) or #fcd34d (amber container), margin 8px 0 |
+
+---
+
+### LINKED LINE NAMES — ALL CLICKABLE
+
+Every line name in the "Also producible" (other feedmill) section is a clickable link:
+
+| Property | Value |
+|---|---|
+| Color | Orange (#fd5108) |
+| Cursor | Pointer |
+| Hover | Underline, darker orange (#c2410c) |
+| Click | Confirmation dialog → navigate to that line's feedmill/tab → reopen Add Order dialog with all details pre-filled |
+
+Both the "Recommended" line in other feedmills AND the "not recommended" lines are clickable — user might still want to navigate there.
+
+---
+
+### GREYED OUT PRODUCTS IN DROPDOWN
+
+Products with no run rate on ANY line (all L1-L7 rates = 0 or empty) appear greyed out in the Item Description dropdown:
+
+| Property | Value |
+|---|---|
+| Text color | Light grey (#d1d5db) |
+| Background | White (same as other options) |
+| Cursor | Not-allowed |
+| Clickable | ❌ No — cannot be selected |
+| Tooltip on hover | "No production history on any line. Update Knowledge Base to enable this product." |
+| Position in list | Below all selectable products, separated by a thin divider |
+
+**Dropdown with greyed out products:**
+
+```
+┌──────────────────────────────────────────────────────────┐
+│ Elite XP Startex, Mini-pellet 50kg                        │
+│ 1000000000241 · Hogs · Lines: 1, 2, 7                    │
+├──────────────────────────────────────────────────────────┤
+│ Lakas Gatas Pellet 50kg                                   │
+│ 1000000000936 · Hogs · Lines: 1, 2, 6                    │
+├──────────── Products without production history ─────────┤
+│ Civic Hog Growex, Pellet 50kg                             │  ← greyed out
+│ 1000000000933 · Hogs · No line available                  │
+├──────────────────────────────────────────────────────────┤
+│ Civic Hog Finex, Pellet 50kg                              │  ← greyed out
+│ 1000000000935 · Hogs · No line available                  │
+└──────────────────────────────────────────────────────────┘
+```
+
+- Separator label: "Products without production history" — 10px, grey italic
+- Greyed products listed below the separator
+- Greyed products show "No line available" instead of "Lines: X, Y"
+```

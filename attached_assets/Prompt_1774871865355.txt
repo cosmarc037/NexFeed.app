@@ -1,0 +1,112 @@
+```
+Implement the following fix to the N10D table tooltip:
+
+---
+
+## FIX: PRODUCT TOOLTIP — POSITION NEXT TO MOUSE CURSOR, NOT CENTERED
+
+The product tooltip is too far from the hovered row. It should appear right next to the mouse cursor — the same way the day cell cumulative tooltip works (see 2nd snip).
+
+---
+
+### THE PROBLEM
+
+Current behavior: tooltip is centered in the viewport, far from the row
+Expected behavior: tooltip appears right beside the mouse cursor, like the day cell tooltip
+
+---
+
+### THE FIX
+
+Use mouse position directly, not row centering. Same approach as the day cell tooltip which already works correctly.
+
+```javascript
+function N10DTableRow({ product, dailyColumns, today }) {
+  const [showTooltip, setShowTooltip] = useState(false);
+  const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
+  const timeoutRef = useRef(null);
+  
+  function handleProductHover(e) {
+    clearTimeout(timeoutRef.current);
+    timeoutRef.current = setTimeout(() => {
+      const pos = clampToViewport(
+        e.clientX + 12,
+        e.clientY + 12,
+        480,  // tooltip width
+        220   // tooltip height
+      );
+      setTooltipPos(pos);
+      setShowTooltip(true);
+    }, 300);
+  }
+  
+  function handleProductMouseMove(e) {
+    if (showTooltip) {
+      const pos = clampToViewport(
+        e.clientX + 12,
+        e.clientY + 12,
+        480,
+        220
+      );
+      setTooltipPos(pos);
+    }
+  }
+  
+  function handleMouseLeave() {
+    clearTimeout(timeoutRef.current);
+    setShowTooltip(false);
+  }
+  
+  // ... render
+}
+```
+
+### CLAMP TO VIEWPORT — PREVENT CLIPPING
+
+```javascript
+function clampToViewport(x, y, tooltipWidth, tooltipHeight) {
+  const viewportWidth = window.innerWidth;
+  const viewportHeight = window.innerHeight;
+  const padding = 8;
+  
+  // If tooltip goes off right edge, flip to left of cursor
+  if (x + tooltipWidth + padding > viewportWidth) {
+    x = x - tooltipWidth - 24; // flip to left side of cursor
+  }
+  
+  // If tooltip goes off bottom edge, flip above cursor
+  if (y + tooltipHeight + padding > viewportHeight) {
+    y = y - tooltipHeight - 24; // flip above cursor
+  }
+  
+  // Ensure not off left edge
+  if (x < padding) x = padding;
+  
+  // Ensure not off top edge
+  if (y < padding) y = padding;
+  
+  return { x, y };
+}
+```
+
+### KEY CHANGE
+
+| Property | Old (wrong) | New (correct) |
+|---|---|---|
+| X position | Center of viewport | Mouse cursor X + 12px |
+| Y position | Above row, centered | Mouse cursor Y + 12px |
+| Follows mouse | No | Yes — updates on mouse move |
+| Flip behavior | Center vertically | Flips to left/above if near edge |
+
+### THE TOOLTIP SHOULD BEHAVE LIKE THE DAY CELL TOOLTIP
+
+The 2nd snip shows the day cell cumulative tooltip ("Apr 3" tooltip) appearing right next to the hovered cell. The product tooltip should behave the exact same way — appearing right beside wherever the mouse cursor is.
+
+---
+
+### APPLY ONLY TO
+
+- ✅ N10D table — product hover tooltip (fix gap)
+- ❌ Auto-Sequence tooltip — leave as-is
+- ❌ Day cell cumulative tooltip — already works correctly, don't touch
+```

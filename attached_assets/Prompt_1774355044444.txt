@@ -1,0 +1,225 @@
+The new order (8 MT, Classic Hog Growex, Avail: March 23, 2026) is placed at the very bottom of the table. But it should be at **Prio 2** — between Salto Conditioner (March 22) and Gallimax Pigeon Pellet (March 28, prio replenish).
+
+The insertion logic is clearly not running — the order is just being appended to the end.
+
+```
+Implement the following fix to the NexFeed application:
+
+---
+
+## FIX: ADD NEW ORDER — INSERTION POSITION NOT BEING APPLIED
+
+The new order is being appended to the bottom of the table regardless of its avail date. The chronological insertion logic is not running when the order is actually added. Fix this.
+
+---
+
+### THE BUG
+
+When the user confirms adding a new order with an actual avail date (e.g., March 23, 2026):
+- The order should be inserted at the correct chronological position (Prio 2, between Mar 22 and Mar 28)
+- Instead, the order is appended to the very bottom of the table (last row)
+
+The Impact Analysis correctly identifies the position (when fixed), but the actual insertion into the table ignores it.
+
+---
+
+### THE FIX
+
+The insertion position calculation must run BOTH:
+1. When generating the Impact Analysis (for preview)
+2. When actually adding the order to the table (on confirm)
+
+The actual table insertion must use the SAME calculated position.
+
+---
+
+### STEP 1: CALCULATE POSITION (SAME FUNCTION FOR BOTH)
+
+```javascript
+function calculateInsertionIndex(newOrder, existingOrders) {
+  const newDate = parseDate(newOrder.avail_date);
+  
+  // Filter to active orders only (not Done, not Cancelled)
+  const activeOrders = existingOrders.filter(
+    o => o.status !== 'Done' && o.status !== 'Cancel PO'
+  );
+  
+  // CASE 1: New order has an actual date
+  if (newDate) {
+    
+    for (let i = 0; i < activeOrders.length; i++) {
+      const order = activeOrders[i];
+      const orderDate = parseDate(order.avail_date);
+      
+      // If current order has no date (prio replenish, safety stocks)
+      // AND the new order has a date — insert BEFORE non-dated orders
+      if (!orderDate) {
+        return i; // insert at this index
+      }
+      
+      // If current order has a date AFTER the new order's date
+      // Insert BEFORE this order
+      if (orderDate > newDate) {
+        return i; // insert at this index
+      }
+      
+      // If same date — insert AFTER this order (continue loop)
+    }
+    
+    // New order's date is after all dated orders
+    // Find where non-dated orders start
+    const lastDatedIndex = activeOrders.findLastIndex(
+      o => parseDate(o.avail_date) !== null
+    );
+    return lastDatedIndex + 1;
+  }
+  
+  // CASE 2: New order is non-dated (prio replenish, safety stocks)
+  // Insert at the end of active orders
+  return activeOrders.length;
+}
+```
+
+---
+
+### STEP 2: USE THE CALCULATED POSITION WHEN INSERTING
+
+```javascript
+function addNewOrder(newOrder, existingOrders) {
+  // Calculate where to insert
+  const insertIndex = calculateInsertionIndex(newOrder, existingOrders);
+  
+  // Get the active orders
+  const doneOrders = existingOrders.filter(o => o.status === 'Done');
+  const cancelledOrders = existingOrders.filter(o => o.status === 'Cancel PO');
+  const activeOrders = existingOrders.filter(
+    o => o.status !== 'Done' && o.status !== 'Cancel PO'
+  );
+  
+  // Insert at the calculated index
+  activeOrders.splice(insertIndex, 0, newOrder);
+  
+  // Renumber priorities
+  activeOrders.forEach((order, index) => {
+    order.prio = index + 1;
+  });
+  
+  // Reconstruct the full table: Done (top) + Active + Cancelled (bottom)
+  const finalOrders = [...doneOrders, ...activeOrders, ...cancelledOrders];
+  
+  // Recalculate completion date cascade
+  recalculateCompletionCascade(activeOrders);
+  
+  return finalOrders;
+}
+```
+
+---
+
+### STEP 3: VERIFY WITH THE CURRENT DATA
+
+**Current table:**
+```
+Prio 1:  Salto Conditioner         | Mar 22, 2026 (dated)
+Prio 2:  Gallimax Pigeon Pellet    | prio replenish (non-dated)
+Prio 3:  Elite XP Startex 80MT     | prio replenish (non-dated)
+Prio 4:  Gall 21 Chicken Layer     | safety stocks (non-dated)
+Prio 5:  Gallimax 3 Maintenance    | safety stocks (non-dated)
+Prio 6:  Elite XP Startex 80MT     | safety stocks (non-dated)
+Prio 7:  Elite XP Startex 8MT      | safety stocks (non-dated)
+Prio 8:  Elite XP Startex 12MT     | safety stocks (non-dated)
+Prio 9:  Elite XP Startex 32MT     | safety stocks (non-dated)
+Prio 10: Elite XP Startex 20MT     | safety stocks (non-dated)
+```
+
+**New order:** Classic Hog Growex | Mar 23, 2026
+
+**Calculation step by step:**
+```
+i=0: Salto Conditioner, date = Mar 22. Mar 22 > Mar 23? NO. Continue.
+i=1: Gallimax Pigeon, date = null (prio replenish). Non-dated found! 
+     → INSERT HERE at index 1.
+```
+
+Wait — that gives index 1 which is Prio 2. But Salto is Mar 22 and new order is Mar 23. So Mar 22 < Mar 23, we skip. Then Gallimax Pigeon has no date, so we insert before it.
+
+**Result: Insert at index 1 → Prio 2** ✅
+
+```
+Prio 1:  Salto Conditioner         | Mar 22, 2026
+Prio 2:  Classic Hog Growex        | Mar 23, 2026 ← NEW
+Prio 3:  Gallimax Pigeon Pellet    | prio replenish
+Prio 4:  Elite XP Startex 80MT     | prio replenish
+Prio 5:  Gall 21 Chicken Layer     | safety stocks
+Prio 6:  Gallimax 3 Maintenance    | safety stocks
+Prio 7:  Elite XP Startex 80MT     | safety stocks
+Prio 8:  Elite XP Startex 8MT      | safety stocks
+Prio 9:  Elite XP Startex 12MT     | safety stocks
+Prio 10: Elite XP Startex 32MT     | safety stocks
+Prio 11: Elite XP Startex 20MT     | safety stocks
+```
+
+---
+
+### DEBUG: FIND WHERE THE BUG IS
+
+The bug is likely in ONE of these places:
+
+**Possible bug 1:** The add function is using `array.push()` instead of `array.splice(insertIndex, 0, newOrder)`:
+```javascript
+// BUG — appends to end
+orders.push(newOrder);
+
+// FIX — insert at calculated position
+orders.splice(insertIndex, 0, newOrder);
+```
+
+**Possible bug 2:** The insertion index is calculated but not passed to the actual add function:
+```javascript
+// BUG — calculates position but doesn't use it
+const position = calculateInsertionIndex(newOrder, orders);
+orders.push(newOrder); // ignores position
+
+// FIX — use the calculated position
+const position = calculateInsertionIndex(newOrder, orders);
+orders.splice(position, 0, newOrder);
+```
+
+**Possible bug 3:** The orders are re-sorted AFTER insertion by some other function that moves the new order to the bottom:
+```javascript
+// BUG — a sort runs after insertion
+orders.splice(position, 0, newOrder);
+orders.sort(someOtherSortFunction); // moves new order to bottom
+
+// FIX — remove the secondary sort, or ensure it respects dated order chronology
+```
+
+**Possible bug 4:** The state update is not using the modified array:
+```javascript
+// BUG — state not updated with spliced array
+const newArray = [...orders];
+newArray.splice(position, 0, newOrder);
+setOrders(orders); // still using original array!
+
+// FIX
+setOrders(newArray); // use the modified array
+```
+
+### SEARCH THE CODEBASE
+
+Search for where the new order is added to the orders array/state. Look for:
+- `push(` — should be `splice(`
+- `setOrders(` or `setState(` — ensure it uses the modified array
+- Any `.sort()` that runs after the order is added
+- The function that handles the "Confirm" button click in the confirmation dialog
+
+---
+
+### AFTER FIX — ALSO VERIFY THESE CASES
+
+**Test 1:** Add order with date Mar 23 → should go to Prio 2 (between Mar 22 and non-dated)
+**Test 2:** Add order with date Mar 20 → should go to Prio 1 (before Mar 22)
+**Test 3:** Add order with date Mar 30 → should go to Prio 2 (after Mar 22, before non-dated)
+**Test 4:** Add order as "prio replenish" → should go to the bottom of active orders
+**Test 5:** Add order with date Mar 22 (same as existing) → should go to Prio 2 (after existing Mar 22)
+```

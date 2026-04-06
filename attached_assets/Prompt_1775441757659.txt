@@ -1,0 +1,729 @@
+```
+Implement the following feature:
+
+---
+
+## AI SUMMARY CONTAINER — PRODUCTION INSIGHTS & ALERTS & REMINDERS
+
+Add an AI-generated summary container at the top of both Production Insights and Alerts & Reminders sections. This container always appears at the top, above the existing rule-based insights/alerts.
+
+---
+
+### 1. LAYOUT
+
+**Production Insights:**
+
+```
+┌──────────────────────────────────────────────────┐
+│ 🟡 Production Insights (X insights)           ▾ │
+├──────────────────────────────────────────────────┤
+│ ┌──────────────────────────────────────────────┐ │
+│ │ ✨ Smart Summary                    🔄 Refresh│ │
+│ │                                              │ │
+│ │ Based on current data for Line 1, your top   │ │
+│ │ priority is Gall 21 Chicken Layer which is   │ │
+│ │ critical — DFL exceeds inventory. Consider   │ │
+│ │ producing it first.                          │ │
+│ │                                              │ │
+│ │ Recommended actions:                         │ │
+│ │ 1. Start production on Gall 21 immediately   │ │
+│ │ 2. Schedule Gallimax 3 Maintenance next      │ │
+│ │ 3. Review 6 Elite XP Startex orders for      │ │
+│ │    potential combining                       │ │
+│ └──────────────────────────────────────────────┘ │
+│                                                  │
+│ 📊 Stock-Level Sequencing Available              │
+│ 📌 Prioritize Order                              │
+│ 🔗 Consider Combining                            │
+└──────────────────────────────────────────────────┘
+```
+
+**Alerts & Reminders:**
+
+```
+┌──────────────────────────────────────────────────┐
+│ 🔔 Alerts & Reminders (X alerts)             ▾  │
+├──────────────────────────────────────────────────┤
+│ ┌──────────────────────────────────────────────┐ │
+│ │ ✨ Smart Summary                    🔄 Refresh│ │
+│ │                                              │ │
+│ │ You have 2 overdue orders that need          │ │
+│ │ immediate attention — Gall 21 Chicken Layer  │ │
+│ │ and Gallimax 3 Maintenance are past their    │ │
+│ │ availability dates.                          │ │
+│ │                                              │ │
+│ │ Recommended actions:                         │ │
+│ │ 1. Mark Gall 21 as In Production or adjust   │ │
+│ │    its avail date immediately                │ │
+│ │ 2. Escalate Gallimax 3 — 6 days overdue      │ │
+│ │ 3. Check Ave Max Duck Layex stock — target   │ │
+│ │    date has passed                           │ │
+│ └──────────────────────────────────────────────┘ │
+│                                                  │
+│ 🔴 Overdue — Past Deadline                       │
+│ 🔴 Stock Running Low                             │
+│ 🔴 SAP Data Outdated                             │
+└──────────────────────────────────────────────────┘
+```
+
+---
+
+### 2. AI SUMMARY COMPONENT
+
+```jsx
+function AISummaryCard({ type, data, scope }) {
+  // type: 'production_insights' or 'alerts_reminders'
+  // scope: { feedmill: 'Feedmill 1', line: 'Line 1' } or { feedmill: 'Feedmill 1', line: 'all' }
+  
+  const [summary, setSummary] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isGenerated, setIsGenerated] = useState(false);
+  
+  // Auto-generate on first load and when data changes
+  useEffect(() => {
+    if (data && data.length > 0) {
+      generateSummary();
+    }
+  }, [data, scope]);
+  
+  async function generateSummary() {
+    setIsLoading(true);
+    
+    try {
+      const context = buildSummaryContext(type, data, scope);
+      const prompt = buildSummaryPrompt(type, context);
+      const response = await callAI(prompt);
+      
+      setSummary(response);
+      setIsGenerated(true);
+    } catch (error) {
+      console.error('Failed to generate summary:', error);
+      setSummary('Unable to generate summary. Click refresh to try again.');
+    } finally {
+      setIsLoading(false);
+    }
+  }
+  
+  function handleRefresh() {
+    generateSummary();
+  }
+  
+  return (
+    <div className="ai-summary-card">
+      <div className="ai-summary-header">
+        <div className="ai-summary-title">
+          <span className="ai-summary-sparkle">✨</span>
+          <span>Smart Summary</span>
+        </div>
+        <button 
+          className="ai-summary-refresh"
+          onClick={handleRefresh}
+          disabled={isLoading}
+          title="Refresh summary"
+        >
+          {isLoading ? (
+            <span className="refresh-spinning">🔄</span>
+          ) : (
+            <span>🔄 Refresh</span>
+          )}
+        </button>
+      </div>
+      
+      <div className="ai-summary-body">
+        {isLoading && !summary && (
+          <div className="ai-summary-loading">
+            Generating summary...
+          </div>
+        )}
+        
+        {summary && (
+          <div className="ai-summary-content">
+            {formatSummaryContent(summary)}
+          </div>
+        )}
+        
+        {!summary && !isLoading && (
+          <div className="ai-summary-empty">
+            Click refresh to generate a smart summary.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function formatSummaryContent(text) {
+  // Split into paragraphs and numbered items
+  const lines = text.split('\n').filter(l => l.trim());
+  
+  return lines.map((line, index) => {
+    // Check if it's a numbered action item
+    const numberedMatch = line.match(/^(\d+)\.\s(.+)/);
+    if (numberedMatch) {
+      return (
+        <div key={index} className="ai-summary-action-item">
+          <span className="ai-summary-action-number">{numberedMatch[1]}.</span>
+          <span>{numberedMatch[2]}</span>
+        </div>
+      );
+    }
+    
+    // Check if it's a header like "Recommended actions:"
+    if (line.toLowerCase().includes('recommended actions') || 
+        line.toLowerCase().includes('action items') ||
+        line.toLowerCase().includes('priorities')) {
+      return (
+        <div key={index} className="ai-summary-section-header">
+          {line}
+        </div>
+      );
+    }
+    
+    // Regular paragraph
+    return <p key={index}>{line}</p>;
+  });
+}
+```
+
+---
+
+### 3. AI SUMMARY STYLING
+
+```css
+.ai-summary-card {
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  border-radius: 8px;
+  margin-bottom: 12px;
+  overflow: hidden;
+}
+
+.ai-summary-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  border-bottom: 1px solid #fed7aa;
+}
+
+.ai-summary-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #92400e;
+}
+
+.ai-summary-sparkle {
+  font-size: 14px;
+}
+
+.ai-summary-refresh {
+  background: none;
+  border: none;
+  font-size: 11px;
+  color: #92400e;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transition: background 0.15s;
+}
+
+.ai-summary-refresh:hover {
+  background: rgba(146, 64, 14, 0.08);
+}
+
+.ai-summary-refresh:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.refresh-spinning {
+  display: inline-block;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.ai-summary-body {
+  padding: 12px 14px;
+}
+
+.ai-summary-content {
+  font-size: 12px;
+  color: #374151;
+  line-height: 1.6;
+}
+
+.ai-summary-content p {
+  margin: 0 0 8px 0;
+}
+
+.ai-summary-content p:last-child {
+  margin-bottom: 0;
+}
+
+.ai-summary-section-header {
+  font-size: 11px;
+  font-weight: 600;
+  color: #92400e;
+  margin: 10px 0 6px 0;
+}
+
+.ai-summary-action-item {
+  display: flex;
+  gap: 6px;
+  font-size: 12px;
+  color: #374151;
+  line-height: 1.6;
+  padding: 2px 0;
+}
+
+.ai-summary-action-number {
+  font-weight: 600;
+  color: #92400e;
+  min-width: 16px;
+}
+
+.ai-summary-loading {
+  font-size: 12px;
+  color: #92400e;
+  font-style: italic;
+}
+
+.ai-summary-empty {
+  font-size: 12px;
+  color: #d1d5db;
+  font-style: italic;
+}
+```
+
+---
+
+### 4. BUILD CONTEXT — SCOPE-AWARE
+
+The AI summary considers only the current feedmill (All tab) or current line (Line tab):
+
+```javascript
+function buildSummaryContext(type, data, scope) {
+  const { feedmill, line } = scope;
+  
+  // Get orders for the current scope
+  let scopedOrders;
+  if (line === 'all') {
+    // All tab — all orders for the current feedmill
+    const lines = FEEDMILL_LINE_MAP[feedmill];
+    scopedOrders = data.filter(o => lines.includes(o.line));
+  } else {
+    // Specific line tab
+    scopedOrders = data.filter(o => o.line === line);
+  }
+  
+  // Get N10D data
+  const n10dProducts = getN10DProducts();
+  
+  // Build context
+  const context = {
+    scope: line === 'all' ? feedmill : line,
+    totalOrders: scopedOrders.length,
+    
+    // By status
+    plotted: scopedOrders.filter(o => o.status === 'Plotted').length,
+    planned: scopedOrders.filter(o => o.status === 'Planned').length,
+    inProduction: scopedOrders.filter(o => o.status === 'In Production').length,
+    onHold: scopedOrders.filter(o => o.status === 'Hold').length,
+    done: scopedOrders.filter(o => o.status === 'Done').length,
+    cancelled: scopedOrders.filter(o => o.status === 'Cancel PO').length,
+    
+    // Volumes
+    totalVolume: scopedOrders.reduce((sum, o) => sum + (parseFloat(o.volume) || 0), 0),
+    
+    // Overdue orders
+    overdueOrders: scopedOrders.filter(o => {
+      if (!o.avail_date || o.avail_date === 'prio replenish' || o.avail_date === 'safety stocks') return false;
+      const availDate = new Date(o.avail_date);
+      return availDate < new Date() && o.status !== 'Done' && o.status !== 'Cancel PO';
+    }),
+    
+    // Critical/Urgent products from N10D
+    criticalProducts: [],
+    urgentProducts: [],
+    
+    // Combinable orders
+    combinableGroups: findCombinableGroups(scopedOrders),
+    
+    // Orders list for reference
+    orders: scopedOrders.map(o => ({
+      prio: o.prio,
+      fpr: o.fpr,
+      description: o.item_description,
+      volume: o.volume,
+      status: o.status,
+      availDate: o.avail_date,
+      materialCode: o.material_code_fg,
+      line: o.line
+    }))
+  };
+  
+  // Match orders to N10D data
+  scopedOrders.forEach(order => {
+    const product = n10dProducts.find(
+      p => String(p.material_code_fg) === String(order.material_code_fg)
+    );
+    if (product) {
+      const status = getProductStatus(
+        product.due_for_loading, 
+        product.inventory, 
+        getDailyColumns(), 
+        product, 
+        new Date()
+      );
+      if (status === 'Critical') {
+        context.criticalProducts.push({
+          name: order.item_description,
+          fpr: order.fpr,
+          prio: order.prio,
+          dfl: product.due_for_loading,
+          inventory: product.inventory
+        });
+      }
+      if (status === 'Urgent') {
+        context.urgentProducts.push({
+          name: order.item_description,
+          fpr: order.fpr,
+          prio: order.prio,
+          dfl: product.due_for_loading,
+          inventory: product.inventory
+        });
+      }
+    }
+  });
+  
+  return context;
+}
+```
+
+---
+
+### 5. AI PROMPTS
+
+### PRODUCTION INSIGHTS PROMPT
+
+```javascript
+function buildSummaryPrompt(type, context) {
+  if (type === 'production_insights') {
+    return `
+You are a production planning advisor for a feed manufacturing plant.
+Generate a brief smart summary for the production insights panel.
+
+SCOPE: ${context.scope}
+
+CURRENT DATA:
+- Total orders: ${context.totalOrders} (${context.totalVolume} MT)
+- Plotted: ${context.plotted}, Planned: ${context.planned}, In Production: ${context.inProduction}
+- On Hold: ${context.onHold}, Done: ${context.done}, Cancelled: ${context.cancelled}
+- Critical products (DFL > Inventory): ${context.criticalProducts.length > 0 
+    ? context.criticalProducts.map(p => `${p.name} (Prio ${p.prio}, DFL: ${p.dfl} MT, Inv: ${p.inventory} MT)`).join('; ') 
+    : 'None'}
+- Urgent products: ${context.urgentProducts.length > 0 
+    ? context.urgentProducts.map(p => `${p.name} (Prio ${p.prio})`).join('; ') 
+    : 'None'}
+- Combinable order groups: ${context.combinableGroups.length > 0 
+    ? context.combinableGroups.map(g => `${g.product} (${g.count} orders, ${g.totalVolume} MT)`).join('; ') 
+    : 'None'}
+- Overdue orders: ${context.overdueOrders.length > 0 
+    ? context.overdueOrders.map(o => `${o.item_description} (Prio ${o.prio}, due: ${o.avail_date})`).join('; ') 
+    : 'None'}
+
+ORDERS:
+${context.orders.map(o => `Prio ${o.prio}: ${o.description} | ${o.volume} MT | ${o.status} | Avail: ${o.availDate || 'N/A'}`).join('\n')}
+
+RULES:
+- Provide a 2-3 sentence summary of the current production situation
+- Then list 3-5 prioritized recommended actions
+- Be specific — use product names, priorities, and volumes
+- Focus on what to do FIRST, NEXT, and LATER
+- Use full month names for dates
+- Do NOT use markdown formatting
+- Keep it concise and actionable
+
+FORMAT:
+[2-3 sentence summary paragraph]
+
+Recommended actions:
+1. [Most important action]
+2. [Second action]
+3. [Third action]
+[optional 4-5]
+    `;
+  }
+  
+  if (type === 'alerts_reminders') {
+    return `
+You are a production planning advisor for a feed manufacturing plant.
+Generate a brief smart summary for the alerts and reminders panel.
+
+SCOPE: ${context.scope}
+
+CURRENT ALERTS:
+- Overdue orders (past avail date): ${context.overdueOrders.length > 0 
+    ? context.overdueOrders.map(o => {
+        const daysOverdue = Math.ceil((new Date() - new Date(o.avail_date)) / (1000 * 60 * 60 * 24));
+        return `${o.item_description} (${daysOverdue} days overdue, Prio ${o.prio})`;
+      }).join('; ') 
+    : 'None'}
+- Critical stock levels: ${context.criticalProducts.length > 0 
+    ? context.criticalProducts.map(p => `${p.name} (DFL: ${p.dfl} MT > Inventory: ${p.inventory} MT)`).join('; ') 
+    : 'None'}
+- Urgent stock levels: ${context.urgentProducts.length > 0 
+    ? context.urgentProducts.map(p => `${p.name}`).join('; ') 
+    : 'None'}
+- Orders on hold: ${context.onHold}
+- Total active orders: ${context.plotted + context.planned + context.inProduction}
+
+RULES:
+- Provide a 2-3 sentence summary of the most critical alerts
+- Then list 3-5 recommended actions to address the alerts
+- Prioritize overdue orders first, then critical stock, then urgent
+- Be specific — use product names and how many days overdue
+- Use full month names for dates
+- Do NOT use markdown formatting
+- Keep it urgent and actionable
+
+FORMAT:
+[2-3 sentence summary of critical situation]
+
+Recommended actions:
+1. [Most urgent action — address overdue first]
+2. [Second action]
+3. [Third action]
+[optional 4-5]
+    `;
+  }
+}
+```
+
+---
+
+### 6. INTEGRATION — WHERE TO PLACE THE COMPONENT
+
+**Production Insights panel:**
+
+```jsx
+function ProductionInsightsPanel({ orders, feedmill, line }) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  
+  const scope = { feedmill, line: line || 'all' };
+  const ruleBasedInsights = generateRuleBasedInsights(orders); // existing logic
+  const totalCount = ruleBasedInsights.length + 1; // +1 for AI summary
+  
+  return (
+    <div className="insights-panel" data-tour="orders-insights">
+      <div 
+        className="insights-header" 
+        onClick={() => setIsExpanded(!isExpanded)}
+      >
+        <span>🟡 Production Insights ({totalCount} insights)</span>
+        <span>{isExpanded ? '▲' : '▼'}</span>
+      </div>
+      
+      {isExpanded && (
+        <div className="insights-body">
+          {/* AI Summary — ALWAYS at the top */}
+          <AISummaryCard 
+            type="production_insights" 
+            data={orders}
+            scope={scope}
+          />
+          
+          {/* Existing rule-based insights below */}
+          {ruleBasedInsights.map((insight, index) => (
+            <InsightCard key={index} insight={insight} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+```
+
+**Alerts & Reminders panel:**
+
+```jsx
+function AlertsRemindersPanel({ orders, feedmill, line }) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  
+  const scope = { feedmill, line: line || 'all' };
+  const ruleBasedAlerts = generateRuleBasedAlerts(orders); // existing logic
+  const totalCount = ruleBasedAlerts.length + 1; // +1 for AI summary
+  
+  return (
+    <div className="alerts-panel" data-tour="orders-alerts">
+      <div 
+        className="alerts-header" 
+        onClick={() => setIsExpanded(!isExpanded)}
+      >
+        <span>🔔 Alerts & Reminders 🔴 ({totalCount} alerts)</span>
+        <span>{isExpanded ? '▲' : '▼'}</span>
+      </div>
+      
+      {isExpanded && (
+        <div className="alerts-body">
+          {/* AI Summary — ALWAYS at the top */}
+          <AISummaryCard 
+            type="alerts_reminders" 
+            data={orders}
+            scope={scope}
+          />
+          
+          {/* Existing rule-based alerts below */}
+          {ruleBasedAlerts.map((alert, index) => (
+            <AlertCard key={index} alert={alert} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+```
+
+---
+
+### 7. SCOPE-AWARE — PER FEEDMILL OR PER LINE
+
+When user is on the "All" tab, the AI summary considers all orders for that feedmill. When on a specific line tab, it only considers that line's orders.
+
+```jsx
+function OrdersPage() {
+  const [activeFeedmill, setActiveFeedmill] = useState('Feedmill 1');
+  const [activeLine, setActiveLine] = useState('all');
+  
+  return (
+    <div>
+      {/* Feedmill tabs */}
+      {/* Line tabs */}
+      
+      {/* Production Insights */}
+      <ProductionInsightsPanel 
+        orders={getOrdersForScope(activeFeedmill, activeLine)}
+        feedmill={activeFeedmill}
+        line={activeLine}
+      />
+      
+      {/* Alerts & Reminders */}
+      <AlertsRemindersPanel 
+        orders={getOrdersForScope(activeFeedmill, activeLine)}
+        feedmill={activeFeedmill}
+        line={activeLine}
+      />
+      
+      {/* Order tables */}
+    </div>
+  );
+}
+
+function getOrdersForScope(feedmill, line) {
+  if (line === 'all') {
+    const lines = FEEDMILL_LINE_MAP[feedmill];
+    return getAllOrders().filter(o => lines.includes(o.line));
+  }
+  return getAllOrders().filter(o => o.line === line);
+}
+```
+
+---
+
+### 8. AUTO-GENERATE ON LOAD + REFRESH BUTTON
+
+- Auto-generates when panel is expanded and data is available
+- User can click 🔄 Refresh to regenerate anytime
+- Regenerates when switching tabs (feedmill or line) since scope changes
+
+```javascript
+// Auto-generate when scope changes
+useEffect(() => {
+  if (data && data.length > 0) {
+    generateSummary();
+  }
+}, [scope.feedmill, scope.line]);
+
+// Also regenerate when panel is expanded for the first time
+useEffect(() => {
+  if (isExpanded && !isGenerated && data && data.length > 0) {
+    generateSummary();
+  }
+}, [isExpanded]);
+```
+
+---
+
+### 9. LOADING STATE
+
+```jsx
+{isLoading && !summary && (
+  <div className="ai-summary-loading">
+    <span className="refresh-spinning">✨</span>
+    Generating smart summary...
+  </div>
+)}
+
+{isLoading && summary && (
+  <div className="ai-summary-content" style={{ opacity: 0.5 }}>
+    {formatSummaryContent(summary)}
+  </div>
+)}
+```
+
+When refreshing an existing summary, show the old content at 50% opacity while the new one loads.
+
+---
+
+## VERIFICATION
+
+### AI Summary in Production Insights
+1. ✅ Smart Summary card appears at the TOP of Production Insights
+2. ✅ Always visible when panel is expanded
+3. ✅ Shows 2-3 sentence summary of production situation
+4. ✅ Shows 3-5 prioritized recommended actions
+5. ✅ References specific product names, priorities, and volumes
+6. ✅ Mentions critical products if any exist
+7. ✅ Mentions combinable orders if any exist
+8. ✅ Light orange background (#fff7ed) with orange border
+
+### AI Summary in Alerts & Reminders
+9. ✅ Smart Summary card appears at the TOP of Alerts & Reminders
+10. ✅ Always visible when panel is expanded
+11. ✅ Shows 2-3 sentence summary of critical alerts
+12. ✅ Shows 3-5 recommended actions to address alerts
+13. ✅ Prioritizes overdue orders first
+14. ✅ Mentions how many days overdue for each order
+15. ✅ Light orange background matching Production Insights
+
+### Scope
+16. ✅ All tab → summary considers all orders for the current feedmill
+17. ✅ Line 1 tab → summary only considers Line 1 orders
+18. ✅ Switching from All to Line 1 → summary regenerates for Line 1
+19. ✅ Switching feedmill → summary regenerates for new feedmill
+
+### Auto-generate and Refresh
+20. ✅ Auto-generates when panel is first expanded
+21. ✅ Auto-regenerates when switching tabs (feedmill or line)
+22. ✅ Refresh button regenerates the summary
+23. ✅ Loading state shows while generating
+24. ✅ Old summary shown at 50% opacity during refresh
+
+### Visual
+25. ✅ ✨ sparkle icon in header
+26. ✅ 🔄 Refresh button in header
+27. ✅ Light orange background (#fff7ed)
+28. ✅ Orange border (#fed7aa)
+29. ✅ Numbered action items with bold numbers
+30. ✅ Rule-based insights/alerts appear BELOW the AI summary
+```

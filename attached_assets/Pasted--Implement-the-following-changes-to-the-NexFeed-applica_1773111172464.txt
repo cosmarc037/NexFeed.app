@@ -1,0 +1,90 @@
+```
+Implement the following changes to the NexFeed application:
+
+---
+
+## 1. START TIME EDITOR — 12-HOUR FORMAT WITH AM/PM SELECTOR
+
+The Start Time editor (inline edit mode when the user clicks on the Start Time cell) must use a 12-hour format with an AM/PM toggle or selector.
+
+**Editor layout:**
+- Two-part input:
+  - Left: Time input field showing HH:MM in 12-hour format (e.g., "08:00", "01:30", "12:45")
+  - Right: AM/PM toggle or dropdown selector allowing the user to switch between AM and PM
+
+**AM/PM toggle options:**
+- Option A (preferred): Two small side-by-side buttons [AM] [PM]. The active selection is highlighted (Orange #fd5108 background, White text). The inactive option is subtle (Grey outline or light grey background).
+- The user clicks AM or PM to select.
+
+**Behavior:**
+- When the user clicks the Start Time cell to edit, the editor opens pre-populated with the current time value in 12-hour format and the correct AM/PM selected.
+- The user can adjust the time and toggle AM/PM independently.
+- On save/confirm, the time is stored internally in 24-hour format (for calculations) but always DISPLAYED in 12-hour format with AM/PM.
+
+**Validation:**
+- Hours: 01–12 only. If the user types "00", auto-correct to "12". If the user types "13" or higher, reject or auto-correct.
+- Minutes: 00–59.
+
+---
+
+## 2. START TIME COLUMN — DISPLAY AM/PM
+
+The Start Time column in the interactive table must always display the AM/PM suffix.
+
+**Current behavior (incorrect):**
+```
+01:24
+02:29
+05:17
+03:07
+```
+
+**Correct behavior:**
+```
+01:24 AM
+02:29 AM
+05:17 AM
+03:07 AM
+```
+
+Or for afternoon/evening times:
+```
+01:30 PM
+06:45 PM
+11:59 PM
+12:00 PM
+```
+
+**Format:** HH:MM AM/PM
+- Leading zero on hours for consistency (e.g., "08:00 AM" not "8:00 AM")
+- Space between the time and AM/PM
+- AM/PM in uppercase
+
+**This applies to:**
+- Start Time column display in the interactive table (all feedmill tabs and Powermix)
+- Start Time value in exported files
+- Start Time value anywhere else it is referenced (Order History, Smart Combine cards, confirmation dialogs, etc.)
+
+---
+
+## 3. START DATE AND START TIME — ICON PLACEMENT (TOP-RIGHT CORNER)
+
+Reposition the date picker icon (calendar icon) and time picker icon (clock icon) to the top-right corner of their respective cells, consistent with the override lock icon placement on other columns.
+
+**Start Date cell:**
+- The calendar icon (date picker trigger) is positioned at the TOP-RIGHT corner of the cell, fixed position.
+- The date value (e.g., "03/10/2026") remains left-aligned as normal.
+- The icon does NOT sit inline next to the date text. It is anchored to the top-right with small padding/margin from the cell edges.
+
+**Start Time cell:**
+- The clock icon (time picker trigger) is positioned at the TOP-RIGHT corner of the cell, fixed position.
+- The time value (e.g., "08:00 AM") remains left-aligned as normal.
+- The icon does NOT sit inline next to the time text. It is anchored to the top-right with small padding/margin from the cell edges.
+
+**Design consistency:**
+- The icon size, padding, and positioning should match the lock icon placement used on the Completion Date column and Volume (MT) column.
+- Icons use Dark Grey (#2e343a) color by default, Orange (#fd5108) on hover.
+- Clicking the icon opens the respective picker (calendar for Start Date, time picker for Start Time).
+
+**This applies to Start Date and Start Time columns across all feedmill tabs and Powermix.**
+```

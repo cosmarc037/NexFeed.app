@@ -1,0 +1,36 @@
+### RECOMMENDATION CARD — ORDER REMOVAL (X BUTTON)
+
+Each order listed within a recommendation card has a small X button on its right side to exclude it from the combination.
+
+**Behavior:**
+- When the user clicks the X on an order, the order moves to a "Removed" section at the bottom of the same card.
+- The removed order is visually greyed out (reduced opacity, strikethrough or muted text) to indicate it is excluded.
+- A small [+ Re-add] button appears next to each removed order, allowing the user to add it back to the active group.
+- When re-added, the order returns to the active list and the removed section entry disappears.
+
+**Combined Volume recalculation:**
+- The "Combined Volume: [total] MT" displayed on the card recalculates in real-time as orders are removed or re-added.
+- Only active (non-removed) orders count toward the combined total.
+
+**Minimum order validation:**
+- At least 2 orders must remain in the active group for the [Approve] button to be enabled.
+- If the user removes orders until only 1 remains, the [Approve] button becomes disabled (greyed out) with a tooltip: "At least 2 orders are required to combine."
+- If ALL orders are removed, the [Approve] button remains disabled and the active list shows: "No orders selected. Re-add orders to proceed."
+
+**Removed section design:**
+- A thin horizontal divider separates the active orders from the removed section.
+- Section label: "Excluded" (small, grey text #a1a8b3).
+- Removed orders are displayed in a compact, single-line format: "[+ Re-add] FPR: [value] — [X] MT" with muted styling.
+
+**Card layout (top to bottom):**
+1. Group header: "Combine Group [#]"
+2. Shared details: Material Code, Item Description, Form, Line
+3. Active orders list (each with X button on the right)
+4. Combined Volume total (recalculates based on active orders only)
+5. Divider
+6. Excluded section (removed orders with [+ Re-add] button) — hidden if no orders are removed
+7. Action buttons: [Approve] [Dismiss]
+
+**Conflict detection and confirmation dialog:**
+- When the user clicks [Approve], only the active (non-removed) orders are included in the conflict detection and combine action.
+- Removed/excluded orders are not affected and remain as independent orders in the table.

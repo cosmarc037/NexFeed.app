@@ -1,0 +1,168 @@
+```
+Implement the following changes to the NexFeed application:
+
+---
+
+## 1. COMBINED ORDERS — DISTINCT LEAD ROW BLUE TINT
+
+When orders are combined and highlighted in blue, the lead order row should have a visually distinct, slightly darker blue tint compared to the child rows, so users can immediately identify which row is the lead.
+
+**Lead row:**
+- Background color: Darker blue tint (#c8e0ed)
+- "Lead" badge remains visible next to the FPR
+
+**Child rows:**
+- Background color: Lighter blue tint (#e0f2f8) — same as previously defined
+- Subtle vertical connector line and indentation remain
+
+**The contrast between #c8e0ed (lead) and #e0f2f8 (child) should be noticeable but not jarring — just enough to distinguish the lead at a glance.**
+
+---
+
+## 2. COMBINED ORDERS — FPR NOTES BEHAVIOR
+
+**Lead row FPR Notes:**
+- The auto-generated combine note (e.g., "Combined orders: FPR [A], FPR [B] — March 09, 2026 02:30 PM") is placed ONLY on the lead row.
+- The lead row FPR Notes field is fully editable. The user can append, modify, or add additional notes.
+
+**Child row FPR Notes:**
+- Child rows do NOT receive any auto-generated combine note.
+- Child row FPR Notes retain their original pre-combine values (whatever was there before combining).
+- **Exception to read-only rule:** FPR Notes on child rows IS editable, even though all other child row fields remain read-only. This allows users to add notes to individual child orders within a combined group.
+
+**Updated child row editability:**
+
+| Field         | Child Row Status  |
+|---------------|-------------------|
+| FPR Notes     | Editable ✓        |
+| All other fields | Read-only ✗    |
+
+---
+
+## 3. ORDER HISTORY PAGE — LINE FILTER TABS
+
+In the left-navigation pane, the Order History page shows all orders. Add line filter tabs to allow users to view orders per feedmill line.
+
+**Tab structure:**
+
+```
+[All] [Line 1] [Line 2] [Line 3] [Line 4] [Line 5] [Line 6] [Line 7]
+```
+
+**Behavior:**
+
+- **All tab:** Displays all orders across all lines (current default behavior).
+- **Line 1 through Line 7 tabs:** Displays only orders assigned to that specific feedmill line.
+- The active tab is visually highlighted (Orange #fd5108 underline or background, matching the app's tab styling).
+- Order count badge on each tab showing the number of orders: e.g., "Line 1 (42)", "Line 2 (38)", "Line 5 (15)"
+
+**Tab placement:**
+- These line filter tabs sit as a secondary filter row at the top of the Order History page content area, below the page title.
+
+**Line mapping reference:**
+- Line 1: Feedmill 1 — Line 1
+- Line 2: Feedmill 1 — Line 2
+- Line 3: Feedmill 2 — Line 3
+- Line 4: Feedmill 2 — Line 4
+- Line 5: Powermix — Line 5
+- Line 6: Feedmill 3 — Line 6
+- Line 7: Feedmill 3 — Line 7
+
+**Empty state:**
+- If a specific line tab has no orders, display: "No orders found for Line [X]."
+
+---
+
+## 4. SCHEDULING — COMPLETION DATE MUST BE AT LEAST 1 DAY BEFORE AVAIL DATE (AUTO-ADJUST)
+
+Implement an automatic scheduling adjustment to ensure that the Completion Date of an order does not go beyond its Avail Date. The Completion Date must be at least 1 day (24 hours) before the Avail Date.
+
+**Auto-adjust logic:**
+
+**Step 1 — Calculate the natural Completion Date:**
+- Completion Date = Start Date/Time + Production Hours + Changeover Time
+
+**Step 2 — Compare against Avail Date:**
+- If the Avail Date is a valid date (not "prio replenish", "safety stocks", "for sched", or any non-date text):
+  - Calculate the deadline: Avail Date minus 1 day (24 hours). This is the latest acceptable Completion Date.
+  - If the natural Completion Date is ON or BEFORE this deadline → No adjustment needed. Keep the natural schedule.
+  - If the natural Completion Date is AFTER this deadline → Auto-adjust is required.
+
+**Step 3 — Auto-adjust the Start Date:**
+- Work backwards from the deadline:
+  - Required Completion Date = Avail Date - 1 day (24 hours)
+  - Required Start Date/Time = Required Completion Date - Production Hours - Changeover Time
+- Set the order's Start Date and Start Time to the calculated required values.
+- If the required Start Date is earlier than the current date, push it to the previous day(s) as needed. There is no restriction on how far back it can go.
+
+**Step 4 — Check for upstream conflicts:**
+- After adjusting the Start Date, check if the new Start Date/Time overlaps with (is earlier than) the previous order's Completion Date in the same line.
+- If there IS an overlap (the adjusted order would need to start before the previous order finishes):
+  - Flag the row with a red highlight (light red background #ffebee) indicating a scheduling conflict.
+  - Display a red warning icon (⚠) in the Start Date cell with tooltip: "Scheduling conflict: This order's adjusted start time overlaps with the previous order's completion. Resolve by reordering or adjusting upstream orders."
+  - The auto-adjusted Start Date is still applied — the system shows where the order NEEDS to start, even if it conflicts. The user must resolve the conflict manually (reorder, adjust upstream, etc.).
+
+**Step 5 — Cascade downstream:**
+- After auto-adjusting, recascade all downstream orders:
+  - Next order's Start Date/Time = This order's Completion Date + Changeover Time
+  - Continue cascading down the line.
+- If downstream orders also have Avail Dates, apply the same auto-adjust logic to them recursively.
+
+**Orders excluded from auto-adjust:**
+- Orders with non-date Avail Date values ("prio replenish", "safety stocks", "for sched", "ASAP", or any free-text) are EXCLUDED from auto-adjust.
+- These orders do not have a deadline to meet. Their scheduling is determined purely by cascade (previous order's Completion Date + Changeover Time) or by manual user placement.
+- Users intentionally place these orders in gaps between dated orders to maximize production uptime.
+
+**Gap utilization for non-dated orders:**
+- When two dated orders have a time gap between them (e.g., Order 1 completes at 12:00 PM and Order 2 must start at 3:00 PM to meet its Avail Date), there is a 3-hour gap.
+- Non-dated orders ("prio replenish", "safety stocks") can be manually dragged into this gap by the user.
+- When a non-dated order is placed between two dated orders:
+  - Its Start Date/Time = Previous order's Completion Date + Changeover Time
+  - Its Completion Date = Start Date/Time + Production Hours + Changeover Time
+  - If the non-dated order's Completion Date would push into the next dated order's Start Date, flag the non-dated order with a yellow warning (#fff9c4 background): "This order may not fit in the available gap. Completion at [time] overlaps with next order starting at [time]."
+
+**Conflict highlighting:**
+
+| Conflict Type | Row Background | Icon |
+|---|---|---|
+| Upstream overlap (adjusted start before previous completion) | Light Red #ffebee | Red ⚠ in Start Date cell |
+| Non-dated order exceeds gap | Light Yellow #fff9c4 | Yellow ⚠ in Completion Date cell |
+| Completion Date exceeds Avail Date (if auto-adjust fails) | Light Red #ffebee | Red ⚠ in Completion Date cell |
+
+**First order in a line (Prio 1):**
+- If the first order needs to start earlier than 8:00 AM on the upload date to meet its Avail Date constraint, the system pushes the Start Date to the previous day(s) as needed.
+- Example: Upload date is March 10, 2026. Order needs 20 hours of production and Avail Date is March 11. Required start = March 10 at latest, but with 20 hours production, start would need to be March 9 at some time. The system sets Start Date to March 9 with the appropriate Start Time.
+
+---
+
+## 5. START TIME COLUMN — FONT SIZE CONSISTENCY
+
+Ensure the Start Time column value font size matches the Start Date column value font size exactly.
+
+- Start Date font size and Start Time font size must be identical.
+- If Start Date uses 14px (or whatever the current size is), Start Time must also use the same size.
+- This includes the AM/PM suffix — it should be the same font size as the time value, not smaller.
+
+---
+
+## 6. COMPLETION DATE — TIME FONT SIZE CONSISTENCY
+
+In the Completion Date column, the time line (Line 2: "Time: HH:MM AM/PM") must be the same font size as the date line (Line 1: "MMMM DD, YYYY").
+
+**Current behavior (incorrect):**
+- Line 1 (date): Larger font
+- Line 2 (time): Smaller, grey, secondary font
+
+**Updated behavior:**
+- Line 1 (date): Standard font size, Dark Grey (#2e343a)
+- Line 2 (time): SAME font size as Line 1, Dark Grey (#2e343a)
+- Both lines should have equal visual weight — the time is equally important as the date.
+
+**Format remains:**
+```
+December 31, 2025
+Time: 01:43 AM
+```
+
+But both lines are now the same font size and color.
+```

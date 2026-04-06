@@ -1,0 +1,190 @@
+Clear. Here's the updated prompt:
+
+```
+Implement the following changes to the NexFeed application:
+
+---
+
+## 1. START DATE AND START TIME — BLANK ON UPLOAD, MANUAL ONLY
+
+When a SAP file is uploaded, ALL orders should have blank Start Date and Start Time fields. The system should NOT auto-fill any dates or times. Start Date and Start Time are NEVER auto-cascaded — they are ONLY set manually by the user.
+
+**On upload:**
+- Start Date = blank (null)
+- Start Time = blank (null)
+- Completion Date = blank (null)
+
+**Cell display when blank:**
+- Start Date cell: Shows placeholder text "Set start date" in grey (#a1a8b3), italic
+- Start Time cell: Shows placeholder text "Set start time" in grey (#a1a8b3), italic
+- Completion Date cell: Shows placeholder text "Set completion" in grey (#a1a8b3), italic
+
+**Editability:**
+- Start Date: Fully editable on ALL orders. User clicks the cell or the calendar icon to set the date.
+- Start Time: Fully editable on ALL orders. User clicks the cell or the clock icon to set the time (12-hour format with AM/PM selector).
+- Start Date and Start Time are ALWAYS manual. The system NEVER auto-fills or cascades Start Date/Time.
+
+**What this replaces:**
+- ❌ Remove ALL auto-scheduling on upload
+- ❌ Remove the backwards-from-Avail-Date scheduling on upload
+- ❌ Remove any auto-fill of Start Date/Time during the upload process
+- ❌ Remove Start Date/Time from the cascade logic — Start Date/Time does NOT cascade
+- Only Completion Date cascades (see section 2)
+
+---
+
+## 2. COMPLETION DATE — CASCADE LOGIC (COMPLETION ONLY, NOT START DATE)
+
+Completion Date is the ONLY scheduling field that cascades. Start Date and Start Time NEVER cascade.
+
+**Completion Date calculation rules:**
+
+**Rule 1 — Order HAS a user-set Start Date/Time:**
+- Completion Date = Start Date/Time + Production Hours
+- This is a direct calculation from the user's input.
+
+**Rule 2 — Order does NOT have a Start Date/Time (blank), but the PREVIOUS order has a Completion Date:**
+- Completion Date = Previous order's Completion Date/Time + Changeover Time + Production Hours
+- The Start Date/Time cells remain blank — they still show "Set start date" / "Set start time" placeholders.
+- The Completion Date is calculated WITHOUT needing a Start Date/Time on this order.
+
+**Rule 3 — Order does NOT have a Start Date/Time AND the previous order has NO Completion Date:**
+- Completion Date = blank
+- Cannot calculate because there is no anchor point.
+- Shows placeholder "Set completion" in grey.
+
+**Rule 4 — Order has a user-set Start Date/Time that OVERRIDES the cascade:**
+- If the user manually sets a Start Date/Time on any order, that order's Completion Date is based on the user's Start Date/Time, NOT the previous order's Completion.
+- Downstream orders (without their own Start Date/Time) continue cascading from THIS order's Completion Date.
+
+**Cascade flow example:**
+
+```
+Prio 1: Start Date = March 21 (user set)
+        Start Time = 06:00 PM (user set)
+        Production = 4 hrs
+        Completion = March 21, 10:00 PM ← Rule 1: user Start + Production
+
+Prio 2: Start Date = blank (placeholder: "Set start date")
+        Start Time = blank (placeholder: "Set start time")
+        Production = 3 hrs, Changeover = 30 min
+        Completion = March 22, 01:30 AM ← Rule 2: Prio 1 Completion + Changeover + Production
+
+Prio 3: Start Date = blank (placeholder: "Set start date")
+        Start Time = blank (placeholder: "Set start time")
+        Production = 2 hrs, Changeover = 30 min
+        Completion = March 22, 04:00 AM ← Rule 2: Prio 2 Completion + Changeover + Production
+
+Prio 4: Start Date = March 23 (user set)
+        Start Time = 08:00 AM (user set)
+        Production = 5 hrs
+        Completion = March 23, 01:00 PM ← Rule 4: user Start overrides, ignores Prio 3 Completion
+
+Prio 5: Start Date = blank (placeholder: "Set start date")
+        Start Time = blank (placeholder: "Set start time")
+        Production = 2 hrs, Changeover = 30 min
+        Completion = March 23, 03:30 PM ← Rule 2: Prio 4 Completion + Changeover + Production
+```
+
+**Key behavior notes:**
+
+- Start Date and Start Time columns NEVER auto-populate. They always remain blank unless the user manually enters a value.
+- The user is NOT required to set Start Date/Time on every order. Only the orders they choose to anchor need Start Date/Time.
+- Completion Date cascades downward from whichever order has the most recent Completion Date (whether from a user-set Start or from the cascade itself).
+- If a user REMOVES a previously set Start Date/Time (clears it back to blank):
+  - That order's Completion Date reverts to Rule 2 (cascade from previous) or Rule 3 (blank if no previous).
+  - All downstream Completion Dates recalculate accordingly.
+
+**Cascade recalculation triggers:**
+- User sets or changes Start Date/Time on any order → recalculate that order's Completion + all downstream Completions
+- User clears Start Date/Time on any order → recalculate that order's Completion + all downstream Completions
+- User reorders rows (drag-and-drop) → recalculate all Completion Dates based on new order
+- Orders are combined or uncombined → recalculate all Completion Dates
+- An order is added or removed → recalculate all Completion Dates
+
+---
+
+## 3. STATUS "DONE" — COMPLETION DATE BEHAVIOR
+
+When the user sets an order's status to "Done", the Completion Date should be visually de-emphasized.
+
+**Behavior when status = "Done":**
+- The Completion Date value remains visible but is greyed out:
+  - Text color: light grey (#c0c7d0)
+  - Font style: italic
+  - Opacity: 0.6
+- The Completion Date cell is no longer part of active scheduling — it represents a historical/archived value.
+- Any picker icons in the Completion Date cell are hidden or disabled.
+
+**Cascade impact when status = "Done":**
+- If a "Done" order is in the middle of the cascade, the next order's Completion Date still cascades from the "Done" order's Completion Date (the production was completed, so the time is known and fixed).
+- The "Done" order's Completion Date is FROZEN — it does NOT recalculate if upstream orders change.
+
+**Visual example:**
+```
+Prio 3 | Status: Done
+Completion Date:
+  March 22, 2026          ← greyed out, italic, 0.6 opacity
+  Time: 08:19 AM          ← greyed out, italic, 0.6 opacity
+```
+
+**When status changes FROM "Done" back to another status:**
+- Completion Date returns to normal styling (dark grey, regular weight, full opacity).
+- Completion Date re-enters the active cascade and may recalculate based on upstream changes.
+
+---
+
+## 4. SMART COMBINE — CHANGEOVER TIME SAVINGS
+
+Update the Smart Combine recommendation cards to include changeover time savings analysis when orders are combined.
+
+**Context:**
+- When two separate orders run back-to-back, there is a changeover time between them.
+- When those orders are COMBINED into one production run, the changeover between them is eliminated — same material, form, line, and batch size.
+
+**Updated Smart Combine insights — add "⏱ Changeover Savings" section:**
+
+```
+📊 Combined Production Summary
+Combined Volume:              160 MT
+Batch Size:                   4.00
+Combined Batches:             40
+Total Bags:                   3,200
+
+⏱ Changeover Savings
+Changeovers eliminated:       1 × 30 min = 30 min saved
+Production Time (separate):   13.0 hrs (6.0 hrs + 30 min changeover + 6.5 hrs)
+Production Time (combined):   12.5 hrs (single continuous run)
+Time saved:                   ✅ 30 min saved by eliminating changeover
+```
+
+**Calculation logic:**
+
+**Original total time (if orders run separately):**
+- Order A production time + Changeover + Order B production time + Changeover + Order C production time + ...
+- Number of changeovers = (Number of orders in group) - 1
+- Formula: Sum of all individual production times + ((N - 1) × Changeover duration)
+
+**Combined total time:**
+- Single production run time based on combined volume, batch size, and run rate.
+- Zero changeovers within the combined run.
+
+**Time saved:**
+- Time saved = Original total time - Combined total time
+- This includes eliminated changeovers AND any efficiency gains from a single larger batch.
+
+**Display:**
+- Time saved shown in green text (#43a047): "✅ [X] min saved by eliminating changeover"
+- Both separate and combined production times shown for comparison.
+
+**Multiple orders combined:**
+- 2 orders combined: 1 changeover eliminated
+- 3 orders combined: 2 changeovers eliminated
+- 4 orders combined: 3 changeovers eliminated
+- Formula: (N - 1) changeovers eliminated
+
+**Changeover duration source:**
+- Use changeover time from knowledge base for the specific line and material transition.
+- If not configured, use default changeover time for the line.
+- If no changeover data exists: "Changeover savings: Unable to calculate — changeover duration not configured."
+```

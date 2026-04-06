@@ -1,0 +1,251 @@
+```
+Fix the following:
+
+---
+
+## FIX: ADD STICKY + BACKGROUND TO EACH <th>
+
+The `<thead>` having `position: sticky` is not enough. Each `<th>` also needs it:
+
+### CURRENT (NOT WORKING)
+
+```jsx
+<thead
+  className="asm-thead"
+  style={{
+    position: "sticky",
+    top: 0,
+    zIndex: 20,
+    background: "#f9fafb",
+    boxShadow: "0 1px 0 #e5e7eb",
+  }}
+>
+  <tr style={{ background: "#f9fafb" }}>
+    <th style={{ width: 32, padding: "8px 4px", background: "#f9fafb" }}>
+    </th>
+    <th style={{
+      width: 50,
+      padding: "8px 6px",
+      textAlign: "center",
+      fontSize: 10,
+      fontWeight: 400,
+      color: "#6b7280",
+    }}>
+      Prio
+    </th>
+    ...
+```
+
+### FIXED
+
+Add `position: "sticky"`, `top: 0`, `zIndex: 20`, and `background: "#f9fafb"` to EVERY `<th>`:
+
+```jsx
+<thead className="asm-thead">
+  <tr>
+    <th style={{
+      width: 32,
+      padding: "8px 4px",
+      position: "sticky",
+      top: 0,
+      zIndex: 20,
+      background: "#f9fafb",
+      boxShadow: "0 1px 0 #e5e7eb",
+    }}></th>
+    
+    <th style={{
+      width: 50,
+      padding: "8px 6px",
+      textAlign: "center",
+      fontSize: 10,
+      fontWeight: 400,
+      color: "#6b7280",
+      position: "sticky",
+      top: 0,
+      zIndex: 20,
+      background: "#f9fafb",
+      boxShadow: "0 1px 0 #e5e7eb",
+    }}>
+      Prio
+    </th>
+    
+    {/* Apply to ALL other <th> cells too */}
+    ...
+  </tr>
+</thead>
+```
+
+### OR CLEANER — USE A SHARED STYLE OBJECT
+
+```jsx
+const stickyHeaderStyle = {
+  position: "sticky",
+  top: 0,
+  zIndex: 20,
+  background: "#f9fafb",
+  boxShadow: "0 1px 0 #e5e7eb",
+};
+
+<thead className="asm-thead">
+  <tr>
+    <th style={{
+      ...stickyHeaderStyle,
+      width: 32,
+      padding: "8px 4px",
+    }}></th>
+    
+    <th style={{
+      ...stickyHeaderStyle,
+      width: 50,
+      padding: "8px 6px",
+      textAlign: "center",
+      fontSize: 10,
+      fontWeight: 400,
+      color: "#6b7280",
+    }}>
+      Prio
+    </th>
+    
+    <th style={{
+      ...stickyHeaderStyle,
+      padding: "8px 6px",
+      fontSize: 10,
+      fontWeight: 400,
+      color: "#6b7280",
+    }}>
+      FPR
+    </th>
+    
+    <th style={{
+      ...stickyHeaderStyle,
+      padding: "8px 6px",
+      fontSize: 10,
+      fontWeight: 400,
+      color: "#6b7280",
+    }}>
+      Planned Order
+    </th>
+    
+    <th style={{
+      ...stickyHeaderStyle,
+      padding: "8px 6px",
+      fontSize: 10,
+      fontWeight: 400,
+      color: "#6b7280",
+    }}>
+      Material Code (FG)
+    </th>
+    
+    <th style={{
+      ...stickyHeaderStyle,
+      padding: "8px 6px",
+      fontSize: 10,
+      fontWeight: 400,
+      color: "#6b7280",
+    }}>
+      Item Description
+    </th>
+    
+    <th style={{
+      ...stickyHeaderStyle,
+      padding: "8px 6px",
+      fontSize: 10,
+      fontWeight: 400,
+      color: "#6b7280",
+    }}>
+      Form
+    </th>
+    
+    <th style={{
+      ...stickyHeaderStyle,
+      padding: "8px 6px",
+      fontSize: 10,
+      fontWeight: 400,
+      color: "#6b7280",
+    }}>
+      Volume (MT)
+    </th>
+    
+    <th style={{
+      ...stickyHeaderStyle,
+      padding: "8px 6px",
+      fontSize: 10,
+      fontWeight: 400,
+      color: "#6b7280",
+    }}>
+      Batch Size
+    </th>
+    
+    <th style={{
+      ...stickyHeaderStyle,
+      padding: "8px 6px",
+      fontSize: 10,
+      fontWeight: 400,
+      color: "#6b7280",
+    }}>
+      Batches
+    </th>
+    
+    <th style={{
+      ...stickyHeaderStyle,
+      padding: "8px 6px",
+      fontSize: 10,
+      fontWeight: 400,
+      color: "#6b7280",
+    }}>
+      Production Time
+    </th>
+    
+    <th style={{
+      ...stickyHeaderStyle,
+      padding: "8px 6px",
+      fontSize: 10,
+      fontWeight: 400,
+      color: "#6b7280",
+    }}>
+      Start Date
+    </th>
+    
+    <th style={{
+      ...stickyHeaderStyle,
+      padding: "8px 6px",
+      fontSize: 10,
+      fontWeight: 400,
+      color: "#6b7280",
+    }}>
+      Start Time
+    </th>
+    
+    <th style={{
+      ...stickyHeaderStyle,
+      padding: "8px 6px",
+      fontSize: 10,
+      fontWeight: 400,
+      color: "#6b7280",
+    }}>
+      Avail Date
+    </th>
+    
+    <th style={{
+      ...stickyHeaderStyle,
+      padding: "8px 6px",
+      fontSize: 10,
+      fontWeight: 400,
+      color: "#6b7280",
+    }}>
+      Completion Date
+    </th>
+  </tr>
+</thead>
+```
+
+### WHY THIS WORKS
+
+The key is that `position: sticky` on `<thead>` alone doesn't make individual cells opaque. Each `<th>` needs:
+- `position: sticky` — makes it stick
+- `top: 0` — sticks to the top
+- `zIndex: 20` — ensures it's above `<td>` cells
+- `background: "#f9fafb"` — solid background hides content scrolling behind
+
+Without the solid background on each `<th>`, the table body content is visible through the gaps between header cells.
+```

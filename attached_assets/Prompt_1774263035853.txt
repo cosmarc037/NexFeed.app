@@ -1,0 +1,200 @@
+```
+Implement the following changes to the NexFeed application:
+
+---
+
+## 1. ORDER TABLE SUB-HEADERS — NOT BOLD, NOT UPPERCASE
+
+Change the sub-headers (individual column names) in the order table to be regular weight and normal case — NOT bold and NOT uppercase.
+
+**Current (wrong):**
+```
+PRIO | FPR | PLANNED FG | FORM | VOLUME (MT) | BATCH SIZE
+```
+
+**Updated (correct):**
+```
+Prio | FPR | Planned Order FG | Form | Volume (MT) | Batch Size
+```
+
+| Property | Current | Updated |
+|---|---|---|
+| Font weight | 600 (semi-bold) | 400 (regular) |
+| Text transform | Uppercase | None (normal case) |
+| Font size | 10px | 10px (keep) |
+| Color | Grey (#6b7280) | Grey (#6b7280) (keep) |
+| Letter spacing | 0.5px | 0 (remove extra spacing) |
+
+**Main header groups REMAIN uppercase and bold:**
+
+| Element | Styling |
+|---|---|
+| Main headers (ORDER DETAILS, PRODUCTION PARAMETERS, etc.) | 12px, font-weight 600, UPPERCASE |
+| Sub-headers (Prio, FPR, Planned Order FG, etc.) | 10px, font-weight 400, Normal case |
+
+---
+
+## 2. DO NOT ABBREVIATE HEADERS OR SUB-HEADERS
+
+Use full column names, never abbreviations.
+
+| Current (abbreviated) | Updated (full name) |
+|---|---|
+| Mat. Code (SFG) | Material Code (SFG) |
+| Mat. Code (FG) | Material Code (FG) |
+| Prod. Order FG1 | Production Order FG1 |
+| Prod. Order SFG1 | Production Order SFG1 |
+| Prod. Order SFGPMX | Production Order SFGPMX |
+| Prod. Time | Production Time |
+| Batch Sz | Batch Size |
+| Comp. Date | Completion Date |
+| Spec. Remarks | Special Remarks |
+| HA-I | HA Info |
+| HA-P | HA Prep |
+| S.D | Start Date |
+| S.T | Start Time |
+| AVL | Avail Date |
+| CMP | Completion Date |
+| FPR | FPR (keep — this is an acronym, not an abbreviation) |
+| FG | FG (keep — standard industry term) |
+| SFG | SFG (keep — standard industry term) |
+| PMX | PMX (keep — standard industry term) |
+| PFG | Planned Order FG |
+| PSG | Planned Order SFG |
+| THR | Threads |
+| SCK | Sacks |
+| MRK | Markings |
+| SPR | Special Remarks |
+| E.DATE | End Date |
+| FRM | Form |
+| VOL | Volume (MT) |
+| BSZ | Batch Size |
+| BAT | Batches |
+| BAG | Bags |
+
+**Full list of correct sub-header names:**
+
+| Column | Correct Full Name |
+|---|---|
+| Readiness | (no text — icon only) |
+| Drag Handle | (no text — icon only) |
+| Prio | Prio |
+| FPR | FPR |
+| Planned Order FG | Planned Order FG |
+| Planned Order SFG | Planned Order SFG |
+| Planned Order PMX | Planned Order PMX |
+| Production Order FG1 | Production Order FG1 |
+| Production Order SFG1 | Production Order SFG1 |
+| Production Order SFGPMX | Production Order SFGPMX |
+| Material Code (SFG) | Material Code (SFG) |
+| Material Code (FG) | Material Code (FG) |
+| Item Description | Item Description |
+| Form | Form |
+| Volume (MT) | Volume (MT) |
+| Batch Size | Batch Size |
+| Batches | Batches |
+| Bags | Bags |
+| Production Time | Production Time |
+| HA Info | HA Info |
+| HA Prep | HA Prep |
+| Status | Status |
+| Start Date | Start Date |
+| Start Time | Start Time |
+| Avail Date | Avail Date |
+| Completion Date | Completion Date |
+| FPR Notes | FPR Notes |
+| Special Remarks | Special Remarks |
+| Threads | Threads |
+| Sacks | Sacks |
+| Markings | Markings |
+| Tags | Tags |
+| End Date | End Date |
+| History | History |
+
+---
+
+## 3. LEFT NAVIGATION PANE — INCREASE WIDTH
+
+Now that the navigation font size is 12px, increase the sidebar width to accommodate the text comfortably without truncation.
+
+| Property | Current (~width) | Updated |
+|---|---|---|
+| Sidebar width (expanded) | ~220px | 250px |
+| Sidebar min-width | ~200px | 240px |
+
+**Padding adjustments:**
+
+| Element | Updated Padding |
+|---|---|
+| Main nav items | 10px 20px |
+| Sub-nav items | 8px 20px 8px 44px |
+| Sub-sub-nav items | 8px 20px 8px 60px |
+
+**Ensure:**
+- No text truncation on any navigation item at the new width.
+- "Next 10 Days" text fits fully without ellipsis.
+- "Knowledge Base" text fits fully.
+- "Order History" text fits fully.
+- The main content area adjusts its left margin to accommodate the wider sidebar.
+
+```css
+.sidebar {
+  width: 250px;
+  min-width: 240px;
+}
+
+.main-content {
+  margin-left: 250px; /* match sidebar width */
+}
+```
+
+---
+
+## 4. KEY METRIC CARDS — ORDERS TABS — LABEL FIRST, VALUE SECOND
+
+Rearrange the key metric cards in the Orders tabs to show the label on the first line and the value on the second line, matching the Overview page's key metric cards.
+
+**Current layout (wrong — value first):**
+```
+┌─────────────┐
+│     15       │  ← value first
+│ Total Orders │  ← label second
+└─────────────┘
+```
+
+**Updated layout (correct — label first, value second):**
+```
+┌─────────────┐
+│ Total Orders │  ← label first
+│     15       │  ← value second
+└─────────────┘
+```
+
+**Apply to ALL key metric cards in the Orders tabs:**
+
+| Card | Label (line 1) | Value (line 2) |
+|---|---|---|
+| Card 1 | Total Orders | 15 |
+| Card 2 | Active Orders | 12 |
+| Card 3 | Urgent Orders | 3 |
+| Card 4 | Lacking Details | 5 |
+
+**Styling:**
+
+| Element | Styling |
+|---|---|
+| Label (line 1) | 12px, grey (#6b7280), font-weight 400 |
+| Value (line 2) | 24px, dark text (#1a1a1a), font-weight 700 |
+| Gap between label and value | 4px |
+| Card padding | 16px |
+| Text alignment | Left-aligned (or center — match Overview cards) |
+
+**Match the Overview page's card layout exactly.** If the Overview cards are center-aligned, the Orders cards should also be center-aligned. If left-aligned, match that too.
+
+**Apply to:**
+- ✅ Orders page key metric cards (Total Orders, Active Orders, Urgent Orders, Lacking Details)
+- ✅ Analytics page key metric cards (if they have the same issue)
+- ✅ Any other page with key metric cards
+
+**Ensure consistency** — every key metric card in the app follows the same layout: label first, value second.
+```

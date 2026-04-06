@@ -1,0 +1,174 @@
+```
+Implement the following fix:
+
+---
+
+## FIX: DATE CELLS — HOVER TOOLTIP ON ENTIRE CELL, NOT JUST ICON
+
+Same fix as the Avail Date column — when a date cell has a warning, hovering anywhere on the cell shows the warning tooltip, not just on the tiny icon.
+
+---
+
+### APPLY TO
+
+| Cell | Hover triggers tooltip? |
+|---|---|
+| Start Date | ✅ If has warning |
+| Completion Date | ✅ If has warning |
+| End Date | ✅ If has warning |
+| Avail Date | ✅ Already fixed |
+
+---
+
+### IMPLEMENTATION
+
+```jsx
+function DateCellWithWarning({ order, field, value }) {
+  const [showTooltip, setShowTooltip] = useState(false);
+  const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
+  const timeoutRef = useRef(null);
+  
+  const warnings = checkDateConflicts(order);
+  const fieldWarning = warnings.find(w => w.field === field);
+  const hasConflict = fieldWarning && fieldWarning.type === 'conflict';
+  const hasInfo = fieldWarning && fieldWarning.type === 'info';
+  const hasWarning = hasConflict || hasInfo;
+  
+  function handleCellMouseEnter(e) {
+    if (!hasWarning) return;
+    
+    timeoutRef.current = setTimeout(() => {
+      const pos = clampToViewport(e.clientX + 12, e.clientY + 12, 300, 60);
+      setTooltipPos(pos);
+      setShowTooltip(true);
+    }, 300);
+  }
+  
+  function handleCellMouseMove(e) {
+    if (!hasWarning || !showTooltip) return;
+    
+    const pos = clampToViewport(e.clientX + 12, e.clientY + 12, 300, 60);
+    setTooltipPos(pos);
+  }
+  
+  function handleCellMouseLeave() {
+    clearTimeout(timeoutRef.current);
+    setShowTooltip(false);
+  }
+  
+  return (
+    <td
+      className={`date-cell ${hasConflict ? 'date-conflict' : ''} ${hasInfo ? 'date-info' : ''}`}
+      onMouseEnter={handleCellMouseEnter}
+      onMouseMove={handleCellMouseMove}
+      onMouseLeave={handleCellMouseLeave}
+    >
+      <div className="date-cell-content">
+        <span className="text-content">{value}</span>
+        {hasWarning && (
+          <span className={`date-warning-icon ${hasInfo ? 'info' : ''}`}>
+            ⚠
+          </span>
+        )}
+      </div>
+      
+      {showTooltip && hasWarning && (
+        <TooltipPortal>
+          <div
+            className="date-warning-tooltip"
+            style={{
+              position: 'fixed',
+              left: tooltipPos.x,
+              top: tooltipPos.y,
+              zIndex: 99999,
+              pointerEvents: 'none'
+            }}
+          >
+            {fieldWarning.message}
+          </div>
+        </TooltipPortal>
+      )}
+    </td>
+  );
+}
+```
+
+### TOOLTIP STYLING
+
+```css
+.date-warning-tooltip {
+  background: #1a1a1a;
+  color: #ffffff;
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.5;
+  max-width: 300px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  animation: tooltipFadeIn 0.15s ease;
+}
+
+@keyframes tooltipFadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+```
+
+### APPLY TO ALL DATE CELLS
+
+Replace existing date cell rendering for Start Date, Completion Date, and End Date:
+
+```jsx
+{/* Start Date */}
+<DateCellWithWarning 
+  order={order} 
+  field="start_date" 
+  value={order.start_date || 'Set start date'} 
+/>
+
+{/* Completion Date */}
+<DateCellWithWarning 
+  order={order} 
+  field="completion_date" 
+  value={order.completion_date || 'Set completion'} 
+/>
+
+{/* End Date */}
+<DateCellWithWarning 
+  order={order} 
+  field="end_date" 
+  value={order.end_date || '—'} 
+/>
+
+{/* Avail Date — already has cell-level hover, no change needed */}
+```
+
+---
+
+### VERIFICATION
+
+1. Start Date with warning
+   - ✅ Hover anywhere on Start Date cell — tooltip shows warning message
+   - ✅ Hover on the date text — tooltip shows
+   - ✅ Hover on the ⚠ icon — tooltip shows
+   - ✅ Hover on empty padding — tooltip shows
+   - ✅ No warning — no tooltip on hover
+
+2. Completion Date with warning
+   - ✅ Hover anywhere on Completion Date cell — tooltip shows
+   - ✅ Message: "Completion exceeds Avail Date..."
+
+3. End Date with warning
+   - ✅ Hover anywhere on End Date cell — tooltip shows
+   - ✅ Yellow info highlight for soft warning
+
+4. No warning cells
+   - ✅ Hovering on cells without warnings shows no tooltip
+   - ✅ Normal cursor behavior
+
+5. Tooltip position
+   - ✅ Appears near cursor
+   - ✅ Does not go off-screen
+   - ✅ Disappears when mouse leaves cell
+```

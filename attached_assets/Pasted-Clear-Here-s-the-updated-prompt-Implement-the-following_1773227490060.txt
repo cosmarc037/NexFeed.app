@@ -1,0 +1,266 @@
+Clear. Here's the updated prompt:
+
+```
+Implement the following changes to the NexFeed application:
+
+---
+
+## 1. COMBINED ORDERS — LEAD CONTROLS ALL STATUSES
+
+In a combined group, ONLY the lead order's status is editable. All child orders automatically mirror the lead's status. Child order statuses are read-only.
+
+### CORE RULE:
+- Lead order: Status dropdown is ACTIVE and editable.
+- Child orders: Status dropdown is DISABLED / read-only. The status badge displays but cannot be clicked or changed.
+- When the lead order's status changes, ALL child orders in the group instantly update to the same status.
+
+### EXAMPLES:
+
+**User changes lead to "In production":**
+```
+Prio 7:  Lead  | Status: In production    ← user changed this
+Prio 8:  Child | Status: In production    ← auto-synced
+Prio 9:  Child | Status: In production    ← auto-synced
+Prio 10: Child | Status: In production    ← auto-synced
+```
+
+**User changes lead to "On-going pelleting":**
+```
+Prio 7:  Lead  | Status: On-going pelleting   ← user changed this
+Prio 8:  Child | Status: On-going pelleting   ← auto-synced
+Prio 9:  Child | Status: On-going pelleting   ← auto-synced
+Prio 10: Child | Status: On-going pelleting   ← auto-synced
+```
+
+**User changes lead to "Hold":**
+```
+Prio 7:  Lead  | Status: Hold    ← user changed this
+Prio 8:  Child | Status: Hold    ← auto-synced
+Prio 9:  Child | Status: Hold    ← auto-synced
+Prio 10: Child | Status: Hold    ← auto-synced
+```
+
+**User changes lead to "Done":**
+```
+Prio 7:  Lead  | Status: Done    ← user changed this
+Prio 8:  Child | Status: Done    ← auto-synced
+Prio 9:  Child | Status: Done    ← auto-synced
+Prio 10: Child | Status: Done    ← auto-synced
+→ Entire block moves to Done section at top
+→ End dates generated for ALL orders in the group
+```
+
+### CHILD STATUS DISPLAY:
+- The status badge on child orders shows the current status (same as lead) with normal badge styling.
+- The badge is NOT clickable — no dropdown appears.
+- Optionally, the badge can have a subtle lock icon (🔒) or slightly reduced opacity (0.8) to indicate it is controlled by the lead.
+- On hover, show a tooltip: "Status controlled by lead order (FPR: [lead FPR])"
+
+---
+
+## 2. COMBINED ORDERS — RESTRICTED STATUS DROPDOWN (LEAD ONLY)
+
+Since only the lead order has an active dropdown, the dropdown options for the lead are:
+
+| # | Status | Behavior |
+|---|---|---|
+| 1 | Uncombine | Triggers uncombine confirmation dialog |
+| 2 | Hold | Status change for entire group |
+| 3 | In production | Status change for entire group |
+| 4 | On-going batching | Status change for entire group |
+| 5 | On-going pelleting | Status change for entire group |
+| 6 | On-going bagging | Status change for entire group |
+| 7 | Done | Entire group marked Done, moves to top |
+
+**Hidden from lead order dropdown:**
+- ❌ Plotted (replaced by "Uncombine")
+- ❌ Cut
+- ❌ Cancel PO
+
+### "UNCOMBINE" BADGE STYLING:
+- Background: Light grey (#f3f4f6)
+- Text: Grey (#6b7280)
+- Same visual style as "Plotted"
+
+### CHILD ORDER DROPDOWN:
+- Dropdown is COMPLETELY DISABLED on child orders.
+- No click handler on the status badge for children.
+- The status badge is display-only.
+
+---
+
+## 3. COMBINED ORDERS — BLUE TINT ALWAYS RETAINED
+
+Combined orders must ALWAYS keep their blue-tinted background (#e3f2fd) regardless of what status the lead selects, as long as they remain part of the combined group.
+
+**Blue tint retained for ALL statuses:**
+```
+Lead  | Status: Hold               | Background: blue tint (#e3f2fd) ✅
+Child | Status: Hold               | Background: blue tint (#e3f2fd) ✅
+Lead  | Status: In production      | Background: blue tint (#e3f2fd) ✅
+Child | Status: In production      | Background: blue tint (#e3f2fd) ✅
+Lead  | Status: On-going pelleting | Background: blue tint (#e3f2fd) ✅
+Child | Status: On-going pelleting | Background: blue tint (#e3f2fd) ✅
+Lead  | Status: Done               | Background: blue tint (#e3f2fd) ✅
+Child | Status: Done               | Background: blue tint (#e3f2fd) ✅
+```
+
+**Blue tint is ONLY removed when:**
+- The user selects "Uncombine" on the lead and confirms the dialog.
+- At that point, ALL orders become standalone, backgrounds turn white, statuses reset to "Plotted".
+
+---
+
+## 4. "DONE" ON COMBINED ORDERS — ENTIRE GROUP MOVES
+
+When the lead order's status is set to "Done":
+
+**Step 1: Status sync to all children**
+- Lead status → "Done"
+- ALL child statuses → "Done" (auto-synced)
+
+**Step 2: End dates generated**
+- End date is generated for the lead order.
+- End dates are generated for ALL child orders.
+
+**Step 3: Entire block moves to top**
+- The ENTIRE combined block (lead + all children) moves to the "Done" section at the top of the interactive table.
+- The block stays together as a contiguous unit — lead first, children below in order.
+- Blue tint is retained in the interactive table.
+- Combined group badges ("Lead", "Child") are retained.
+
+**Step 4: Cascade recalculation**
+- The combined block is excluded from active scheduling.
+- Downstream orders recalculate their Completion Dates.
+
+**Step 5: Order History**
+- When the combined group moves to Order History (Completed Orders tab):
+  - The ENTIRE group moves together.
+  - Blue tint is REMOVED in Order History (normal white background).
+  - Combined group badges are RETAINED but reframed:
+    - "Lead" badge → stays as "Lead"
+    - "Child" badge → renamed to "Sub"
+  - This allows users to see that these orders were part of a combined production run.
+
+---
+
+## 5. "UNCOMBINE" — CONFIRMATION DIALOG AND BEHAVIOR
+
+When the user selects "Uncombine" from the lead order's status dropdown:
+
+### UNCOMBINE CONFIRMATION DIALOG:
+
+```
+╔══════════════════════════════════════════════════════════════╗
+║  🔓 Uncombine Order                                          ║
+║                                                               ║
+║  This will uncombine the entire group. All orders will        ║
+║  become standalone and set to "Plotted". Are you sure?        ║
+║                                                               ║
+║  Line:              1                                         ║
+║  Combined Group:    Combine Group 1                           ║
+║  Lead Order:        FPR 260311 (40 MT)                        ║
+║  Total Orders:      4 (1 lead + 3 sub)                        ║
+║  Combined Volume:   80 MT                                     ║
+║                                                               ║
+║  Orders in this group:                                        ║
+║  ┌────────────────────────────────────────────────────────┐   ║
+║  │ Lead  │ FPR: 260311 │ 40 MT                            │   ║
+║  │ Sub   │ FPR: 260309 │  8 MT (Original: 5 MT)          │   ║
+║  │ Sub   │ FPR: 260309 │ 12 MT (Original: 10 MT)         │   ║
+║  │ Sub   │ FPR: 260309 │ 20 MT                            │   ║
+║  └────────────────────────────────────────────────────────┘   ║
+║                                                               ║
+║  ⚠ After uncombining:                                        ║
+║  • All orders will become standalone.                         ║
+║  • All statuses will reset to "Plotted".                      ║
+║  • Blue highlight will be removed.                            ║
+║  • Lead and Sub badges will be removed.                       ║
+║  • Orders will remain in their current positions.             ║
+║  • You can then Cut, Cancel, or rearrange each order          ║
+║    independently.                                             ║
+║                                                               ║
+║              [Go Back]    [Confirm Uncombine]                 ║
+╚══════════════════════════════════════════════════════════════╝
+```
+
+### DIALOG DETAILS:
+
+**Header section:**
+| Label | Value | Styling |
+|---|---|---|
+| Line: | [line number] | Bold, dark text (#1a1a1a) |
+| Combined Group: | [group name] | Blue text (#1976d2) |
+| Lead Order: | [FPR + volume] | Bold, dark text (#1a1a1a) |
+| Total Orders: | [count] (1 lead + [N] sub) | Dark text |
+| Combined Volume: | [total volume] MT | Bold, dark text (#1a1a1a) |
+
+**Orders table within dialog:**
+- Shows all orders in the group.
+- Columns: Role (Lead/Sub), FPR, Volume.
+- If volume differs from original, show "(Original: X MT)" in grey.
+- Simple table with subtle borders.
+
+**"After uncombining" info section:**
+- Light amber background (#fef3c7)
+- Amber text (#92400e)
+- ⚠ icon
+- Bullet points explaining what will happen
+
+**Buttons:**
+- [Go Back]: Grey outlined button. Closes dialog, nothing changes.
+- [Confirm Uncombine]: Orange filled button (#fd5108), white text.
+
+### WHAT HAPPENS ON CONFIRM:
+
+1. **Group dissolved:**
+   - group_id is set to null for ALL orders in the group.
+   - is_lead is set to false for all.
+   - is_child is set to false for all.
+
+2. **Status reset:**
+   - ALL orders (lead + children) have their status set to "Plotted".
+
+3. **Visual changes:**
+   - Blue tint removed from all orders (white background).
+   - Lead/Sub badges removed.
+   - Status badges show "Plotted" (grey).
+
+4. **Positioning:**
+   - Orders remain in their current positions in the table.
+   - They are now independently draggable.
+
+5. **Dropdown restored:**
+   - All orders now show the full standalone status dropdown (including Cut, Cancel PO, etc.).
+
+6. **Cascade recalculation:**
+   - Completion Dates recalculate as each order is now an independent unit in the cascade.
+
+---
+
+## 6. ORDER HISTORY — COMBINED GROUP DISPLAY
+
+When combined orders appear in Order History (Completed Orders tab):
+
+### BADGE REFRAMING:
+- In the interactive table: badges show "Lead" and "Child"
+- In Order History: badges show "Lead" and "Sub"
+
+| Location | Lead Badge | Child Badge |
+|---|---|---|
+| Interactive Table | "Lead" — Blue (#1976d2) | "Child" — Blue (#1976d2) |
+| Order History | "Lead" — Blue (#1976d2) | "Sub" — Blue (#1976d2) |
+
+### VISUAL STYLING IN ORDER HISTORY:
+- Blue tint background is REMOVED (white/normal background).
+- Lead/Sub badges are RETAINED next to the FPR or in a dedicated column.
+- Orders from the same combined group are displayed together (contiguous rows).
+- A subtle left border (3px solid #1976d2) connects the group visually, similar to the interactive table.
+- All fields are read-only.
+
+### GROUP IDENTIFICATION:
+- Orders from the same combined group should be visually identifiable:
+  - Consecutive rows with Lead/Sub badges.
+  - Subtle blue left border spanning the group.
+  - Optionally, a small group label above the lead row: "Combined Group 1" in light blue text.
+```

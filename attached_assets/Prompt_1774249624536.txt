@@ -1,0 +1,103 @@
+```
+Implement the following change to the NexFeed application:
+
+---
+
+## FONT SIZE — APPLY 13px TO ALL REMAINING COLUMNS
+
+The previous font size update missed some columns. Ensure the following columns also use the 13px font size to match the rest of the table.
+
+---
+
+### COLUMNS TO UPDATE
+
+**Production Order columns:**
+
+| Column | Current | Updated |
+|---|---|---|
+| Production Order FG1 | ~11-12px | 13px |
+| Production Order SFG1 | ~11-12px | 13px |
+| Production Order SFGPMX | ~11-12px | 13px |
+
+**Status column:**
+
+| Element | Current | Updated |
+|---|---|---|
+| Status badge text | ~11-12px | 13px |
+| Status dropdown option text | ~11-12px | 13px |
+
+**Notes columns:**
+
+| Column | Current | Updated |
+|---|---|---|
+| FPR Notes text | ~11-12px | 13px |
+| Special Remarks text | ~11-12px | 13px |
+| FPR Notes placeholder ("Add note...") | ~11-12px | 12px, italic, grey |
+| Special Remarks placeholder | ~11-12px | 12px, italic, grey |
+
+**Other columns that may have been missed:**
+
+| Column | Current | Updated |
+|---|---|---|
+| SCADA value | ~11-12px | 13px |
+| PV value | ~11-12px | 13px |
+| HA Prep value | ~11-12px | 13px |
+| Threads value | ~11-12px | 13px |
+| Sacks value | ~11-12px | 13px |
+| Markings value | ~11-12px | 13px |
+| Tags value | ~11-12px | 13px |
+| End Date value | ~11-12px | 13px |
+| History value | ~11-12px | 13px |
+| Number of Bags value | ~11-12px | 13px |
+| Production Time value | ~11-12px | 13px |
+
+---
+
+### RULE: EVERY DATA CELL = 13px
+
+To prevent future inconsistencies, apply a single global rule:
+
+```css
+/* ALL data cells in the interactive order table = 13px */
+.order-table td {
+  font-size: 13px;
+}
+
+/* Exceptions — intentionally smaller */
+.order-table td .category-text {
+  font-size: 11px;  /* Category below Item Description */
+}
+
+.order-table td .original-volume-text {
+  font-size: 11px;  /* "Original: XX MT" below volume */
+}
+
+.order-table td .avail-remarks-text {
+  font-size: 11px;  /* "TLD | Mar 22" below avail date */
+}
+
+.order-table td .placeholder-text {
+  font-size: 12px;  /* "Set start date", "Add note..." */
+}
+
+.order-table td .badge-text {
+  font-size: 12px;  /* Status badges, Lead/Child/Cut badges */
+}
+
+.order-table td .icon {
+  font-size: 15px;  /* Readiness icons, warning icons */
+}
+```
+
+This ensures NO data cell is left at the old smaller font size.
+
+---
+
+### APPLY TO ALL ORDER TABLES
+
+| Table | Apply 13px? |
+|---|---|
+| Main interactive order table | ✅ Yes |
+| Auto-Sequence preview table | ✅ Yes |
+| Order History tables | ✅ Yes |
+```

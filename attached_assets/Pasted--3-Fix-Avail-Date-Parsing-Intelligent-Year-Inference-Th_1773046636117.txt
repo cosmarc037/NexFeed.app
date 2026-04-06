@@ -1,0 +1,37 @@
+---
+
+### 3. Fix Avail Date Parsing — Intelligent Year Inference
+
+The current date parsing from the Remarks column produces unreasonable dates. For example, FPR "251229" (order created December 29, 2025) with Remarks "TLD | Jan 02" results in January 02, 2027 — two years out. Fix with this logic:
+
+**New parsing rules:**
+
+Step 1: Parse the FPR column (YYMMDD format) to get the order creation date.
+  - Example: "251229" → December 29, 2025
+
+Step 2: Extract month and day from Remarks.
+  - Pattern: "TLD | Jan 02" → month = January, day = 2
+  - If Remarks contains non-date text (e.g., "prio replenish"), display as-is. No date conversion.
+
+Step 3: Build a candidate Avail Date using the extracted month/day and the FPR year.
+  - Example: January 02, 2025
+
+Step 4: Compare the candidate date to the FPR creation date:
+  - If the candidate is MORE than 30 days BEFORE the FPR date → set Avail Date to NEXT year (FPR year + 1)
+    - Example: FPR = Dec 29, 2025. Candidate = Jan 02, 2025. Jan 02 is ~362 days before Dec 29 → Avail Date = January 02, 2026
+  - If the candidate is WITHIN 30 days before OR any time AFTER the FPR date → keep same year
+    - Example: FPR = Jan 15, 2026. Candidate = Feb 10, 2026. Feb 10 is after Jan 15 → Avail Date = February 10, 2026
+
+Step 5: Sanity check — if the resulting Avail Date is more than 90 days after the FPR date, display the date but flag it with a console warning for review.
+
+**Validation examples:**
+
+| FPR    | Remarks        | FPR Date     | Avail Date       | Why                                         |
+|--------|----------------|--------------|------------------|---------------------------------------------|
+| 251229 | TLD | Jan 02   | Dec 29, 2025 | Jan 02, 2026     | Jan 02 in 2025 is >30 days before → +1 year |
+| 251229 | TLD | Jan 06   | Dec 29, 2025 | Jan 06, 2026     | Jan 06 in 2025 is >30 days before → +1 year |
+| 260115 | TLD | Feb 10   | Jan 15, 2026 | Feb 10, 2026     | Feb 10 is after Jan 15 → same year          |
+| 260115 | TLD | Jan 10   | Jan 15, 2026 | Jan 10, 2026     | Jan 10 is only 5 days before → within 30 days → same year |
+| 251229 | prio replenish | Dec 29, 2025 | "prio replenish" | Non-date text → display as-is               |
+
+**Logging:** For the first upload, log parsed dates to the console:

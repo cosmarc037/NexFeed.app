@@ -1,0 +1,162 @@
+```
+Implement the following fixes to the Avail Date icons in the order table:
+
+---
+
+## 1. ALIGN ICON DATA WITH N10D
+
+The icons next to the avail date (⚠ triangle, ✅ circle) show stock level data when hovered. Ensure this data matches the updated N10D logic.
+
+### CURRENT TOOLTIP (WRONG)
+
+```
+Stock level data available.
+Target: March 31, 2026 (Urgent)
+Run Auto-Sequence to prioritize this order.
+```
+
+### CORRECT TOOLTIP — ALIGNED WITH N10D
+
+Update the tooltip text to use the correct terminology and data:
+
+```
+Stock level data available.
+Completion: March 31, 2026
+Avail: April 1, 2026
+Status: Urgent
+Buffer: 40.0%
+```
+
+### ICON COLOR MAPPING — MATCH N10D STATUS
+
+| N10D Status | Icon | Color |
+|---|---|---|
+| Critical | ⚠ triangle | Red (#dc2626) |
+| Urgent | ⚠ triangle | Orange (#ea580c) |
+| Monitor | ⚠ triangle | Yellow/gold (#ca8a04) |
+| Sufficient | ✅ circle | Green (#16a34a) |
+
+### UPDATE TOOLTIP CONTENT
+
+```javascript
+function getAvailDateTooltip(order, n10dData) {
+  const product = n10dData.find(
+    p => String(p.material_code_fg) === String(order.material_code_fg)
+  );
+  
+  if (!product) {
+    return 'No stock level data available.';
+  }
+  
+  const status = product.status;
+  const completionDate = product.completionDate 
+    ? formatDateFull(product.completionDate) 
+    : '—';
+  const availDate = product.availDate 
+    ? formatDateFull(product.availDate) 
+    : '—';
+  const buffer = product.inventory > 0 
+    ? (((product.inventory - product.due_for_loading) / product.inventory) * 100).toFixed(1)
+    : '-100.0';
+  
+  let lines = [
+    'Stock level data available.',
+    `Completion: ${completionDate}`,
+    `Avail: ${availDate}`,
+    `Status: ${status}`,
+    `Buffer: ${buffer}%`
+  ];
+  
+  return lines.join('\n');
+}
+```
+
+### USE FULL MONTH NAMES IN TOOLTIP
+
+Since this is a tooltip (not a table column), use `formatDateFull()`:
+
+```
+Completion: March 31, 2026
+Avail: April 1, 2026
+```
+
+NOT:
+```
+Completion: Mar 31
+Avail: Apr 1
+```
+
+---
+
+## 2. CURSOR — POINTER ON ICON HOVER
+
+When the user hovers over the icon, show a pointer (hand) cursor so they know it's interactive.
+
+### THE PROBLEM
+
+The icon doesn't show a pointer cursor, making it hard for users to know they can hover/interact with it.
+
+### THE FIX
+
+```css
+.avail-date-icon {
+  cursor: pointer;
+}
+```
+
+Also increase the hover target area without changing the visual icon size:
+
+```css
+.avail-date-icon {
+  cursor: pointer;
+  padding: 4px;
+  margin: -4px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.avail-date-icon:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+```
+
+| Property | Value |
+|---|---|
+| Cursor | Pointer (hand icon) |
+| Padding | 4px (invisible extra hover area) |
+| Margin | -4px (compensates for padding so layout doesn't shift) |
+| Hover background | Very subtle grey (rgba(0,0,0,0.05)) |
+| Icon size | Unchanged — keep as-is |
+| Clickable area | Larger than visual icon — easier to hover |
+
+### VISUAL — NO CHANGE TO ICON SIZE
+
+The icon stays the same size visually. The padding trick just makes the invisible hover target bigger:
+
+```
+Visual:     [⚠]        ← same small icon
+Hit area:  [  ⚠  ]     ← larger invisible hover zone
+```
+
+---
+
+## 3. APPLY TO ALL AVAIL DATE ICONS
+
+| Location | Fix |
+|---|---|
+| Order table — all line tabs | ✅ Cursor pointer + bigger hover area |
+| Order table — all feedmill tabs | ✅ Cursor pointer + bigger hover area |
+| Order table — "All" tab | ✅ Cursor pointer + bigger hover area |
+| Tooltip content | ✅ Aligned with N10D data, full month names |
+
+---
+
+## DO NOT CHANGE
+
+- ❌ Icon size — keep as-is
+- ❌ Icon colors — already correct if mapped to N10D status
+- ❌ N10D table tooltips — already fixed
+- ❌ Auto-Sequence tooltips — already fixed
+```

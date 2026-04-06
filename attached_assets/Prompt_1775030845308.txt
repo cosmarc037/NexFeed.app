@@ -1,0 +1,329 @@
+```
+Implement the following fixes:
+
+---
+
+## FIX 1: REVERT STATUS — ORDER GOES BACK TO ORIGINAL POSITION
+
+When an order's status is reverted (e.g., Done → Plotted), it should return to its original position, not go to the bottom.
+
+```javascript
+// Store original prio when status changes to a locked status
+function handleStatusChange(order, newStatus, allOrders) {
+  // When changing TO a locked status, store original prio
+  if (isLockedStatus(newStatus) && !order._originalPrioBeforeLock) {
+    order._originalPrioBeforeLock = order.prio;
+  }
+  
+  // When changing FROM a locked status back to movable
+  if (isLockedStatus(order.status) && !isLockedStatus(newStatus)) {
+    // Restore original prio
+    if (order._originalPrioBeforeLock) {
+      const targetPrio = order._originalPrioBeforeLock;
+      order._originalPrioBeforeLock = null;
+      
+      // Move order back to original position
+      moveOrderToPrio(order, targetPrio, allOrders);
+    }
+  }
+  
+  order.status = newStatus;
+}
+
+function moveOrderToPrio(order, targetPrio, allOrders) {
+  // Remove order from current position
+  const currentIndex = allOrders.findIndex(o => o.id === order.id);
+  if (currentIndex === -1) return;
+  
+  allOrders.splice(currentIndex, 1);
+  
+  // Insert at target position (0-indexed)
+  const insertIndex = Math.min(targetPrio - 1, allOrders.length);
+  allOrders.splice(insertIndex, 0, order);
+  
+  // Renumber priorities
+  allOrders.forEach((o, i) => {
+    o.prio = i + 1;
+  });
+}
+```
+
+---
+
+## FIX 2: PREVIEW PRIO NUMBERS — USE REAL ORDER TABLE PRIO
+
+The Planned order at Prio 2 in the order table becomes Prio 1 in the preview because the excluded In Production order at Prio 1 is hidden. The preview must show the REAL prio numbers from the order table.
+
+### THE PROBLEM
+
+Order table:
+```
+Prio 1: Salto Conditioner → In Production (excluded)
+Prio 2: Gallimax Pigeon → Planned
+Prio 3: Elite XP Startex → Plotted
+Prio 4: Gall 21 Chicken → Plotted
+Prio 5: Gallimax 3 Maintenance → Plotted
+```
+
+Preview shows (WRONG):
+```
+Prio 1: Gallimax Pigeon → Planned     ← WRONG, should be Prio 2
+Prio 2: Gallimax 3 Maintenance        ← WRONG, should be different
+Prio 3: Gall 21 Chicken               ← WRONG
+```
+
+### THE FIX
+
+The preview must use the actual prio slot numbers from the full order table, NOT renumber from 1:
+
+```javascript
+function runAutoSequence(allOrders, n10dData, dailyColumns, today) {
+  const excludedOrders = [];
+  const plannedOrders = [];
+  const movableOrders = [];
+  
+  // Use the REAL prio from the order table
+  allOrders.forEach((order) => {
+    const realPrio = order.prio; // This is the actual prio in the order table
+    
+    if (['Done', 'Cancel PO', 'In Production',
+         'On-going batching', 'On-going pelleting', 'On-going bagging'
+        ].includes(order.status)) {
+      excludedOrders.push({ ...order, _realPrio: realPrio });
+    } else if (order.status === 'Planned') {
+      const lockedPrio = order._plannedPrio || realPrio;
+      plannedOrders.push({ ...order, _realPrio: lockedPrio });
+    } else {
+      movableOrders.push({ ...order, _realPrio: realPrio });
+    }
+  });
+  
+  // Get excluded prio slots
+  const excludedPrios = new Set(excludedOrders.map(o => o._realPrio));
+  
+  // Build planned prio map using REAL prios
+  const plannedPrioMap = {};
+  plannedOrders.forEach(o => {
+    plannedPrioMap[o._realPrio] = o;
+  });
+  
+  // Available slots = all real prios NOT excluded
+  const totalOrders = allOrders.length;
+  const availableSlots = [];
+  for (let i = 1; i <= totalOrders; i++) {
+    if (!excludedPrios.has(i)) {
+      availableSlots.push(i);
+    }
+  }
+  
+  // Sort movable orders
+  const movableWithDates = assignAvailDates(movableOrders, n10dData, dailyColumns, today);
+  
+  movableWithDates.sort((a, b) => {
+    const dateA = a._sortDate;
+    const dateB = b._sortDate;
+    
+    if (dateA && !dateB) return -1;
+    if (!dateA && dateB) return 1;
+    if (!dateA && !dateB) return 0;
+    
+    // FIRST: Critical orders always first regardless of date
+    const statusOrder = { 'Critical': 0, 'Urgent': 1, 'Monitor': 2, 'Sufficient': 3 };
+    const statusA = statusOrder[a._n10dStatus] ?? 3;
+    const statusB = statusOrder[b._n10dStatus] ?? 3;
+    
+    // If one is Critical and other is not, Critical goes first
+    if (statusA === 0 && statusB !== 0) return -1;
+    if (statusB === 0 && statusA !== 0) return 1;
+    
+    // Both Critical — sort by date
+    if (statusA === 0 && statusB === 0) {
+      return dateA.getTime() - dateB.getTime();
+    }
+    
+    // Neither Critical — sort by date first
+    const dateDiff = dateA.getTime() - dateB.getTime();
+    if (dateDiff !== 0) return dateDiff;
+    
+    // Same date — sort by status urgency
+    if (statusA !== statusB) return statusA - statusB;
+    
+    // Same date, same status — higher volume first
+    const volA = parseFloat(a.volume) || 0;
+    const volB = parseFloat(b.volume) || 0;
+    return volB - volA;
+  });
+  
+  // Build preview with REAL prio numbers
+  const previewResult = [];
+  let movableIndex = 0;
+  
+  availableSlots.forEach(slot => {
+    if (plannedPrioMap[slot]) {
+      previewResult.push({
+        ...plannedPrioMap[slot],
+        prio: slot, // REAL prio number
+        _isLocked: true
+      });
+    } else {
+      if (movableIndex < movableWithDates.length) {
+        previewResult.push({
+          ...movableWithDates[movableIndex],
+          prio: slot, // REAL prio number
+          _isLocked: false
+        });
+        movableIndex++;
+      }
+    }
+  });
+  
+  return { previewResult, excludedOrders };
+}
+```
+
+### EXPECTED RESULT
+
+Order table:
+```
+Prio 1: Salto Conditioner → In Production (excluded)
+Prio 2: Gallimax Pigeon → Planned
+Prio 3: Elite XP Startex → Plotted
+Prio 4: Gall 21 Chicken → Plotted
+Prio 5: Gallimax 3 Maintenance → Plotted
+```
+
+Preview shows (CORRECT):
+```
+1 order excluded (In Production)
+
+Prio 2: Gallimax Pigeon → Planned 🔒     ← REAL prio 2
+Prio 3: Gall 21 Chicken → Apr 1 (Critical) ← sorted, REAL prio 3
+Prio 4: Gallimax 3 Maintenance → Mar 31    ← sorted, REAL prio 4
+Prio 5: Elite XP Startex → Apr 9           ← sorted, REAL prio 5
+```
+
+Wait — that's still wrong for Critical. Let me re-sort:
+
+---
+
+## FIX 3: SORTING — CRITICAL ORDERS ALWAYS FIRST
+
+Critical orders must be prioritized ABOVE all other orders, regardless of date.
+
+### SORTING PRIORITY
+
+```
+1. CRITICAL orders (regardless of date — they need production NOW)
+2. Then all other orders sorted chronologically by avail date
+   - Within same date: Urgent > Monitor > Sufficient
+   - Within same date and status: higher volume first
+```
+
+### SORTING LOGIC
+
+```javascript
+movableWithDates.sort((a, b) => {
+  const statusOrder = { 'Critical': 0, 'Urgent': 1, 'Monitor': 2, 'Sufficient': 3 };
+  const statusA = statusOrder[a._n10dStatus] ?? 3;
+  const statusB = statusOrder[b._n10dStatus] ?? 3;
+  
+  const isCriticalA = statusA === 0;
+  const isCriticalB = statusB === 0;
+  
+  // Rule 1: Critical ALWAYS comes first
+  if (isCriticalA && !isCriticalB) return -1;
+  if (!isCriticalA && isCriticalB) return 1;
+  
+  // Rule 2: Both Critical — sort by date (earliest first)
+  if (isCriticalA && isCriticalB) {
+    const dateA = a._sortDate;
+    const dateB = b._sortDate;
+    if (dateA && dateB) return dateA.getTime() - dateB.getTime();
+    if (dateA && !dateB) return -1;
+    if (!dateA && dateB) return 1;
+    return 0;
+  }
+  
+  // Rule 3: Neither Critical — sort chronologically
+  const dateA = a._sortDate;
+  const dateB = b._sortDate;
+  
+  if (dateA && !dateB) return -1;
+  if (!dateA && dateB) return 1;
+  if (!dateA && !dateB) return 0;
+  
+  const dateDiff = dateA.getTime() - dateB.getTime();
+  if (dateDiff !== 0) return dateDiff;
+  
+  // Rule 4: Same date — Urgent before Monitor before Sufficient
+  if (statusA !== statusB) return statusA - statusB;
+  
+  // Rule 5: Same date, same status — higher volume first
+  const volA = parseFloat(a.volume) || 0;
+  const volB = parseFloat(b.volume) || 0;
+  return volB - volA;
+});
+```
+
+### EXAMPLE WITH CRITICAL PRIORITIZED
+
+Orders:
+```
+Gallimax 3 Maintenance — Mar 31 (Urgent)
+Gall 21 Chicken Layer — Apr 1 (Critical)
+Elite XP Startex — Apr 9 (Sufficient)
+```
+
+Sorted result:
+```
+1. Gall 21 Chicken Layer — Apr 1 (CRITICAL — goes first regardless of date)
+2. Gallimax 3 Maintenance — Mar 31 (Urgent — chronological)
+3. Elite XP Startex — Apr 9 (Sufficient — chronological)
+```
+
+Even though Mar 31 is before Apr 1, Critical overrides the date because the product NEEDS production immediately.
+
+### COMPLETE EXPECTED PREVIEW
+
+Order table:
+```
+Prio 1: Salto Conditioner → In Production (excluded)
+Prio 2: Gallimax Pigeon → Planned (locked at 2)
+Prio 3-10: movable orders
+```
+
+Preview:
+```
+1 order excluded (In Production)
+
+Prio 2: Gallimax Pigeon → Planned 🔒 (locked)
+Prio 3: Gall 21 Chicken Layer → Apr 1, 2026 (CRITICAL — first among movable)
+Prio 4: Gallimax 3 Maintenance → Mar 31, 2026 (Urgent)
+Prio 5: Elite XP Startex 80 MT → Apr 9, 2026 (Sufficient)
+Prio 6: Elite XP Startex 80 MT → Apr 9, 2026 (Sufficient)
+...
+```
+
+---
+
+## VERIFICATION
+
+### Revert status
+1. ✅ Order at Prio 3 marked as Done → moves to top (existing behavior)
+2. ✅ Same order reverted to Plotted → returns to Prio 3, not bottom
+3. ✅ Original prio stored when status changes to locked
+4. ✅ Original prio restored when status reverts to movable
+
+### Preview prio numbers
+5. ✅ Excluded orders (In Production) hidden from preview
+6. ✅ Planned order shows at REAL prio (Prio 2, not Prio 1)
+7. ✅ Movable orders show at REAL available prio slots (3, 4, 5...)
+8. ✅ Excluded count shown: "1 order excluded (In Production)"
+
+### Critical sorting
+9. ✅ Critical orders sorted FIRST among movable orders
+10. ✅ Even if Critical date (Apr 1) is after Urgent date (Mar 31), Critical goes first
+11. ✅ Multiple Critical orders sorted by date among themselves
+12. ✅ Non-Critical orders sorted chronologically after Critical
+13. ✅ Same date tiebreaker: Urgent > Monitor > Sufficient
+```

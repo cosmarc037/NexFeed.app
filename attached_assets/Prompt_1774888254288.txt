@@ -1,0 +1,907 @@
+```
+Implement the following changes to the NexFeed application:
+
+---
+
+## PRODUCT INSIGHTS — SUMMARY COLUMN, N10D TOOLTIP, AUTO-SEQUENCE TOOLTIP
+
+A unified insight system where template-based text is auto-generated from N10D data, and AI enhancement is available ONLY in the order table Summary column via a sparkle button.
+
+---
+
+### 1. DATA FLOW
+
+```
+N10D file uploaded / App loads with N10D data
+    ↓
+Template text auto-generated INSTANTLY per product (no AI)
+    ↓
+Cached in global store
+    ↓
+Order table Summary column → reads template from cache
+    ↓
+N10D tooltip → reads template from cache
+    ↓
+Auto-Sequence tooltip → reads template from cache
+    ↓
+User clicks ✨ in order table → AI generates and appends to template (order table ONLY)
+```
+
+---
+
+### 2. NAMING
+
+| Location | Old name | New name |
+|---|---|---|
+| Order table header | AI | PRODUCT INSIGHTS |
+| Order table sub-header | Smart Insight | Summary ✨ |
+| N10D tooltip panel header | ✨ Smart Insight | ✨ Summary |
+| Auto-Sequence tooltip panel header | ✨ Smart Insight | ✨ Summary |
+
+---
+
+### 3. TEMPLATE LINE GENERATION (INSTANT — NO AI)
+
+```javascript
+function generateTemplateLine(product, order, today, includeEmoji = false) {
+  const dfl = product?.due_for_loading;
+  const inventory = product?.inventory;
+  const status = product?.status;
+  const buffer = product?.buffer;
+  const availDate = product?.availDate;
+  const completionDate = product?.completionDate;
+  const daysUntilBreach = product?.daysUntilBreach;
+  
+  if (product && status) {
+    switch (status) {
+      case 'Critical': {
+        const deficit = (dfl - inventory).toFixed(1);
+        const prefix = includeEmoji ? '⚠ ' : '';
+        return `${prefix}This product is on Critical. Current inventory (${inventory} MT) has already fallen below the required demand (${dfl} MT), creating a ${deficit} MT deficit. Immediate production is needed to prevent stockout.`;
+      }
+      
+      case 'Urgent': {
+        const prefix = includeEmoji ? '⚠ ' : '';
+        return `${prefix}This product is on Urgent. Demand will exceed inventory by ${formatDateFull(availDate)}, with ${formatDateFull(completionDate)} as the last safe production date. The ${buffer}% buffer is thin and will erode quickly — production should be scheduled within 1-2 days.`;
+      }
+      
+      case 'Monitor': {
+        const prefix = includeEmoji ? '📋 ' : '';
+        return `${prefix}This product is on Monitor. Demand will exceed inventory by ${formatDateFull(availDate)}, with ${formatDateFull(completionDate)} as the last safe production date. The ${buffer}% buffer provides a window — production should be planned within the coming week.`;
+      }
+      
+      case 'Sufficient': {
+        const prefix = includeEmoji ? '✅ ' : '';
+        return `${prefix}This product is on Sufficient. Current inventory (${inventory} MT) comfortably covers the required demand (${dfl} MT) with a ${buffer}% buffer. No immediate production action is needed.`;
+      }
+      
+      default: {
+        return `This product has a status of ${status}. DFL: ${dfl} MT. Inventory: ${inventory} MT.`;
+      }
+    }
+  }
+  
+  if (order && order.avail_date && 
+      order.avail_date !== 'prio replenish' && 
+      order.avail_date !== 'safety stocks') {
+    const deadline = parseDate(order.avail_date);
+    const daysRemaining = deadline 
+      ? Math.ceil((deadline - today) / (1000 * 60 * 60 * 24)) 
+      : 'Unknown';
+    const prodTime = order.production_time || 'N/A';
+    const prefix = includeEmoji ? '📅 ' : '';
+    return `${prefix}This order has a deadline of ${formatDateFull(order.avail_date)} — ${daysRemaining} days remaining. Estimated production time is ${prodTime} hours.`;
+  }
+  
+  const volume = order?.volume || 0;
+  const line = order?.line || 'unassigned';
+  return `No stock level data available from Next 10 Days. This order is scheduled for ${volume} MT on ${line}.`;
+}
+```
+
+---
+
+### 4. PRE-CALCULATE ENRICHED DATA
+
+```javascript
+function enrichProductData(product, dailyColumns) {
+  const availDate = product.availDate ? new Date(product.availDate) : null;
+  const daysUntilBreach = availDate 
+    ? Math.ceil((availDate - new Date()) / (1000 * 60 * 60 * 24)) 
+    : null;
+  
+  let totalDemand = 0;
+  let daysWithDemand = 0;
+  dailyColumns.forEach(col => {
+    const val = parseFloat(product[col.key]) || 0;
+    if (val > 0) {
+      totalDemand += val;
+      daysWithDemand++;
+    }
+  });
+  const avgDailyDemand = daysWithDemand > 0 
+    ? (totalDemand / daysWithDemand).toFixed(1) 
+    : 0;
+  
+  const buffer = product.inventory > 0 
+    ? (((product.inventory - product.due_for_loading) / product.inventory) * 100).toFixed(1)
+    : '-100.0';
+  
+  return {
+    ...product,
+    daysUntilBreach: daysUntilBreach,
+    avgDailyDemand: avgDailyDemand,
+    buffer: buffer
+  };
+}
+```
+
+---
+
+### 5. AUTO-GENERATE TEMPLATES — NO BUTTON CLICK NEEDED
+
+```javascript
+let insightCache = {};
+let insightsLoaded = false;
+let isGenerating = false;
+
+function setInsightCache(cache) {
+  insightCache = cache;
+  insightsLoaded = true;
+}
+
+function getSmartInsight(materialCode) {
+  const entry = insightCache[materialCode];
+  if (!entry) return null;
+  return entry.combined;
+}
+
+function getTemplateOnly(materialCode) {
+  const entry = insightCache[materialCode];
+  if (!entry) return null;
+  return entry.template;
+}
+
+function hasInsights() {
+  return insightsLoaded && Object.keys(insightCache).length > 0;
+}
+
+function autoGenerateTemplates(n10dProducts, allOrders, today, dailyColumns) {
+  const cache = {};
+  
+  const enrichedProducts = n10dProducts.map(
+    p => enrichProductData(p, dailyColumns)
+  );
+  
+  // Template lines for N10D products
+  enrichedProducts.forEach(product => {
+    const templateLine = generateTemplateLine(product, null, today, false);
+    cache[product.material_code_fg] = {
+      template: templateLine,
+      ai: null,
+      combined: templateLine
+    };
+  });
+  
+  // Template lines for orders without N10D
+  allOrders.forEach(order => {
+    if (!cache[order.material_code_fg]) {
+      const templateLine = generateTemplateLine(null, order, today, false);
+      cache[order.material_code_fg] = {
+        template: templateLine,
+        ai: null,
+        combined: templateLine
+      };
+    }
+  });
+  
+  setInsightCache(cache);
+  triggerOrderTableRefresh();
+}
+```
+
+### TRIGGERS — AUTO TEMPLATE GENERATION
+
+```javascript
+// Trigger 1: N10D file uploaded
+async function handleN10DUpload(file) {
+  const parsedData = parseN10DFile(file);
+  setN10dData(parsedData);
+  autoGenerateTemplates(parsedData, allOrders, new Date(), dailyColumns);
+}
+
+// Trigger 2: App loads with existing N10D data
+useEffect(() => {
+  if (n10dData && n10dData.length > 0) {
+    if (!hasInsights() || Object.keys(insightCache).length === 0) {
+      autoGenerateTemplates(n10dData, allOrders, new Date(), dailyColumns);
+    }
+  }
+}, [n10dData]);
+
+// Trigger 3: New orders added
+useEffect(() => {
+  if (n10dData && n10dData.length > 0) {
+    const uncachedOrders = allOrders.filter(
+      o => !insightCache[o.material_code_fg]
+    );
+    if (uncachedOrders.length > 0) {
+      autoGenerateTemplates(n10dData, allOrders, new Date(), dailyColumns);
+    }
+  }
+}, [allOrders]);
+
+// Trigger 4: Re-apply to Existing Orders
+async function handleReapplyToOrders() {
+  const updatedProducts = recalculateN10DStatuses(n10dData, new Date());
+  autoGenerateTemplates(updatedProducts, allOrders, new Date(), dailyColumns);
+  updateAvailDateIcons(allOrders, updatedProducts);
+  
+  // If AI was previously enhanced, regenerate AI too
+  const hasAI = Object.values(insightCache).some(e => e.ai !== null);
+  if (hasAI) {
+    await handleEnhanceWithAI();
+  }
+}
+```
+
+---
+
+### 6. SPARKLE BUTTON — AI ENHANCEMENT (ORDER TABLE ONLY)
+
+The ✨ button in the Summary column sub-header triggers AI generation for ALL orders on the current line tab. This is the ONLY way AI text is generated. N10D and Auto-Sequence tooltips NEVER get AI text.
+
+```javascript
+async function handleEnhanceWithAI() {
+  if (!n10dData || n10dData.length === 0) {
+    showNotification('Upload Next 10 Days data first to generate AI insights.');
+    return;
+  }
+  
+  isGenerating = true;
+  triggerOrderTableRefresh();
+  
+  try {
+    const enrichedProducts = n10dData.map(
+      p => enrichProductData(p, dailyColumns)
+    );
+    
+    // Part A: N10D products — MUST use AI API
+    const n10dResponse = await generateN10DInsights(enrichedProducts, new Date());
+    const n10dInsights = parseInsightResponse(n10dResponse);
+    
+    Object.entries(n10dInsights).forEach(([code, aiText]) => {
+      if (insightCache[code]) {
+        insightCache[code].ai = aiText;
+        insightCache[code].combined = insightCache[code].template + '\n\n' + aiText;
+      }
+    });
+    
+    // Part B: Dated MTO orders — MUST use AI API
+    const datedOrders = allOrders.filter(order => {
+      const hasN10D = n10dData.some(
+        p => String(p.material_code_fg) === String(order.material_code_fg)
+      );
+      return !hasN10D && order.avail_date && 
+             order.avail_date !== 'prio replenish' && 
+             order.avail_date !== 'safety stocks';
+    });
+    
+    if (datedOrders.length > 0) {
+      const datedResponse = await generateDatedOrderInsights(datedOrders, new Date());
+      const datedInsights = parseInsightResponse(datedResponse);
+      
+      Object.entries(datedInsights).forEach(([code, aiText]) => {
+        if (insightCache[code]) {
+          insightCache[code].ai = aiText;
+          insightCache[code].combined = insightCache[code].template + '\n\n' + aiText;
+        }
+      });
+    }
+    
+    setInsightCache(insightCache);
+  } catch (error) {
+    console.error('AI enhancement failed:', error);
+    showNotification('Failed to generate AI insights. Try again.');
+  } finally {
+    isGenerating = false;
+    triggerOrderTableRefresh();
+  }
+}
+
+function parseInsightResponse(response) {
+  const insights = {};
+  const lines = response.split('\n').filter(l => l.trim());
+  lines.forEach(line => {
+    const match = line.match(/^\[?(\d+)\]?:\s*(.+)/);
+    if (match) {
+      insights[match[1]] = match[2].trim();
+    }
+  });
+  return insights;
+}
+```
+
+---
+
+### 7. AI PROMPTS
+
+### FOR N10D PRODUCTS (STOCK-BASED)
+
+```javascript
+async function generateN10DInsights(products, today) {
+  const prompt = `
+You are a production planning advisor for a feed manufacturing plant.
+Generate a helpful 3-5 sentence production insight for each product.
+
+RULES:
+- Do NOT just restate the data. Provide actionable advice.
+- Tell the planner WHEN to act, WHAT to do, and WHY.
+- Include how many days remain before stockout.
+- Mention risk level in plain language.
+- Suggest specific actions based on the status.
+- Use full month names (e.g., "April 5, 2026").
+- Be direct and practical — write as if advising a colleague.
+- Do NOT include the template line — only the advisory sentences.
+
+TONE GUIDE:
+
+Critical:
+- Urgent tone. Emphasize immediate action.
+- Recommend producing NOW or within 24 hours.
+- Warn about consequences of delay.
+- Mention if other orders should be deprioritized.
+
+Urgent:
+- Firm tone. Emphasize short timeline.
+- Recommend scheduling production within 1-2 days.
+- Mention the last safe production date.
+- Suggest checking line availability.
+
+Monitor:
+- Advisory tone. Production needed but not immediate.
+- Recommend planning production within the coming week.
+- Note that buffer exists but is shrinking.
+- Suggest monitoring daily demand trends.
+
+Sufficient:
+- Reassuring tone. No urgency.
+- Confirm stock comfortably covers demand.
+- Recommend routine monitoring only.
+
+PRODUCTS:
+${products.map(p => `
+[${p.material_code_fg}] ${p.item_description}
+DFL: ${p.due_for_loading} MT | Inventory: ${p.inventory} MT
+Status: ${p.status} | Buffer: ${p.buffer}%
+Completion: ${p.completionDate ? formatDateFull(p.completionDate) : 'N/A'}
+Avail: ${p.availDate ? formatDateFull(p.availDate) : 'N/A'}
+Bal to Prod: ${p.balanceToProduce} MT
+Days until stockout: ${p.daysUntilBreach || 'N/A (no breach in 10 days)'}
+Daily avg demand: ${p.avgDailyDemand || 'N/A'} MT
+`).join('\n')}
+
+Output format — one per line:
+[material_code]: [3-5 sentence insight — advisory only, no template data]
+  `;
+
+  return await callAI(prompt);
+}
+```
+
+### FOR DATED MTO ORDERS (DEADLINE-BASED)
+
+```javascript
+async function generateDatedOrderInsights(orders, today) {
+  const prompt = `
+You are a production planning advisor for a feed manufacturing plant.
+Generate a helpful 3-5 sentence production insight for each order.
+These are dated Make-to-Order (MTO) orders with specific deadlines.
+
+RULES:
+- Focus on whether the order is on track to meet its deadline.
+- Calculate backward from the deadline: when must production START.
+- Factor in production time and changeover.
+- Mention days remaining until the deadline.
+- Recommend specific actions if the deadline is at risk.
+- Use full month names.
+- Be direct and practical.
+- Do NOT include the template line — only advisory sentences.
+
+ORDERS:
+${orders.map(o => {
+  const deadline = parseDate(o.avail_date);
+  const daysRemaining = deadline 
+    ? Math.ceil((deadline - today) / (1000 * 60 * 60 * 24)) 
+    : 'Unknown';
+  const completionDate = deadline 
+    ? new Date(deadline.getTime() - 24 * 60 * 60 * 1000) 
+    : null;
+  
+  return `
+[${o.material_code_fg}] ${o.item_description}
+Volume: ${o.volume} MT | Line: ${o.line}
+Deadline (Avail Date): ${formatDateFull(o.avail_date)}
+Expected Completion: ${completionDate ? formatDateFull(completionDate) : 'N/A'}
+Production Time: ${o.production_time || 'N/A'} hrs
+Changeover: ${o.changeover || 'N/A'} hrs
+Days remaining: ${daysRemaining}
+Current status: ${o.status}
+Queue position: Priority ${o.prio || 'N/A'}
+`;
+}).join('\n')}
+
+Output format — one per line:
+[material_code]: [3-5 sentence insight — advisory only, no template data]
+  `;
+
+  return await callAI(prompt);
+}
+```
+
+---
+
+### 8. ORDER TABLE — COLUMN STRUCTURE
+
+### HEADER
+
+```
+┌─────────────────────────────────────┬──────────────────┬──────────────────────┐
+│            SCHEDULING               │ PRODUCT INSIGHTS │        NOTES         │
+├────────┬──────────┬────────┬────────┼──────────────────┼──────────┬───────────┤
+│ Start  │ Start    │ Avail  │Complet.│  Summary ✨      │FPR Notes │ Sp.       │
+│ Date   │ Time     │ Date   │ Date   │                  │          │ Remarks   │
+```
+
+### COLSPAN
+
+| Header group | Columns | Colspan |
+|---|---|---|
+| SCHEDULING | Start Date, Start Time, Avail Date, Completion Date | 4 |
+| PRODUCT INSIGHTS | Summary | 1 |
+| NOTES | FPR Notes, Special Remarks | 2 |
+
+### HEADER JSX
+
+```jsx
+<thead>
+  <tr>
+    <th colSpan={/* order details */}>ORDER DETAILS</th>
+    <th colSpan={/* production params */}>PRODUCTION PARAMETERS</th>
+    <th colSpan={/* operator */}>OPERATOR</th>
+    <th colSpan={4}>SCHEDULING</th>
+    <th colSpan={1} className="ai-header">PRODUCT INSIGHTS</th>
+    <th colSpan={2}>NOTES</th>
+  </tr>
+  
+  <tr>
+    {/* SCHEDULING — 4 columns */}
+    <th>Start Date</th>
+    <th>Start Time</th>
+    <th>Avail Date</th>
+    <th>Completion Date</th>
+    
+    {/* PRODUCT INSIGHTS — 1 column */}
+    <th className="ai-subheader">
+      <span>Summary</span>
+      <button className="sparkle-btn" onClick={handleEnhanceWithAI} title="Enhance with AI">
+        ✨
+      </button>
+    </th>
+    
+    {/* NOTES — 2 columns */}
+    <th>FPR Notes</th>
+    <th>Special Remarks</th>
+  </tr>
+</thead>
+```
+
+---
+
+### 9. HEADER STYLING — SINGLE SUBTLE YELLOW
+
+```css
+.ai-header {
+  background: #fef9e7 !important;
+  color: #92400e !important;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  text-align: center;
+  padding: 6px 8px;
+  letter-spacing: 0.5px;
+}
+
+.ai-subheader {
+  background: #fef9e7 !important;
+  color: #1a1a1a !important;
+  font-size: 11px;
+  font-weight: 600;
+  text-align: left;
+  padding: 6px 8px;
+}
+```
+
+| Element | Background | Same color? |
+|---|---|---|
+| "PRODUCT INSIGHTS" header | #fef9e7 | ✅ |
+| "Summary ✨" sub-header | #fef9e7 | ✅ Same |
+
+---
+
+### 10. SPARKLE BUTTON STYLING
+
+```css
+.sparkle-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 4px;
+  margin-left: 4px;
+  border-radius: 4px;
+  transition: background 0.15s ease;
+}
+
+.sparkle-btn:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+```
+
+| Property | Value |
+|---|---|
+| Always visible | ✅ Yes — stays visible, can click again to regenerate |
+| Hover | Subtle grey background |
+| Disabled state | When isGenerating = true, show as disabled |
+
+---
+
+### 11. SUMMARY CELL — ORDER TABLE
+
+```jsx
+function SummaryCell({ order }) {
+  const entry = insightCache[order.material_code_fg];
+  
+  if (!entry) {
+    return (
+      <td className="summary-cell">
+        <div className="summary-empty">
+          No insight available
+        </div>
+      </td>
+    );
+  }
+  
+  return (
+    <td className="summary-cell">
+      <div className="summary-text">
+        <div className="summary-template">
+          {entry.template}
+        </div>
+        {entry.ai && (
+          <div className="summary-ai">
+            {entry.ai}
+          </div>
+        )}
+        {!entry.ai && isGenerating && (
+          <div className="summary-loading">
+            Generating...
+          </div>
+        )}
+      </div>
+    </td>
+  );
+}
+```
+
+### CELL STYLING
+
+```css
+.summary-cell {
+  user-select: none;
+  vertical-align: top;
+  padding: 8px 10px;
+  width: 300px;
+  min-width: 250px;
+  max-width: 400px;
+}
+
+.summary-text {
+  font-size: 10px;
+  line-height: 1.5;
+  white-space: normal;
+  word-wrap: break-word;
+}
+
+.summary-template {
+  font-size: 10px;
+  font-weight: 400;
+  color: #374151;
+  margin-bottom: 4px;
+}
+
+.summary-ai {
+  font-size: 10px;
+  font-weight: 400;
+  color: #4b5563;
+  line-height: 1.5;
+}
+
+.summary-loading {
+  font-size: 10px;
+  color: #9ca3af;
+  font-style: italic;
+  margin-top: 4px;
+}
+
+.summary-empty {
+  font-size: 10px;
+  color: #d1d5db;
+  font-style: italic;
+}
+```
+
+- ❌ No bold text
+- ❌ No emoji in cell content
+- ❌ No truncation — full text visible
+- ❌ Not editable
+- ❌ No hover tooltip needed
+
+---
+
+### 12. HIDDEN STATE — REMOVE HARDCODED WIDTH
+
+When the Summary column is hidden via toggle, remove all hardcoded width:
+
+```javascript
+function getSummaryColumnStyle(isVisible) {
+  if (!isVisible) {
+    return {
+      width: 0,
+      minWidth: 0,
+      maxWidth: 0,
+      padding: 0,
+      overflow: 'hidden',
+      border: 'none'
+    };
+  }
+  
+  return {
+    width: 300,
+    minWidth: 250,
+    maxWidth: 400
+  };
+}
+```
+
+```css
+td.summary-cell.column-hidden,
+th.ai-header.column-hidden,
+th.ai-subheader.column-hidden {
+  width: 0 !important;
+  min-width: 0 !important;
+  max-width: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  overflow: hidden !important;
+  border: none !important;
+  font-size: 0 !important;
+  line-height: 0 !important;
+}
+
+td.summary-cell.column-hidden *,
+th.ai-header.column-hidden *,
+th.ai-subheader.column-hidden * {
+  display: none !important;
+}
+```
+
+Use the SAME toggle mechanism as other columns (FPR Notes, Special Remarks, etc.).
+
+---
+
+### 13. N10D TOOLTIP — TEMPLATE ONLY
+
+```
+┌─────────────────────────┬────────────────────────────────┐
+│  Order Details           │  ✨ Summary                    │
+│                          │                                │
+│  DFL: 92.3 MT            │  This product is on Monitor.   │
+│  Inventory: 310.6 MT     │  Demand will exceed inventory  │
+│  Ratio: 0.30             │  by April 9, 2026, with        │
+│  Buffer: 70.3%           │  April 8, 2026 as the last     │
+│  Status: Monitor         │  safe production date. The     │
+│                          │  40.0% buffer provides a       │
+│  Completion: Apr 8, 2026 │  window — production should    │
+│  Avail: Apr 9, 2026      │  be planned within the         │
+│                          │  coming week.                  │
+└─────────────────────────┴────────────────────────────────┘
+```
+
+- ✅ Template text only (with emoji prefix)
+- ❌ No AI text
+- ❌ No sparkle button
+- ❌ No "Generating..." state
+
+### AUTO-SEQUENCE TOOLTIP — TEMPLATE ONLY
+
+Same as N10D tooltip:
+- ✅ Template text only (with emoji prefix)
+- ❌ No AI text
+- ❌ No sparkle button
+- ❌ No "Generating..." state
+
+### TOOLTIP TEMPLATE — WITH EMOJI
+
+```javascript
+// N10D and Auto-Sequence use emoji version
+const templateLine = generateTemplateLine(product, null, today, true);
+// Result: "📋 This product is on Monitor. Demand will exceed..."
+```
+
+---
+
+### 14. AVAIL DATE CELL — HOVER ON ENTIRE CELL
+
+```jsx
+function AvailDateCell({ order, n10dData }) {
+  const [showTooltip, setShowTooltip] = useState(false);
+  const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
+  const timeoutRef = useRef(null);
+  
+  function handleCellMouseEnter(e) {
+    timeoutRef.current = setTimeout(() => {
+      const pos = clampToViewport(e.clientX + 12, e.clientY + 12, 280, 120);
+      setTooltipPos(pos);
+      setShowTooltip(true);
+    }, 300);
+  }
+  
+  function handleCellMouseMove(e) {
+    if (showTooltip) {
+      const pos = clampToViewport(e.clientX + 12, e.clientY + 12, 280, 120);
+      setTooltipPos(pos);
+    }
+  }
+  
+  function handleCellMouseLeave() {
+    clearTimeout(timeoutRef.current);
+    setShowTooltip(false);
+  }
+  
+  return (
+    <td
+      onMouseEnter={handleCellMouseEnter}
+      onMouseMove={handleCellMouseMove}
+      onMouseLeave={handleCellMouseLeave}
+      style={{ cursor: 'pointer' }}
+    >
+      <span className="avail-date-text">{order.avail_date}</span>
+      {order.stockIcon && (
+        <span className="avail-date-icon" style={{ cursor: 'pointer' }}>
+          {order.stockIcon}
+        </span>
+      )}
+      
+      {showTooltip && (
+        <TooltipPortal>
+          <AvailDateTooltip order={order} n10dData={n10dData} position={tooltipPos} />
+        </TooltipPortal>
+      )}
+    </td>
+  );
+}
+```
+
+---
+
+### 15. AVAIL DATE ICON — ALIGN WITH N10D STATUS
+
+```javascript
+function getAvailDateIcon(order, n10dData) {
+  const product = n10dData.find(
+    p => String(p.material_code_fg) === String(order.material_code_fg)
+  );
+  
+  if (!product) return null;
+  
+  switch (product.status) {
+    case 'Critical':
+      return { icon: '⚠', color: '#dc2626' };
+    case 'Urgent':
+      return { icon: '⚠', color: '#ea580c' };
+    case 'Monitor':
+      return { icon: '⚠', color: '#ca8a04' };
+    case 'Sufficient':
+      return { icon: '✅', color: '#16a34a' };
+    default:
+      return null;
+  }
+}
+```
+
+### AVAIL DATE ICON — LARGER HOVER TARGET
+
+```css
+.avail-date-icon {
+  cursor: pointer;
+  padding: 4px;
+  margin: -4px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.avail-date-icon:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+```
+
+---
+
+### 16. SUMMARY TABLE — WHAT HAPPENS WHERE
+
+| Action | Template (Order Table) | AI (Order Table) | N10D Tooltip | Auto-Sequence Tooltip |
+|---|---|---|---|---|
+| N10D file uploaded | ✅ Auto-generated | ❌ Not yet | ✅ Template only | ✅ Template only |
+| App loads with N10D data | ✅ Auto-generated | ❌ Not yet | ✅ Template only | ✅ Template only |
+| User clicks ✨ sparkle | ✅ Already there | ✅ Generated and appended | ❌ No change | ❌ No change |
+| User clicks ✨ again | ✅ Already there | ✅ Regenerated | ❌ No change | ❌ No change |
+| "Re-apply to Existing Orders" | ✅ Regenerated | ✅ Regenerated (if previously enhanced) | ✅ Template regenerated | ✅ Template regenerated |
+
+---
+
+### 17. DO NOT
+
+- ❌ Do NOT call AI API for N10D tooltip
+- ❌ Do NOT call AI API for Auto-Sequence tooltip
+- ❌ Do NOT add sparkle button to N10D tooltip
+- ❌ Do NOT add sparkle button to Auto-Sequence tooltip
+- ❌ Do NOT show "Generating..." in N10D or Auto-Sequence tooltips
+- ❌ Do NOT use bold text in Summary column
+- ❌ Do NOT use emoji in Summary column cell content
+- ❌ Do NOT truncate Summary column text
+- ❌ Do NOT make Summary column editable
+- Only call AI API when user clicks ✨ in the order table Summary sub-header
+
+---
+
+### 18. VERIFICATION
+
+1. Column header
+   - ✅ Header says "PRODUCT INSIGHTS"
+   - ✅ Sub-header says "Summary ✨"
+   - ✅ Both use same subtle yellow (#fef9e7)
+   - ✅ Completion Date is under SCHEDULING (not NOTES)
+   - ✅ ✨ is clickable
+
+2. Before sparkle click
+   - ✅ Template text auto-populates when N10D data exists
+   - ✅ No AI text shown
+   - ✅ No button click needed for template
+
+3. After sparkle click
+   - ✅ AI text appended below template for all rows
+   - ✅ Sparkle button stays visible for regeneration
+   - ✅ "Generating..." shown while loading
+
+4. Hidden state
+   - ✅ Column collapses completely — no empty block
+   - ✅ Width goes to 0, matches other hidden columns
+   - ✅ No hardcoded width when hidden
+
+5. N10D tooltip
+   - ✅ Shows "✨ Summary" header
+   - ✅ Template text only (with emoji)
+   - ✅ No AI text, no sparkle button
+
+6. Auto-Sequence tooltip
+   - ✅ Shows "✨ Summary" header
+   - ✅ Template text only (with emoji)
+   - ✅ No AI text, no sparkle button
+
+7. Avail Date icons
+   - ✅ Match N10D status
+   - ✅ Hover entire cell triggers tooltip
+```

@@ -1,0 +1,473 @@
+```
+Implement the following changes to both the order table and auto-sequence preview:
+
+---
+
+## 1. CASCADING COMPLETION DATE — RULES
+
+### CASCADE LOGIC
+
+```
+For each order in priority order (top to bottom):
+
+IF order has Start Date AND Start Time set:
+  → Use that as the anchor
+  → Completion = Start DateTime + Production Time + Changeover
+  → Pass completion as the next order's cascaded start
+
+IF order has NO Start Date or NO Start Time:
+  → Start = Previous order's Completion DateTime
+  → Completion = Start + Production Time + Changeover
+  → Pass completion as the next order's cascaded start
+
+IF order has overridden Completion Date:
+  → Keep the overridden value
+  → Do NOT recalculate
+  → Pass overridden completion as the next order's cascaded start
+```
+
+### IMPLEMENTATION
+
+```javascript
+function recalculateCompletionDates(orders) {
+  // Sort by prio
+  orders.sort((a, b) => a.prio - b.prio);
+  
+  let currentEndTime = null;
+  
+  for (let i = 0; i < orders.length; i++) {
+    const order = orders[i];
+    
+    // Skip Done and Cancelled
+    if (order.status === 'Done' || order.status === 'Cancel PO') {
+      continue;
+    }
+    
+    const productionTime = parseFloat(order.production_time) || 0;
+    const changeover = parseFloat(order.changeover) || 0;
+    const totalTime = productionTime + changeover;
+    
+    // If completion date is overridden, keep it and use it as anchor
+    if (order._completionOverridden) {
+      const overriddenDateTime = parseDateTime(
+        order.completion_date, 
+        order.completion_time
+      );
+      if (overriddenDateTime) {
+        currentEndTime = overriddenDateTime;
+      }
+      continue; // Don't recalculate this order
+    }
+    
+    let startDateTime = null;
+    
+    // Order has explicit start date and time
+    if (order.start_date && order.start_time) {
+      startDateTime = parseDateTime(order.start_date, order.start_time);
+    }
+    // No start date — cascade from previous order's completion
+    else if (currentEndTime) {
+      startDateTime = new Date(currentEndTime);
+      order._cascadedStartDate = formatDateFull(startDateTime);
+      order._cascadedStartTime = formatTime(startDateTime);
+    }
+    
+    if (startDateTime) {
+      const completionDateTime = new Date(
+        startDateTime.getTime() + (totalTime * 60 * 60 * 1000)
+      );
+      
+      order.completion_date = formatDateFull(completionDateTime);
+      order.completion_time = formatTime(completionDateTime);
+      
+      currentEndTime = completionDateTime;
+    }
+  }
+}
+```
+
+### APPLY TO BOTH ORDER TABLE AND PREVIEW
+
+```javascript
+// Order table — recalculate when anything changes
+function handleOrderTableChange(order, field, newValue, line) {
+  order[field] = newValue;
+  
+  if (['start_date', 'start_time', 'volume', 'batch_size', 
+       'batches', 'production_time', 'changeover'].includes(field)) {
+    const lineOrders = getOrdersForLine(line);
+    recalculateCompletionDates(lineOrders);
+  }
+}
+
+// Preview — recalculate when anything changes
+function handlePreviewChange(order, field, newValue, previewOrders) {
+  order[field] = newValue;
+  
+  if (['start_date', 'start_time', 'volume', 'batch_size',
+       'batches', 'production_time', 'changeover'].includes(field)) {
+    recalculateCompletionDates(previewOrders);
+  }
+}
+```
+
+---
+
+## 2. AVAIL DATE — EDITABLE IN PREVIEW
+
+Make the Avail Date column in the auto-sequence preview editable, with the same behavior as the order table.
+
+### BEHAVIOR
+
+- Same date picker as order table
+- Same restrictions (no past dates, min: today)
+- Changes only affect the preview
+- Written to order table when "Apply to Schedule" is clicked
+
+```jsx
+function PreviewAvailDateCell({ order, onChange }) {
+  function handleAvailDateChange(newDate) {
+    // Same restrictions as order table
+    const today = getMinSelectableDate();
+    if (newDate < today) return;
+    
+    order.avail_date = formatDateFull(newDate);
+    order._previewAvailDateChanged = true;
+    
+    onChange(order, 'avail_date', formatDateFull(newDate));
+  }
+  
+  return (
+    <td className="data-cell editable-cell">
+      <DatePickerField
+        value={order.avail_date}
+        minDate={getMinSelectableDate()}
+        maxDate={null}
+        onChange={handleAvailDateChange}
+        placeholder="Set avail date"
+      />
+    </td>
+  );
+}
+```
+
+### APPLY TO SCHEDULE — WRITE PREVIEW CHANGES
+
+```javascript
+function applyAutoSequence(previewOrders) {
+  previewOrders.forEach((order, index) => {
+    order.prio = order.prio;
+    
+    // Write avail date changes from preview
+    if (order._previewAvailDateChanged) {
+      // Already updated in order object
+      order._previewAvailDateChanged = false;
+    }
+    
+    // Write completion date changes from preview
+    if (order._previewCompletionChanged) {
+      order._previewCompletionChanged = false;
+    }
+  });
+}
+```
+
+---
+
+## 3. COMPLETION DATE — EDITABLE IN PREVIEW WITH OVERRIDE
+
+Make Completion Date editable in the preview with the same override dialog as the order table.
+
+### BEHAVIOR
+
+- By default: auto-cascaded (calculated from start date + production time)
+- User can click to override
+- Override shows the same warning dialog
+- Overridden value sticks until removed
+
+### OVERRIDE DIALOG
+
+```jsx
+function CompletionOverrideDialog({ order, onCancel, onProceed }) {
+  return (
+    <div className="dialog-overlay">
+      <div className="dialog-container" style={{ maxWidth: '480px' }}>
+        <div className="dialog-header">
+          <span style={{ fontWeight: 700 }}>Override Completion Date</span>
+          <button className="dialog-close" onClick={onCancel}>✕</button>
+        </div>
+        
+        <div className="dialog-body">
+          <p style={{ fontSize: '12px', color: '#374151', lineHeight: 1.6 }}>
+            You are about to override the calculated Completion Date. 
+            Please be aware of the following:
+          </p>
+          
+          <ul style={{ 
+            fontSize: '12px', 
+            color: '#374151', 
+            lineHeight: 1.6, 
+            marginTop: '12px',
+            paddingLeft: '20px'
+          }}>
+            <li style={{ marginBottom: '8px' }}>
+              The Completion Date will no longer auto-calculate based on 
+              Start Date, Production Hours, and Changeover Time.
+            </li>
+            <li style={{ marginBottom: '8px' }}>
+              All downstream orders in this feedmill line will have their 
+              Start/Time and Completion Date recalculated based on your new date.
+            </li>
+            <li>
+              If you later edit Start Date, Start Time, or Volume, the 
+              Completion Date will NOT auto-recalculate — it will retain 
+              your overridden value until you remove the override.
+            </li>
+          </ul>
+        </div>
+        
+        <div className="dialog-footer" style={{ 
+          display: 'flex', 
+          justifyContent: 'flex-end', 
+          gap: '8px' 
+        }}>
+          <button 
+            onClick={onCancel}
+            style={{
+              background: '#ffffff',
+              color: '#374151',
+              border: '1px solid #d1d5db',
+              borderRadius: '6px',
+              padding: '8px 20px',
+              fontSize: '13px',
+              fontWeight: 500,
+              cursor: 'pointer'
+            }}
+          >
+            Cancel
+          </button>
+          <button 
+            onClick={onProceed}
+            style={{
+              background: '#fd5108',
+              color: '#ffffff',
+              border: 'none',
+              borderRadius: '6px',
+              padding: '8px 20px',
+              fontSize: '13px',
+              fontWeight: 600,
+              cursor: 'pointer'
+            }}
+          >
+            Proceed
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+```
+
+### COMPLETION DATE CELL — PREVIEW
+
+```jsx
+function PreviewCompletionDateCell({ order, previewOrders, onChange }) {
+  const [showOverrideDialog, setShowOverrideDialog] = useState(false);
+  const [pendingDate, setPendingDate] = useState(null);
+  
+  function handleCompletionClick() {
+    // Open date picker
+    // When date is selected, show override dialog before applying
+  }
+  
+  function handleDateSelected(newDate) {
+    // Check restrictions
+    const constraints = getCompletionDateConstraints(order);
+    if (constraints.minDate && newDate < constraints.minDate) return;
+    if (constraints.maxDate && newDate > constraints.maxDate) return;
+    
+    setPendingDate(newDate);
+    setShowOverrideDialog(true);
+  }
+  
+  function handleOverrideProceed() {
+    order.completion_date = formatDateFull(pendingDate);
+    order.completion_time = formatTime(pendingDate);
+    order._completionOverridden = true;
+    order._previewCompletionChanged = true;
+    
+    setShowOverrideDialog(false);
+    setPendingDate(null);
+    
+    // Recalculate downstream orders
+    recalculateCompletionDates(previewOrders);
+    onChange();
+  }
+  
+  function handleOverrideCancel() {
+    setShowOverrideDialog(false);
+    setPendingDate(null);
+  }
+  
+  // Show override indicator if overridden
+  const isOverridden = order._completionOverridden;
+  
+  return (
+    <td className={`data-cell editable-cell ${isOverridden ? 'overridden' : ''}`}>
+      <div onClick={handleCompletionClick} style={{ cursor: 'pointer' }}>
+        {order.completion_date ? (
+          <div>
+            <span className="text-content">
+              {order.completion_date}
+            </span>
+            {order.completion_time && (
+              <div style={{ fontSize: '10px', color: '#6b7280' }}>
+                {order.completion_time}
+              </div>
+            )}
+            {isOverridden && (
+              <div style={{ fontSize: '10px', color: '#ea580c' }}>
+                Overridden ✏
+              </div>
+            )}
+          </div>
+        ) : (
+          <span className="placeholder-text">Set completion</span>
+        )}
+      </div>
+      
+      {showOverrideDialog && (
+        <CompletionOverrideDialog
+          order={order}
+          onCancel={handleOverrideCancel}
+          onProceed={handleOverrideProceed}
+        />
+      )}
+    </td>
+  );
+}
+```
+
+### REMOVE OVERRIDE
+
+Users can remove the override to return to auto-cascade:
+
+```jsx
+{isOverridden && (
+  <button 
+    className="remove-override-btn"
+    onClick={() => {
+      order._completionOverridden = false;
+      recalculateCompletionDates(previewOrders);
+      onChange();
+    }}
+    title="Remove override — return to auto-calculated"
+  >
+    ✕
+  </button>
+)}
+```
+
+```css
+.remove-override-btn {
+  background: none;
+  border: none;
+  color: #dc2626;
+  font-size: 10px;
+  cursor: pointer;
+  padding: 0 4px;
+  margin-left: 4px;
+}
+
+.remove-override-btn:hover {
+  color: #991b1b;
+}
+
+.editable-cell.overridden {
+  background: #fff7ed;
+}
+```
+
+---
+
+## 4. PRODUCTION TIME COLUMN — LEFT ALIGNED
+
+```css
+.production-time-cell {
+  min-width: 120px;
+  text-align: left;
+}
+
+.prod-time-value {
+  font-size: 12px;
+  font-weight: 600;
+  color: #1a1a1a;
+  text-align: left;
+}
+
+.changeover-value {
+  font-size: 10px;
+  font-weight: 400;
+  color: #9ca3af;
+  margin-top: 2px;
+  text-align: left;
+}
+```
+
+---
+
+## 5. CASCADE EXAMPLE
+
+```
+Order 1: Start Date = April 2, 08:00 AM | Prod: 4.19 hrs | CO: 0.17 hrs
+  → Completion = April 2, 12:22 PM
+
+Order 2: No start date (cascaded from Order 1)
+  → Start = April 2, 12:22 PM | Prod: 2.30 hrs | CO: 0.17 hrs
+  → Completion = April 2, 02:50 PM
+
+Order 3: Start Date = April 3, 08:00 AM (resets cascade)
+  → Completion = April 3, 12:22 PM
+
+Order 4: No start date (cascaded from Order 3)
+  → Start = April 3, 12:22 PM | Prod: 1.05 hrs | CO: 0.17 hrs
+  → Completion = April 3, 01:35 PM
+
+Order 5: Completion overridden to April 4, 06:00 PM
+  → Keeps April 4, 06:00 PM (no recalculate)
+  → Next order cascades from April 4, 06:00 PM
+
+Order 6: No start date (cascaded from Order 5's override)
+  → Start = April 4, 06:00 PM | Prod: 0.42 hrs | CO: 0.17 hrs
+  → Completion = April 4, 06:35 PM
+```
+
+---
+
+## VERIFICATION
+
+### Cascading
+1. ✅ Order with start date/time → completion calculated from it
+2. ✅ Next order without start date → cascades from previous completion
+3. ✅ Order with new start date → resets cascade anchor
+4. ✅ Overridden completion → keeps value, cascades from it
+5. ✅ Removing override → returns to auto-calculated
+6. ✅ Works in BOTH order table AND preview
+
+### Avail Date editable in preview
+7. ✅ Click avail date in preview → opens date picker
+8. ✅ Same restrictions (no past dates)
+9. ✅ Changes only in preview until "Apply to Schedule"
+10. ✅ After apply → written to order table
+
+### Completion Date editable in preview
+11. ✅ Click completion → override dialog appears
+12. ✅ Dialog explains consequences
+13. ✅ Cancel — no change
+14. ✅ Proceed — overrides, recalculates downstream
+15. ✅ "Overridden ✏" indicator shown
+16. ✅ Can remove override to return to auto-cascade
+
+### Production Time column
+17. ✅ Left-aligned text
+```

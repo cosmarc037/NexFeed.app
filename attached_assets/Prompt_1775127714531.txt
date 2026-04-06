@@ -1,0 +1,128 @@
+```
+Implement the following fix:
+
+---
+
+## FIX: AUTO-SEQUENCE PREVIEW — STICKY HEADER Z-INDEX
+
+The table header in the auto-sequence preview is sticky/frozen, but the row content scrolls behind it and shows through. Fix the z-index and background so the header fully covers scrolling content.
+
+---
+
+### THE PROBLEM
+
+When scrolling the preview table, row data is visible behind/through the sticky header row. The header doesn't fully occlude the content below it.
+
+---
+
+### THE FIX
+
+```css
+/* Preview table header — sticky with proper z-index and solid background */
+.preview-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.preview-table thead tr {
+  position: relative;
+  z-index: 10;
+}
+
+.preview-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: #ffffff;
+  border-bottom: 2px solid #e5e7eb;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+/* If there are two header rows (group header + sub-header) */
+.preview-table thead tr:first-child th {
+  position: sticky;
+  top: 0;
+  z-index: 11;
+  background: #ffffff;
+}
+
+.preview-table thead tr:nth-child(2) th {
+  position: sticky;
+  top: 36px; /* Height of first header row — adjust as needed */
+  z-index: 10;
+  background: #ffffff;
+}
+```
+
+### KEY PROPERTIES
+
+| Property | Value | Why |
+|---|---|---|
+| position | sticky | Stays fixed at top when scrolling |
+| top | 0 (first row), ~36px (second row) | Stacks properly if two header rows |
+| z-index | 10-11 | Above all table body content |
+| background | #ffffff (solid white) | Fully covers content scrolling behind |
+| box-shadow | 0 2px 4px rgba(0,0,0,0.05) | Subtle shadow to visually separate from content |
+
+### ENSURE NO TRANSPARENCY
+
+Remove any of these if they exist on the header:
+
+```css
+/* REMOVE if present: */
+thead th {
+  background: transparent;     /* DELETE */
+  background: rgba(...)        /* DELETE — use solid color */
+  opacity: 0.9;                /* DELETE */
+}
+```
+
+Replace with solid backgrounds:
+
+```css
+thead th {
+  background: #ffffff !important;  /* Solid white — no transparency */
+}
+```
+
+### IF HEADER HAS A COLORED BACKGROUND
+
+If the preview header uses a light grey or blue tint:
+
+```css
+.preview-table thead th {
+  background: #f9fafb !important;  /* Solid light grey */
+  /* OR */
+  background: #f8fafc !important;  /* Solid light blue-grey */
+}
+```
+
+The key is that it must be a SOLID color, not transparent or semi-transparent.
+
+---
+
+### ALSO CHECK THE SCROLL CONTAINER
+
+The table must be inside a scrollable container with proper overflow:
+
+```css
+.preview-table-container {
+  max-height: 500px;  /* or whatever the preview height is */
+  overflow-y: auto;
+  position: relative;
+}
+```
+
+The `position: relative` on the container ensures `position: sticky` works on the header.
+
+---
+
+## VERIFICATION
+
+1. ✅ Scroll down in preview — header stays fixed at top
+2. ✅ No row content visible through/behind the header
+3. ✅ Header has solid background (no transparency)
+4. ✅ Subtle shadow separates header from scrolling content
+5. ✅ If two header rows — both stick properly, second row below first
+```

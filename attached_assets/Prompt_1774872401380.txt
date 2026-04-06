@@ -1,0 +1,108 @@
+```
+Implement the following date formatting changes:
+
+---
+
+## DATE FORMAT RULES
+
+Two different date formats depending on where it's displayed:
+
+### RULE 1: TOOLTIPS / MODALS / DIALOGS — FULL MONTH NAME
+
+Anywhere inside a tooltip, modal, dialog, or popover — use the FULL month name with year:
+
+```
+March 16, 2026
+April 7, 2026
+June 21, 2026
+```
+
+```javascript
+function formatDateFull(date) {
+  if (!date) return '—';
+  
+  if (typeof date === 'string') {
+    date = parseDate(date);
+  }
+  
+  if (!date || isNaN(date.getTime())) return '—';
+  
+  const months = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'
+  ];
+  
+  return `${months[date.getMonth()]} ${date.getDate()}, ${date.getFullYear()}`;
+}
+```
+
+### RULE 2: TABLE COLUMNS (N10D) — ABBREVIATED MONTH, NO YEAR
+
+In the Completion and Avail columns in the N10D table — use abbreviated month with day only:
+
+```
+Mar 16
+Apr 07
+Jun 21
+```
+
+```javascript
+function formatDateShort(date) {
+  if (!date) return '—';
+  
+  if (typeof date === 'string') {
+    date = parseDate(date);
+  }
+  
+  if (!date || isNaN(date.getTime())) return '—';
+  
+  const months = [
+    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+  ];
+  
+  return `${months[date.getMonth()]} ${date.getDate()}`;
+}
+```
+
+---
+
+## WHERE TO APPLY
+
+### USE formatDateFull() — FULL MONTH + YEAR
+
+| Location | Example |
+|---|---|
+| N10D product hover tooltip — Completion | "Completion: April 4, 2026" |
+| N10D product hover tooltip — Avail | "Avail: April 5, 2026" |
+| N10D day cell hover tooltip — Date header | "April 3" (no year needed for day header, but full month) |
+| Auto-Sequence hover tooltip — Completion | "Completion: April 8, 2026" |
+| Auto-Sequence hover tooltip — Avail | "Avail: April 9, 2026" |
+| Auto-Sequence Sequence Analysis AI text | "March 31, 2026" not "Mar 31, 2026" |
+| Divert Order dialog — dates | Full month + year |
+| Revert Order dialog — dates | Full month + year |
+| Shutdown dialog — dates | Full month + year |
+| Add New Order dialog — dates | Full month + year |
+| Combine Orders panel — dates | Full month + year |
+| Impact Analysis — dates | Full month + year |
+| Comment timestamps | Full month + year |
+| Any AI-generated text — dates | Full month + year |
+
+### USE formatDateShort() — ABBREVIATED MONTH, NO YEAR
+
+| Location | Example |
+|---|---|
+| N10D table — Completion column | "Apr 4" |
+| N10D table — Avail column | "Apr 5" |
+| N10D table — day column headers | "APR 2", "APR 3" (already abbreviated) |
+
+---
+
+## SUMMARY
+
+| Context | Format | Example |
+|---|---|---|
+| Inside any tooltip / modal / dialog / AI text | Full month + year | "April 4, 2026" |
+| N10D table Completion & Avail columns | Abbreviated month + day | "Apr 4" |
+| N10D day column headers | Abbreviated uppercase | "APR 2" |
+```

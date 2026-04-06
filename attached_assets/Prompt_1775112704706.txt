@@ -1,0 +1,188 @@
+```
+Implement the following fix:
+
+---
+
+## FIX: COMPLETION DATE — AUTO-CASCADE WHEN NEW ORDER IS ADDED
+
+When a new order is added to a line, the completion dates should automatically recalculate/cascade for all orders on that line, including the new order.
+
+---
+
+### THE PROBLEM
+
+- Existing orders have cascaded completion dates
+- New order is added (e.g., at the bottom or at a specific prio)
+- New order shows "Set completion" — no completion date calculated
+- Other orders' completion dates don't adjust for the new order
+
+### THE FIX
+
+After ANY new order is added, trigger the completion date cascade for the entire line.
+
+### TRIGGER POINTS — RECALCULATE CASCADE
+
+```javascript
+// 1. When a new order is added via "+ Add Order"
+async function handleAddNewOrder(newOrder, line) {
+  // Add order to the line
+  addOrderToLine(newOrder, line);
+  
+  // Recalculate completion dates for the entire line
+  recalculateCompletionDates(line);
+}
+
+// 2. When an order is moved/dragged to a different position
+function handleOrderDrag(order, newPosition, line) {
+  moveOrderToPosition(order, newPosition);
+  recalculateCompletionDates(line);
+}
+
+// 3. When auto-sequence is applied
+function handleApplyAutoSequence(sortedOrders, line) {
+  applyOrderSequence(sortedOrders);
+  recalculateCompletionDates(line);
+}
+
+// 4. When an order is removed/deleted
+function handleRemoveOrder(order, line) {
+  removeOrder(order);
+  recalculateCompletionDates(line);
+}
+
+// 5. When an order's volume, batch size, or run rate changes
+function handleOrderDataChange(order, field, newValue, line) {
+  updateOrderField(order, field, newValue);
+  
+  if (['volume', 'batch_size', 'batches', 'production_time'].includes(field)) {
+    recalculateCompletionDates(line);
+  }
+}
+
+// 6. When an order's status changes (affects cascade)
+function handleStatusChange(order, newStatus, line) {
+  order.status = newStatus;
+  recalculateCompletionDates(line);
+}
+
+// 7. When orders are combined or uncombined
+function handleCombineOrders(orders, line) {
+  combineOrders(orders);
+  recalculateCompletionDates(line);
+}
+```
+
+### COMPLETION DATE CASCADE LOGIC
+
+```javascript
+function recalculateCompletionDates(line) {
+  const lineOrders = getOrdersForLine(line);
+  
+  // Sort by current prio
+  lineOrders.sort((a, b) => a.prio - b.prio);
+  
+  // Find the anchor — first order with a set start date and time
+  let currentEndTime = null;
+  
+  for (let i = 0; i < lineOrders.length; i++) {
+    const order = lineOrders[i];
+    
+    // Skip Done and Cancelled — they already have completion dates
+    if (order.status === 'Done' || order.status === 'Cancel PO') {
+      continue;
+    }
+    
+    // Get production time for this order (hours)
+    const productionTime = parseFloat(order.production_time) || 0;
+    const changeover = parseFloat(order.changeover) || 0;
+    const totalTime = productionTime + changeover;
+    
+    if (order.start_date && order.start_time) {
+      // This order has a set start — use it as anchor
+      const startDateTime = parseDateTime(order.start_date, order.start_time);
+      
+      if (startDateTime) {
+        // Calculate completion = start + production time + changeover
+        const completionDateTime = new Date(
+          startDateTime.getTime() + (totalTime * 60 * 60 * 1000)
+        );
+        
+        order.completion_date = formatDateFull(completionDateTime);
+        order.completion_time = formatTime(completionDateTime);
+        
+        currentEndTime = completionDateTime;
+      }
+    } else if (currentEndTime) {
+      // No start date set — cascade from previous order's completion
+      const startDateTime = new Date(currentEndTime);
+      
+      order._cascadedStartDate = formatDateFull(startDateTime);
+      order._cascadedStartTime = formatTime(startDateTime);
+      
+      const completionDateTime = new Date(
+        startDateTime.getTime() + (totalTime * 60 * 60 * 1000)
+      );
+      
+      order.completion_date = formatDateFull(completionDateTime);
+      order.completion_time = formatTime(completionDateTime);
+      
+      currentEndTime = completionDateTime;
+    }
+    // If no anchor found yet (no order above has start date), skip
+  }
+}
+
+function parseDateTime(dateStr, timeStr) {
+  const date = parseDate(dateStr);
+  if (!date) return null;
+  
+  // Parse time like "08:00 AM", "02:21 PM"
+  const timeParts = timeStr.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+  if (!timeParts) return null;
+  
+  let hours = parseInt(timeParts[1]);
+  const minutes = parseInt(timeParts[2]);
+  const ampm = timeParts[3].toUpperCase();
+  
+  if (ampm === 'PM' && hours !== 12) hours += 12;
+  if (ampm === 'AM' && hours === 12) hours = 0;
+  
+  date.setHours(hours, minutes, 0, 0);
+  return date;
+}
+
+function formatTime(date) {
+  if (!date) return '';
+  let hours = date.getHours();
+  const minutes = date.getMinutes();
+  const ampm = hours >= 12 ? 'PM' : 'AM';
+  hours = hours % 12;
+  if (hours === 0) hours = 12;
+  return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')} ${ampm}`;
+}
+```
+
+---
+
+### VERIFICATION
+
+1. Add new order
+   - ✅ New order gets cascaded completion date automatically
+   - ✅ All subsequent orders' completion dates adjust
+
+2. Drag order to new position
+   - ✅ Completion dates recalculate for entire line
+
+3. Apply auto-sequence
+   - ✅ All completion dates recalculate after applying
+
+4. Change volume or production time
+   - ✅ Completion dates downstream recalculate
+
+5. Remove order
+   - ✅ Orders below shift up, completion dates recalculate
+
+6. Status change
+   - ✅ Changing to Done/Cancel removes from cascade
+   - ✅ Remaining orders recalculate
+```

@@ -1,0 +1,279 @@
+```
+Implement the following fixes to the NexFeed application:
+
+---
+
+## FIX 1: CHILD ORDERS NOT STICKING TO LEAD ORDER
+
+Child orders are being placed at the bottom of the table instead of directly below the lead order. Fix this so they are always directly beneath the lead order as a block.
+
+---
+
+### THE PROBLEM
+
+Current behavior:
+```
+Prio 1: Salto Conditioner
+Prio 2: Elite XP Startex (Lead) ▶
+Prio 3: Gallimax Pigeon Pellet
+Prio 4: Gallimax 3 Maintenance
+...
+Prio 10: Elite XP Startex 80 MT (child)    ← WRONG, at bottom
+Prio 11: Elite XP Startex 32 MT (child)    ← WRONG, at bottom
+Prio 12: Elite XP Startex 20 MT (child)    ← WRONG, at bottom
+```
+
+### CORRECT BEHAVIOR
+
+```
+Prio 1: Salto Conditioner
+Prio 2: Elite XP Startex (Lead) ▼
+         Elite XP Startex 80 MT (child)     ← directly below lead
+         Elite XP Startex 32 MT (child)     ← directly below lead
+         Elite XP Startex 20 MT (child)     ← directly below lead
+Prio 3: Gallimax Pigeon Pellet
+Prio 4: Gallimax 3 Maintenance
+```
+
+### THE FIX
+
+When combining orders, the child orders must be stored WITHIN the lead order's data structure, NOT as separate entries in the main orders array.
+
+```javascript
+// WRONG — children as separate entries in the orders array
+const orders = [
+  { prio: 1, name: 'Salto Conditioner' },
+  { prio: 2, name: 'Elite XP Startex', isCombinedLead: true },
+  { prio: 3, name: 'Gallimax Pigeon Pellet' },
+  // ... other orders ...
+  { prio: 10, name: 'Elite XP Startex 80MT', isCombinedChild: true },  // WRONG
+  { prio: 11, name: 'Elite XP Startex 32MT', isCombinedChild: true },  // WRONG
+  { prio: 12, name: 'Elite XP Startex 20MT', isCombinedChild: true },  // WRONG
+];
+
+// CORRECT — children nested inside the lead order
+const orders = [
+  { prio: 1, name: 'Salto Conditioner' },
+  { 
+    prio: 2, 
+    name: 'Elite XP Startex', 
+    isCombinedLead: true,
+    isExpanded: false,
+    children: [
+      { name: 'Elite XP Startex', volume: 80, originalPrio: 3 },
+      { name: 'Elite XP Startex', volume: 32, originalPrio: 5 },
+      { name: 'Elite XP Startex', volume: 20, originalPrio: 8 },
+    ]
+  },
+  { prio: 3, name: 'Gallimax Pigeon Pellet' },
+  { prio: 4, name: 'Gallimax 3 Maintenance' },
+];
+```
+
+### RENDERING THE TABLE
+
+When rendering the orders array, check if an order is a combined lead and if it's expanded:
+
+```jsx
+function renderOrderTable(orders) {
+  const rows = [];
+  
+  orders.forEach((order) => {
+    // Render the lead/normal order row
+    rows.push(
+      <OrderRow 
+        key={order.id} 
+        order={order} 
+        isLead={order.isCombinedLead}
+      />
+    );
+    
+    // If this is a combined lead AND it's expanded, render children directly after
+    if (order.isCombinedLead && order.isExpanded && order.children) {
+      order.children.forEach((child, index) => {
+        rows.push(
+          <ChildOrderRow 
+            key={`${order.id}_child_${index}`} 
+            child={child}
+            parentOrder={order}
+          />
+        );
+      });
+    }
+  });
+  
+  return rows;
+}
+```
+
+### ON COMBINE — MOVE CHILDREN INTO LEAD
+
+```javascript
+function combineOrders(childOrderIds, allOrders) {
+  const childOrders = allOrders.filter(o => childOrderIds.includes(o.id));
+  
+  // Calculate combined values
+  const totalVolume = childOrders.reduce((sum, o) => sum + o.volume, 0);
+  const totalBatches = childOrders.reduce((sum, o) => sum + o.batches, 0);
+  const totalBags = childOrders.reduce((sum, o) => sum + o.bags, 0);
+  
+  // Create lead order
+  const leadOrder = {
+    ...childOrders[0], // use first child as template
+    id: generateId(),
+    isCombinedLead: true,
+    isExpanded: false,
+    volume: totalVolume,
+    batches: totalBatches,
+    bags: totalBags,
+    production_time: totalVolume / childOrders[0].run_rate + childOrders[0].changeover,
+    children: childOrders.map(o => ({
+      ...o,
+      isCombinedChild: true,
+      originalPrio: o.prio,
+      originalStatus: o.status
+    }))
+  };
+  
+  // Find optimal position
+  const insertPosition = findOptimalLeadPosition(childOrders, allOrders);
+  
+  // Remove ALL child orders from the main array
+  const newOrders = allOrders.filter(o => !childOrderIds.includes(o.id));
+  
+  // Insert lead order at the optimal position
+  newOrders.splice(insertPosition.suggestedPosition - 1, 0, leadOrder);
+  
+  // Renumber priorities (children don't count)
+  renumberPriorities(newOrders);
+  
+  return newOrders;
+}
+```
+
+---
+
+## FIX 2: CHILD ORDER STYLING — BLUE TINT, NOT GREY
+
+Child orders should look greyed-out but still use the app's blue color scheme, not literal grey. They should appear as a muted/faded version of normal rows, using blue tones.
+
+### CURRENT (WRONG)
+
+```css
+/* Literal grey — wrong */
+.child-order-row {
+  background: #f9fafb;
+  color: #9ca3af;
+  opacity: 0.7;
+}
+```
+
+### CORRECT — MUTED BLUE
+
+```css
+.child-order-row {
+  background: #f0f4fa;           /* very light blue-grey */
+  color: #8094b4;                /* muted blue text */
+  opacity: 1;                    /* no opacity reduction */
+}
+
+.child-order-row td {
+  color: #8094b4;                /* muted blue for all cell text */
+  font-weight: 400;
+}
+
+.child-order-row .item-description {
+  color: #6b83a8;                /* slightly darker muted blue for product name */
+}
+
+.child-order-row .category-text {
+  color: #9fb3cc;                /* lighter muted blue for category */
+}
+
+.child-order-row .volume-text {
+  color: #6b83a8;                /* muted blue for volume */
+}
+```
+
+| Element | Color | Description |
+|---|---|---|
+| Row background | #f0f4fa | Very light blue-grey |
+| Primary text (product name, volume, codes) | #6b83a8 | Muted medium blue |
+| Secondary text (category, form) | #9fb3cc | Lighter muted blue |
+| Data text (batch size, batches, bags, time) | #8094b4 | Muted blue |
+| Left border | 3px solid #b8cce4 | Soft blue border |
+| Hover | No hover state change | Children are not interactive |
+
+### VISUAL COMPARISON
+
+**Normal order row:**
+```
+│  2  │ 260325 │ Elite XP Startex, Mini-pellet 50kg ▼  │ 132 MT │
+│     │        │ Hogs                                   │        │
+```
+- Dark text, white background, fully saturated
+
+**Child order row (muted blue, NOT grey):**
+```
+│     │ 260325 │  Elite XP Startex, Mini-pellet 50kg   │ 80 MT  │
+│     │        │  Hogs                                  │        │
+```
+- Muted blue text, light blue-grey background
+- Same blue color family as the app — just faded/muted
+- Looks "greyed out" but uses blue tones, not grey tones
+
+### CHILD ROW — COMPLETE PROPERTIES
+
+| Property | Value |
+|---|---|
+| Background | #f0f4fa (very light blue-grey) |
+| Text color | #6b83a8 to #9fb3cc (muted blue range) |
+| Font weight | 400 |
+| Opacity | 1 (no opacity reduction) |
+| Left border | 3px solid #b8cce4 |
+| Cursor | Default |
+| Draggable | ❌ No |
+| Editable | ❌ No |
+| Selectable | ❌ No |
+| Right-click menu | ❌ No |
+| Hover effect | ❌ None |
+| Prio column | Blank — no number |
+| Transition | None |
+
+### DO NOT USE
+
+- ❌ `color: #9ca3af` (grey)
+- ❌ `background: #f9fafb` (grey)
+- ❌ `opacity: 0.7` (makes everything faded including borders)
+- ❌ Any grey (#xxx) tones — use blue tones only
+
+---
+
+## VERIFICATION
+
+### Test 1: Children stick to lead
+1. Combine 3 orders
+2. ✅ Lead order appears at the correct position
+3. ✅ Expanding shows children DIRECTLY below the lead
+4. ✅ NO children at the bottom of the table
+5. ✅ Next order after the lead (or after expanded children) is the correct non-combined order
+
+### Test 2: Children are muted blue
+1. Expand a combined order
+2. ✅ Child rows have light blue-grey background (#f0f4fa)
+3. ✅ Child text is muted blue (#6b83a8), NOT grey
+4. ✅ Child rows have blue left border (#b8cce4)
+5. ✅ Children look "faded" but clearly use blue color family
+6. ❌ No grey tones anywhere on child rows
+
+### Test 3: Collapse and expand
+1. Click ▶ on lead order → children appear directly below
+2. Click ▼ on lead order → children disappear
+3. ✅ Orders below the block shift up/down correctly
+4. ✅ Priority numbers adjust correctly (children don't count)
+
+### Test 4: Drag lead order
+1. Drag the lead order to a new position
+2. ✅ Children move with the lead (if expanded, they stay below)
+3. ✅ No orphaned children left at old position or at bottom
+```

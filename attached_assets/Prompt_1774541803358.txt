@@ -1,0 +1,895 @@
+```
+Implement the following feature in the NexFeed application:
+
+---
+
+## OVERVIEW TAB — PRODUCTION STATUS MONITORING
+
+Replace the existing Line Capacity Monitoring section with a new Production Status Monitoring section. This section displays stacked bar charts showing the volume (MT) breakdown by order status per feedmill and line, with expandable detail views and PDF report export.
+
+---
+
+### 1. SECTION HEADER
+
+```
+Production Status Monitoring
+
+[March 2026 ▼]    [📄 Export Report]
+```
+
+**Title:**
+
+| Property | Value |
+|---|---|
+| Text | "Production Status Monitoring" |
+| Font size | 16px |
+| Font weight | 700 |
+| Color | Dark text (#1a1a1a) |
+| Margin-bottom | 16px |
+
+**Header row (month + export):**
+
+| Property | Value |
+|---|---|
+| Display | Flex, row, align-items center |
+| Gap | 12px |
+| Margin-bottom | 20px |
+
+---
+
+### 2. MONTH DROPDOWN
+
+| Property | Value |
+|---|---|
+| Default | Current month and year (e.g., "March 2026") |
+| Options | Rolling 12 months from current date |
+| Format | "Month YYYY" |
+| Width | 160px |
+| Border | 1px solid #d1d5db |
+| Border-radius | 6px |
+| Padding | 8px 12px |
+| Font size | 13px |
+| Arrow | ▼ on the right side |
+| On change | Recalculates all charts and data for selected month |
+
+**Rolling 12 months (if current is March 2026):**
+```
+March 2026       ← current (default)
+February 2026
+January 2026
+December 2025
+November 2025
+October 2025
+September 2025
+August 2025
+July 2025
+June 2025
+May 2025
+April 2025
+```
+
+---
+
+### 3. EXPORT REPORT BUTTON
+
+| Property | Value |
+|---|---|
+| Text | "📄 Export Report" |
+| Font size | 13px |
+| Font weight | 500 |
+| Color | Dark orange (#c2410c) |
+| Background | None |
+| Border | 1px solid #c2410c |
+| Border-radius | 6px |
+| Padding | 8px 16px |
+| Cursor | Pointer |
+| Hover background | Light orange (#fff7ed) |
+| On click | Generates PDF for the selected month |
+
+---
+
+### 4. FEEDMILL CARDS — HORIZONTAL GRID LAYOUT
+
+Four cards in a horizontal row, one per feedmill.
+
+```css
+.production-status-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr 1fr;
+  gap: 16px;
+}
+
+@media (max-width: 1200px) {
+  .production-status-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 768px) {
+  .production-status-grid {
+    grid-template-columns: 1fr;
+  }
+}
+```
+
+### FEEDMILL TO LINE MAPPING
+
+| Card | Label | Lines |
+|---|---|---|
+| Card 1 | FM1 | Line 1, Line 2 |
+| Card 2 | FM2 | Line 3, Line 4 |
+| Card 3 | FM3 | Line 5, Line 6 |
+| Card 4 | PMX | Line 7 |
+
+---
+
+### 5. CARD STYLING
+
+| Property | Value |
+|---|---|
+| Background | White (#ffffff) |
+| Border | 1px solid #e5e7eb |
+| Border-radius | 8px |
+| Overflow | Hidden |
+
+### CARD HEADER
+
+| Property | Value |
+|---|---|
+| Background | White |
+| Padding | 12px 16px |
+| Border-bottom | 1px solid #f3f4f6 |
+| Display | Flex, space-between, align-items center |
+
+**Feedmill label:**
+
+| Property | Value |
+|---|---|
+| Text | "FM1", "FM2", "FM3", "PMX" |
+| Font size | 13px |
+| Font weight | 700 |
+| Color | Dark text (#1a1a1a) |
+
+**Expand arrow:**
+
+| Property | Value |
+|---|---|
+| Icon | ▶ (collapsed) / ▼ (expanded) |
+| Size | 10px |
+| Color | Grey (#6b7280) |
+| Cursor | Pointer |
+| Hover | Dark text (#1a1a1a) |
+
+### CARD BODY
+
+| Property | Value |
+|---|---|
+| Padding | 12px 16px |
+
+---
+
+### 6. STATUS CATEGORIES AND COLORS
+
+Map all order statuses to five categories:
+
+```javascript
+function getStatusCategory(status) {
+  switch (status) {
+    case 'Done':
+      return 'completed';
+    
+    case 'In production':
+    case 'On-going batching':
+    case 'On-going pelleting':
+    case 'On-going bagging':
+      return 'in_progress';
+    
+    case 'Hold':
+      return 'on_hold';
+    
+    case 'Cancel PO':
+    case 'Cut':
+      return 'cancelled';
+    
+    case 'Plotted':
+    default:
+      return 'scheduled';
+  }
+}
+```
+
+### STATUS COLORS
+
+| Category | Color | Hex | Text inside bar |
+|---|---|---|---|
+| Completed (Done) | Green | #4ade80 | White |
+| In Progress | Light orange | #fb923c | White |
+| Scheduled | Light grey | #e5e7eb | Dark (#374151) |
+| On Hold | Grey | #9ca3af | White |
+| Cancelled | Red | #f87171 | White |
+
+### SEGMENT ORDER (left to right in stacked bar)
+
+```
+[Completed][In Progress][Scheduled][On Hold][Cancelled]
+```
+
+---
+
+### 7. DATA CALCULATION
+
+```javascript
+function calculateStatusBreakdown(allOrders, selectedMonth, selectedYear) {
+  const lineToFeedmill = {
+    'Line 1': 'FM1', 'Line 2': 'FM1',
+    'Line 3': 'FM2', 'Line 4': 'FM2',
+    'Line 5': 'FM3', 'Line 6': 'FM3',
+    'Line 7': 'PMX'
+  };
+  
+  const feedmillLines = {
+    'FM1': ['Line 1', 'Line 2'],
+    'FM2': ['Line 3', 'Line 4'],
+    'FM3': ['Line 5', 'Line 6'],
+    'PMX': ['Line 7']
+  };
+  
+  // Filter orders by selected month
+  const monthOrders = allOrders.filter(order => {
+    const orderDate = getOrderDate(order);
+    if (!orderDate) return false;
+    return orderDate.getMonth() === selectedMonth && 
+           orderDate.getFullYear() === selectedYear;
+  });
+  
+  // Get the date from an order (priority: avail date > start date > FPR)
+  function getOrderDate(order) {
+    if (order.avail_date && order.avail_date !== '' && 
+        order.avail_date !== 'prio replenish' && 
+        order.avail_date !== 'safety stocks') {
+      return parseDate(order.avail_date);
+    }
+    if (order.start_date) return parseDate(order.start_date);
+    if (order.fpr) {
+      // FPR is YYMMDD format
+      const year = 2000 + parseInt(order.fpr.substring(0, 2));
+      const month = parseInt(order.fpr.substring(2, 4)) - 1;
+      const day = parseInt(order.fpr.substring(4, 6));
+      return new Date(year, month, day);
+    }
+    return null;
+  }
+  
+  // Initialize result structure
+  const result = {};
+  
+  Object.entries(feedmillLines).forEach(([fm, lines]) => {
+    const fmOrders = monthOrders.filter(o => lines.includes(o.line));
+    
+    const fmBreakdown = {
+      completed: 0, in_progress: 0, scheduled: 0, on_hold: 0, cancelled: 0, total: 0
+    };
+    
+    fmOrders.forEach(order => {
+      const category = getStatusCategory(order.status);
+      const volume = parseFloat(order.volume) || 0;
+      fmBreakdown[category] += volume;
+      fmBreakdown.total += volume;
+    });
+    
+    // Calculate percentages
+    const categories = ['completed', 'in_progress', 'scheduled', 'on_hold', 'cancelled'];
+    categories.forEach(cat => {
+      fmBreakdown[`${cat}_pct`] = fmBreakdown.total > 0
+        ? Math.round((fmBreakdown[cat] / fmBreakdown.total) * 100)
+        : 0;
+    });
+    
+    // Line-level breakdown
+    const lineBreakdowns = {};
+    lines.forEach(line => {
+      const lineOrders = fmOrders.filter(o => o.line === line);
+      const lineBreakdown = {
+        completed: 0, in_progress: 0, scheduled: 0, on_hold: 0, cancelled: 0, total: 0
+      };
+      
+      lineOrders.forEach(order => {
+        const category = getStatusCategory(order.status);
+        const volume = parseFloat(order.volume) || 0;
+        lineBreakdown[category] += volume;
+        lineBreakdown.total += volume;
+      });
+      
+      categories.forEach(cat => {
+        lineBreakdown[`${cat}_pct`] = lineBreakdown.total > 0
+          ? Math.round((lineBreakdown[cat] / lineBreakdown.total) * 100)
+          : 0;
+      });
+      
+      lineBreakdowns[line] = lineBreakdown;
+    });
+    
+    result[fm] = {
+      ...fmBreakdown,
+      lines: lineBreakdowns
+    };
+  });
+  
+  return result;
+}
+```
+
+---
+
+### 8. STACKED BAR COMPONENT
+
+### OVERVIEW BAR (Feedmill and Line level) — SHOWS PERCENTAGES
+
+```jsx
+function StackedBar({ data, height = 24 }) {
+  const segments = [
+    { key: 'completed', color: '#4ade80', textColor: '#ffffff', label: 'Done' },
+    { key: 'in_progress', color: '#fb923c', textColor: '#ffffff', label: 'In Prog' },
+    { key: 'scheduled', color: '#e5e7eb', textColor: '#374151', label: 'Sched' },
+    { key: 'on_hold', color: '#9ca3af', textColor: '#ffffff', label: 'Hold' },
+    { key: 'cancelled', color: '#f87171', textColor: '#ffffff', label: 'Cancel' },
+  ];
+  
+  return (
+    <div style={{
+      display: 'flex',
+      width: '100%',
+      height: `${height}px`,
+      borderRadius: '6px',
+      overflow: 'hidden'
+    }}>
+      {segments.map(seg => {
+        const pct = data[`${seg.key}_pct`] || 0;
+        if (pct === 0) return null;
+        
+        return (
+          <div
+            key={seg.key}
+            style={{
+              width: `${pct}%`,
+              minWidth: pct > 0 ? '2%' : '0',
+              backgroundColor: seg.color,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              position: 'relative',
+              cursor: 'pointer'
+            }}
+            title={`${seg.label}: ${data[seg.key].toLocaleString()} MT (${pct}%)`}
+          >
+            {/* Only show percentage text if segment is wide enough */}
+            {pct >= 8 && (
+              <span style={{
+                fontSize: '9px',
+                fontWeight: 600,
+                color: seg.textColor,
+                whiteSpace: 'nowrap'
+              }}>
+                {pct}%
+              </span>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+```
+
+---
+
+### 9. COLLAPSED CARD VIEW
+
+```
+┌─────────────────────────────────────┐
+│ FM1                             ▶   │
+├─────────────────────────────────────┤
+│                                     │
+│ [██ 50% ██│█ 20% █│ 15% │10%│5%]  │
+│ 4,900 MT total                      │
+│                                     │
+└─────────────────────────────────────┘
+```
+
+**MT total label:**
+
+| Property | Value |
+|---|---|
+| Font size | 11px |
+| Color | Grey (#6b7280) |
+| Font weight | 500 |
+| Text | "X,XXX MT total" |
+| Margin-top | 6px |
+
+---
+
+### 10. EXPANDED CARD VIEW
+
+When user clicks ▶ on a feedmill card, it expands to show:
+1. Feedmill stacked bar (same as collapsed)
+2. Line stacked bars
+3. Category breakdown with individual simple bars showing MT
+
+```
+┌─────────────────────────────────────┐
+│ FM1                             ▼   │
+├─────────────────────────────────────┤
+│                                     │
+│ [██ 50% ██│█ 20% █│ 15% │10%│5%]  │
+│ 4,900 MT total                      │
+│                                     │
+│ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─    │
+│                                     │
+│ Line 1                              │
+│ [█ 55% █│█ 20% │ 15% │5%│5%]      │
+│ 3,000 MT                            │
+│                                     │
+│ Line 2                              │
+│ [█ 45% █│█ 25% │ 10% │10%│10%]    │
+│ 1,900 MT                            │
+│                                     │
+│ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─    │
+│                                     │
+│ Category Breakdown                  │
+│                                     │
+│ ● Completed                         │
+│ [████████████████████████]  2,400 MT │
+│                                     │
+│ ● In Progress                       │
+│ [████████████████]          1,200 MT │
+│                                     │
+│ ● Scheduled                         │
+│ [████████████]                800 MT │
+│                                     │
+│ ● On Hold                           │
+│ [██████]                     300 MT │
+│                                     │
+│ ● Cancelled                         │
+│ [████]                       200 MT │
+│                                     │
+│ ──────────────────────────          │
+│ Total                      4,900 MT │
+│                                     │
+└─────────────────────────────────────┘
+```
+
+### LINE LABEL
+
+| Property | Value |
+|---|---|
+| Font size | 11px |
+| Font weight | 600 |
+| Color | Dark text (#374151) |
+| Margin-top | 12px |
+| Margin-bottom | 4px |
+
+### LINE STACKED BAR
+
+| Property | Value |
+|---|---|
+| Same as feedmill stacked bar | Same segment order, colors, percentage labels |
+| Height | 20px (slightly smaller than feedmill bar at 24px) |
+| Border-radius | 4px |
+
+### LINE MT LABEL
+
+| Property | Value |
+|---|---|
+| Font size | 11px |
+| Color | Grey (#6b7280) |
+| Font weight | 500 |
+| Margin-top | 4px |
+
+### SEPARATOR
+
+| Property | Value |
+|---|---|
+| Type | 1px dashed #e5e7eb |
+| Margin | 12px 0 |
+
+### CATEGORY BREAKDOWN HEADER
+
+| Property | Value |
+|---|---|
+| Text | "Category Breakdown" |
+| Font size | 11px |
+| Font weight | 600 |
+| Color | Dark text (#1a1a1a) |
+| Margin-bottom | 12px |
+
+### CATEGORY — INDIVIDUAL SIMPLE BARS
+
+Each category gets its own single-color bar. Largest MT = full width, others proportional.
+
+```javascript
+function getCategoryBarWidth(categoryMT, maxCategoryMT) {
+  if (maxCategoryMT === 0) return 0;
+  return (categoryMT / maxCategoryMT) * 100;
+}
+```
+
+**Category label:**
+
+| Property | Value |
+|---|---|
+| Font size | 11px |
+| Font weight | 500 |
+| Color | Dark text (#374151) |
+| Color dot | 8px circle of status color, before the label text |
+| Margin-bottom | 4px |
+
+**Simple bar:**
+
+| Property | Value |
+|---|---|
+| Height | 14px |
+| Border-radius | 3px |
+| Color | Same as stacked bar segment |
+| Width | Proportional (largest category = 100%) |
+| Margin-bottom | 2px |
+
+**MT value:**
+
+| Property | Value |
+|---|---|
+| Font size | 11px |
+| Font weight | 600 |
+| Color | Dark text (#1a1a1a) |
+| Position | Right-aligned on the same row as the bar |
+
+**Layout per category:**
+
+```jsx
+<div style={{ marginBottom: '12px' }}>
+  <div style={{ display: 'flex', alignItems: 'center', marginBottom: '4px' }}>
+    <span className="color-dot" style={{ background: color }} />
+    <span className="category-label">{label}</span>
+  </div>
+  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+    <div style={{ flex: 1 }}>
+      <div style={{
+        height: '14px',
+        borderRadius: '3px',
+        backgroundColor: color,
+        width: `${barWidthPct}%`
+      }} />
+    </div>
+    <span className="mt-value">{mt.toLocaleString()} MT</span>
+  </div>
+</div>
+```
+
+### TOTAL ROW
+
+| Property | Value |
+|---|---|
+| Font size | 11px |
+| Font weight | 700 |
+| Color | Dark text (#1a1a1a) |
+| Border-top | 1px solid #e5e7eb |
+| Padding-top | 8px |
+| Margin-top | 8px |
+| Display | Flex, space-between |
+
+---
+
+### 11. LEGEND (below the cards)
+
+```
+■ Completed  ■ In Progress  ■ Scheduled  ■ On Hold  ■ Cancelled
+```
+
+| Property | Value |
+|---|---|
+| Position | Below the feedmill cards grid |
+| Display | Flex, row, center-aligned |
+| Gap | 20px between items |
+| Margin-top | 16px |
+| Color dot | 10px × 10px square, border-radius 2px |
+| Label | 11px, grey (#6b7280) |
+
+---
+
+### 12. HOVER TOOLTIP ON STACKED BAR SEGMENTS
+
+When hovering over any segment in the stacked bar:
+
+```
+Completed: 2,400 MT (50%)
+```
+
+| Property | Value |
+|---|---|
+| Background | Dark (#1a1a1a) |
+| Text | White, 11px |
+| Padding | 6px 10px |
+| Border-radius | 4px |
+| Delay | 200ms |
+| Position | Above the segment |
+
+---
+
+### 13. EMPTY STATE
+
+If no orders exist for the selected month:
+
+```
+┌─────────────────────────────────────┐
+│ FM1                             ▶   │
+├─────────────────────────────────────┤
+│                                     │
+│ No orders for this month.           │
+│                                     │
+└─────────────────────────────────────┘
+```
+
+| Property | Value |
+|---|---|
+| Text | "No orders for this month." |
+| Font size | 11px |
+| Color | Grey (#9ca3af) |
+| Font style | Italic |
+| Text align | Center |
+| Padding | 16px |
+
+---
+
+### 14. DEFAULT STATE
+
+- All cards start COLLAPSED
+- Shows feedmill stacked bar + total MT only
+- User clicks ▶ to expand
+- Only one card can be expanded at a time (clicking another collapses the current one) — OR all can be expanded independently. Either way is fine.
+
+---
+
+### 15. PDF REPORT GENERATION
+
+When user clicks "📄 Export Report", generate a PDF for the selected month.
+
+### PDF CONTENT
+
+```
+Page 1:
+┌─────────────────────────────────────────────────────────────┐
+│                                                             │
+│  NexFeed: Feed Production Report                            │
+│  ─────────────────────────────────────────────────────────  │
+│  Report Period: March 2026                                  │
+│  Generated: March 25, 2026 at 3:15 PM                      │
+│                                                             │
+│  ═══════════════════════════════════════════════════════════ │
+│                                                             │
+│  1. OVERALL SUMMARY                                         │
+│  ─────────────────────────────────────────────────────────  │
+│                                                             │
+│  Total Orders: 156                                          │
+│  Total Volume: 12,400 MT                                    │
+│                                                             │
+│  ┌──────────────┬──────────┬────────┐                       │
+│  │ Status       │ Volume   │ %      │                       │
+│  ├──────────────┼──────────┼────────┤                       │
+│  │ Completed    │ 6,200 MT │ 50.0%  │                       │
+│  │ In Progress  │ 2,480 MT │ 20.0%  │                       │
+│  │ Scheduled    │ 1,860 MT │ 15.0%  │                       │
+│  │ On Hold      │ 1,240 MT │ 10.0%  │                       │
+│  │ Cancelled    │   620 MT │  5.0%  │                       │
+│  ├──────────────┼──────────┼────────┤                       │
+│  │ TOTAL        │12,400 MT │ 100%   │                       │
+│  └──────────────┴──────────┴────────┘                       │
+│                                                             │
+│  ═══════════════════════════════════════════════════════════ │
+│                                                             │
+│  2. FEEDMILL BREAKDOWN                                      │
+│  ─────────────────────────────────────────────────────────  │
+│                                                             │
+│  FEEDMILL 1 (FM1)                                           │
+│  ┌──────────────┬──────────┬────────┐                       │
+│  │ Status       │ Volume   │ %      │                       │
+│  ├──────────────┼──────────┼────────┤                       │
+│  │ Completed    │ 2,400 MT │ 48.0%  │                       │
+│  │ In Progress  │ 1,200 MT │ 24.0%  │                       │
+│  │ Scheduled    │   800 MT │ 16.0%  │                       │
+│  │ On Hold      │   400 MT │  8.0%  │                       │
+│  │ Cancelled    │   200 MT │  4.0%  │                       │
+│  ├──────────────┼──────────┼────────┤                       │
+│  │ TOTAL        │ 5,000 MT │ 100%   │                       │
+│  └──────────────┴──────────┴────────┘                       │
+│                                                             │
+│  Line 1:                                                    │
+│  ┌──────────────┬──────────┬────────┐                       │
+│  │ Completed    │ 1,500 MT │ 50.0%  │                       │
+│  │ In Progress  │   700 MT │ 23.3%  │                       │
+│  │ Scheduled    │   400 MT │ 13.3%  │                       │
+│  │ On Hold      │   250 MT │  8.3%  │                       │
+│  │ Cancelled    │   150 MT │  5.0%  │                       │
+│  │ TOTAL        │ 3,000 MT │ 100%   │                       │
+│  └──────────────┴──────────┴────────┘                       │
+│                                                             │
+│  Line 2:                                                    │
+│  ┌──────────────┬──────────┬────────┐                       │
+│  │ Completed    │   900 MT │ 45.0%  │                       │
+│  │ In Progress  │   500 MT │ 25.0%  │                       │
+│  │ Scheduled    │   200 MT │ 10.0%  │                       │
+│  │ On Hold      │   200 MT │ 10.0%  │                       │
+│  │ Cancelled    │   100 MT │  5.0%  │                       │
+│  │ TOTAL        │ 1,900 MT │ 100%   │                       │
+│  └──────────────┴──────────┴────────┘                       │
+│                                                             │
+│  (Repeat for FM2, FM3, PMX with their respective lines)     │
+│                                                             │
+│  ═══════════════════════════════════════════════════════════ │
+│                                                             │
+│  3. ORDER LIST                                              │
+│  ─────────────────────────────────────────────────────────  │
+│                                                             │
+│  ┌─────┬─────────────────────┬────────┬──────┬───────────┐  │
+│  │ #   │ Item Description    │ Volume │ Line │ Status    │  │
+│  ├─────┼─────────────────────┼────────┼──────┼───────────┤  │
+│  │ 1   │ Elite XP Startex    │ 80 MT  │ L1   │ Done      │  │
+│  │ 2   │ Gallimax 3 Maint    │ 80 MT  │ L1   │ Done      │  │
+│  │ 3   │ Salto Conditioner   │  3 MT  │ L1   │ Plotted   │  │
+│  │ 4   │ Classic Hog Growex  │ 20 MT  │ L2   │ In Prod   │  │
+│  │ ... │                     │        │      │           │  │
+│  └─────┴─────────────────────┴────────┴──────┴───────────┘  │
+│                                                             │
+│  ═══════════════════════════════════════════════════════════ │
+│                                                             │
+│  Generated by NexFeed Production Scheduling System          │
+│  Page 1 of 3                                                │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### PDF HEADER
+
+| Property | Value |
+|---|---|
+| Title | "NexFeed: Feed Production Report" |
+| Font size | 20px |
+| Font weight | 700 |
+| Report Period | "Report Period: [Month Year]" — 12px |
+| Generated | "Generated: [Date] at [Time]" — 9px, grey |
+| Separator | 1px solid #1a1a1a below header |
+
+### PDF TABLE STYLING
+
+| Property | Value |
+|---|---|
+| Header background | Dark blue (#1e3a5f) |
+| Header text | White, 10px, font-weight 600 |
+| Row background | Alternating white / light grey (#f9fafb) |
+| Row text | 10px, dark text |
+| Border | 0.5px solid #d1d5db |
+| Cell padding | 4px 8px |
+
+### PDF SECTION HEADERS
+
+| Property | Value |
+|---|---|
+| "1. OVERALL SUMMARY" | 14px, font-weight 700, uppercase |
+| "FEEDMILL 1 (FM1)" | 12px, font-weight 700 |
+| "Line 1:" | 11px, font-weight 600 |
+| Separator between sections | Double line (═══) |
+| Separator within section | Single line (───) |
+
+### PDF FOOTER
+
+| Property | Value |
+|---|---|
+| Text | "Generated by NexFeed Production Scheduling System" |
+| Page numbers | "Page X of Y" |
+| Font size | 8px |
+| Color | Grey (#6b7280) |
+| Position | Bottom center |
+
+### PDF GENERATION CODE
+
+```javascript
+async function generateReport(selectedMonth, selectedYear) {
+  const data = calculateStatusBreakdown(allOrders, selectedMonth, selectedYear);
+  const monthOrders = getOrdersForMonth(allOrders, selectedMonth, selectedYear);
+  const monthName = new Date(selectedYear, selectedMonth)
+    .toLocaleString('en-US', { month: 'long' });
+  
+  // Use jsPDF or html2pdf
+  const pdf = new jsPDF('p', 'mm', 'a4');
+  
+  // === HEADER ===
+  pdf.setFontSize(20);
+  pdf.setFont('helvetica', 'bold');
+  pdf.text('NexFeed: Feed Production Report', 20, 20);
+  
+  pdf.setFontSize(12);
+  pdf.setFont('helvetica', 'normal');
+  pdf.text(`Report Period: ${monthName} ${selectedYear}`, 20, 30);
+  
+  pdf.setFontSize(9);
+  pdf.setTextColor(107, 114, 128);
+  pdf.text(`Generated: ${new Date().toLocaleString()}`, 20, 36);
+  pdf.setTextColor(0, 0, 0);
+  
+  pdf.line(20, 40, 190, 40);
+  
+  let yPos = 50;
+  
+  // === 1. OVERALL SUMMARY ===
+  pdf.setFontSize(14);
+  pdf.setFont('helvetica', 'bold');
+  pdf.text('1. OVERALL SUMMARY', 20, yPos);
+  yPos += 10;
+  
+  // Calculate overall totals
+  const overall = {
+    completed: 0, in_progress: 0, scheduled: 0, on_hold: 0, cancelled: 0, total: 0
+  };
+  Object.values(data).forEach(fm => {
+    overall.completed += fm.completed;
+    overall.in_progress += fm.in_progress;
+    overall.scheduled += fm.scheduled;
+    overall.on_hold += fm.on_hold;
+    overall.cancelled += fm.cancelled;
+    overall.total += fm.total;
+  });
+  
+  pdf.setFontSize(10);
+  pdf.setFont('helvetica', 'normal');
+  pdf.text(`Total Orders: ${monthOrders.length}`, 20, yPos);
+  yPos += 5;
+  pdf.text(`Total Volume: ${overall.total.toLocaleString()} MT`, 20, yPos);
+  yPos += 10;
+  
+  // Summary table using autoTable or manual draw
+  const summaryData = [
+    ['Completed', `${overall.completed.toLocaleString()} MT`, `${overall.total > 0 ? ((overall.completed/overall.total)*100).toFixed(1) : 0}%`],
+    ['In Progress', `${overall.in_progress.toLocaleString()} MT`, `${overall.total > 0 ? ((overall.in_progress/overall.total)*100).toFixed(1) : 0}%`],
+    ['Scheduled', `${overall.scheduled.toLocaleString()} MT`, `${overall.total > 0 ? ((overall.scheduled/overall.total)*100).toFixed(1) : 0}%`],
+    ['On Hold', `${overall.on_hold.toLocaleString()} MT`, `${overall.total > 0 ? ((overall.on_hold/overall.total)*100).toFixed(1) : 0}%`],
+    ['Cancelled', `${overall.cancelled.toLocaleString()} MT`, `${overall.total > 0 ? ((overall.cancelled/overall.total)*100).toFixed(1) : 0}%`],
+    ['TOTAL', `${overall.total.toLocaleString()} MT`, '100%'],
+  ];
+  
+  // Draw table (use jspdf-autotable plugin or manual)
+  // ... table drawing code
+  
+  // === 2. FEEDMILL BREAKDOWN ===
+  // For each feedmill, add its table and line tables
+  
+  // === 3. ORDER LIST ===
+  // Full order list table
+  
+  // === FOOTER ===
+  const pageCount = pdf.getNumberOfPages();
+  for (let i = 1; i <= pageCount; i++) {
+    pdf.setPage(i);
+    pdf.setFontSize(8);
+    pdf.setTextColor(107, 114, 128);
+    pdf.text(
+      'Generated by NexFeed Production Scheduling System', 
+      105, 290, { align: 'center' }
+    );
+    pdf.text(`Page ${i} of ${pageCount}`, 190, 290, { align: 'right' });
+  }
+  
+  pdf.save(`NexFeed_Report_${monthName}_${selectedYear}.pdf`);
+}
+```
+
+---
+
+### 16. REMOVE OLD LINE CAPACITY MONITORING
+
+Remove the existing Line Capacity Monitoring component entirely and replace with the new Production Status Monitoring section.
+
+Search for:
+- "Line Capacity Monitoring" text
+- LineCapacityMonitoring component
+- Any related state, data fetching, or styling
+
+Replace completely with the new implementation.
+```

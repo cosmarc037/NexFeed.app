@@ -1,0 +1,530 @@
+```
+Implement the following feature in the Auto-Sequence Preview:
+
+---
+
+## ADD "SEQUENCE INSIGHT" COLUMN — AI-POWERED PER-ROW ANALYSIS
+
+Add a new column at the end of the auto-sequence preview table that provides an AI-generated explanation for why each order is placed at its specific priority position.
+
+---
+
+### 1. COLUMN PLACEMENT
+
+The "Sequence Insight" column is the LAST column in the auto-sequence preview table:
+
+```
+┌──────┬─────┬──────────┬────────────┬──────────────────┬──────┬──────┬───────┬─────────┬───────────┬───────────┬──────────────┬───────────────────┐
+│ Prio │ FPR │ Planned  │ Material   │ Item Description │ Form │ Vol  │ Batch │ Batches │ Start     │ Avail     │ Completion   │ Sequence Insight  │
+│      │     │ Order    │ Code       │                  │      │      │ Size  │         │ Date/Time │ Date      │ Date         │                   │
+├──────┼─────┼──────────┼────────────┼──────────────────┼──────┼──────┼───────┼─────────┼───────────┼───────────┼──────────────┼───────────────────┤
+│  2   │ ... │ ...      │ ...        │ Gall 21 Chicken  │ ...  │ 39MT │ ...   │ ...     │ ...       │ Mar 31    │ ...          │ This order is     │
+│      │     │          │            │                  │      │      │       │         │           │           │              │ placed first      │
+│      │     │          │            │                  │      │      │       │         │           │           │              │ because its N10D  │
+│      │     │          │            │                  │      │      │       │         │           │           │              │ status is Critical│
+│      │     │          │            │                  │      │      │       │         │           │           │              │ — DFL exceeds...  │
+├──────┼─────┼──────────┼────────────┼──────────────────┼──────┼──────┼───────┼─────────┼───────────┼───────────┼──────────────┼───────────────────┤
+│  3   │ ... │ ...      │ ...        │ Gallimax Pigeon  │ ...  │ 24MT │ ...   │ ...     │ ...       │ Apr 9     │ ...          │ This order is     │
+│      │     │          │            │ (Planned)        │      │      │       │         │           │           │              │ locked at Priority│
+│      │     │          │            │                  │      │      │       │         │           │           │              │ 3 by the planner. │
+│      │     │          │            │                  │      │      │       │         │           │           │              │ While its N10D... │
+└──────┴─────┴──────────┴────────────┴──────────────────┴──────┴──────┴───────┴─────────┴───────────┴───────────┴──────────────┴───────────────────┘
+```
+
+---
+
+### 2. COLUMN HEADER
+
+```jsx
+<thead>
+  <tr>
+    <th>Prio</th>
+    <th>FPR</th>
+    <th>Planned Order</th>
+    <th>Material Code</th>
+    <th>Item Description</th>
+    <th>Form</th>
+    <th>Volume (MT)</th>
+    <th>Batch Size</th>
+    <th>Batches</th>
+    <th>Start Date</th>
+    <th>Start Time</th>
+    <th>Avail Date</th>
+    <th>Completion Date</th>
+    <th className="sequence-insight-header">
+      <span>✨ Sequence Insight</span>
+      <button 
+        className="sequence-insight-refresh"
+        onClick={handleRefreshInsights}
+        disabled={isGeneratingInsights}
+        title="Refresh insights"
+      >
+        {isGeneratingInsights ? (
+          <span className="refresh-spinning">🔄</span>
+        ) : (
+          <span>🔄</span>
+        )}
+      </button>
+    </th>
+  </tr>
+</thead>
+```
+
+---
+
+### 3. STATE MANAGEMENT
+
+```jsx
+function AutoSequencePreview({ previewOrders, excludedOrders, n10dData }) {
+  const [sequenceInsights, setSequenceInsights] = useState({});
+  const [isGeneratingInsights, setIsGeneratingInsights] = useState(false);
+  
+  // Auto-generate when preview opens
+  useEffect(() => {
+    if (previewOrders && previewOrders.length > 0) {
+      generateSequenceInsights();
+    }
+  }, [previewOrders]);
+  
+  async function generateSequenceInsights() {
+    setIsGeneratingInsights(true);
+    
+    try {
+      const context = buildSequenceInsightContext(previewOrders, excludedOrders, n10dData);
+      const prompt = buildSequenceInsightPrompt(context);
+      const response = await callAI(prompt);
+      const parsed = parseSequenceInsightResponse(response);
+      
+      setSequenceInsights(parsed);
+    } catch (error) {
+      console.error('Failed to generate sequence insights:', error);
+    } finally {
+      setIsGeneratingInsights(false);
+    }
+  }
+  
+  function handleRefreshInsights() {
+    generateSequenceInsights();
+  }
+  
+  return (
+    <div className="auto-sequence-preview">
+      {/* Sequence Analysis section */}
+      {/* ... */}
+      
+      {/* Preview table */}
+      <table className="sequence-table">
+        <thead>
+          {/* ... headers including Sequence Insight */}
+        </thead>
+        <tbody>
+          {previewOrders.map(order => (
+            <tr key={order.id} className={order._isLocked ? 'preview-row-planned' : ''}>
+              {/* ... existing columns ... */}
+              
+              {/* Sequence Insight column */}
+              <td className="sequence-insight-cell">
+                {isGeneratingInsights && !sequenceInsights[order.prio] && (
+                  <span className="sequence-insight-loading">Generating...</span>
+                )}
+                {sequenceInsights[order.prio] && (
+                  <div className="sequence-insight-text">
+                    {sequenceInsights[order.prio]}
+                  </div>
+                )}
+                {!isGeneratingInsights && !sequenceInsights[order.prio] && (
+                  <span className="sequence-insight-empty">—</span>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+```
+
+---
+
+### 4. BUILD CONTEXT FOR AI
+
+```javascript
+function buildSequenceInsightContext(previewOrders, excludedOrders, n10dData) {
+  const context = {
+    excludedOrders: excludedOrders.map(o => ({
+      prio: o._realPrio,
+      name: o.item_description,
+      status: o.status,
+      reason: o.status === 'Done' ? 'Completed' 
+            : o.status === 'Cancel PO' ? 'Cancelled'
+            : o.status === 'In Production' ? 'Currently in production'
+            : o.status.startsWith('On-going') ? 'Currently in progress'
+            : 'Excluded'
+    })),
+    
+    orders: previewOrders.map(order => {
+      // Get N10D data for this order
+      const product = n10dData?.find(
+        p => String(p.material_code_fg) === String(order.material_code_fg)
+      );
+      
+      const n10dStatus = product ? getProductStatus(
+        product.due_for_loading,
+        product.inventory,
+        getDailyColumns(),
+        product,
+        new Date()
+      ) : null;
+      
+      const dflInvRatio = product && product.inventory > 0 
+        ? (product.due_for_loading / product.inventory).toFixed(2)
+        : product && product.inventory <= 0 ? 'Infinity' : null;
+      
+      return {
+        prio: order.prio,
+        name: order.item_description,
+        fpr: order.fpr,
+        volume: order.volume,
+        status: order.status,
+        isPlanned: order._isLocked || order.status === 'Planned',
+        isCritical: order._isCritical || false,
+        n10dStatus: n10dStatus,
+        availDate: order._displayAvailDate || order.avail_date || null,
+        dateSource: order._dateSource || null,
+        dfl: product?.due_for_loading || null,
+        inventory: product?.inventory || null,
+        dflInvRatio: dflInvRatio,
+        materialCode: order.material_code_fg,
+        line: order.line,
+        category: order.category
+      };
+    }),
+    
+    sortingRules: `
+SORTING RULES USED:
+1. Excluded orders (Done, Cancel PO, In Production, On-going) are removed from the preview — they keep their positions in the order table.
+2. Critical orders (DFL >= Inventory) are placed FIRST among movable orders, sorted by DFL/Inventory ratio (highest deficit first).
+3. If Critical orders exist, they can override Planned orders — pushing Planned to the next available slot.
+4. Planned orders are locked at their planner-assigned position unless overridden by Critical orders.
+5. All other movable orders (Plotted, Hold, Cut, etc.) are sorted chronologically by availability date.
+6. Within the same date: Urgent > Monitor > Sufficient.
+7. Within the same date and status: higher volume first.
+8. Orders without dates (Sufficient, no breach) are placed at the end using the last day of the 10-day window.
+    `
+  };
+  
+  return context;
+}
+```
+
+---
+
+### 5. AI PROMPT
+
+```javascript
+function buildSequenceInsightPrompt(context) {
+  return `
+You are a production planning advisor for a feed manufacturing plant.
+For each order in the auto-sequence preview below, explain in 2-3 sentences WHY it is placed at its specific priority position.
+
+${context.sortingRules}
+
+EXCLUDED ORDERS (not shown in preview):
+${context.excludedOrders.length > 0 
+  ? context.excludedOrders.map(o => `Priority ${o.prio}: ${o.name} — ${o.reason}`).join('\n')
+  : 'None'}
+
+PREVIEW ORDERS:
+${context.orders.map(o => `
+Priority ${o.prio}: ${o.name}
+  FPR: ${o.fpr} | Volume: ${o.volume} MT | Status: ${o.status}
+  Planned/Locked: ${o.isPlanned ? 'Yes' : 'No'}
+  Critical: ${o.isCritical ? 'Yes' : 'No'}
+  N10D Status: ${o.n10dStatus || 'N/A'}
+  Avail Date: ${o.availDate || 'N/A'} (source: ${o.dateSource || 'N/A'})
+  DFL: ${o.dfl || 'N/A'} MT | Inventory: ${o.inventory || 'N/A'} MT | Ratio: ${o.dflInvRatio || 'N/A'}
+`).join('\n')}
+
+RULES FOR YOUR RESPONSE:
+- Provide exactly one insight per order
+- Each insight should be 2-3 sentences
+- Explain WHY this order is at this specific position based on the sorting rules
+- Reference the specific data — N10D status, DFL vs Inventory, avail dates, planned status
+- For Critical orders: explain that DFL exceeds inventory and why it's prioritized first
+- For Planned orders: explain that the planner locked it at this position, and whether the position makes sense given the data (e.g., "While the planner locked this at Priority 3, its Sufficient status means it could be placed later without risk")
+- For chronologically sorted orders: explain the avail date and why it comes before or after adjacent orders
+- For Sufficient orders at the end: explain that stock is adequate and there's no urgency
+- Use full month names for dates
+- Do NOT use markdown formatting
+- Be specific and reference actual numbers
+
+OUTPUT FORMAT — one per line using the exact priority number:
+[priority_number]: [2-3 sentence insight]
+
+Example:
+2: This order is placed first among movable orders because its N10D status is Critical — DFL (24.0 MT) far exceeds available inventory (0.7 MT), with a ratio of 34.29. Critical orders are always prioritized regardless of date to prevent stockout.
+3: This order is locked at Priority 3 by the planner's decision. While its N10D status is Sufficient (inventory of 27.3 MT covers DFL of 2.5 MT), the planner may have specific operational reasons for keeping it in this position.
+
+IMPORTANT: Generate an insight for EVERY order listed. Do not skip any.
+  `;
+}
+```
+
+---
+
+### 6. PARSE AI RESPONSE
+
+```javascript
+function parseSequenceInsightResponse(response) {
+  const insights = {};
+  
+  const lines = response.split('\n').filter(l => l.trim());
+  
+  lines.forEach(line => {
+    // Match pattern: [number]: [insight text]
+    const match = line.match(/^(\d+)\s*:\s*(.+)/);
+    if (match) {
+      const prio = parseInt(match[1]);
+      const text = match[2].trim();
+      insights[prio] = text;
+    }
+  });
+  
+  return insights;
+}
+```
+
+---
+
+### 7. STYLING
+
+### COLUMN HEADER
+
+```css
+.sequence-insight-header {
+  min-width: 280px;
+  max-width: 350px;
+  width: 300px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.sequence-insight-header span {
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.sequence-insight-refresh {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 4px;
+  margin-left: 6px;
+  border-radius: 4px;
+  transition: background 0.15s;
+  vertical-align: middle;
+}
+
+.sequence-insight-refresh:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.sequence-insight-refresh:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.refresh-spinning {
+  display: inline-block;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+```
+
+### CELL
+
+```css
+.sequence-insight-cell {
+  min-width: 280px;
+  max-width: 350px;
+  width: 300px;
+  vertical-align: top;
+  padding: 10px 12px;
+}
+
+.sequence-insight-text {
+  font-size: 11px;
+  color: #374151;
+  line-height: 1.6;
+  white-space: normal;
+  word-wrap: break-word;
+}
+
+.sequence-insight-loading {
+  font-size: 11px;
+  color: #9ca3af;
+  font-style: italic;
+}
+
+.sequence-insight-empty {
+  font-size: 11px;
+  color: #d1d5db;
+}
+
+/* Planned row insight — subtle blue tint */
+.preview-row-planned .sequence-insight-cell {
+  background: #eff6ff;
+}
+
+/* Critical row insight — subtle red tint */
+.preview-row-critical .sequence-insight-cell {
+  background: #fef2f2;
+}
+```
+
+---
+
+### 8. ROW CLASSES FOR CRITICAL
+
+Add a class to Critical order rows for visual distinction:
+
+```jsx
+<tr 
+  key={order.id} 
+  className={`
+    ${order._isLocked ? 'preview-row-planned' : ''}
+    ${order._isCritical ? 'preview-row-critical' : ''}
+  `}
+>
+```
+
+```css
+.preview-row-critical {
+  border-left: 3px solid #dc2626;
+}
+
+.preview-row-planned {
+  border-left: 3px solid #2563eb;
+  background: #eff6ff;
+}
+```
+
+---
+
+### 9. LOADING STATE — WHILE GENERATING
+
+Show loading state per cell while AI is generating:
+
+```jsx
+<td className="sequence-insight-cell">
+  {isGeneratingInsights && !sequenceInsights[order.prio] && (
+    <div className="sequence-insight-loading">
+      <span className="refresh-spinning" style={{ fontSize: '10px' }}>✨</span>
+      {' '}Generating...
+    </div>
+  )}
+  
+  {isGeneratingInsights && sequenceInsights[order.prio] && (
+    <div className="sequence-insight-text" style={{ opacity: 0.5 }}>
+      {sequenceInsights[order.prio]}
+    </div>
+  )}
+  
+  {!isGeneratingInsights && sequenceInsights[order.prio] && (
+    <div className="sequence-insight-text">
+      {sequenceInsights[order.prio]}
+    </div>
+  )}
+  
+  {!isGeneratingInsights && !sequenceInsights[order.prio] && (
+    <span className="sequence-insight-empty">—</span>
+  )}
+</td>
+```
+
+---
+
+### 10. EXAMPLE OUTPUT
+
+For a preview with these orders:
+
+```
+Prio 2: Gall 21 Chicken Layer (Critical, DFL 24.0, Inv 0.7)
+Prio 3: Gallimax Pigeon Pellet (Planned, Sufficient)
+Prio 4: Gallimax 3 Maintenance (Urgent, avail Mar 31)
+Prio 5: Elite XP Startex 80 MT (Sufficient, avail Apr 9)
+...
+```
+
+Expected insights:
+
+```
+Prio 2: "This order is placed first among movable orders 
+because its N10D status is Critical — DFL (24.0 MT) far 
+exceeds available inventory (0.7 MT), creating a deficit 
+of 23.3 MT. Critical orders are always prioritized 
+regardless of availability date to prevent stockout."
+
+Prio 3: "This order is locked at Priority 3 by the 
+planner's decision. Its N10D status is Sufficient — 
+inventory (27.3 MT) comfortably covers demand (2.5 MT) 
+with no urgency. The planner may have operational reasons 
+for keeping it ahead of other orders."
+
+Prio 4: "This order follows the Planned order and is 
+placed here based on its availability date of March 31, 
+2026, which is the earliest among the remaining movable 
+orders. Its N10D status is Urgent — stock will breach 
+within 3 days, requiring production soon."
+
+Prio 5: "This order is placed at Priority 5 based on 
+its availability date of April 9, 2026. While its N10D 
+status is Sufficient, it follows chronological ordering 
+after the Urgent and dated orders ahead of it."
+```
+
+---
+
+## VERIFICATION
+
+### Column display
+1. ✅ "✨ Sequence Insight" column appears as the LAST column
+2. ✅ Column has 🔄 refresh button in header
+3. ✅ Column width: 280-350px
+4. ✅ Text wraps within the cell — no truncation
+
+### Auto-generate
+5. ✅ Insights auto-generate when preview opens
+6. ✅ "Generating..." shown while loading
+7. ✅ All rows get insights — none skipped
+
+### Content quality
+8. ✅ Critical orders: explains DFL > Inventory, why prioritized first
+9. ✅ Planned orders: explains planner locked it, analyzes if position makes sense
+10. ✅ Chronological orders: explains avail date and relative position
+11. ✅ Sufficient orders at end: explains no urgency, stock adequate
+12. ✅ Each insight is 2-3 sentences
+13. ✅ References specific numbers (DFL, Inventory, dates, ratios)
+
+### Refresh
+14. ✅ Clicking 🔄 regenerates all insights
+15. ✅ Old insights shown at 50% opacity during refresh
+16. ✅ New insights replace old ones after generation
+
+### Visual
+17. ✅ Planned rows have blue left border and blue background
+18. ✅ Critical rows have red left border
+19. ✅ Loading state shows spinning ✨
+
+### Edge cases
+20. ✅ Preview with no N10D data — insights still generate based on available info
+21. ✅ Preview with only Planned orders — insights explain locked positions
+22. ✅ Preview with only Sufficient orders — insights explain chronological sorting
+23. ✅ If AI fails — shows "—" and no crash
+```

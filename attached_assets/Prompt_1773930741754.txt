@@ -1,0 +1,191 @@
+```
+Implement the following changes to the NexFeed application:
+
+---
+
+## 1. REMOVE AUTO-SORTING BY TARGET DATES IN MAIN TABLE
+
+The main interactive order table should NOT automatically sort or reorder orders based on the Next 10 Days target dates. Target date prioritization should ONLY happen when the user clicks the Auto-Sequence button.
+
+**Remove:**
+- ❌ Any auto-sorting of orders in the main table triggered by Next 10 Days file upload.
+- ❌ Any auto-insertion of non-dated orders between dated orders based on target dates in the main table.
+- ❌ Any drag-and-drop enforcement based on target dates in the main table.
+
+**Keep:**
+- ✅ Auto-sorting by actual avail dates (dated orders stay chronologically sorted relative to each other) — this existing behavior stays.
+- ✅ Non-dated orders remain in their uploaded position (below dated orders) unless manually moved by the user.
+- ✅ Target date calculations still happen in the background (for use by Auto-Sequence).
+- ✅ Drag-and-drop enforcement for ACTUAL avail dates only (not inferred target dates).
+
+**The main table behaves exactly as it did BEFORE the Next 10 Days feature was added.** The Next 10 Days data is only used when the user explicitly clicks Auto-Sequence.
+
+---
+
+## 2. AVAIL DATE CELL — REMOVE TARGET DATE DISPLAY, ADD WARNING ICON ONLY
+
+Remove the target date text and warning messages from the Avail Date cell in the main interactive table. Replace with a subtle warning icon only.
+
+**Current (remove this):**
+```
+┌─────────────────────────────────┐
+│ safety stocks                   │
+│ 📊 Target: March 28, 2026      │
+│ ⚠ May not meet target in 10d   │
+└─────────────────────────────────┘
+```
+
+```
+┌─────────────────────────────────┐
+│ prio replenish                  │
+│ 📊 Target: March 19, 2026      │
+└─────────────────────────────────┘
+```
+
+```
+┌─────────────────────────────────┐
+│ safety stocks                   │
+│ 📊 Stock sufficient             │
+└─────────────────────────────────┘
+```
+
+**Updated (show this instead):**
+
+**For orders with "Needs Production" target date:**
+```
+┌─────────────────────────────────┐
+│ safety stocks              ⚠   │
+└─────────────────────────────────┘
+```
+
+- The avail date value ("safety stocks", "prio replenish") displays as normal — orange text.
+- A small warning icon (⚠) is placed to the RIGHT of the avail date text.
+- No target date text shown.
+- No "May not meet target" text shown.
+
+**For orders with "Stock Sufficient":**
+```
+┌─────────────────────────────────┐
+│ safety stocks              ✅   │
+└─────────────────────────────────┘
+```
+
+- A small green check icon (✅) to the right of the avail date text.
+- No "Stock sufficient" text shown.
+
+**For orders with NO match in Next 10 Days data:**
+```
+┌─────────────────────────────────┐
+│ prio replenish                  │
+└─────────────────────────────────┘
+```
+
+- No icon. Just the avail date text as normal.
+
+**For orders with actual avail dates (not prio/safety):**
+```
+┌─────────────────────────────────┐
+│ March 22, 2026                  │
+│ TLD | Mar 22                    │
+└─────────────────────────────────┘
+```
+
+- No icon. Unchanged from current behavior.
+
+---
+
+### WARNING ICON DETAILS
+
+**⚠ Needs Production icon:**
+
+| Property | Value |
+|---|---|
+| Icon | ⚠ triangle warning OR 📊 chart icon (small) |
+| Color | Amber (#f59e0b) |
+| Size | 14px |
+| Position | Right side of the avail date cell, vertically centered |
+| Cursor | Pointer (hoverable) |
+
+**Tooltip on hover:**
+```
+Stock level data available.
+Target: March 28, 2026
+Run Auto-Sequence to prioritize this order.
+```
+
+Or for urgent targets:
+```
+Stock level data available.
+Target: March 19, 2026 (Urgent)
+Run Auto-Sequence to prioritize this order.
+```
+
+- Tooltip background: dark grey (#374151)
+- Tooltip text: white, 11px
+- Tooltip max-width: 250px
+- Tooltip position: below the icon
+- Shows the target date in the tooltip so the information is accessible but not cluttering the cell.
+
+**✅ Stock Sufficient icon:**
+
+| Property | Value |
+|---|---|
+| Icon | ✅ green check (small) |
+| Color | Green (#43a047) |
+| Size | 14px |
+| Position | Right side of the avail date cell, vertically centered |
+| Cursor | Pointer (hoverable) |
+
+**Tooltip on hover:**
+```
+Stock sufficient — no urgent production needed.
+Current loading exceeds inventory target.
+```
+
+- Same tooltip styling as above.
+
+---
+
+### ICON SEVERITY VARIATIONS
+
+Based on how close the target date is:
+
+| Condition | Icon | Color |
+|---|---|---|
+| Target date within 2 days | ⚠ | Red (#e53935) |
+| Target date within 3-5 days | ⚠ | Amber (#f59e0b) |
+| Target date 6+ days away | ⚠ | Grey (#9ca3af) |
+| Target unlikely within 10 days | ⚠ | Amber (#f59e0b) |
+| Stock sufficient | ✅ | Green (#43a047) |
+| No Next 10 Days data | (none) | — |
+
+---
+
+## 3. AUTO-SEQUENCE — REMAINS THE ONLY PLACE FOR TARGET DATE SORTING
+
+The Auto-Sequence feature is the ONLY place where target dates from Next 10 Days data are used for sorting and prioritization.
+
+**When user clicks Auto-Sequence:**
+1. The preview table shows the proposed sequence.
+2. Non-dated orders are inserted between dated orders based on their target dates.
+3. The user reviews and can approve or modify.
+4. Only when the user clicks "Apply to Schedule" does the main table update.
+
+**The main table never auto-sorts by target dates on its own.**
+
+---
+
+## 4. PRODUCTION INSIGHTS PANEL — STILL REFERENCES TARGET DATES
+
+The Production Insights panel (above the interactive table) can still reference target dates in its recommendations — but as TEXT suggestions, not automatic actions.
+
+**Example insight:**
+```
+📊 Gallimax 3 Maintenance (FPR: 260309, safety stocks) 
+has a stock target date of March 19 based on Next 10 Days 
+data. Consider running Auto-Sequence to optimize this 
+order's position, or manually move it higher in the schedule.
+```
+
+This is informational only — the panel doesn't trigger any auto-sorting.
+```

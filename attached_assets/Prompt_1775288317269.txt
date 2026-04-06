@@ -1,0 +1,436 @@
+Implement the following fixes to the Knowledge Base:
+
+---
+
+## FIX: HIGHLIGHT EDITED CELLS IN LIGHT AMBER/YELLOW
+
+When a user manually edits a cell and saves, the edited cell should be highlighted in light amber/yellow so users can easily identify which cells were changed from the original uploaded data. Highlights should only appear for manually edited cells and should be cleared when a new file is uploaded (since that resets the baseline).
+
+### THE PROBLEM
+
+Currently, there is no visual indicator showing which cells have been manually edited versus which cells contain original uploaded data. Users cannot tell at a glance what has changed.
+
+### THE FIX
+
+#### TRACK EDITED CELLS IN HISTORY SNAPSHOTS
+
+When a Manual Edit history entry is created, store a set of edited cell coordinates alongside the snapshot. Compare the current data against the most recent File Upload snapshot to determine which cells differ.
+
+```javascript
+// Utility: Compare two snapshots and return set of edited cell keys
+function getEditedCells(originalSnapshot, currentData) {
+  const editedCells = new Set();
+
+  if (!originalSnapshot || !currentData) return editedCells;
+
+  currentData.forEach((row) => {
+    const originalRow = originalSnapshot.find(
+      (orig) => orig._rowId === row._rowId
+    );
+
+    if (!originalRow) {
+      // Entire row is new (inserted) — mark all data cells as edited
+      Object.keys(row).forEach((key) => {
+        if (!key.startsWith('_')) {
+          editedCells.add(`${row._rowId}_${key}`);
+        }
+      });
+      return;
+    }
+
+    // Compare each field
+    Object.keys(row).forEach((key) => {
+      if (key.startsWith('_')) return; // Skip internal fields like _rowId, _originalIndex
+      if (String(row[key] ?? '') !== String(originalRow[key] ?? '')) {
+        editedCells.add(`${row._rowId}_${key}`);
+      }
+    });
+  });
+
+  return editedCells;
+}
+```
+
+#### STORE THE BASELINE (FILE UPLOAD) SNAPSHOT REFERENCE
+
+Track the most recent File Upload snapshot as the baseline for comparison:
+
+```javascript
+// State to hold the baseline snapshot (from the most recent file upload)
+const [baselineSnapshot, setBaselineSnapshot] = useState(null);
+
+// When uploading a file — set as new baseline and clear all highlights
+function handleUploadComplete(filename, parsedData, recordCount) {
+  const dataWithIds = parsedData.map((row, index) => ({
+    ...row,
+    _rowId: row._rowId || `kb_row_${index}_${Date.now()}`,
+    _originalIndex: index,
+  }));
+
+  const clonedData = JSON.parse(JSON.stringify(dataWithIds));
+
+  setKbData(clonedData);
+  setBaselineSnapshot(JSON.parse(JSON.stringify(clonedData))); // New baseline = uploaded file
+
+  const uploadEntry = {
+    id: Date.now(),
+    type: 'file_upload',
+    timestamp: new Date().toISOString(),
+    summary: `Uploaded: ${filename} (${recordCount} records)`,
+    details: `File "${filename}" uploaded and applied as new Knowledge Base with ${recordCount} records.`,
+    snapshot: JSON.parse(JSON.stringify(clonedData)),
+    filename: filename,
+    user: getCurrentUser(),
+  };
+
+  addToHistory(uploadEntry);
+}
+```
+
+#### COMPUTE EDITED CELLS FOR DISPLAY
+
+Derive the set of edited cells by comparing current table data against the baseline:
+
+```javascript
+// Compute which cells are edited compared to the baseline (file upload)
+const editedCells = useMemo(() => {
+  if (!baselineSnapshot || !kbData) return new Set();
+  return getEditedCells(baselineSnapshot, kbData);
+}, [baselineSnapshot, kbData]);
+
+// Helper to check if a specific cell is edited
+function isCellEdited(rowId, fieldName) {
+  return editedCells.has(`${rowId}_${fieldName}`);
+}
+```
+
+#### WHEN SAVING MANUAL EDITS — Edited cells persist in highlight
+
+The baseline does NOT change on manual edit save. The baseline only changes when a new file is uploaded. So edited cell highlights remain visible after saving:
+
+```javascript
+function handleSaveChanges() {
+  const errors = validateKnowledgeBase(kbData);
+  if (errors.length > 0) {
+    setValidationErrors(errors);
+    showNotification('error', `Cannot save. ${errors.length} validation error(s) found.`);
+    return;
+  }
+
+  const { summary, details } = changeTracker.generateChangeSummary();
+
+  const editEntry = {
+    id: Date.now(),
+    type: 'manual_edit',
+    timestamp: new Date().toISOString(),
+    summary: summary,
+    details: details,
+    snapshot: JSON.parse(JSON.stringify(kbData)),
+    user: getCurrentUser(),
+  };
+
+  addToHistory(editEntry);
+
+  setIsEditMode(false);
+  changeTracker.reset();
+  setValidationErrors([]);
+
+  // DO NOT reset baselineSnapshot here — highlights should persist
+  // baselineSnapshot only resets on new file upload
+
+  showNotification('success', 'Knowledge Base saved successfully.');
+}
+```
+
+#### WHEN REVERTING TO FILE UPLOAD — Clear highlights (baseline matches current data)
+
+```javascript
+function handleRevert(entry) {
+  if (!entry.snapshot) {
+    showNotification('error', 'Cannot revert — no snapshot available.');
+    return;
+  }
+
+  const restoredData = JSON.parse(JSON.stringify(entry.snapshot));
+  setKbData(restoredData);
+
+  // If reverting to a file_upload entry, update baseline so highlights clear
+  if (entry.type === 'file_upload') {
+    setBaselineSnapshot(JSON.parse(JSON.stringify(restoredData)));
+  }
+
+  // If reverting to a manual_edit entry, find the most recent file_upload
+  // in history and use that as baseline so highlights show correctly
+  if (entry.type === 'manual_edit' || entry.type === 'revert') {
+    const fileUploadEntry = history.find((h) => h.type === 'file_upload');
+    if (fileUploadEntry && fileUploadEntry.snapshot) {
+      setBaselineSnapshot(JSON.parse(JSON.stringify(fileUploadEntry.snapshot)));
+    }
+  }
+
+  const revertEntry = {
+    id: Date.now(),
+    type: 'revert',
+    timestamp: new Date().toISOString(),
+    summary: `Reverted to version from ${formatDateTimeFull(entry.timestamp)}`,
+    details: `Knowledge Base reverted to: ${entry.summary}`,
+    snapshot: JSON.parse(JSON.stringify(restoredData)),
+    user: getCurrentUser(),
+  };
+
+  addToHistory(revertEntry);
+  showNotification('success', 'Knowledge Base reverted successfully.');
+}
+```
+
+#### WHEN DELETING ACTIVE HISTORY — Update baseline accordingly
+
+```javascript
+function handleDeleteWithActiveTransfer(entry, index) {
+  const isActive = index === 0;
+
+  showDeleteConfirmDialog(entry, isActive, async () => {
+    if (isActive) {
+      if (history.length > 1) {
+        const nextEntry = history[1];
+        if (nextEntry && nextEntry.snapshot) {
+          const restoredData = JSON.parse(JSON.stringify(nextEntry.snapshot));
+          setKbData(restoredData);
+
+          // If falling back to file_upload, update baseline to clear highlights
+          if (nextEntry.type === 'file_upload') {
+            setBaselineSnapshot(JSON.parse(JSON.stringify(restoredData)));
+          }
+
+          // If falling back to manual_edit, find file_upload baseline
+          if (nextEntry.type === 'manual_edit' || nextEntry.type === 'revert') {
+            const fileUploadEntry = history.find(
+              (h) => h.type === 'file_upload' && h.id !== entry.id
+            );
+            if (fileUploadEntry && fileUploadEntry.snapshot) {
+              setBaselineSnapshot(
+                JSON.parse(JSON.stringify(fileUploadEntry.snapshot))
+              );
+            }
+          }
+
+          showNotification(
+            'info',
+            `Active version deleted. Reverted to version from ${formatDateTimeFull(nextEntry.timestamp)}.`
+          );
+        }
+      } else {
+        setKbData([]);
+        setBaselineSnapshot(null); // No baseline when KB is empty
+        showNotification(
+          'info',
+          'Knowledge Base history cleared. Upload a new file or add data manually.'
+        );
+      }
+    }
+
+    removeFromHistory(entry.id);
+  });
+}
+```
+
+#### WHEN LOADING FROM localStorage — Restore baseline
+
+```javascript
+function initializeFromStorage() {
+  const storedHistory = loadHistoryFromStorage();
+
+  if (storedHistory.length > 0) {
+    // Load active entry's snapshot
+    const activeEntry = storedHistory[0];
+    if (activeEntry.snapshot) {
+      setKbData(JSON.parse(JSON.stringify(activeEntry.snapshot)));
+    }
+
+    // Find the most recent file_upload entry to use as baseline
+    const fileUploadEntry = storedHistory.find((h) => h.type === 'file_upload');
+    if (fileUploadEntry && fileUploadEntry.snapshot) {
+      setBaselineSnapshot(JSON.parse(JSON.stringify(fileUploadEntry.snapshot)));
+    }
+  }
+
+  setHistory(storedHistory);
+}
+```
+
+#### RENDER TABLE CELLS WITH HIGHLIGHT
+
+Apply light amber background to edited cells in BOTH read-only and edit modes:
+
+```jsx
+{/* Define column field mappings */}
+const columns = [
+  { key: 'fgMaterialCode', label: 'FG Material Code' },
+  { key: 'fgItemDescription', label: 'FG Item Description' },
+  { key: 'sfg1MaterialCode', label: 'SFG1 Material Code' },
+  { key: 'sfgItemDescription', label: 'SFG Item Description' },
+  { key: 'form', label: 'Form' },
+  { key: 'batchFm1', label: 'Batch FM1' },
+  { key: 'batchFm2', label: 'Batch FM2' },
+  { key: 'batchFm3', label: 'Batch FM3' },
+];
+
+<tbody>
+  {filteredData.map((row) => (
+    <tr key={row._rowId}>
+      {isEditMode && (
+        <td className="kb-select-cell">
+          <input
+            type="checkbox"
+            checked={selectedRows.has(row._rowId)}
+            onChange={() => toggleRowSelection(row._rowId)}
+          />
+        </td>
+      )}
+      <td className="kb-row-number-cell">{(row._originalIndex ?? 0) + 1}</td>
+
+      {columns.map((col) => (
+        <td
+          key={col.key}
+          className={`kb-cell ${isCellEdited(row._rowId, col.key) ? 'kb-cell-edited' : ''}`}
+        >
+          {isEditMode ? (
+            <input
+              type="text"
+              value={row[col.key] ?? ''}
+              onChange={(e) => handleCellChange(row._rowId, col.key, e.target.value)}
+              className={`kb-cell-input ${isCellEdited(row._rowId, col.key) ? 'kb-cell-input-edited' : ''}`}
+            />
+          ) : (
+            <span>{row[col.key] ?? ''}</span>
+          )}
+        </td>
+      ))}
+
+      {isEditMode && (
+        <td className="kb-delete-cell">
+          <button
+            className="kb-delete-btn"
+            onClick={() => handleDeleteRow(row._rowId)}
+          >
+            🗑
+          </button>
+        </td>
+      )}
+    </tr>
+  ))}
+</tbody>
+```
+
+#### CSS STYLES FOR EDITED CELL HIGHLIGHT
+
+```css
+/* Edited cell highlight — light amber/yellow background */
+.kb-cell-edited {
+  background-color: #fef9e7 !important; /* Very light amber */
+  position: relative;
+}
+
+/* Subtle left border accent for edited cells */
+.kb-cell-edited::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: 0;
+  width: 3px;
+  background-color: #f59e0b; /* Amber accent */
+  border-radius: 0 2px 2px 0;
+}
+
+/* Edit mode — input inside edited cell */
+.kb-cell-input-edited {
+  background-color: #fef9e7 !important; /* Match the cell background */
+}
+
+/* Hover state for edited cells — slightly deeper amber */
+.kb-cell-edited:hover {
+  background-color: #fef3c7 !important;
+}
+
+/* Ensure the highlight works with table striping */
+tr:nth-child(even) .kb-cell-edited {
+  background-color: #fef9e7 !important; /* Override stripe color */
+}
+
+tr:nth-child(odd) .kb-cell-edited {
+  background-color: #fef9e7 !important;
+}
+
+/* Row number and checkbox cells should NOT get highlight */
+.kb-row-number-cell,
+.kb-select-cell,
+.kb-delete-cell {
+  background-color: inherit !important;
+}
+```
+
+#### OPTIONAL — TOOLTIP ON EDITED CELLS SHOWING ORIGINAL VALUE
+
+To help users see what the original value was:
+
+```jsx
+<td
+  key={col.key}
+  className={`kb-cell ${isCellEdited(row._rowId, col.key) ? 'kb-cell-edited' : ''}`}
+  title={
+    isCellEdited(row._rowId, col.key)
+      ? `Original: ${getOriginalValue(row._rowId, col.key)}`
+      : undefined
+  }
+>
+  {/* ... cell content ... */}
+</td>
+```
+
+```javascript
+// Get original value from baseline for tooltip
+function getOriginalValue(rowId, fieldName) {
+  if (!baselineSnapshot) return '';
+  const originalRow = baselineSnapshot.find((row) => row._rowId === rowId);
+  if (!originalRow) return '(new row)';
+  return originalRow[fieldName] ?? '';
+}
+```
+
+---
+
+## VERIFICATION
+
+### Edited Cell Highlights
+1. ✅ Upload a file → no cells are highlighted (baseline = current data)
+2. ✅ Edit a cell (e.g., Form "P" → "MP") and save → that cell shows light amber background
+3. ✅ Edit multiple cells across different rows → all edited cells show light amber
+4. ✅ Cells that were NOT edited remain with normal background (no highlight)
+5. ✅ Highlights visible in both read-only mode and edit mode
+6. ✅ Hovering over an edited cell shows the original value in tooltip (e.g., "Original: P")
+
+### Highlights Clear on New File Upload
+7. ✅ Upload a new file → ALL highlights are removed (new baseline set)
+8. ✅ After new upload, editing a cell again → only newly edited cells highlight
+9. ✅ Baseline resets completely — old edits are no longer tracked
+
+### Highlights Persist Correctly Through History Operations
+10. ✅ Save manual edit → highlights remain (baseline unchanged)
+11. ✅ Make another edit and save → both old and new edits highlighted
+12. ✅ Revert to File Upload history → highlights clear (data matches baseline)
+13. ✅ Revert to Manual Edit history → highlights show for cells that differ from file upload baseline
+14. ✅ Delete active Manual Edit → falls back to File Upload → highlights clear
+
+### Highlights Do Not Apply to Non-Edit Scenarios
+15. ✅ Only manual edits cause highlights — file upload data is never highlighted
+16. ✅ Row number column (`#`) is never highlighted
+17. ✅ Checkbox and delete button columns are never highlighted
+18. ✅ No other colors used — only light amber/yellow for edits
+
+### Edge Cases
+19. ✅ Edit a cell then edit it back to original value → highlight removed (matches baseline)
+20. ✅ Insert a new row → all cells in that row are highlighted (new row = all edited)
+21. ✅ Delete a row → no highlight issues on remaining rows
+22. ✅ Search/filter → highlighted cells remain highlighted in filtered results
+23. ✅ Page reload (localStorage) → highlights restore correctly by comparing active data against stored file upload baseline

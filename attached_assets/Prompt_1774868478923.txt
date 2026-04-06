@@ -1,0 +1,374 @@
+```
+Implement the following fixes to the NexFeed application:
+
+---
+
+## 1. AUTO-SEQUENCE PREVIEW — ALIGN WITH UPDATED N10D LOGIC
+
+The auto-sequence preview hover tooltip is still using the OLD N10D logic (Fulfillment %, Gap %, "Inventory target"). Update it to match the corrected understanding.
+
+---
+
+### CURRENT HOVER (WRONG)
+
+```
+Stock Level Data
+Due for loading: 92.3 MT
+Inventory target: 310.6 MT
+Fulfillment: 29.7%
+Gap: 70.3% still needed
+Target date: Apr 9, 2026
+Status: Needs Production
+
+⚠ Inventory target unlikely to be met within 10
+days. Start production as early as possible.
+```
+
+### ISSUES
+
+- "Inventory target" → wrong label, Inventory is current stock not target
+- "Fulfillment: 29.7%" → old calculation, not aligned with new logic
+- "Gap: 70.3% still needed" → old calculation
+- "Target date" → should now show Completion and Avail
+- Status should use new 4 levels (Critical, Urgent, Monitor, Sufficient)
+- No Smart Insight section
+
+---
+
+### CORRECT HOVER — MATCH N10D TOOLTIP DESIGN
+
+Update the auto-sequence preview hover to use the same two-panel design as the N10D tooltip:
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                                                                  │
+│  Elite XP Startex, Mini-pellet 50kg                              │
+│                                                                  │
+├─────────────────────────────┬────────────────────────────────────┤
+│                             │                                    │
+│  Order Details              │  ✨ Smart Insight                  │
+│                             │                                    │
+│  DFL:          92.3 MT      │  This product is in Monitor        │
+│  Inventory:    310.6 MT     │  status. Cumulative demand will    │
+│  Ratio:        0.30         │  exceed inventory by April 9,      │
+│  Buffer:       70.3%        │  giving approximately 7 days to    │
+│  Status:       Monitor      │  schedule production. Current      │
+│                             │  buffer of 70.3% is comfortable    │
+│  Completion:   Apr 8        │  but production should be planned  │
+│  Avail:        Apr 9        │  within the coming week.           │
+│  Bal. to Prod: 79.0 MT     │                                    │
+│                             │                                    │
+└─────────────────────────────┴────────────────────────────────────┘
+```
+
+### UPDATE ALL LABELS AND CALCULATIONS
+
+| Old label | New label |
+|---|---|
+| "Inventory target" | "Inventory" |
+| "Due for loading" | "DFL" |
+| "Fulfillment: X%" | REMOVE — replaced by Buffer |
+| "Gap: X% still needed" | REMOVE — replaced by Ratio |
+| "Target date" | Split into "Completion" and "Avail" |
+| "Status: Needs Production" | Use 4-level status (Critical, Urgent, Monitor, Sufficient) |
+
+### CALCULATIONS — SAME AS N10D
+
+```javascript
+function getAutoSequenceTooltipData(order, n10dData, today) {
+  // Find matching product in N10D data by material code
+  const product = n10dData.find(
+    p => p.material_code_fg === order.material_code_fg ||
+         String(p.material_code_fg) === String(order.material_code_fg)
+  );
+  
+  if (!product) {
+    return null; // No N10D data for this product
+  }
+  
+  const dfl = product.due_for_loading;
+  const inventory = product.inventory;
+  
+  const ratio = inventory > 0 ? (dfl / inventory).toFixed(2) : '∞';
+  const buffer = inventory > 0 
+    ? (((inventory - dfl) / inventory) * 100).toFixed(1) 
+    : '-100.0';
+  
+  const status = product.status; // Critical, Urgent, Monitor, Sufficient
+  const completionDate = product.completionDate;
+  const availDate = product.availDate;
+  const balToProd = product.balanceToProduce;
+  
+  const insight = getInsight(product.material_code_fg); // Cached insight
+  
+  return {
+    name: order.item_description,
+    dfl: dfl,
+    inventory: inventory,
+    ratio: ratio,
+    buffer: buffer,
+    status: status,
+    completionDate: completionDate,
+    availDate: availDate,
+    balToProd: balToProd,
+    insight: insight
+  };
+}
+```
+
+---
+
+## 2. FIX HOVER TOOLTIP BEING CUT OFF
+
+The tooltip is being clipped by the auto-sequence preview container's overflow. Fix so the tooltip is always fully visible.
+
+### THE PROBLEM
+
+The auto-sequence preview container likely has:
+- `overflow: hidden` or `overflow: auto`
+- A fixed height that clips content
+- The tooltip is positioned inside the container, so it gets cut off at the edges
+
+### THE FIX
+
+Render the tooltip using a **portal** so it's placed at the document body level, outside of any overflow-hidden containers.
+
+```jsx
+import { createPortal } from 'react-dom';
+
+function TooltipPortal({ children }) {
+  return createPortal(children, document.body);
+}
+
+// Usage
+function AutoSequenceRow({ order, n10dData, today }) {
+  const [showTooltip, setShowTooltip] = useState(false);
+  const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
+  const timeoutRef = useRef(null);
+  
+  function handleMouseEnter(e) {
+    timeoutRef.current = setTimeout(() => {
+      setShowTooltip(true);
+    }, 300);
+  }
+  
+  function handleMouseMove(e) {
+    setTooltipPos({ x: e.clientX + 12, y: e.clientY + 12 });
+  }
+  
+  function handleMouseLeave() {
+    clearTimeout(timeoutRef.current);
+    setShowTooltip(false);
+  }
+  
+  return (
+    <>
+      <tr
+        onMouseEnter={handleMouseEnter}
+        onMouseMove={handleMouseMove}
+        onMouseLeave={handleMouseLeave}
+      >
+        {/* ... row cells ... */}
+      </tr>
+      
+      {showTooltip && (
+        <TooltipPortal>
+          <ProductTooltip
+            data={getAutoSequenceTooltipData(order, n10dData, today)}
+            position={tooltipPos}
+          />
+        </TooltipPortal>
+      )}
+    </>
+  );
+}
+```
+
+### TOOLTIP POSITIONING — VIEWPORT BOUNDARY CHECK
+
+Ensure the tooltip never goes outside the viewport:
+
+```javascript
+function getTooltipPosition(mouseX, mouseY, tooltipWidth, tooltipHeight) {
+  const viewportWidth = window.innerWidth;
+  const viewportHeight = window.innerHeight;
+  const padding = 16;
+  
+  let x = mouseX + 12;
+  let y = mouseY + 12;
+  
+  // If tooltip would go off right edge
+  if (x + tooltipWidth + padding > viewportWidth) {
+    x = mouseX - tooltipWidth - 12;
+  }
+  
+  // If tooltip would go off bottom edge
+  if (y + tooltipHeight + padding > viewportHeight) {
+    y = mouseY - tooltipHeight - 12;
+  }
+  
+  // If tooltip would go off left edge
+  if (x < padding) {
+    x = padding;
+  }
+  
+  // If tooltip would go off top edge
+  if (y < padding) {
+    y = padding;
+  }
+  
+  return { x, y };
+}
+```
+
+### TOOLTIP CSS — ENSURE ALWAYS VISIBLE
+
+```css
+.product-tooltip {
+  position: fixed;
+  z-index: 99999;  /* Very high — above everything */
+  pointer-events: none;
+  
+  /* Ensure it's not clipped by any parent */
+  /* Rendered via portal to document.body */
+}
+```
+
+### ALSO FIX FOR N10D TABLE
+
+Apply the same portal approach to the N10D table tooltip if it also gets clipped:
+
+```jsx
+// N10D tooltip — also use portal
+{showTooltip && (
+  <TooltipPortal>
+    <ProductTooltip ... />
+  </TooltipPortal>
+)}
+
+{showDayTooltip && (
+  <TooltipPortal>
+    <DayCumulativeTooltip ... />
+  </TooltipPortal>
+)}
+```
+
+---
+
+## 3. SHARED TOOLTIP COMPONENT
+
+Both the N10D table and Auto-Sequence preview should use the SAME tooltip component for consistency:
+
+```jsx
+function ProductTooltip({ data, position }) {
+  if (!data) return null;
+  
+  const ratioColor = parseFloat(data.ratio) > 1.0 ? '#fca5a5' :
+                     parseFloat(data.ratio) > 0.8 ? '#fde047' : '#86efac';
+  
+  const bufferColor = parseFloat(data.buffer) < 0 ? '#fca5a5' :
+                      parseFloat(data.buffer) < 20 ? '#fde047' : '#86efac';
+  
+  const statusColors = {
+    'Critical': '#fca5a5',
+    'Urgent': '#fdba74',
+    'Monitor': '#fde047',
+    'Sufficient': '#86efac'
+  };
+  
+  const balColor = data.balToProd < 0 ? '#fca5a5' : '#86efac';
+  
+  return (
+    <div className="product-tooltip" style={{
+      position: 'fixed',
+      left: position.x,
+      top: position.y,
+      zIndex: 99999
+    }}>
+      {/* Header — Product Name */}
+      <div className="tooltip-header">
+        {data.name}
+      </div>
+      
+      {/* Body — Two Columns */}
+      <div className="tooltip-body">
+        
+        {/* Left: Order Details */}
+        <div className="tooltip-left">
+          <div className="tooltip-grid">
+            <span className="tooltip-label">DFL:</span>
+            <span className="tooltip-value">{data.dfl} MT</span>
+            
+            <span className="tooltip-label">Inventory:</span>
+            <span className="tooltip-value">{data.inventory} MT</span>
+            
+            <span className="tooltip-label">Ratio:</span>
+            <span className="tooltip-value" style={{ color: ratioColor }}>
+              {data.ratio}
+            </span>
+            
+            <span className="tooltip-label">Buffer:</span>
+            <span className="tooltip-value" style={{ color: bufferColor }}>
+              {data.buffer}%
+            </span>
+            
+            <span className="tooltip-label">Status:</span>
+            <span className="tooltip-value" style={{ color: statusColors[data.status] }}>
+              {data.status}
+            </span>
+          </div>
+          
+          <div className="tooltip-separator" />
+          
+          <div className="tooltip-grid">
+            <span className="tooltip-label">Completion:</span>
+            <span className="tooltip-value">{data.completionDate || '—'}</span>
+            
+            <span className="tooltip-label">Avail:</span>
+            <span className="tooltip-value">{data.availDate || '—'}</span>
+            
+            <span className="tooltip-label">Bal. to Prod:</span>
+            <span className="tooltip-value" style={{ color: balColor }}>
+              {data.balToProd} MT
+            </span>
+          </div>
+        </div>
+        
+        {/* Right: Smart Insight */}
+        <div className="tooltip-right">
+          <div className="tooltip-insight-header">✨ Smart Insight</div>
+          <div className="tooltip-insight-text">
+            {data.insight}
+          </div>
+        </div>
+        
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+## 4. REMOVE OLD TOOLTIP LABELS
+
+Search and remove these old labels/calculations from the auto-sequence preview:
+
+| Remove | Replace with |
+|---|---|
+| "Stock Level Data" | Product name header |
+| "Inventory target: X MT" | "Inventory: X MT" |
+| "Fulfillment: X%" | "Buffer: X%" |
+| "Gap: X% still needed" | "Ratio: X" |
+| "Target date: X" | "Completion: X" + "Avail: X" |
+| "Status: Needs Production" | 4-level status |
+| Old warning messages | Smart Insight from AI |
+
+---
+
+## 5. APPLY TO
+
+- ✅ Auto-Sequence Preview — update tooltip content and fix clipping
+- ✅ N10D Table — ensure portal rendering to prevent clipping
+- ❌ Do NOT change any other tooltips in the app
+```

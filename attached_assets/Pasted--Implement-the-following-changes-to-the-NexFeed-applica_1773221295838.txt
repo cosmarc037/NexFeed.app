@@ -1,0 +1,181 @@
+```
+Implement the following changes to the NexFeed application:
+
+---
+
+## 1. END DATE — ONLY SHOWS WHEN STATUS IS "DONE"
+
+The end date (completion date) field should ONLY have a value when the order's status is currently set to "Done". When the status is changed away from "Done", the end date must be cleared.
+
+**Rules:**
+
+- When status is set TO "Done":
+  - End date is generated/populated (existing behavior — this works correctly already).
+
+- When status is changed FROM "Done" to ANY other status:
+  - End date is immediately cleared (set to null/blank).
+  - The cell reverts to the placeholder state: "Set completion" in grey (#a1a8b3), italic.
+  - The cleared end date does NOT affect downstream cascade — downstream orders recalculate based on whatever anchor is available above them.
+
+- When status is anything OTHER than "Done":
+  - End date follows the normal cascade logic (calculated from Start Date/Time or previous order's Completion, as defined in previous changes).
+  - The "Done"-generated end date is a SEPARATE concept — it represents the ACTUAL completion timestamp, not the estimated cascade completion.
+
+**Implementation:**
+- Find the status change handler.
+- Add a check: when the previous status was "Done" and the new status is NOT "Done", clear the end date field.
+- Ensure this triggers a cascade recalculation for downstream orders if needed.
+
+---
+
+## 2. STATUS DROPDOWN — UPDATED OPTIONS
+
+Replace the current status dropdown options with the following list, in this exact order:
+
+| # | Status | Default | Color | Trigger |
+|---|---|---|---|---|
+| 1 | Plotted | ✅ Default on upload | Grey (#a1a8b3) | — |
+| 2 | Hold | | Yellow/Amber (#f59e0b) | — |
+| 3 | Cut | | Orange (#fd5108) | — |
+| 4 | Combined with other PO | | Blue (#1976d2) | — |
+| 5 | In production | | Blue (#1976d2) | — |
+| 6 | On-going batching | | Blue (#1976d2) | — |
+| 7 | On-going pelleting | | Blue (#1976d2) | — |
+| 8 | On-going bagging | | Blue (#1976d2) | — |
+| 9 | Done | | Green (#43a047) | Generates end date |
+| 10 | Cancel PO | | Red (#e53935) | Triggers cancel dialog |
+
+**Notes:**
+- "Plotted" is the DEFAULT status assigned to every order when uploaded from SAP.
+- "Cancel PO" triggers the cancellation confirmation dialog (as previously defined). The status does not change until the dialog is confirmed.
+- "Done" triggers the end date generation (existing behavior).
+- All other statuses are simple status changes — no special dialogs or side effects.
+- The dropdown displays options in the order listed above.
+
+**Status badge styling:**
+
+| Status | Background | Text Color |
+|---|---|---|
+| Plotted | Light grey (#f3f4f6) | Grey (#6b7280) |
+| Hold | Light amber (#fef3c7) | Amber (#92400e) |
+| Cut | Light orange (#fff7ed) | Orange (#c2410c) |
+| Combined with other PO | Light blue (#dbeafe) | Blue (#1e40af) |
+| In production | Light blue (#dbeafe) | Blue (#1e40af) |
+| On-going batching | Light blue (#dbeafe) | Blue (#1e40af) |
+| On-going pelleting | Light blue (#dbeafe) | Blue (#1e40af) |
+| On-going bagging | Light blue (#dbeafe) | Blue (#1e40af) |
+| Done | Light green (#dcfce7) | Green (#166534) |
+| Cancel PO | Light red (#fef2f2) | Red (#991b1b) |
+
+---
+
+## 3. SMART COMBINE — DETAIL ALIGNMENT
+
+Fix the alignment of the shared detail fields in Smart Combine recommendation cards. The labels and values should be aligned in a clean two-column layout.
+
+**Current (misaligned):**
+```
+Material Code (FG)    1000000000241
+Category              Hogs
+Form                  MP
+Batch Size            4.00
+Line                  Line 1
+```
+
+The labels and values are not visually aligned — values start at different horizontal positions.
+
+**Fixed (aligned):**
+
+All labels are left-aligned, and all values start at the SAME horizontal position, creating a clean two-column grid:
+
+```
+Material Code (FG)    1000000000241
+Category              Hogs
+Form                  MP
+Batch Size            4.00
+Line                  Line 1
+```
+
+**Implementation:**
+- Use a consistent layout for the detail section — either CSS grid or a two-column flex layout.
+- Label column: fixed width, left-aligned, grey text (#6b7280), font-size ~13px.
+- Value column: left-aligned at a consistent start position, dark text (#1a1a1a), font-weight 500 or 600, font-size ~13px.
+- The label column width should be wide enough to accommodate the longest label ("Material Code (FG)") without wrapping.
+- Suggested label column width: ~160px or ~40% of the card width.
+- All value text starts at the same x-position regardless of label length.
+
+**Spacing:**
+- Row height: ~24-28px per detail row.
+- Vertical spacing between rows: ~2-4px.
+- Top padding above detail section: ~12px (below the card title).
+- Bottom padding below detail section: ~12px (above the first order card).
+
+---
+
+## 4. CANCEL DIALOG — UPDATED LAYOUT WITH MORE DETAILS
+
+Update the Cancel Order confirmation dialog to show additional order details including Line, Availability, and the Item description with Form appended and greyed out.
+
+**Updated dialog layout:**
+
+```
+╔══════════════════════════════════════════════════════════════╗
+║  ⚠ Cancel Order                                              ║
+║                                                               ║
+║  Are you sure you want to cancel this order?                  ║
+║                                                               ║
+║  Line:           1                                            ║
+║  FPR:            260309                                       ║
+║  Item:           Salto Conditioner P 1kg (Bundle) - MP        ║
+║  Volume:         3 MT                                         ║
+║  Availability:   prio replenish                               ║
+║                                                               ║
+║  Cancellation Reason *                                        ║
+║  ┌──────────────────────────────────────┐                     ║
+║  │ Select a reason               ▼     │                     ║
+║  └──────────────────────────────────────┘                     ║
+║                                                               ║
+║  Additional Notes (optional)                                  ║
+║  ┌──────────────────────────────────────┐                     ║
+║  │ Any additional details...            │                     ║
+║  │                                      │                     ║
+║  └──────────────────────────────────────┘                     ║
+║                                                               ║
+║              [Go Back]    [Confirm Cancel]                    ║
+╚══════════════════════════════════════════════════════════════╝
+```
+
+**Detail fields layout:**
+
+Use the same two-column aligned layout as the Smart Combine details:
+
+| Label | Value | Value Styling |
+|---|---|---|
+| Line: | [line number, e.g., "1"] | Bold, dark text (#1a1a1a) |
+| FPR: | [FPR value, e.g., "260309"] | Bold, dark text (#1a1a1a) |
+| Item: | [Item description + " - " + Form, e.g., "Salto Conditioner P 1kg (Bundle) - MP"] | Grey text (#a1a8b3), regular weight |
+| Volume: | [volume + " MT", e.g., "3 MT"] | Bold, dark text (#1a1a1a) |
+| Availability: | [avail date value] | Dark text for dates (#1a1a1a), orange (#fd5108) for "prio replenish" / "safety stocks" / "for sched" |
+
+**Label styling:**
+- Labels: grey text (#6b7280), regular weight, right-aligned or left-aligned with consistent width (~100px).
+- Values: start at the same x-position.
+
+**Item field — special formatting:**
+- The Item value is the Item Description + " - " + Form (e.g., "Salto Conditioner P 1kg (Bundle) - MP").
+- The ENTIRE Item value text is greyed out (#a1a8b3), regular weight (not bold).
+- This distinguishes it visually from the other bold values.
+
+**Availability field — special formatting:**
+- If the availability is a valid date: dark text (#1a1a1a), format "March 19, 2026"
+- If the availability is a non-date value: orange text (#fd5108)
+  - "prio replenish"
+  - "safety stocks"
+  - "for sched"
+
+**Rest of the dialog remains the same:**
+- Cancellation Reason dropdown (required)
+- Additional Notes textarea (optional, required if "Other" selected)
+- [Go Back] grey outlined button
+- [Confirm Cancel] red filled button (#e53935)
+```

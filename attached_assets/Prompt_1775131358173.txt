@@ -1,0 +1,1025 @@
+```
+Implement the following changes to the NexFeed order table:
+
+---
+
+## 1. MOVE HIDE TO RIGHT-CLICK, FILTER ICON ON HEADER
+
+### CURRENT
+
+- Hide button visible on column headers
+- No filter capability
+
+### NEW
+
+- Hide column → triggered by right-click on column header
+- Filter icon → visible on column header (small funnel)
+
+### RIGHT-CLICK CONTEXT MENU — HIDE COLUMN
+
+```jsx
+function ColumnHeaderContextMenu({ column, position, onHide, onClose }) {
+  return (
+    <div 
+      className="context-menu"
+      style={{
+        position: 'fixed',
+        left: position.x,
+        top: position.y,
+        zIndex: 9999
+      }}
+    >
+      <div 
+        className="context-menu-item" 
+        onClick={() => { onHide(column); onClose(); }}
+      >
+        Hide column
+      </div>
+    </div>
+  );
+}
+```
+
+```css
+.context-menu {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  padding: 4px 0;
+  min-width: 150px;
+}
+
+.context-menu-item {
+  padding: 8px 16px;
+  font-size: 12px;
+  color: #374151;
+  cursor: pointer;
+}
+
+.context-menu-item:hover {
+  background: #f3f4f6;
+}
+```
+
+### COLUMN HEADER — WITH FILTER ICON
+
+```jsx
+function ColumnHeader({ column, onFilter, onContextMenu }) {
+  const [isHovered, setIsHovered] = useState(false);
+  const hasActiveFilter = column.filterActive;
+  
+  return (
+    <th
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        onContextMenu(e, column);
+      }}
+    >
+      <div className="column-header-content">
+        <span className="column-header-text">{column.label}</span>
+        
+        {/* Filter icon — visible on hover OR when active */}
+        {(isHovered || hasActiveFilter) && (
+          <button
+            className={`filter-icon-btn ${hasActiveFilter ? 'active' : ''}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onFilter(column, e);
+            }}
+          >
+            <FilterIcon />
+          </button>
+        )}
+      </div>
+    </th>
+  );
+}
+```
+
+### FILTER ICON STYLING
+
+```css
+.column-header-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+}
+
+.filter-icon-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #9ca3af;
+  font-size: 10px;
+  transition: color 0.15s, background 0.15s;
+}
+
+.filter-icon-btn:hover {
+  background: rgba(0, 0, 0, 0.05);
+  color: #6b7280;
+}
+
+/* Active filter — orange color */
+.filter-icon-btn.active {
+  color: #fd5108;
+}
+
+.filter-icon-btn.active:hover {
+  color: #e8490b;
+  background: rgba(253, 81, 8, 0.08);
+}
+```
+
+### FILTER ICON SVG
+
+```jsx
+function FilterIcon() {
+  return (
+    <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5">
+      <path d="M1 1.5h8M2.5 4h5M4 6.5h2" strokeLinecap="round"/>
+    </svg>
+  );
+}
+```
+
+---
+
+## 2. FILTER DROPDOWN — PER COLUMN TYPE
+
+When user clicks the filter icon, a dropdown appears below the header with the appropriate filter type.
+
+### FILTER TYPES
+
+#### A. MULTI-SELECT (Checkboxes)
+
+For: Readiness, Material Code (SFG), Material Code (FG), Item Description, Form, Status, Threads, Sacks, Markings, Tags
+
+```jsx
+function MultiSelectFilter({ column, allValues, activeValues, onApply, onClear, onClose }) {
+  const [selected, setSelected] = useState(new Set(activeValues || []));
+  const [searchText, setSearchText] = useState('');
+  
+  const filteredValues = allValues.filter(v => 
+    v.toLowerCase().includes(searchText.toLowerCase())
+  );
+  
+  function toggleValue(val) {
+    const next = new Set(selected);
+    if (next.has(val)) next.delete(val);
+    else next.add(val);
+    setSelected(next);
+  }
+  
+  function selectAll() {
+    setSelected(new Set(allValues));
+  }
+  
+  function deselectAll() {
+    setSelected(new Set());
+  }
+  
+  return (
+    <div className="filter-dropdown">
+      <div className="filter-dropdown-header">
+        <span className="filter-dropdown-title">Filter: {column.label}</span>
+        <button className="filter-close-btn" onClick={onClose}>✕</button>
+      </div>
+      
+      {/* Search within options */}
+      <div className="filter-search">
+        <input
+          type="text"
+          placeholder="Search..."
+          value={searchText}
+          onChange={(e) => setSearchText(e.target.value)}
+          className="filter-search-input"
+        />
+      </div>
+      
+      {/* Select all / Deselect all */}
+      <div className="filter-actions">
+        <button className="filter-action-btn" onClick={selectAll}>Select all</button>
+        <button className="filter-action-btn" onClick={deselectAll}>Deselect all</button>
+      </div>
+      
+      {/* Checkbox list */}
+      <div className="filter-options-list">
+        {filteredValues.map(val => (
+          <label key={val} className="filter-option">
+            <input
+              type="checkbox"
+              checked={selected.has(val)}
+              onChange={() => toggleValue(val)}
+            />
+            <span>{val || '(empty)'}</span>
+          </label>
+        ))}
+      </div>
+      
+      {/* Apply / Clear */}
+      <div className="filter-dropdown-footer">
+        <button className="filter-clear-btn" onClick={() => { onClear(); onClose(); }}>
+          Clear
+        </button>
+        <button 
+          className="filter-apply-btn"
+          onClick={() => { onApply(Array.from(selected)); onClose(); }}
+        >
+          Apply
+        </button>
+      </div>
+    </div>
+  );
+}
+```
+
+#### B. TEXT SEARCH (Contains)
+
+For: FPR, Planned Order, Production Order, HA Info, Summary, FPR Notes, Special Remarks
+
+```jsx
+function TextSearchFilter({ column, activeValue, onApply, onClear, onClose }) {
+  const [text, setText] = useState(activeValue || '');
+  
+  return (
+    <div className="filter-dropdown">
+      <div className="filter-dropdown-header">
+        <span className="filter-dropdown-title">Filter: {column.label}</span>
+        <button className="filter-close-btn" onClick={onClose}>✕</button>
+      </div>
+      
+      <div className="filter-text-input-container">
+        <input
+          type="text"
+          placeholder={`Search ${column.label}...`}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          className="filter-text-input"
+          autoFocus
+        />
+      </div>
+      
+      <div className="filter-dropdown-footer">
+        <button className="filter-clear-btn" onClick={() => { onClear(); onClose(); }}>
+          Clear
+        </button>
+        <button 
+          className="filter-apply-btn"
+          onClick={() => { onApply(text); onClose(); }}
+        >
+          Apply
+        </button>
+      </div>
+    </div>
+  );
+}
+```
+
+#### C. NUMBER RANGE (Min-Max)
+
+For: Prio, Volume, Batch Size, Batches, Bags, Production Time
+
+```jsx
+function NumberRangeFilter({ column, activeMin, activeMax, onApply, onClear, onClose }) {
+  const [min, setMin] = useState(activeMin || '');
+  const [max, setMax] = useState(activeMax || '');
+  
+  return (
+    <div className="filter-dropdown">
+      <div className="filter-dropdown-header">
+        <span className="filter-dropdown-title">Filter: {column.label}</span>
+        <button className="filter-close-btn" onClick={onClose}>✕</button>
+      </div>
+      
+      <div className="filter-range-inputs">
+        <div className="filter-range-field">
+          <label>Min</label>
+          <input
+            type="number"
+            placeholder="Min"
+            value={min}
+            onChange={(e) => setMin(e.target.value)}
+            className="filter-number-input"
+          />
+        </div>
+        <span className="filter-range-separator">—</span>
+        <div className="filter-range-field">
+          <label>Max</label>
+          <input
+            type="number"
+            placeholder="Max"
+            value={max}
+            onChange={(e) => setMax(e.target.value)}
+            className="filter-number-input"
+          />
+        </div>
+      </div>
+      
+      <div className="filter-dropdown-footer">
+        <button className="filter-clear-btn" onClick={() => { onClear(); onClose(); }}>
+          Clear
+        </button>
+        <button 
+          className="filter-apply-btn"
+          onClick={() => { onApply({ min: min ? parseFloat(min) : null, max: max ? parseFloat(max) : null }); onClose(); }}
+        >
+          Apply
+        </button>
+      </div>
+    </div>
+  );
+}
+```
+
+#### D. DATE RANGE (From-To)
+
+For: Start Date, Avail Date, Completion Date, End Date
+
+```jsx
+function DateRangeFilter({ column, activeFrom, activeTo, onApply, onClear, onClose }) {
+  const [fromDate, setFromDate] = useState(activeFrom || null);
+  const [toDate, setToDate] = useState(activeTo || null);
+  
+  return (
+    <div className="filter-dropdown">
+      <div className="filter-dropdown-header">
+        <span className="filter-dropdown-title">Filter: {column.label}</span>
+        <button className="filter-close-btn" onClick={onClose}>✕</button>
+      </div>
+      
+      <div className="filter-date-inputs">
+        <div className="filter-date-field">
+          <label>From</label>
+          <DatePickerField
+            value={fromDate}
+            onChange={setFromDate}
+            placeholder="Start date"
+          />
+        </div>
+        <div className="filter-date-field">
+          <label>To</label>
+          <DatePickerField
+            value={toDate}
+            onChange={setToDate}
+            placeholder="End date"
+          />
+        </div>
+      </div>
+      
+      <div className="filter-dropdown-footer">
+        <button className="filter-clear-btn" onClick={() => { onClear(); onClose(); }}>
+          Clear
+        </button>
+        <button 
+          className="filter-apply-btn"
+          onClick={() => { onApply({ from: fromDate, to: toDate }); onClose(); }}
+        >
+          Apply
+        </button>
+      </div>
+    </div>
+  );
+}
+```
+
+#### E. TOGGLE (Yes/No/Any)
+
+For: HA Prep, History
+
+```jsx
+function ToggleFilter({ column, activeValue, options, onApply, onClear, onClose }) {
+  const [selected, setSelected] = useState(activeValue || 'any');
+  
+  return (
+    <div className="filter-dropdown">
+      <div className="filter-dropdown-header">
+        <span className="filter-dropdown-title">Filter: {column.label}</span>
+        <button className="filter-close-btn" onClick={onClose}>✕</button>
+      </div>
+      
+      <div className="filter-toggle-options">
+        {options.map(opt => (
+          <label key={opt.value} className="filter-toggle-option">
+            <input
+              type="radio"
+              name={`filter-${column.key}`}
+              checked={selected === opt.value}
+              onChange={() => setSelected(opt.value)}
+            />
+            <span>{opt.label}</span>
+          </label>
+        ))}
+      </div>
+      
+      <div className="filter-dropdown-footer">
+        <button className="filter-clear-btn" onClick={() => { onClear(); onClose(); }}>
+          Clear
+        </button>
+        <button 
+          className="filter-apply-btn"
+          onClick={() => { onApply(selected); onClose(); }}
+        >
+          Apply
+        </button>
+      </div>
+    </div>
+  );
+}
+```
+
+#### F. TIME RANGE (From-To)
+
+For: Start Time
+
+```jsx
+function TimeRangeFilter({ column, activeFrom, activeTo, onApply, onClear, onClose }) {
+  const [fromTime, setFromTime] = useState(activeFrom || '');
+  const [toTime, setToTime] = useState(activeTo || '');
+  
+  return (
+    <div className="filter-dropdown">
+      <div className="filter-dropdown-header">
+        <span className="filter-dropdown-title">Filter: {column.label}</span>
+        <button className="filter-close-btn" onClick={onClose}>✕</button>
+      </div>
+      
+      <div className="filter-time-inputs">
+        <div className="filter-time-field">
+          <label>From</label>
+          <input
+            type="time"
+            value={fromTime}
+            onChange={(e) => setFromTime(e.target.value)}
+            className="filter-time-input"
+          />
+        </div>
+        <span className="filter-range-separator">—</span>
+        <div className="filter-time-field">
+          <label>To</label>
+          <input
+            type="time"
+            value={toTime}
+            onChange={(e) => setToTime(e.target.value)}
+            className="filter-time-input"
+          />
+        </div>
+      </div>
+      
+      <div className="filter-dropdown-footer">
+        <button className="filter-clear-btn" onClick={() => { onClear(); onClose(); }}>
+          Clear
+        </button>
+        <button 
+          className="filter-apply-btn"
+          onClick={() => { onApply({ from: fromTime, to: toTime }); onClose(); }}
+        >
+          Apply
+        </button>
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+## 3. COLUMN-TO-FILTER MAPPING
+
+```javascript
+const COLUMN_FILTER_CONFIG = {
+  // Standalone
+  readiness: { type: 'multi-select', getValues: (orders) => [...new Set(orders.map(o => o.readiness).filter(Boolean))] },
+  prio: { type: 'number-range' },
+  fpr: { type: 'text-search' },
+  
+  // Order Details
+  planned_order: { type: 'text-search' },
+  production_order: { type: 'text-search' },
+  material_code_sfg: { type: 'multi-select', getValues: (orders) => [...new Set(orders.map(o => o.material_code_sfg).filter(Boolean))] },
+  material_code_fg: { type: 'multi-select', getValues: (orders) => [...new Set(orders.map(o => o.material_code_fg).filter(Boolean))] },
+  item_description: { type: 'multi-select', getValues: (orders) => [...new Set(orders.map(o => o.item_description).filter(Boolean))] },
+  
+  // Production Parameters
+  form: { type: 'multi-select', getValues: (orders) => [...new Set(orders.map(o => o.form).filter(Boolean))] },
+  volume: { type: 'number-range' },
+  batch_size: { type: 'number-range' },
+  batches: { type: 'number-range' },
+  bags: { type: 'number-range' },
+  production_time: { type: 'number-range' },
+  
+  // Mixer Details
+  ha_info: { type: 'text-search' },
+  ha_prep: { type: 'toggle', options: [
+    { value: 'any', label: 'Any' },
+    { value: 'checked', label: 'Checked' },
+    { value: 'unchecked', label: 'Unchecked' }
+  ]},
+  
+  // Operator
+  status: { type: 'multi-select', getValues: () => [
+    'Plotted', 'Planned', 'Hold', 'Cut', 'In Production',
+    'On-going batching', 'On-going pelleting', 'On-going bagging',
+    'Done', 'Cancel PO', 'Uncombine', 'Merge Back'
+  ]},
+  
+  // Scheduling
+  start_date: { type: 'date-range' },
+  start_time: { type: 'time-range' },
+  avail_date: { type: 'date-range' },
+  completion_date: { type: 'date-range' },
+  
+  // Product Insights
+  summary: { type: 'text-search' },
+  
+  // Notes
+  fpr_notes: { type: 'text-search' },
+  special_remarks: { type: 'text-search' },
+  
+  // Bagger Details
+  threads: { type: 'multi-select', getValues: (orders) => [...new Set(orders.map(o => o.threads).filter(Boolean))] },
+  sacks: { type: 'multi-select', getValues: (orders) => [...new Set(orders.map(o => o.sacks).filter(Boolean))] },
+  markings: { type: 'multi-select', getValues: (orders) => [...new Set(orders.map(o => o.markings).filter(Boolean))] },
+  tags: { type: 'multi-select', getValues: (orders) => [...new Set(orders.map(o => o.tags).filter(Boolean))] },
+  
+  // Completion & Tracking
+  end_date: { type: 'date-range' },
+  history: { type: 'toggle', options: [
+    { value: 'any', label: 'Any' },
+    { value: 'has_history', label: 'Has history' },
+    { value: 'none', label: 'None' }
+  ]}
+};
+```
+
+---
+
+## 4. FILTER ENGINE
+
+```javascript
+function applyFilters(orders, activeFilters) {
+  if (Object.keys(activeFilters).length === 0) return orders;
+  
+  return orders.filter(order => {
+    for (const [columnKey, filter] of Object.entries(activeFilters)) {
+      const config = COLUMN_FILTER_CONFIG[columnKey];
+      if (!config) continue;
+      
+      const value = order[columnKey];
+      
+      switch (config.type) {
+        case 'multi-select': {
+          if (filter.values && filter.values.length > 0) {
+            if (!filter.values.includes(value)) return false;
+          }
+          break;
+        }
+        
+        case 'text-search': {
+          if (filter.text && filter.text.trim() !== '') {
+            const searchText = filter.text.toLowerCase();
+            const cellValue = (value || '').toString().toLowerCase();
+            if (!cellValue.includes(searchText)) return false;
+          }
+          break;
+        }
+        
+        case 'number-range': {
+          const numValue = parseFloat(value) || 0;
+          if (filter.min !== null && filter.min !== undefined && numValue < filter.min) return false;
+          if (filter.max !== null && filter.max !== undefined && numValue > filter.max) return false;
+          break;
+        }
+        
+        case 'date-range': {
+          if (!value || !isRealDate(value)) {
+            if (filter.from || filter.to) return false;
+            break;
+          }
+          const dateValue = parseDate(value);
+          if (filter.from) {
+            const fromDate = parseDate(filter.from);
+            if (fromDate && dateValue < fromDate) return false;
+          }
+          if (filter.to) {
+            const toDate = parseDate(filter.to);
+            if (toDate && dateValue > toDate) return false;
+          }
+          break;
+        }
+        
+        case 'time-range': {
+          if (!value) {
+            if (filter.from || filter.to) return false;
+            break;
+          }
+          if (filter.from && value < filter.from) return false;
+          if (filter.to && value > filter.to) return false;
+          break;
+        }
+        
+        case 'toggle': {
+          if (filter.value && filter.value !== 'any') {
+            if (filter.value === 'checked' && !value) return false;
+            if (filter.value === 'unchecked' && value) return false;
+            if (filter.value === 'has_history' && (!order.history || order.history.length === 0)) return false;
+            if (filter.value === 'none' && order.history && order.history.length > 0) return false;
+          }
+          break;
+        }
+      }
+    }
+    
+    return true;
+  });
+}
+```
+
+---
+
+## 5. FILTER STATE MANAGEMENT
+
+```javascript
+function useOrderFilters() {
+  // Filters are per line tab
+  const [filtersByLine, setFiltersByLine] = useState({});
+  
+  function getActiveFilters(line) {
+    return filtersByLine[line] || {};
+  }
+  
+  function setFilter(line, columnKey, filterData) {
+    setFiltersByLine(prev => ({
+      ...prev,
+      [line]: {
+        ...(prev[line] || {}),
+        [columnKey]: filterData
+      }
+    }));
+  }
+  
+  function clearFilter(line, columnKey) {
+    setFiltersByLine(prev => {
+      const lineFilters = { ...(prev[line] || {}) };
+      delete lineFilters[columnKey];
+      return { ...prev, [line]: lineFilters };
+    });
+  }
+  
+  function clearAllFilters(line) {
+    setFiltersByLine(prev => ({
+      ...prev,
+      [line]: {}
+    }));
+  }
+  
+  function hasActiveFilters(line) {
+    const filters = filtersByLine[line] || {};
+    return Object.keys(filters).length > 0;
+  }
+  
+  return {
+    getActiveFilters,
+    setFilter,
+    clearFilter,
+    clearAllFilters,
+    hasActiveFilters
+  };
+}
+```
+
+---
+
+## 6. CLEAR FILTERS BUTTON
+
+Appears beside "+ Add Order" ONLY when filters are active:
+
+```jsx
+function LineTabHeader({ line, onAddOrder, filters }) {
+  return (
+    <div className="line-tab-header">
+      <button className="add-order-btn" onClick={onAddOrder}>
+        + Add Order
+      </button>
+      
+      {filters.hasActiveFilters(line) && (
+        <button 
+          className="clear-filters-btn"
+          onClick={() => filters.clearAllFilters(line)}
+        >
+          Clear filters
+        </button>
+      )}
+    </div>
+  );
+}
+```
+
+### STYLING
+
+```css
+.line-tab-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.clear-filters-btn {
+  background: none;
+  border: 1px solid #fecaca;
+  color: #dc2626;
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.clear-filters-btn:hover {
+  background: #fef2f2;
+}
+```
+
+---
+
+## 7. FILTER DROPDOWN STYLING
+
+```css
+.filter-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 100;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+  min-width: 220px;
+  max-width: 300px;
+  animation: filterDropdownFadeIn 0.15s ease;
+}
+
+@keyframes filterDropdownFadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.filter-dropdown-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.filter-dropdown-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: #374151;
+}
+
+.filter-close-btn {
+  background: none;
+  border: none;
+  color: #9ca3af;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.filter-search-input,
+.filter-text-input {
+  width: 100%;
+  padding: 6px 10px;
+  font-size: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 4px;
+  outline: none;
+}
+
+.filter-search-input:focus,
+.filter-text-input:focus {
+  border-color: #fd5108;
+}
+
+.filter-search {
+  padding: 8px 12px;
+}
+
+.filter-text-input-container {
+  padding: 8px 12px;
+}
+
+.filter-actions {
+  display: flex;
+  gap: 8px;
+  padding: 0 12px 4px;
+}
+
+.filter-action-btn {
+  background: none;
+  border: none;
+  color: #fd5108;
+  font-size: 10px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.filter-action-btn:hover {
+  text-decoration: underline;
+}
+
+.filter-options-list {
+  max-height: 200px;
+  overflow-y: auto;
+  padding: 4px 12px;
+}
+
+.filter-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 11px;
+  color: #374151;
+  cursor: pointer;
+}
+
+.filter-option input[type="checkbox"] {
+  accent-color: #fd5108;
+}
+
+.filter-range-inputs,
+.filter-date-inputs,
+.filter-time-inputs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+}
+
+.filter-range-field,
+.filter-date-field,
+.filter-time-field {
+  flex: 1;
+}
+
+.filter-range-field label,
+.filter-date-field label,
+.filter-time-field label {
+  display: block;
+  font-size: 10px;
+  color: #6b7280;
+  margin-bottom: 4px;
+}
+
+.filter-number-input,
+.filter-time-input {
+  width: 100%;
+  padding: 4px 8px;
+  font-size: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 4px;
+  outline: none;
+}
+
+.filter-range-separator {
+  color: #9ca3af;
+  font-size: 12px;
+  margin-top: 16px;
+}
+
+.filter-toggle-options {
+  padding: 8px 12px;
+}
+
+.filter-toggle-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 11px;
+  color: #374151;
+  cursor: pointer;
+}
+
+.filter-toggle-option input[type="radio"] {
+  accent-color: #fd5108;
+}
+
+.filter-dropdown-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 8px 12px;
+  border-top: 1px solid #f3f4f6;
+}
+
+.filter-clear-btn {
+  background: none;
+  border: 1px solid #e5e7eb;
+  color: #6b7280;
+  border-radius: 4px;
+  padding: 4px 12px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.filter-apply-btn {
+  background: #fd5108;
+  color: #ffffff;
+  border: none;
+  border-radius: 4px;
+  padding: 4px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.filter-apply-btn:hover {
+  background: #e8490b;
+}
+```
+
+---
+
+## 8. APPLY FILTERS TO TABLE RENDERING
+
+```jsx
+function OrderTable({ allOrders, currentLine, filters }) {
+  const lineOrders = allOrders.filter(o => o.line === currentLine);
+  const activeFilters = filters.getActiveFilters(currentLine);
+  const filteredOrders = applyFilters(lineOrders, activeFilters);
+  
+  return (
+    <table>
+      <thead>
+        <tr>
+          {columns.map(col => (
+            <ColumnHeader
+              key={col.key}
+              column={{
+                ...col,
+                filterActive: !!activeFilters[col.key]
+              }}
+              onFilter={(column, e) => openFilterDropdown(column, e)}
+              onContextMenu={(e, column) => openContextMenu(e, column)}
+            />
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {filteredOrders.map(order => (
+          <OrderRow key={order.id} order={order} />
+        ))}
+      </tbody>
+    </table>
+  );
+}
+```
+
+---
+
+## VERIFICATION
+
+### Filter icon
+1. ✅ Small funnel icon on each column header
+2. ✅ Icon appears on hover over header
+3. ✅ Icon stays visible and turns orange when filter is active
+4. ✅ Click icon opens filter dropdown
+
+### Hide column
+5. ✅ Right-click on header shows "Hide column" context menu
+6. ✅ Clicking "Hide column" hides the column
+7. ✅ Same toggle mechanism as before
+
+### Filter types
+8. ✅ Multi-select with checkboxes for Form, Status, Material Code, etc.
+9. ✅ Text search for FPR, Planned Order, Notes, etc.
+10. ✅ Number range for Volume, Batches, Production Time, etc.
+11. ✅ Date range for Start Date, Avail Date, Completion Date, End Date
+12. ✅ Time range for Start Time
+13. ✅ Toggle for HA Prep, History
+
+### Multiple filters
+14. ✅ Can apply filters on multiple columns simultaneously
+15. ✅ Filters stack (AND logic)
+
+### Clear filters
+16. ✅ "Clear filters" button appears beside "+ Add Order" when filters active
+17. ✅ Button hidden when no filters active
+18. ✅ Clicking clears all filters for current line
+19. ✅ Individual clear per column in filter dropdown
+
+### Per line
+20. ✅ Filters are independent per line tab
+21. ✅ Switching to Line 2 shows Line 2's filters (or no filters)
+```

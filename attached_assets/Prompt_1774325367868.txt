@@ -1,0 +1,225 @@
+```
+Implement the following changes to the NexFeed application:
+
+---
+
+## AUTO-SEQUENCE PREVIEW TABLE — FIX COLUMN LAYOUT AND ALIGNMENT
+
+The auto-sequence preview table looks messy — columns are cramped, text is wrapping awkwardly, headers are uppercase/bold when they shouldn't be, and widths don't match the main table. Fix all of this.
+
+---
+
+### COLUMN HEADERS — MATCH MAIN TABLE STYLING
+
+| Property | Value |
+|---|---|
+| Font weight | 400 (regular, NOT bold) |
+| Text transform | None (normal case, NOT uppercase) |
+| Font size | 10px |
+| Color | Grey (#6b7280) |
+| Letter spacing | 0 (no extra spacing) |
+
+**Current (wrong):**
+```
+PRIO | FPR | PLANNED ORDER | MATERIAL CODE | ITEM DESCRIPTION | FORM | VOLUME (MT) | BATCH SZ | BATCHES
+```
+
+**Updated (correct):**
+```
+Prio | FPR | Planned Order | Material Code | Item Description | Form | Volume (MT) | Batch Size | Batches
+```
+
+---
+
+### COLUMN WIDTHS — PROPER SIZING
+
+Set explicit column widths for the auto-sequence preview table so columns are properly sized and consistent:
+
+| Column | Width | Alignment |
+|---|---|---|
+| Drag Handle | 32px | Center |
+| Prio | 50px | Center |
+| FPR | 80px | Left |
+| Planned Order (FG / SFG) | 120px | Left |
+| Material Code (FG) | 140px | Left |
+| Item Description | 280px | Left |
+| Form | 70px | Center |
+| Volume (MT) | 80px | Center |
+| Batch Size | 80px | Center |
+| Batches | 70px | Center |
+| Start Date | 110px | Center |
+| Start Time | 90px | Center |
+| Avail Date | 140px | Left |
+| Completion Date | 160px | Left |
+
+**Total approximate width:** ~1500px (scrollable horizontally if needed)
+
+---
+
+### CELL CONTENT — FIX WRAPPING AND TRUNCATION
+
+**Prio column:**
+- Single number, no wrapping
+- Center-aligned
+- Font-weight: 700
+
+**FPR column:**
+- Single number, no wrapping
+- Left-aligned
+
+**Planned Order (FG / SFG):**
+- Two lines: FG on first line, SFG on second line
+- 12px for both
+- SFG in grey (#6b7280)
+
+**Material Code (FG):**
+- Single line, no wrapping
+- Truncate with ellipsis if overflow
+- Tooltip on hover shows full code
+
+**Item Description:**
+- Allow 2 lines maximum
+- Line 1: Product name (12px, dark text)
+- Line 2: Category (10px, grey #6b7280)
+- Truncate with ellipsis if name exceeds 2 lines
+- 280px width gives enough room for most names
+
+**Form:**
+- Single line, no wrapping
+- Center-aligned
+- Short codes: MP, P, CS, MP-CS
+
+**Volume (MT):**
+- Single line, no wrapping
+- Center-aligned
+- Bold (font-weight 700)
+- Show "MT" suffix: e.g., "80 MT"
+
+**Batch Size:**
+- Single line, no wrapping
+- Center-aligned
+- Show with decimal: "4.00"
+
+**Batches:**
+- Single line, no wrapping
+- Center-aligned
+
+**Start Date:**
+- Single line
+- Center-aligned
+- Format: "Mar 19, 2026"
+- Placeholder: "Set start date" in grey italic 10px
+- Should NOT wrap to multiple lines
+
+**Start Time:**
+- Single line
+- Center-aligned
+- Format: "12:00 PM"
+- Placeholder: "Set time" in grey italic 10px
+- Should NOT wrap
+
+**Avail Date:**
+- Allow 2 lines
+- Line 1: Date or "prio replenish" / "safety stocks" (12px, orange for non-date, dark for date)
+- Line 2: Warning icon (⚠ or ✅) — on the same line as the date, right-aligned
+- 140px width prevents awkward wrapping
+
+**Completion Date:**
+- Single line preferred, 2 lines maximum
+- Format: "03/19/2026 - 12:19 PM"
+- Placeholder: "Set completion" in grey italic 10px
+- 160px width fits the full date-time format
+
+---
+
+### ROW STYLING
+
+| Property | Value |
+|---|---|
+| Row padding vertical | 10px |
+| Row padding horizontal | 10px |
+| Row border-bottom | 1px solid #f3f4f6 |
+| Row hover | #fafafa (very subtle) |
+| Row min-height | 44px |
+| Font size (all cells) | 12px |
+| Line height | 1.5 |
+
+---
+
+### LEFT BORDER INDICATORS
+
+Each row has a 3px left border indicating status:
+
+| Status | Color |
+|---|---|
+| Actual avail date — on track | Green (#43a047) |
+| Stock target date — on track | Blue (#3b82f6) |
+| Tight fit | Amber (#f59e0b) |
+| Will miss deadline | Red (#e53935) |
+| No deadline | Light grey (#d1d5db) |
+| Stock sufficient | Dotted grey (#d1d5db) |
+
+---
+
+### COMBINED ORDERS IN PREVIEW
+
+Combined orders show with blue tint:
+
+| Element | Styling |
+|---|---|
+| Lead row background | Darker blue (#d0e8fc) |
+| Child row background | Light blue (#e3f2fd) |
+| Lead badge | [Lead] blue badge, 10px |
+| Child badge | [Child] blue badge, 10px |
+| Left border | 3px solid #1976d2 (continuous from lead through children) |
+| No indentation | Lead and child rows aligned the same |
+
+---
+
+### TABLE CONTAINER
+
+| Property | Value |
+|---|---|
+| Max height | 500px |
+| Overflow-y | Auto (scroll vertically) |
+| Overflow-x | Auto (scroll horizontally if needed) |
+| Sticky header | Column headers stick to top when scrolling |
+| Background | White |
+| Border | 1px solid #e5e7eb |
+| Border-radius | 8px |
+
+---
+
+### COMPLETE VISUAL EXAMPLE
+
+```
+┌──────┬────────┬─────────────┬────────────────┬───────────────────────────────────┬──────┬────────┬───────┬─────────┬───────────┬──────────┬──────────────┬──────────────────┐
+│      │        │ Planned     │                │                                   │      │ Volume │ Batch │         │ Start     │ Start    │              │ Completion       │
+│ Prio │ FPR    │ Order       │ Material Code  │ Item Description                  │ Form │ (MT)   │ Size  │ Batches │ Date      │ Time     │ Avail Date   │ Date             │
+├──────┼────────┼─────────────┼────────────────┼───────────────────────────────────┼──────┼────────┼───────┼─────────┼───────────┼──────────┼──────────────┼──────────────────┤
+│  1   │ 260309 │ 5882491     │ 1000000000219  │ Gallimax 3 Maintenance (Natural)  │ MP-  │ 80 MT  │ 4.00  │  20     │ Set start │ Set time │ safety    ⚠  │ Set completion   │
+│      │        │ 5915609     │                │ P, 50Kg                           │ CS   │        │       │         │ date      │          │ stocks       │                  │
+│      │        │             │                │ GAMEFOWL                          │      │        │       │         │           │          │              │                  │
+├──────┼────────┼─────────────┼────────────────┼───────────────────────────────────┼──────┼────────┼───────┼─────────┼───────────┼──────────┼──────────────┼──────────────────┤
+│  2   │ 260309 │ -----       │ 1000000000546  │ Salto Conditioner P 1kg (Bundle)  │ MP-  │  3 MT  │ 3.00  │   1     │ Mar 19,   │ 12:00 PM │ Mar 22,      │ 03/19/2026 -     │
+│      │        │ 5875176     │                │ GAMEFOWL                          │ CS   │        │       │         │ 2026      │          │ 2026         │ 12:19 PM         │
+├──────┼────────┼─────────────┼────────────────┼───────────────────────────────────┼──────┼────────┼───────┼─────────┼───────────┼──────────┼──────────────┼──────────────────┤
+│  3   │ 260309 │ 5869937     │ 1000000000241  │ Elite XP Startex, Mini-pellet     │ MP   │ 80 MT  │ 4.00  │  20     │ Set start │ Set time │ prio      ⚠  │ Set completion   │
+│      │        │ 5877608     │                │ 50kg                              │      │        │       │         │ date      │          │ replenish    │                  │
+│      │        │             │                │ HOGS                              │      │        │       │         │           │          │              │                  │
+└──────┴────────┴─────────────┴────────────────┴───────────────────────────────────┴──────┴────────┴───────┴─────────┴───────────┴──────────┴──────────────┴──────────────────┘
+```
+
+---
+
+### MATCH MAIN TABLE EXACTLY
+
+The auto-sequence preview table should feel like a copy of the main interactive table — same font sizes, same column widths, same cell padding, same alignment. The only differences are:
+
+- The preview is inside a modal
+- The preview has left border color indicators
+- The preview has drag handles for reordering within the preview
+- The preview shows the AI Sequence Analysis above it
+
+**If the main table column widths are updated, the preview table should automatically match.**
+```

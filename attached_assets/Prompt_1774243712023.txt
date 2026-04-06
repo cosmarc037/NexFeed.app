@@ -1,0 +1,193 @@
+```
+Implement the following changes to the NexFeed application:
+
+---
+
+## INTERACTIVE ORDER TABLE — INCREASE FONT SIZE AND RESIZE COLUMNS
+
+Increase the default font size of the interactive order table to be equivalent to approximately 10pt in MS Word (which translates to approximately 13.3px or ~0.833rem in web). Round to 13px for clean rendering.
+
+---
+
+### FONT SIZE UPDATES
+
+**Current approximate sizes → Updated sizes:**
+
+| Element | Current (~11-12px) | Updated |
+|---|---|---|
+| Table data cells (all text) | ~11-12px | 13px |
+| Table column headers (sub-headers) | ~9-10px | 11px |
+| Table group headers (main headers like "Order Details") | ~10-11px | 12px |
+| Prio number | ~11-12px | 13px, font-weight 700 |
+| FPR number | ~11-12px | 13px, font-weight 600 |
+| Planned Order FG/SFG values | ~11-12px | 13px |
+| Material Code values | ~11-12px | 13px |
+| Item Description | ~11-12px | 13px |
+| Category (below Item Description) | ~10-11px | 11px (keep slightly smaller, secondary info) |
+| Form value | ~11-12px | 13px |
+| Volume value | ~11-12px | 13px, font-weight 700 |
+| "Original: XX MT" text | ~10px | 11px |
+| Batch Size value | ~11-12px | 13px |
+| Number of Batches | ~11-12px | 13px |
+| Production Time | ~11-12px | 13px |
+| HA Info value | ~11-12px | 13px |
+| Status badge text | ~10-11px | 12px |
+| Start Date value | ~11-12px | 13px |
+| Start Time value | ~11-12px | 13px |
+| Avail Date value | ~11-12px | 13px |
+| Avail Date remarks (TLD | Mar 22) | ~10px | 11px |
+| Completion Date value | ~11-12px | 13px |
+| FPR Notes text | ~11-12px | 13px |
+| Special Remarks text | ~11-12px | 13px |
+| Placeholder text ("Set start date", etc.) | ~11-12px | 12px, italic, grey |
+| Lead/Child/Cut badges | ~9-10px | 11px |
+| Readiness icons | ~12-14px | 15px |
+| Warning/check icons in Avail Date | ~12-14px | 15px |
+
+---
+
+### ROW HEIGHT — ADJUST FOR LARGER FONT
+
+With larger font, rows need slightly more vertical space:
+
+| Property | Current | Updated |
+|---|---|---|
+| Cell padding (vertical) | ~6-8px | 10px |
+| Cell padding (horizontal) | ~8-10px | 12px |
+| Minimum row height | ~36-40px | 44px |
+| Line height | ~1.4 | 1.5 |
+
+---
+
+### COLUMN WIDTH ADJUSTMENTS
+
+Resize columns to balance readability with the larger font. The goal is to prevent text overflow/wrapping while keeping the table visually balanced.
+
+**Column width recommendations:**
+
+| Column | Current (approx) | Updated | Notes |
+|---|---|---|---|
+| Readiness icon | ~30px | 32px | Just an icon, minimal width |
+| Prio | ~40px | 44px | Single/double digit number |
+| Drag handle | ~30px | 32px | Just the grip icon |
+| FPR | ~70px | 80px | 6-digit number |
+| Planned Order FG | ~90px | 100px | Two lines (FG + SFG) |
+| Planned Order SFG | ~90px | 100px | Numbers |
+| Planned Order PMX | ~90px | 100px | Numbers |
+| Production Order FG1 | ~100px | 110px | 10-digit number |
+| Production Order SFG1 | ~100px | 110px | 10-digit number |
+| Production Order SFGPMX | ~100px | 110px | 10-digit number |
+| Material Code (SFG) | ~110px | 120px | Long number |
+| Material Code (FG) | ~110px | 120px | Long number |
+| Item Description | ~200px | 240px | Longest text, needs more space |
+| Category | (part of Item Desc) | (part of Item Desc) | Shown below Item Desc |
+| Form | ~50px | 60px | Short code (MP, P, CS) |
+| Volume (MT) | ~60px | 70px | Number + "MT" |
+| Batch Size | ~60px | 70px | Number with 2 decimals |
+| Number of Batches | ~60px | 70px | Number |
+| Number of Bags | ~60px | 70px | Number |
+| Production Time | ~80px | 90px | "X hrs Y min" format |
+| HA Info | ~50px | 60px | Number (matches batches) |
+| HA Prep | ~60px | 70px | Status indicator |
+| SCADA | ~60px | 70px | Value |
+| PV | ~50px | 60px | Value |
+| Status | ~120px | 140px | Badge with text |
+| Start Date | ~100px | 110px | "Mar 22, 2026" |
+| Start Time | ~80px | 90px | "12:00 PM" |
+| Avail Date | ~110px | 130px | Date or "prio replenish" + icon |
+| Completion Date | ~130px | 150px | "03/24/2026 - 4:21 PM" |
+| FPR Notes | ~120px | 140px | Text, may wrap |
+| Special Remarks | ~120px | 140px | Text, may wrap |
+| Threads | ~60px | 70px | Value |
+| Sacks | ~60px | 70px | Value |
+| Markings | ~80px | 90px | Value |
+| Tags | ~80px | 90px | Value |
+| End Date | ~100px | 110px | Date |
+| History | ~80px | 90px | Value |
+
+---
+
+### KEY COLUMN PRIORITIES
+
+Some columns deserve proportionally MORE width because they contain the most important information:
+
+**Priority columns (give generous width):**
+- Item Description: 240px — longest text, most read column
+- Avail Date: 130px — contains date + icon + sometimes "prio replenish" text
+- Completion Date: 150px — contains full date + time
+- Status: 140px — badge with full status text
+- FPR Notes: 140px — user-entered text
+
+**Compact columns (keep tight):**
+- Prio: 44px — just a number
+- Readiness: 32px — just an icon
+- Drag handle: 32px — just a grip
+- Form: 60px — short codes
+- HA Info: 60px — just a number
+
+---
+
+### TEXT OVERFLOW HANDLING
+
+With larger fonts, some cells may overflow. Handle gracefully:
+
+**Item Description:**
+- Allow text to wrap to 2 lines maximum.
+- If longer than 2 lines, truncate with ellipsis (...).
+- Tooltip on hover shows the full text.
+
+**FPR Notes / Special Remarks:**
+- Allow text to wrap to 2 lines maximum.
+- Truncate with ellipsis if longer.
+- Tooltip on hover shows full text.
+
+**All other cells:**
+- Single line, truncate with ellipsis if overflow.
+- Tooltip on hover shows full value.
+
+```css
+.table-cell-default {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.table-cell-wrappable {
+  white-space: normal;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+```
+
+---
+
+### APPLY TO ALL TABLES
+
+This font size increase applies to:
+
+| Table | Apply? |
+|---|---|
+| Main interactive order table | ✅ Yes |
+| Auto-Sequence preview table | ✅ Yes |
+| Order History tables | ✅ Yes |
+
+**Tables that should NOT change (keep their current smaller sizes):**
+- Knowledge Base table (already has its own sizing)
+- Next 10 Days Stock Level table (already has its own sizing)
+- Upload History tables (intentionally compact)
+- Smart Combine cards (separate component)
+
+---
+
+### VERIFICATION
+
+After implementing:
+
+1. Open the interactive order table.
+2. Text should feel similar to 10pt font in MS Word — comfortable to read without squinting.
+3. Columns should be balanced — no excessive empty space, no cramped overflow.
+4. Horizontal scrolling should still work smoothly with the wider columns.
+5. Compare with a Word document at 10pt font to confirm the visual size feels equivalent.
+```

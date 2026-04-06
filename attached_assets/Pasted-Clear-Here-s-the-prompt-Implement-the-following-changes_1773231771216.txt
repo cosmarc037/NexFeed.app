@@ -1,0 +1,431 @@
+Clear. Here's the prompt:
+
+```
+Implement the following changes to the NexFeed application:
+
+---
+
+## 1. CUT ORDER — STATUS TRIGGERS DIALOG
+
+When a user selects "Cut" from the status dropdown on any standalone order, a dialog appears. The status does NOT change immediately — the dialog opens first.
+
+**Trigger:**
+- User selects "Cut" from the status dropdown.
+- Dialog opens.
+- If user confirms, the order is split into two portions.
+- If user cancels/goes back, the status reverts to its previous value.
+
+**"Cut" is NOT available for:**
+- Combined orders (lead or child) — hidden from combined order dropdown.
+- Orders already tagged as "Cut" — hidden from dropdown (cannot cut twice).
+
+---
+
+## 2. CUT ORDER — DIALOG LAYOUT
+
+```
+╔══════════════════════════════════════════════════════════════╗
+║  ✂ Cut Order                                                  ║
+║                                                               ║
+║  Split this order into two separate production runs.          ║
+║                                                               ║
+║  ─── Order Details ───                                        ║
+║                                                               ║
+║  Line:           1                                            ║
+║  FPR:            260309                                       ║
+║  Item:           Elite XP Startex, Mini-pellet 50kg - MP      ║
+║  Volume:         80 MT                                        ║
+║  Batch Size:     4.00                                         ║
+║  Availability:   March 22, 2026                               ║
+║                                                               ║
+║  ─── Split Volume ───                                         ║
+║                                                               ║
+║  Portion 1 (MT) *                                             ║
+║  ┌──────────────────────────────────┐                         ║
+║  │ Enter volume for first portion   │                         ║
+║  └──────────────────────────────────┘                         ║
+║                                                               ║
+║  Portion 2 (MT)           [auto-calculated]                   ║
+║  ┌──────────────────────────────────┐                         ║
+║  │ 0                        (auto)  │                         ║
+║  └──────────────────────────────────┘                         ║
+║                                                               ║
+║  ─── Split Summary ───                                        ║
+║                                                               ║
+║  Portion 1:   -- MT  (-- batches)                             ║
+║  Portion 2:   -- MT  (-- batches)                             ║
+║  Total:       80 MT  (20 batches)                             ║
+║                                                               ║
+║  ─── 🤖 AI Insights ───                                      ║
+║                                                               ║
+║  [AI insights appear here after user enters Portion 1 value]  ║
+║                                                               ║
+║              [Go Back]    [Confirm Cut]                       ║
+╚══════════════════════════════════════════════════════════════╝
+```
+
+---
+
+### DIALOG — ORDER DETAILS SECTION
+
+| Label | Value | Styling |
+|---|---|---|
+| Line: | [line number] | Bold, dark text (#1a1a1a) |
+| FPR: | [FPR value] | Bold, dark text (#1a1a1a) |
+| Item: | [Item description + " - " + Form] | Grey text (#a1a8b3), regular weight |
+| Volume: | [volume] MT | Bold, dark text (#1a1a1a) |
+| Batch Size: | [batch size] | Bold, dark text (#1a1a1a) |
+| Availability: | [avail date or non-date value] | Dark text for dates, orange (#fd5108) for non-dates |
+
+---
+
+### DIALOG — SPLIT VOLUME SECTION
+
+**Portion 1 input:**
+- Editable number input field.
+- Required (*).
+- User enters the MT for the first portion.
+- Must be greater than 0.
+- Must be less than the total volume (cannot cut 100% into one portion).
+- Must be divisible by batch size (validation — see below).
+
+**Portion 2 display:**
+- Auto-calculated: Total Volume - Portion 1.
+- Read-only / disabled field.
+- Updates in real-time as user types Portion 1.
+- Greyed out to indicate it's auto-calculated.
+
+**Example interaction:**
+```
+Volume: 80 MT, Batch Size: 4.00
+
+User types Portion 1: 32
+→ Portion 2 auto-calculates: 48
+
+User types Portion 1: 30
+→ Portion 2 auto-calculates: 50
+→ Validation error: "30 is not divisible by batch size 4.00"
+```
+
+---
+
+### DIALOG — BATCH SIZE VALIDATION
+
+Both Portion 1 AND Portion 2 must be divisible by the batch size.
+
+**Validation rules:**
+- Portion 1 ÷ Batch Size must result in a whole number (no decimals).
+- Portion 2 ÷ Batch Size must result in a whole number (no decimals).
+- If either fails, show a validation error.
+
+**Validation error display:**
+- Error text appears below the Portion 1 input field.
+- Red text (#e53935).
+- Error messages:
+
+| Scenario | Error Message |
+|---|---|
+| Portion 1 not divisible | "⚠ [X] MT is not divisible by batch size [Y]. Try [nearest lower] or [nearest higher] MT." |
+| Portion 2 not divisible | "⚠ Remaining [X] MT is not divisible by batch size [Y]. Try [adjusted value] MT for Portion 1." |
+| Portion 1 is 0 or empty | "⚠ Please enter a volume greater than 0." |
+| Portion 1 equals total | "⚠ Portion 1 cannot equal the total volume. Leave some for Portion 2." |
+| Portion 1 exceeds total | "⚠ Portion 1 cannot exceed the total volume of [X] MT." |
+
+**Helpful suggestions in error messages:**
+
+When the value is not divisible, calculate and suggest the nearest valid values:
+
+```
+Volume: 80 MT, Batch Size: 4.00
+User enters: 30 MT
+
+Error: "⚠ 30 MT is not divisible by batch size 4.00. Try 28 MT or 32 MT."
+
+  28 ÷ 4 = 7 batches → Portion 2: 52 MT (52 ÷ 4 = 13 batches) ✅
+  32 ÷ 4 = 8 batches → Portion 2: 48 MT (48 ÷ 4 = 12 batches) ✅
+```
+
+**"Confirm Cut" button is disabled** until both Portion 1 and Portion 2 pass validation.
+
+---
+
+### DIALOG — SPLIT SUMMARY SECTION
+
+Updates in real-time as the user types.
+
+**Before user enters a value:**
+```
+Portion 1:   -- MT  (-- batches)
+Portion 2:   -- MT  (-- batches)
+Total:       80 MT  (20 batches)
+```
+
+**After valid input (e.g., Portion 1 = 32 MT):**
+```
+Portion 1:   32 MT  (8 batches)     ✅
+Portion 2:   48 MT  (12 batches)    ✅
+Total:       80 MT  (20 batches)
+```
+
+**After invalid input (e.g., Portion 1 = 30 MT):**
+```
+Portion 1:   30 MT  (7.5 batches)   ❌
+Portion 2:   50 MT  (12.5 batches)  ❌
+Total:       80 MT  (20 batches)
+```
+
+- Valid rows: green check ✅, dark text.
+- Invalid rows: red cross ❌, red text (#e53935).
+- Total row: always dark text, bold.
+
+---
+
+### DIALOG — AI INSIGHTS SECTION
+
+The AI Insights section provides contextual narratives and suggestions to help the user make a good cut decision. This section updates dynamically as the user enters or changes the Portion 1 value.
+
+**AI Insights appear after the user enters a valid Portion 1 value.**
+
+**Types of AI insights:**
+
+**Insight 1 — Placement suggestion:**
+```
+💡 Suggestion: You can place the 48 MT portion between Order Prio 5 
+(FPR: 260310, Elite XP Growex) and Order Prio 6 (FPR: 260312, 
+Salto Grower) to optimize the production sequence, as they share 
+the same form (MP) and line (Line 1), minimizing changeover time.
+```
+
+**Insight 2 — Batch size alignment confirmation:**
+```
+✅ Both portions are divisible by batch size 4.00:
+   • Portion 1: 32 MT = 8 batches
+   • Portion 2: 48 MT = 12 batches
+```
+
+**Insight 3 — Completion date impact:**
+```
+📅 Cutting this order will result in different completion dates:
+   • Portion 1 (32 MT): Est. completion ~4 hrs from start
+   • Portion 2 (48 MT): Est. completion ~6 hrs from start
+   • Original (80 MT): Est. completion ~10 hrs from start
+   Cutting allows Portion 1 to be completed earlier if needed.
+```
+
+**Insight 4 — Availability alignment:**
+```
+⏰ This order's availability date is March 22, 2026. 
+   Portion 1 (32 MT) can be scheduled to meet this date. 
+   Portion 2 (48 MT) can be scheduled after if production 
+   capacity allows.
+```
+
+**Insight 5 — Warning when cut is not advisable:**
+```
+⚠ Note: Cutting this order will introduce an additional changeover 
+   (est. 30 min) when the two portions are not run back-to-back. 
+   Consider keeping the order whole if both portions will run on 
+   the same line consecutively.
+```
+
+**When Portion 1 is empty or invalid:**
+```
+🤖 Enter a valid volume for Portion 1 to see AI insights.
+```
+
+**AI Insights styling:**
+- Section background: Light blue-grey (#f8fafc)
+- Border: 1px solid #e2e8f0
+- Border radius: 8px
+- Padding: 12px
+- Each insight is a separate paragraph with an emoji icon prefix.
+- Text: Dark grey (#4b5563), font-size 13px.
+- Suggestions in bold or highlighted where relevant.
+
+---
+
+### DIALOG BUTTONS
+
+| Button | Style | Behavior |
+|---|---|---|
+| Go Back | Grey outlined | Closes dialog, reverts status, no changes |
+| Confirm Cut | Light purple filled (#7c3aed), white text | Processes the cut. Disabled until validation passes. |
+
+---
+
+## 3. CUT ORDER — WHAT HAPPENS ON CONFIRM
+
+When the user confirms the cut:
+
+**Step 1: Original order becomes Portion 1**
+- The original order's volume is updated to Portion 1 value.
+- The original order's production hours, batches, bags are recalculated based on new volume.
+- Status is set to "Cut".
+- A "Cut" tag/badge is added to the order.
+
+**Step 2: New order created for Portion 2**
+- A NEW order row is created with:
+  - Same FPR, FG, SFG, Material Code, Category, Form, Batch Size, Line as the original.
+  - Volume = Portion 2 value.
+  - Production hours, batches, bags calculated based on Portion 2 volume.
+  - Status = "Cut".
+  - A "Cut" tag/badge is added.
+  - Availability = same as original order.
+  - Start Date/Time = blank (user must set).
+  - Completion Date = blank initially (will be calculated by cascade if applicable).
+
+**Step 3: Placement**
+- Portion 1 stays in the original order's position.
+- Portion 2 is placed IMMEDIATELY BELOW Portion 1.
+- Prio numbers are re-sequenced.
+
+```
+Before cut:
+Prio 5: FPR 260309, 80 MT
+
+After cut (Portion 1 = 32 MT, Portion 2 = 48 MT):
+Prio 5: FPR 260309, 32 MT [Cut]    ← original order, updated volume
+Prio 6: FPR 260309, 48 MT [Cut]    ← new order, Portion 2
+```
+
+**Step 4: Both portions are independently movable**
+- Unlike combined orders, cut portions do NOT need to stick together.
+- The user can freely drag either portion to any position in the table.
+- They are independent orders that happen to share the same FPR.
+
+**Step 5: Cascade recalculation**
+- Completion Dates recalculate for both portions and all downstream orders.
+
+**Step 6: FPR Notes**
+- Portion 1 FPR Notes appended with:
+  ```
+  Cut: Split from 80 MT to 32 MT (Portion 1 of 2) — March 11, 2026 10:30 AM
+  ```
+- Portion 2 FPR Notes set to:
+  ```
+  Cut: Split from 80 MT to 48 MT (Portion 2 of 2) — March 11, 2026 10:30 AM
+  ```
+- Note text displayed in purple (#7c3aed) to match the Cut status color.
+
+---
+
+## 4. "CUT" TAG/BADGE
+
+Both cut portions display a "Cut" badge in the interactive table.
+
+**Badge styling:**
+- Background: Light purple (#ede9fe)
+- Text: Purple (#7c3aed)
+- Label: "Cut"
+- Position: Next to the FPR number or in the same column as Lead/Child badges for combined orders.
+
+**Badge display:**
+```
+Prio 5: [Cut] FPR: 260309    32 MT    ...
+Prio 6: [Cut] FPR: 260309    48 MT    ...
+```
+
+**Badge is persistent:**
+- The "Cut" badge remains visible regardless of status changes.
+- If the user changes a cut order's status to "In production", "On-going pelleting", "Done", etc., the "Cut" badge still shows.
+- The badge is only removed if the order is recombined (see Section 6).
+
+---
+
+## 5. CUT ORDERS — STATUS RESTRICTIONS
+
+Orders with the "Cut" tag have the following status restrictions:
+
+**Available statuses for cut orders:**
+
+| # | Status | Available |
+|---|---|---|
+| 1 | Plotted | ✅ Yes |
+| 2 | Hold | ✅ Yes |
+| 3 | Cut | ❌ No — already cut, cannot cut again |
+| 4 | Combined with other PO | ✅ Yes — can be recombined |
+| 5 | In production | ✅ Yes |
+| 6 | On-going batching | ✅ Yes |
+| 7 | On-going pelleting | ✅ Yes |
+| 8 | On-going bagging | ✅ Yes |
+| 9 | Done | ✅ Yes |
+| 10 | Cancel PO | ✅ Yes |
+
+**Key restriction:**
+- "Cut" is HIDDEN from the dropdown for orders already tagged as "Cut".
+- A cut order cannot be cut again.
+
+---
+
+## 6. CUT ORDERS — RECOMBINE
+
+Cut portions CAN be recombined back together.
+
+**How it works:**
+- If both cut portions (Portion 1 and Portion 2) are selected for combining via Smart Combine or manual combine:
+  - The two portions merge back into a single order.
+  - Volume = Portion 1 + Portion 2 (back to original).
+  - The "Cut" badge is removed from the merged order.
+  - Production hours, batches, bags are recalculated.
+  - FPR Notes appended with:
+    ```
+    Recombined: Merged back from 32 MT + 48 MT to 80 MT — March 12, 2026 02:00 PM
+    ```
+
+**Recombine is only possible when:**
+- Both portions share the same original FPR.
+- Both portions are on the same line.
+- Neither portion is currently part of another combined group.
+
+---
+
+## 7. CUT ORDERS — VOLUME DISPLAY
+
+In the interactive table, cut orders show their current volume with an "Original" reference:
+
+```
+Prio 5: [Cut] FPR: 260309    32 MT
+                               Original: 80 MT    ← grey, smaller text
+
+Prio 6: [Cut] FPR: 260309    48 MT
+                               Original: 80 MT    ← grey, smaller text
+```
+
+**"Original: XX MT" styling:**
+- Text: Grey (#a1a8b3)
+- Font size: smaller than the main volume (~11px or 0.75rem)
+- Positioned below the main volume value.
+
+---
+
+## 8. CUT ORDERS IN ORDER HISTORY
+
+When cut orders are moved to Order History (via Done or Cancel):
+
+- The "Cut" badge is retained in Order History.
+- "Original: XX MT" reference is retained.
+- Both portions may appear independently in Order History (since they are independent orders).
+- They are NOT required to be adjacent in Order History.
+
+---
+
+## 9. EDGE CASES
+
+**Edge case 1 — Cut order is cancelled:**
+- The cut order follows normal cancellation flow (dialog, FPR notes, moves to bottom).
+- The OTHER cut portion is NOT affected — it remains active and independent.
+- The "Cut" badge remains on both portions.
+
+**Edge case 2 — One cut portion is Done, the other is still active:**
+- This is valid. Each portion operates independently.
+- Portion 1 can be "Done" and at the top while Portion 2 is still active in the schedule.
+
+**Edge case 3 — Cut order combined with a DIFFERENT order (not its other portion):**
+- This is allowed. A cut portion can be combined with any compatible order via Smart Combine.
+- The "Cut" badge remains alongside the "Lead" or "Child" badge.
+- Example: Prio 5 shows both [Cut] and [Child] badges.
+
+**Edge case 4 — User tries to cut a combined order:**
+- "Cut" is hidden from combined order dropdown — not allowed.
+- User must uncombine first, then cut.
+```

@@ -1,0 +1,309 @@
+```
+Implement the following fix to the auto-sequence drag-and-drop:
+
+---
+
+## FIX: SHOW WARNING WHENEVER A PLANNED ORDER'S POSITION CHANGES
+
+A warning confirmation dialog must appear whenever a Planned order's priority position changes — regardless of HOW it changes. Whether the Planned order is:
+- Dragged directly by the user
+- Pushed DOWN because another order was inserted above it
+- Pushed UP because another order was inserted below and displaces it
+
+If the Planned order ends up at a different priority than where it was, show the warning.
+
+---
+
+### THE PROBLEM
+
+Currently:
+- ✅ Dragging a non-planned order directly to the Planned order's position shows a warning
+- ❌ Dragging a non-planned order ABOVE the Planned order (e.g., to Prio 1) pushes Planned down but NO warning
+- ❌ Dragging a non-planned order BELOW the Planned order, causing Planned to shift up, shows NO warning
+- ❌ Dragging the Planned order itself to another position shows NO warning (or inconsistent)
+
+### THE FIX
+
+After ANY drag-and-drop operation completes, check if ANY Planned order's position has changed. If yes, show the warning.
+
+```javascript
+function handleDragEnd(draggedOrderId, fromIndex, toIndex) {
+  if (fromIndex === toIndex) return; // No movement
+  
+  // Step 1: Record all Planned orders' current positions BEFORE the move
+  const plannedOrdersBefore = {};
+  allOrders.forEach((order, index) => {
+    if (order.status === 'Planned') {
+      plannedOrdersBefore[order.id] = {
+        order: order,
+        prio: index + 1,
+        name: order.item_description
+      };
+    }
+  });
+  
+  // Step 2: Perform the reorder in a temporary array
+  const reorderedOrders = [...allOrders];
+  const [movedOrder] = reorderedOrders.splice(fromIndex, 1);
+  reorderedOrders.splice(toIndex, 0, movedOrder);
+  
+  // Step 3: Check all Planned orders' positions AFTER the move
+  const affectedPlannedOrders = [];
+  reorderedOrders.forEach((order, index) => {
+    if (order.status === 'Planned') {
+      const newPrio = index + 1;
+      const before = plannedOrdersBefore[order.id];
+      
+      if (before && before.prio !== newPrio) {
+        affectedPlannedOrders.push({
+          order: order,
+          name: order.item_description,
+          fromPrio: before.prio,
+          toPrio: newPrio,
+          direction: newPrio > before.prio ? 'down' : 'up'
+        });
+      }
+    }
+  });
+  
+  // Step 4: If any Planned order is affected, show warning
+  if (affectedPlannedOrders.length > 0) {
+    showPlannedOrderWarning(affectedPlannedOrders, () => {
+      // User confirmed — apply the reorder
+      applyReorder(reorderedOrders);
+    }, () => {
+      // User cancelled — revert, do nothing
+    });
+  } else {
+    // No Planned orders affected — apply immediately
+    applyReorder(reorderedOrders);
+  }
+}
+
+function applyReorder(reorderedOrders) {
+  // Update priorities
+  reorderedOrders.forEach((order, index) => {
+    order.prio = index + 1;
+    
+    // Update Planned order's locked position
+    if (order.status === 'Planned') {
+      order._plannedPrio = index + 1;
+    }
+  });
+  
+  setAllOrders(reorderedOrders);
+}
+```
+
+---
+
+### WARNING DIALOG
+
+```jsx
+function PlannedOrderWarningDialog({ affectedOrders, onProceed, onCancel }) {
+  return (
+    <div className="dialog-overlay">
+      <div className="dialog-container" style={{ maxWidth: '460px' }}>
+        <div className="dialog-header">
+          <span>⚠ Planned Order Will Be Affected</span>
+          <button className="dialog-close" onClick={onCancel}>✕</button>
+        </div>
+        
+        <div className="dialog-body">
+          <p style={{ fontSize: '12px', color: '#374151', lineHeight: 1.6 }}>
+            This action will change the position of the following 
+            planned order{affectedOrders.length > 1 ? 's' : ''}:
+          </p>
+          
+          <div style={{ 
+            margin: '12px 0', 
+            padding: '10px 14px', 
+            background: '#eff6ff', 
+            borderRadius: '6px',
+            borderLeft: '3px solid #2563eb' 
+          }}>
+            {affectedOrders.map((affected, index) => (
+              <div key={index} style={{ 
+                fontSize: '12px', 
+                color: '#1e40af', 
+                padding: '4px 0',
+                lineHeight: 1.6
+              }}>
+                <strong>{affected.name}</strong>
+                <br />
+                Priority {affected.fromPrio} → Priority {affected.toPrio}
+                {' '}({affected.direction === 'down' ? 'pushed down' : 'pushed up'})
+              </div>
+            ))}
+          </div>
+          
+          <p style={{ fontSize: '12px', color: '#374151', lineHeight: 1.6 }}>
+            Consider adjusting the planned order first, or proceed 
+            if this change is intentional.
+          </p>
+        </div>
+        
+        <div className="dialog-footer" style={{ 
+          display: 'flex', 
+          justifyContent: 'flex-end', 
+          gap: '8px',
+          padding: '12px 20px'
+        }}>
+          <button
+            onClick={onCancel}
+            style={{
+              padding: '8px 20px',
+              fontSize: '13px',
+              fontWeight: 500,
+              color: '#6b7280',
+              background: '#ffffff',
+              border: '1px solid #d1d5db',
+              borderRadius: '6px',
+              cursor: 'pointer'
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onProceed}
+            style={{
+              padding: '8px 20px',
+              fontSize: '13px',
+              fontWeight: 600,
+              color: '#ffffff',
+              background: '#fd5108',
+              border: 'none',
+              borderRadius: '6px',
+              cursor: 'pointer'
+            }}
+          >
+            Proceed Anyway
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+### ALL SCENARIOS COVERED
+
+**Scenario 1: Non-planned dragged to Planned order's exact position**
+
+```
+BEFORE:                    AFTER (if confirmed):
+Prio 1: Order A            Prio 1: Order A
+Prio 2: Order B            Prio 2: Order C ← moved here
+Prio 3: Order B (Planned)  Prio 3: Order B (Planned) → pushed to Prio 4
+Prio 4: Order C            
+
+WARNING: "Order B: Priority 3 → Priority 4 (pushed down)"
+```
+✅ Warning shows
+
+**Scenario 2: Non-planned dragged ABOVE the Planned order (e.g., to Prio 1)**
+
+```
+BEFORE:                    AFTER (if confirmed):
+Prio 1: Order A            Prio 1: Order C ← moved here
+Prio 2: Order B (Planned)  Prio 2: Order A
+Prio 3: Order C            Prio 3: Order B (Planned) → pushed to Prio 3
+
+WARNING: "Order B: Priority 2 → Priority 3 (pushed down)"
+```
+✅ Warning shows
+
+**Scenario 3: Non-planned dragged below, causing Planned to shift up**
+
+```
+BEFORE:                    AFTER (if confirmed):
+Prio 1: Order A            Prio 1: Order B (Planned) → pushed to Prio 1
+Prio 2: Order B (Planned)  Prio 2: Order C
+Prio 3: Order C            Prio 3: Order A ← moved here
+
+WARNING: "Order B: Priority 2 → Priority 1 (pushed up)"
+```
+✅ Warning shows
+
+**Scenario 4: Planned order dragged directly by user**
+
+```
+BEFORE:                    AFTER (if confirmed):
+Prio 1: Order A            Prio 1: Order A
+Prio 2: Order B (Planned)  Prio 2: Order C
+Prio 3: Order C            Prio 3: Order B (Planned) ← dragged here
+
+WARNING: "Order B: Priority 2 → Priority 3 (pushed down)"
+```
+✅ Warning shows
+
+**Scenario 5: Movement does NOT affect any Planned order**
+
+```
+BEFORE:                    AFTER:
+Prio 1: Order A            Prio 1: Order C ← moved here
+Prio 2: Order C            Prio 2: Order A
+Prio 3: Order D            Prio 3: Order D
+
+No Planned orders exist or none changed position.
+```
+✅ No warning — applied immediately
+
+**Scenario 6: Multiple Planned orders affected**
+
+```
+BEFORE:                    AFTER (if confirmed):
+Prio 1: Order A            Prio 1: Order D ← moved here
+Prio 2: Order B (Planned)  Prio 2: Order A
+Prio 3: Order C (Planned)  Prio 3: Order B (Planned) → pushed down
+Prio 4: Order D            Prio 4: Order C (Planned) → pushed down
+
+WARNING shows BOTH:
+"Order B: Priority 2 → Priority 3 (pushed down)"
+"Order C: Priority 3 → Priority 4 (pushed down)"
+```
+✅ Warning shows all affected Planned orders
+
+---
+
+### ALSO APPLY TO AUTO-SEQUENCE PREVIEW DRAG
+
+The same logic applies in the auto-sequence preview if drag-and-drop is enabled there:
+
+```javascript
+function handlePreviewDragEnd(draggedOrderId, fromIndex, toIndex) {
+  // Same logic as above — check if any Planned order's prio changed
+  // Show warning if yes
+}
+```
+
+---
+
+## VERIFICATION
+
+1. Drag non-planned to Planned's exact position
+   - ✅ Planned pushed down → warning shows
+
+2. Drag non-planned ABOVE Planned (to Prio 1)
+   - ✅ Planned pushed down → warning shows
+
+3. Drag non-planned BELOW Planned causing Planned to shift up
+   - ✅ Planned pushed up → warning shows
+
+4. Drag Planned order itself to another position
+   - ✅ Planned moved → warning shows
+
+5. Drag non-planned, no Planned orders affected
+   - ✅ No warning → applied immediately
+
+6. Multiple Planned orders affected
+   - ✅ Warning lists ALL affected Planned orders
+
+7. User clicks "Cancel" on warning
+   - ✅ Drag is reverted, nothing changes
+
+8. User clicks "Proceed Anyway" on warning
+   - ✅ Reorder is applied, Planned order's _plannedPrio updated to new position
+```

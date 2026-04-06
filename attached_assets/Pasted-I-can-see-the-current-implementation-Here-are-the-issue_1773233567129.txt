@@ -1,0 +1,405 @@
+I can see the current implementation. Here are the issues to fix based on the previous prompt:
+
+```
+Implement the following fixes to the Cut Order dialog:
+
+---
+
+## FIX 1: ITEM DESCRIPTION — BLACK BOLD, NO FORM
+
+**Current (incorrect):**
+```
+Item:    Gallimax Pigeon Pellet, 50kg - MP-CS     ← grey text, includes Form
+```
+
+**Fix to:**
+```
+Item:    Gallimax Pigeon Pellet, 50kg              ← BLACK text, BOLD, NO Form
+```
+
+- Remove the " - MP-CS" suffix (Form code) from the Item value.
+- Change Item value color from grey to BLACK (#1a1a1a).
+- Change Item value font-weight to BOLD (600 or 700).
+- The Form is already visible elsewhere in the order; it should not appear in the dialog.
+
+---
+
+## FIX 2: BATCH SIZE — 2 DECIMAL PLACES
+
+**Current (incorrect):**
+```
+Batch Size:    4
+```
+
+**Fix to:**
+```
+Batch Size:    4.00
+```
+
+- Always display batch size with exactly 2 decimal places.
+- Use toFixed(2) or equivalent.
+
+---
+
+## FIX 3: PORTION 2 — NORMAL STYLING, NOT GREYED OUT
+
+**Current (incorrect):**
+```
+Portion 2 (MT) (auto-calculated)
+┌──────────────────────────────────┐
+│ 8                                │    ← greyed out background and text
+└──────────────────────────────────┘
+```
+
+**Fix to:**
+```
+Portion 2 (MT)  auto-calculated
+┌──────────────────────────────────┐
+│ 8                                │    ← NORMAL background, NORMAL text color
+└──────────────────────────────────┘
+```
+
+Changes:
+- Remove the grey/disabled background color from Portion 2 input field.
+- Remove the grey text color — use the same dark text (#1a1a1a) as Portion 1.
+- The field border should match Portion 1's border styling.
+- The field background should be WHITE, same as Portion 1.
+- The field is still NOT editable (read-only / no cursor / no click handler).
+- Move "(auto-calculated)" from inside the parentheses of the label to a separate small text:
+  - Label: "Portion 2 (MT)"
+  - Small text next to it: "auto-calculated" in grey italic (#a1a8b3), font-size 11px.
+
+---
+
+## FIX 4: AI INSIGHTS — LIGHT ORANGE TINT BACKGROUND
+
+**Current (incorrect):**
+```
+Background: light grey/blue tint
+```
+
+**Fix to:**
+```
+Background: light orange tint (#fff7ed)
+Border: 1px solid #fed7aa
+Border radius: 8px
+Padding: 14px
+```
+
+- Change the AI Insights container background from the current grey/blue to light orange tint (#fff7ed).
+- Change border color to soft orange (#fed7aa).
+- This aligns with the app's orange theme (#fd5108).
+
+---
+
+## FIX 5: AI INSIGHTS — SMALLER FONT
+
+**Current:**
+```
+Font size appears to be ~14px (standard body text size)
+```
+
+**Fix to:**
+```
+Font size: 12px (0.75rem)
+Line height: 1.5
+```
+
+- Reduce ALL text within the AI Insights section to 12px.
+- Bold headers within insights (e.g., "**Optimize Batching:**") remain bold at 12px.
+- Emoji icons stay at the same relative size.
+- Line height 1.5 for comfortable reading at smaller size.
+
+---
+
+## FIX 6: AI INSIGHTS — MORE DETAILED AND DATA-DRIVEN
+
+The current AI insights are too generic. They need to be more specific, referencing actual data from the order and the production line.
+
+**Current insights (too generic):**
+```
+💡 **Optimize Batching:** Consider running Portion 1 
+first to maximize production efficiency with 4 batches.
+
+✅ **Schedule Changeovers:** Account for 0.17 hours 
+for changeover between portions to avoid delays.
+
+🏢 **Plan Availability:** Ensure Portion 1 is available 
+for the priority replenish date to meet demand.
+
+⏰ **Total Time Estimate:** Portion 1: ~3.57 hrs (4 
+batches + changeover). Portion 2: ~2.68 hrs (2 batches 
++ changeover).
+```
+
+**Updated insights (detailed, data-driven):**
+
+Replace with the following insight categories. Each insight must reference ACTUAL values from the order and the line.
+
+---
+
+### INSIGHT A — BATCH VALIDATION
+
+```
+✅ Batch Alignment Verified
+
+Both portions align with the batch size of 4.00:
+
+  • Portion 1: 16 MT ÷ 4.00 = 4 batches (exact)
+  • Portion 2: 8 MT ÷ 4.00 = 2 batches (exact)
+
+No partial batches — both portions can run without 
+waste or batch adjustments.
+```
+
+When invalid:
+```
+❌ Batch Alignment Issue
+
+The entered split does not align with batch size 4.00:
+
+  • Portion 1: 15 MT ÷ 4.00 = 3.75 batches (partial)
+  • Portion 2: 9 MT ÷ 4.00 = 2.25 batches (partial)
+
+Try these valid splits instead:
+  • 12 MT + 12 MT (3 + 3 batches)
+  • 16 MT + 8 MT (4 + 2 batches)
+  • 20 MT + 4 MT (5 + 1 batch)
+```
+
+---
+
+### INSIGHT B — PRODUCTION TIME BREAKDOWN
+
+```
+⏱ Production Time Breakdown
+
+Original order (24 MT): ~6.25 hrs total
+  6 batches × ~55 min/batch + changeover setup
+
+After split:
+  • Portion 1 (16 MT): ~3.57 hrs
+    4 batches × ~55 min/batch + 1 changeover setup
+  • Portion 2 (8 MT): ~2.68 hrs
+    2 batches × ~55 min/batch + 1 changeover setup
+
+⚠ Combined split time: ~6.25 hrs + 0.17 hrs changeover
+   = ~6.42 hrs total (0.17 hrs longer than running as 
+   one order due to the additional changeover).
+
+If both portions run back-to-back on Line [X] with no 
+other orders in between, the extra changeover is 
+eliminated (same product, no transition needed).
+```
+
+Must include:
+- Actual batch count for each portion.
+- Actual time per batch from production data.
+- Actual changeover time from line configuration.
+- Comparison: original time vs split total time.
+- Note about back-to-back efficiency.
+
+---
+
+### INSIGHT C — PLACEMENT SUGGESTION
+
+```
+💡 Placement Suggestion
+
+Portion 1 (16 MT) stays at current position (Prio [X]).
+
+For Portion 2 (8 MT), recommended placements on Line [X]:
+
+  📍 Best: After Prio [Y] — FPR: [YYYYY] 
+     ([Product Name], [Form])
+     Reason: Same product form ([Form]), zero changeover.
+     Est. completion if placed here: [Date, Time]
+
+  📍 Good: After Prio [Z] — FPR: [ZZZZZ] 
+     ([Product Name], [Form])
+     Reason: Same category ([Category]), minimal 
+     changeover (~[X] min).
+     Est. completion if placed here: [Date, Time]
+
+  📍 Fallback: End of line (Prio [N])
+     Changeover: ~[X] min
+     Est. completion: [Date, Time]
+
+Both portions are independent — you can freely drag 
+Portion 2 to any position after cutting.
+```
+
+Must include:
+- Reference to ACTUAL orders on the line (real FPR numbers, real product names).
+- At least 2-3 specific placement options.
+- Changeover time for each option.
+- Estimated completion date for each option.
+- Clear reasoning for each suggestion.
+
+---
+
+### INSIGHT D — COMPLETION DATE IMPACT
+
+When the order has a start date or completion date:
+
+```
+📅 Completion Date Impact
+
+Current order (24 MT):
+  Start: March 19, 2026 08:00 AM
+  Completion: March 19, 2026 02:15 PM
+
+After split:
+  • Portion 1 (16 MT):
+    Start: March 19, 2026 08:00 AM
+    Est. completion: March 19, 2026 11:34 AM
+    ✅ Completes 2 hrs 41 min earlier than the 
+       original 24 MT order.
+
+  • Portion 2 (8 MT):
+    Start: Depends on placement
+    If immediately after Portion 1:
+      Start: ~March 19, 2026 11:34 AM
+      Completion: ~March 19, 2026 02:15 PM
+    If placed at end of line:
+      Start: est. [Date, Time]
+      Completion: est. [Date, Time]
+
+Splitting allows Portion 1 to be available sooner 
+for downstream packaging or delivery.
+```
+
+When no start date is set:
+
+```
+📅 Completion Date Impact
+
+No start date is currently set for this order.
+
+Estimated production times:
+  • Portion 1 (16 MT): ~3.57 hrs
+  • Portion 2 (8 MT): ~2.68 hrs
+
+Completion dates will calculate automatically once a 
+start date is set or the upstream cascade reaches 
+these orders.
+```
+
+Must include:
+- Actual start and completion dates from the order.
+- Calculated completion for each portion.
+- Time saved by completing Portion 1 earlier.
+- Scenario comparison (immediately after vs end of line).
+
+---
+
+### INSIGHT E — AVAILABILITY ALIGNMENT
+
+When the order has a date-based availability:
+
+```
+⏰ Availability Check
+
+Availability date: March 22, 2026
+
+  • Portion 1 (16 MT): Est. completion March 19, 
+    2026 11:34 AM
+    ✅ 2 days 12 hrs before availability — on track.
+
+  • Portion 2 (8 MT): Est. completion depends on 
+    placement.
+    If placed immediately after Portion 1: 
+      March 19, 2026 02:15 PM
+      ✅ 2 days 10 hrs before availability — on track.
+    If placed at end of line: 
+      Est. March 20, 2026 08:00 AM
+      ✅ 1 day 16 hrs before availability — on track.
+
+Both portions are projected to complete well before 
+the availability date.
+```
+
+When availability is "prio replenish" or "safety stocks":
+
+```
+⏰ Availability Note
+
+This order is flagged as "prio replenish" — no specific 
+availability date. 
+
+Consider prioritizing Portion 1 (16 MT) for immediate 
+replenishment and scheduling Portion 2 (8 MT) based on 
+remaining line capacity.
+```
+
+---
+
+### INSIGHT F — ADVISORY NOTE
+
+Always shown at the bottom of insights:
+
+```
+📋 Advisory
+
+Cutting an order creates two independent production runs. 
+Keep in mind:
+
+  • Each portion will have its own scheduling position 
+    and completion date.
+  • An additional changeover (~[X] min) applies if the 
+    two portions are not run consecutively.
+  • Both portions can be freely moved, combined with 
+    other orders, or cancelled independently.
+  • To merge the portions back, use the Smart Combine 
+    feature.
+```
+
+---
+
+### AI INSIGHTS — VISUAL LAYOUT
+
+Each insight category is separated by a subtle horizontal line or spacing:
+
+```
+┌─ AI INSIGHTS ──────────────────────────────────────────┐
+│                                                         │ ← bg: #fff7ed
+│ ✅ Batch Alignment Verified                             │
+│ [details...]                                            │
+│                                                         │
+│ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─  │ ← subtle separator
+│                                                         │
+│ ⏱ Production Time Breakdown                            │
+│ [details...]                                            │
+│                                                         │
+│ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─  │
+│                                                         │
+│ 💡 Placement Suggestion                                 │
+│ [details...]                                            │
+│                                                         │
+│ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─  │
+│                                                         │
+│ 📅 Completion Date Impact                               │
+│ [details...]                                            │
+│                                                         │
+│ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─  │
+│                                                         │
+│ ⏰ Availability Check                                   │
+│ [details...]                                            │
+│                                                         │
+│ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─  │
+│                                                         │
+│ 📋 Advisory                                             │
+│ [details...]                                            │
+│                                                         │
+└─────────────────────────────────────────────────────────┘
+```
+
+- Separator: dashed line, light orange (#fed7aa), 1px.
+- Spacing between insights: 12px above and below separator.
+- Each insight heading: bold, 12px, dark text (#1a1a1a).
+- Each insight body: regular, 12px, dark grey (#4b5563).
+- Bullet points indented with consistent left padding.
+- Values and numbers in bold where referenced.
+- Font: 12px (0.75rem) throughout.
+- Line height: 1.5.
+```

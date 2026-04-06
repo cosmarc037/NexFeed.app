@@ -1,0 +1,157 @@
+```
+Update the validation rules in the previous Knowledge Base prompt:
+
+---
+
+## UPDATED VALIDATION — ONLY FG MATERIAL CODE AND FG ITEM DESCRIPTION REQUIRED
+
+### REQUIRED FIELDS — ONLY TWO
+
+```javascript
+const REQUIRED_FIELDS = [
+  { key: 'fg_material_code', label: 'FG Material Code' },
+  { key: 'fg_item_description', label: 'FG Item Description' },
+];
+```
+
+### REMOVE THESE FROM REQUIRED
+
+```javascript
+// REMOVE — no longer required:
+// sfg1_material_code
+// sfg_item_description
+// form
+// fg_weight
+// batch sizes (batch_fm1, batch_fm2, batch_fm3, batch_pm)
+// run rates (all lines)
+```
+
+### UPDATED VALIDATION FUNCTION
+
+```javascript
+function validateKnowledgeBase(data) {
+  const errors = [];
+  
+  data.forEach((row, index) => {
+    // Only FG Material Code and FG Item Description are required
+    REQUIRED_FIELDS.forEach(f => {
+      const value = row[f.key];
+      if (!value || value.toString().trim() === '' || value === '-') {
+        errors.push({
+          rowIndex: index,
+          rowId: row.id,
+          field: f.key,
+          message: `${f.label} is required`
+        });
+      }
+    });
+    
+    // Numeric validation — only if a value is entered (not required)
+    // Batch sizes — optional, but if filled must be positive number
+    const BATCH_FIELDS = ['batch_fm1', 'batch_fm2', 'batch_fm3', 'batch_pm'];
+    BATCH_FIELDS.forEach(f => {
+      const val = row[f];
+      if (val && val !== '-' && val.toString().trim() !== '') {
+        if (isNaN(parseFloat(val)) || parseFloat(val) <= 0) {
+          errors.push({
+            rowIndex: index,
+            rowId: row.id,
+            field: f,
+            message: `Must be a positive number`
+          });
+        }
+      }
+    });
+    
+    // Run rates — optional, but if filled must be positive number
+    const RUN_RATE_FIELDS = [
+      'run_rate_line1', 'run_rate_line2', 'run_rate_line3', 'run_rate_line4',
+      'run_rate_line5', 'run_rate_line6', 'run_rate_line7'
+    ];
+    RUN_RATE_FIELDS.forEach(f => {
+      const val = row[f];
+      if (val && val !== '-' && val.toString().trim() !== '') {
+        if (isNaN(parseFloat(val)) || parseFloat(val) <= 0) {
+          errors.push({
+            rowIndex: index,
+            rowId: row.id,
+            field: f,
+            message: `Must be a positive number`
+          });
+        }
+      }
+    });
+    
+    // FG Weight — optional, but if filled must be positive number
+    const fgWeight = row.fg_weight;
+    if (fgWeight && fgWeight !== '-' && fgWeight.toString().trim() !== '') {
+      if (isNaN(parseFloat(fgWeight)) || parseFloat(fgWeight) <= 0) {
+        errors.push({
+          rowIndex: index,
+          rowId: row.id,
+          field: 'fg_weight',
+          message: `FG Weight must be a positive number`
+        });
+      }
+    }
+    
+    // Form — optional, but if filled must be valid
+    const validForms = ['P', 'MP', 'MP-CS', 'M', 'MX', 'C-S', 'C-M', 'C-L'];
+    if (row.form && row.form !== '-' && row.form.toString().trim() !== '') {
+      if (!validForms.includes(row.form)) {
+        errors.push({
+          rowIndex: index,
+          rowId: row.id,
+          field: 'form',
+          message: `Form must be one of: ${validForms.join(', ')}`
+        });
+      }
+    }
+  });
+  
+  return errors;
+}
+```
+
+### SUMMARY
+
+| Field | Required? | Validation if filled |
+|---|---|---|
+| FG Material Code | ✅ Required | Cannot be empty |
+| FG Item Description | ✅ Required | Cannot be empty |
+| SFG1 Material Code | ❌ Optional | — |
+| SFG Item Description | ❌ Optional | — |
+| Form | ❌ Optional | — |
+| Batch FM1 | ❌ Optional | Must be positive number if filled |
+| Batch FM2 | ❌ Optional | Must be positive number if filled |
+| Batch FM3 | ❌ Optional | Must be positive number if filled |
+| Batch PM | ❌ Optional | Must be positive number if filled |
+| FG Weight | ❌ Optional | Must be positive number if filled |
+| Thread Color | ❌ Optional | — |
+| Sack Material Code | ❌ Optional | — |
+| Sack Description | ❌ Optional | — |
+| Tag Material Code | ❌ Optional | — |
+| Tag Description | ❌ Optional | — |
+| Marking | ❌ Optional | — |
+| Run Rate Line 1-7 | ❌ Optional | Must be positive number if filled |
+
+### PLACEHOLDER TEXT — UPDATED
+
+```jsx
+<KBEditableCell
+  value={row.fg_material_code}
+  onChange={(val) => handleCellChange(row.id, 'fg_material_code', val)}
+  required={true}
+  hasError={!!getCellError(row.id, 'fg_material_code')}
+/>
+// Shows "Required" as placeholder
+
+<KBEditableCell
+  value={row.batch_fm1}
+  onChange={(val) => handleCellChange(row.id, 'batch_fm1', val)}
+  required={false}
+  hasError={!!getCellError(row.id, 'batch_fm1')}
+/>
+// Shows "-" as placeholder (optional)
+```
+```

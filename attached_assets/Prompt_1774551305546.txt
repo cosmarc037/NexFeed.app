@@ -1,0 +1,209 @@
+```
+Implement the following fix to the NexFeed application:
+
+---
+
+## FIX: ORDERS THAT CANNOT BE DIVERTED — REMOVE ALL INDICATORS
+
+Orders that cannot be diverted (no alternative lines) should have NO special styling, NO warning message, NO icon — nothing. They should look completely normal as if no shutdown happened.
+
+Only orders that CAN be diverted get the yellow/gold border and divert message.
+
+---
+
+### THE RULE
+
+| Order state | Yellow border? | Message? | Styling? |
+|---|---|---|---|
+| CAN be diverted (has alt lines in KB) | ✅ Yes | ✅ "⚠ Line shutdown — right-click to divert" | Yellow/gold left border |
+| CANNOT be diverted (no alt lines) | ❌ No | ❌ Nothing | Completely normal — no changes at all |
+| Done / Cancelled | ❌ No | ❌ Nothing | Normal |
+| Not on shutdown line | ❌ No | ❌ Nothing | Normal |
+
+---
+
+### REMOVE
+
+Remove ALL of these for non-divertable orders:
+
+- ❌ `order-row-blocked` class
+- ❌ Light red background (#fef2f2)
+- ❌ Opacity 0.7
+- ❌ "⛔ Line shutdown — no alternative lines available" message
+- ❌ Any blocked icon or indicator
+- ❌ Any CSS applied to non-divertable orders
+
+---
+
+### UPDATED CODE
+
+```jsx
+function OrderRow({ order, shutdownLines, knowledgeBase }) {
+  const isDivertable = canOrderBeDiverted(order, shutdownLines, knowledgeBase);
+  
+  return (
+    <tr className={isDivertable ? 'order-row-divertable' : ''}>
+      {/* ... cells ... */}
+      
+      <td>
+        <div>{order.item_description}</div>
+        <div className="category-text">{order.category}</div>
+        
+        {/* ONLY for divertable orders — nothing else */}
+        {isDivertable && (
+          <div className="divert-message">
+            ⚠ Line shutdown — right-click to divert
+          </div>
+        )}
+        
+        {/* NO message for non-divertable orders */}
+        {/* NO blocked message */}
+        {/* NO icon */}
+        {/* NOTHING */}
+      </td>
+    </tr>
+  );
+}
+```
+
+### UPDATED CSS
+
+```css
+/* Only divertable orders get styling */
+.order-row-divertable {
+  border-left: 4px solid #eab308 !important;
+}
+
+.divert-message {
+  font-size: 10px;
+  color: #b45309;
+  font-weight: 400;
+  margin-top: 2px;
+}
+
+/* REMOVE these — delete entirely */
+/* .order-row-blocked { ... } */
+/* .blocked-message { ... } */
+```
+
+---
+
+### FIX THE canOrderBeDiverted FUNCTION
+
+The issue may be that the function is not correctly matching material codes or not finding products in the Knowledge Base. Add debug logging and ensure matching works:
+
+```javascript
+function canOrderBeDiverted(order, shutdownLines, knowledgeBase) {
+  // Step 1: Only check active orders on shutdown lines
+  if (!shutdownLines.includes(order.line)) return false;
+  if (order.status === 'Done' || order.status === 'Cancel PO') return false;
+  
+  // Step 2: Find product in Knowledge Base
+  // Try multiple matching approaches
+  const materialCode = order.material_code_fg;
+  
+  const product = knowledgeBase.find(p => {
+    // Match by material_code_fg
+    if (p.material_code_fg === materialCode) return true;
+    if (p.fg_material_code === materialCode) return true;
+    if (p['FG Material Code'] === materialCode) return true;
+    
+    // Try string comparison (in case one has leading zeros)
+    if (String(p.material_code_fg) === String(materialCode)) return true;
+    if (String(p.fg_material_code) === String(materialCode)) return true;
+    
+    return false;
+  });
+  
+  // DEBUG — log to verify matching
+  console.log(
+    'Divert check:', 
+    order.item_description, 
+    'Material:', materialCode, 
+    'KB match:', product ? 'FOUND' : 'NOT FOUND'
+  );
+  
+  if (!product) {
+    console.log('No KB match for:', materialCode);
+    return false;
+  }
+  
+  // Step 3: Check run rates on lines OUTSIDE the shutdown feedmill
+  const rateFields = {
+    'Line 1': ['l1_rate', 'L1 Rate', 'l1Rate'],
+    'Line 2': ['l2_rate', 'L2 Rate', 'l2Rate'],
+    'Line 3': ['l3_rate', 'L3 Rate', 'l3Rate'],
+    'Line 4': ['l4_rate', 'L4 Rate', 'l4Rate'],
+    'Line 5': ['l5_rate', 'L5 Rate', 'l5Rate'],
+    'Line 6': ['l6_rate', 'L6 Rate', 'l6Rate'],
+    'Line 7': ['l7_rate', 'L7 Rate', 'l7Rate'],
+  };
+  
+  const availableLines = [];
+  
+  Object.entries(rateFields).forEach(([line, fields]) => {
+    // Skip lines that are in the shutdown feedmill
+    if (shutdownLines.includes(line)) return;
+    
+    // Try all possible field names for the rate
+    let rate = 0;
+    for (const field of fields) {
+      if (product[field]) {
+        rate = parseFloat(product[field]);
+        if (!isNaN(rate) && rate > 0) break;
+      }
+    }
+    
+    if (rate > 0) {
+      availableLines.push({ line, rate });
+    }
+  });
+  
+  // DEBUG — log available lines
+  console.log(
+    'Available lines for', order.item_description, ':',
+    availableLines.length > 0 ? availableLines : 'NONE'
+  );
+  
+  return availableLines.length > 0;
+}
+```
+
+---
+
+### COMMON ISSUES TO CHECK
+
+| Issue | What to verify |
+|---|---|
+| Material code field name mismatch | KB might use `FG Material Code` or `fg_material_code` instead of `material_code_fg` |
+| Rate field name mismatch | KB might use `L1 Rate` or `l1Rate` instead of `l1_rate` |
+| Data type mismatch | Material code in order might be a string, in KB might be a number (or vice versa) |
+| Leading zeros | "1000000000241" vs "001000000000241" |
+| Rate parsing | Rate might be stored as string "20.13" instead of number 20.13 |
+| KB not loaded | Knowledge Base data might not be available when the check runs |
+| Shutdown lines format | shutdownLines might contain "Line 1" but order.line might be "line 1" or "L1" |
+
+### VERIFY IN CONSOLE
+
+After fix, check the console logs:
+```
+Divert check: Elite XP Startex  Material: 1000000000241  KB match: FOUND
+Available lines for Elite XP Startex: [{line: 'Line 3', rate: 22.8}, {line: 'Line 7', rate: 7.09}]
+
+Divert check: Poultry Sol Chick Grower  Material: 1000000000XXX  KB match: NOT FOUND
+```
+
+If "NOT FOUND" for all products, the material code matching is broken. If "FOUND" but no available lines, the rate field names are wrong.
+
+---
+
+### VERIFICATION
+
+After fix:
+1. Shutdown Feedmill 1
+2. Check each order on Line 1 and Line 2:
+   - Orders with alternative lines in KB → ✅ Yellow border + divert message
+   - Orders WITHOUT alternative lines in KB → ✅ Completely normal, no styling, no message
+   - Done/Cancelled orders → ✅ Normal
+3. Console should show which products matched and which lines are available
+```

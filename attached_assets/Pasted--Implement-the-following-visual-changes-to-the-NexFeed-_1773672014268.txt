@@ -1,0 +1,165 @@
+```
+Implement the following visual changes to the NexFeed application:
+
+---
+
+## PRODUCTION INSIGHTS & ALERTS PANELS — MINIMALIST STYLING
+
+The current panel headers have colored backgrounds (blue tint, orange tint) that feel too heavy and inconsistent with the app's clean, minimalist design. Update both panels to match the app's simple aesthetic.
+
+---
+
+### UPDATED PANEL HEADER STYLING
+
+**Both panels — collapsed and expanded:**
+
+| Property | Value |
+|---|---|
+| Background | White (#ffffff) |
+| Border | 1px solid #e5e7eb (light grey, same as table borders) |
+| Border radius | 8px |
+| Padding | 10px 16px |
+| Font size | 13px |
+| Font weight | 500 (medium) |
+| Text color | Dark grey (#374151) — same for both panels |
+| Chevron color | Grey (#9ca3af) |
+| Chevron size | 14px |
+| Hover | Very subtle grey background (#f9fafb) |
+| Transition | background-color 150ms ease |
+
+**Remove:**
+- ❌ Blue background on Production Insights header
+- ❌ Orange background on Alerts & Reminders header
+- ❌ Blue text color on Production Insights
+- ❌ Orange text color on Alerts & Reminders
+- ❌ Any bold or heavy styling on headers
+
+**Keep:**
+- ✅ Emoji icons (🧠 and 🔔)
+- ✅ Summary count in parentheses — grey (#9ca3af), regular weight, 12px
+- ✅ Severity dot on Alerts panel when collapsed
+- ✅ Chevron toggle
+
+**Updated look — collapsed:**
+```
+┌──────────────────────────────────┬──────────────────────────────────┐
+│ 🧠 Production Insights (3)    ∨ │ 🔔 Alerts & Reminders (2) 🔴 ∨ │
+└──────────────────────────────────┴──────────────────────────────────┘
+```
+
+**Updated look — expanded:**
+```
+┌──────────────────────────────────┬──────────────────────────────────┐
+│ 🧠 Production Insights          ∧ │ 🔔 Alerts & Reminders        ∧ │
+├──────────────────────────────────┼──────────────────────────────────┤
+│                                  │                                  │
+│  [insight cards]                 │  [alert cards]                   │
+│                                  │                                  │
+└──────────────────────────────────┴──────────────────────────────────┘
+```
+
+---
+
+### INSIGHT/ALERT CARDS INSIDE PANELS — MINIMALIST
+
+The individual insight and alert cards inside the panels should also be minimal:
+
+**Insight cards (Panel 1):**
+
+| Property | Value |
+|---|---|
+| Background | White (#ffffff) |
+| Border | 1px solid #f3f4f6 (very light, barely visible) |
+| Border radius | 6px |
+| Padding | 10px 12px |
+| Spacing between cards | 8px |
+| Heading font | 12px, medium weight (500), dark text (#374151) |
+| Body font | 12px, regular (400), grey (#6b7280) |
+| Line height | 1.5 |
+| Hover | No hover effect — static cards |
+
+- No colored left borders on insight cards.
+- No background tints.
+- Clean, flat, simple.
+
+**Alert cards (Panel 2):**
+
+Same as insight cards EXCEPT:
+- Keep a subtle left border to indicate severity:
+  - 2px solid (not 3px — thinner, more subtle)
+  - Critical: #e53935
+  - Urgent: #fd5108
+  - Warning: #f59e0b
+  - Info: #9ca3af
+- No background tints — white background for all.
+
+```
+┌──────────────────────────────────┐
+│ 🚨 Urgent — Deadline Approaching │   ← 12px, medium weight
+│                                   │
+│ FPR: 260315 has an availability   │   ← 12px, regular, grey
+│ date of March 16...               │
+└──────────────────────────────────┘
+```
+
+---
+
+### PANEL BODY STYLING
+
+| Property | Value |
+|---|---|
+| Background | #fafafa (very subtle off-white, almost white) |
+| Padding | 12px |
+| Max height | 350px |
+| Overflow | Scroll (subtle scrollbar) |
+| Border | Shares parent border (no additional border) |
+| Border radius | 0 0 8px 8px (bottom corners only when expanded) |
+
+---
+
+### CLICKABLE ORDER REFERENCES — SUBTLE
+
+Order references in insights/alerts should be clickable but not visually loud:
+
+| Property | Value |
+|---|---|
+| Color | Dark text (#374151) — NOT orange |
+| Font weight | 600 (semi-bold) — to distinguish from body text |
+| Underline | Subtle dotted underline (#d1d5db) |
+| Hover color | Orange (#fd5108) |
+| Hover underline | Solid orange underline |
+| Cursor | Pointer |
+
+This keeps references subtle by default but clearly interactive on hover.
+
+---
+
+### "NO INSIGHTS" / "NO ALERTS" EMPTY STATE
+
+When there are no insights or alerts, show a minimal empty state:
+
+```
+┌──────────────────────────────────┐
+│                                  │
+│   ✅ No suggestions right now.   │   ← grey (#9ca3af), 12px, centered
+│                                  │
+└──────────────────────────────────┘
+```
+
+- Centered text.
+- Grey (#9ca3af).
+- 12px, regular weight.
+- No extra icons or decorations.
+
+---
+
+### OVERALL VISUAL GOAL
+
+The panels should feel like a natural, quiet part of the app — not a separate flashy component. They should:
+- Use the same border colors as the table (#e5e7eb)
+- Use the same text colors as the table (#374151, #6b7280)
+- Use white/near-white backgrounds
+- Avoid colored backgrounds on headers or cards
+- Be informative but not visually demanding
+- Let the interactive table remain the primary focus
+```

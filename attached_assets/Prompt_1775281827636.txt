@@ -1,0 +1,244 @@
+```
+Implement the following fix:
+
+---
+
+## FIX: ACTIVE STATUS — ALWAYS ON MOST RECENT HISTORY ENTRY
+
+The "Active" status badge should always be on the MOST RECENT history entry, regardless of whether it's a file upload, manual edit, or revert. The most recent entry is the current state of the Knowledge Base.
+
+---
+
+### THE PROBLEM
+
+```
+# | DATE                  | TYPE        | NOTES                              | STATUS
+1 | Apr 4, 2026 1:30 PM  | Manual Edit | Manual edit — 1 row(s) modified    |          ← should be Active
+2 | Apr 2, 2026 10:05 PM | File Upload | Uploaded: Knowledge Base.xlsx      | Active   ← WRONG
+```
+
+### THE CORRECT BEHAVIOR
+
+```
+# | DATE                  | TYPE        | NOTES                              | STATUS
+1 | Apr 4, 2026 1:30 PM  | Manual Edit | Manual edit — 1 row(s) modified    | Active   ← CORRECT (most recent)
+2 | Apr 2, 2026 10:05 PM | File Upload | Uploaded: Knowledge Base.xlsx      |          ← no longer active
+```
+
+### THE FIX
+
+The "Active" badge is determined purely by position — the FIRST entry (index 0) in the history array (which is sorted newest first) is always the active one.
+
+```javascript
+function isActiveEntry(entry, history) {
+  // Active = most recent entry = first in the list
+  return history.length > 0 && history[0].id === entry.id;
+}
+```
+
+### ADD STATUS COLUMN TO UNIFIED HISTORY TABLE
+
+```jsx
+<table className="kb-history-table">
+  <thead>
+    <tr>
+      <th style={{ width: 40 }}>#</th>
+      <th style={{ width: 180 }}>DATE</th>
+      <th style={{ width: 120 }}>TYPE</th>
+      <th>NOTES</th>
+      <th style={{ width: 80 }}>STATUS</th>
+      <th style={{ width: 120 }}>ACTIONS</th>
+    </tr>
+  </thead>
+  <tbody>
+    {history.map((entry, index) => (
+      <tr key={entry.id} className={index === 0 ? 'kb-history-active-row' : ''}>
+        <td>{index + 1}</td>
+        <td>{formatDateTimeFull(entry.timestamp)}</td>
+        <td>
+          <span className={`kb-history-type-badge ${entry.type}`}>
+            {getTypeLabel(entry.type)}
+          </span>
+        </td>
+        <td>
+          <HistoryNotesCell 
+            summary={entry.summary} 
+            details={entry.details} 
+          />
+        </td>
+        <td>
+          {index === 0 && (
+            <span className="kb-history-active-badge">Active</span>
+          )}
+        </td>
+        <td className="kb-history-actions">
+          <button 
+            className="kb-history-action-btn"
+            onClick={() => onDownload(entry)}
+            title="Download snapshot"
+          >
+            📥
+          </button>
+          {/* Revert — only show on non-active entries */}
+          {index !== 0 && (
+            <button 
+              className="kb-history-action-btn"
+              onClick={() => onRevert(entry)}
+              title="Revert to this version"
+            >
+              ↩
+            </button>
+          )}
+          {/* Delete — only show on non-active entries */}
+          {index !== 0 && (
+            <button 
+              className="kb-history-action-btn delete"
+              onClick={() => onDelete(entry)}
+              title="Delete this entry"
+            >
+              🗑
+            </button>
+          )}
+        </td>
+      </tr>
+    ))}
+  </tbody>
+</table>
+```
+
+### ACTIVE BADGE STYLING
+
+```css
+.kb-history-active-badge {
+  font-size: 11px;
+  font-weight: 600;
+  color: #16a34a;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 4px;
+  padding: 2px 8px;
+}
+
+.kb-history-active-row {
+  background: #fafffe;
+}
+```
+
+### WHEN EACH ACTION HAPPENS
+
+| Action | What happens to "Active" |
+|---|---|
+| Upload new file | New upload entry becomes #1 → Active |
+| Manual edit saved | New edit entry becomes #1 → Active |
+| Revert to older version | New revert entry becomes #1 → Active |
+| Delete a history entry | If non-active deleted, no change. Active entry cannot be deleted |
+
+### PROTECT ACTIVE ENTRY
+
+The active (most recent) entry cannot be deleted or reverted (it's already active):
+
+```javascript
+function canDeleteEntry(entry, history) {
+  // Cannot delete the active (most recent) entry
+  return history[0]?.id !== entry.id;
+}
+
+function canRevertEntry(entry, history) {
+  // Cannot revert to the active entry (already active)
+  return history[0]?.id !== entry.id;
+}
+```
+
+### AFTER REVERT — NEW ENTRY BECOMES ACTIVE
+
+```javascript
+function handleRevert(entry) {
+  if (!entry.snapshot) {
+    showNotification('error', 'Cannot revert — no snapshot available.');
+    return;
+  }
+  
+  // Replace KB data
+  setKbData(JSON.parse(JSON.stringify(entry.snapshot)));
+  
+  // Create NEW history entry for the revert — this becomes the active entry
+  const revertEntry = {
+    id: Date.now(),
+    type: 'revert',
+    timestamp: new Date().toISOString(),
+    summary: `Reverted to version from ${formatDateTimeFull(entry.timestamp)}`,
+    details: `Knowledge Base reverted to: ${entry.summary}`,
+    snapshot: JSON.parse(JSON.stringify(entry.snapshot)),
+    user: getCurrentUser(),
+  };
+  
+  // Add to top of history — becomes #1 (Active)
+  addToHistory(revertEntry);
+  
+  showNotification('success', `Knowledge Base reverted successfully.`);
+}
+```
+
+### AFTER UPLOAD — NEW ENTRY BECOMES ACTIVE
+
+```javascript
+function handleUploadComplete(filename, data, recordCount) {
+  setKbData(data);
+  
+  const uploadEntry = {
+    id: Date.now(),
+    type: 'file_upload',
+    timestamp: new Date().toISOString(),
+    summary: `Uploaded new file: ${filename} (${recordCount} records)`,
+    details: `File "${filename}" uploaded and applied as new Knowledge Base with ${recordCount} records.`,
+    snapshot: JSON.parse(JSON.stringify(data)),
+    filename: filename,
+    user: getCurrentUser(),
+  };
+  
+  // Add to top of history — becomes #1 (Active)
+  addToHistory(uploadEntry);
+}
+```
+
+### AFTER MANUAL EDIT SAVE — NEW ENTRY BECOMES ACTIVE
+
+```javascript
+function handleSaveChanges() {
+  // ... validation ...
+  
+  const editEntry = createEditHistoryEntry();
+  
+  // Add to top of history — becomes #1 (Active)
+  addToHistory(editEntry);
+  
+  setIsEditMode(false);
+}
+```
+
+---
+
+## VERIFICATION
+
+1. Upload file → edit manually
+   - ✅ Manual edit is #1 with "Active" badge
+   - ✅ Upload is #2 with no badge
+
+2. Upload → edit → upload again
+   - ✅ Second upload is #1 with "Active"
+   - ✅ Edit is #2, first upload is #3
+
+3. Revert to older version
+   - ✅ New revert entry is #1 with "Active"
+   - ✅ Previous active loses badge
+
+4. Active entry protection
+   - ✅ Cannot delete active entry (no delete button shown)
+   - ✅ Cannot revert to active entry (no revert button shown)
+   - ✅ Can download active entry
+
+5. Multiple edits
+   - ✅ Each save creates new entry at #1
+   - ✅ Only #1 shows "Active"
+   - ✅ All others lose "Active"
+```

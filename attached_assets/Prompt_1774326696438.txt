@@ -1,0 +1,244 @@
+```
+Implement the following changes to the NexFeed application:
+
+---
+
+## AUTO-SEQUENCE — TIEBREAKER LOGIC FOR SAME TARGET DATE
+
+When two or more non-dated orders have the SAME target date from the Next 10 Days file, the auto-sequence needs a tiebreaker to determine which order goes first. Use the percentage gap between Due for Loading and Inventory.
+
+---
+
+### PRIORITY RULES (IN ORDER)
+
+**Rule 1: Target date (primary sort)**
+- Earlier target date = higher priority
+- This is unchanged from before
+
+**Rule 2: Percentage gap (tiebreaker for same target date)**
+- When two orders share the same target date, calculate the fulfillment percentage
+- The order with the LOWER fulfillment percentage (more still needed) gets higher priority
+
+**Rule 3: Volume (second tiebreaker)**
+- If two orders have the same target date AND the same fulfillment percentage
+- Higher volume order goes first
+- But also consider production time impact on downstream orders
+
+---
+
+### PERCENTAGE GAP CALCULATION
+
+```javascript
+function calculateFulfillmentPercentage(product) {
+  const dueForLoading = product.due_for_loading;
+  const inventory = product.inventory;
+  
+  // Avoid division by zero
+  if (inventory === 0 || inventory === null) {
+    return 100; // treat as fully fulfilled, lowest priority
+  }
+  
+  // Fulfillment % = how much of the inventory target is already met
+  const fulfillmentPct = (dueForLoading / inventory) * 100;
+  
+  return fulfillmentPct;
+}
+
+// Lower fulfillment % = more urgent = higher priority
+// Higher fulfillment % = less urgent = lower priority
+```
+
+### EXAMPLES
+
+**Example 1 — Different fulfillment percentages:**
+```
+Order A: Inventory = 100, Due for loading = 20
+  Fulfillment = 20/100 = 20% → 80% still needed → MORE urgent
+
+Order B: Inventory = 50, Due for loading = 25
+  Fulfillment = 25/50 = 50% → 50% still needed → LESS urgent
+
+Both have Target: March 28
+
+Priority: Order A first (20% fulfilled), then Order B (50% fulfilled)
+```
+
+**Example 2 — Large inventory but mostly fulfilled:**
+```
+Order A: Inventory = 1000, Due for loading = 900
+  Fulfillment = 900/1000 = 90% → only 10% still needed → LESS urgent
+
+Order B: Inventory = 50, Due for loading = 5
+  Fulfillment = 5/50 = 10% → 90% still needed → MORE urgent
+
+Both have Target: March 28
+
+Priority: Order B first (10% fulfilled), then Order A (90% fulfilled)
+```
+
+**Example 3 — Same percentage, different volumes:**
+```
+Order A: Inventory = 200, Due for loading = 40
+  Fulfillment = 40/200 = 20%
+  Volume: 80 MT
+
+Order B: Inventory = 100, Due for loading = 20
+  Fulfillment = 20/100 = 20%
+  Volume: 40 MT
+
+Both have Target: March 28, both 20% fulfilled
+
+Priority: Order A first (80 MT, higher volume)
+```
+
+---
+
+### UPDATED SORT ALGORITHM
+
+```javascript
+function autoSequenceSort(orderA, orderB, next10DaysData) {
+  const dateA = getEffectiveDate(orderA, next10DaysData);
+  const dateB = getEffectiveDate(orderB, next10DaysData);
+  
+  // Rule 0: Stock sufficient always goes last
+  if (dateA.source === 'stock_sufficient' && dateB.source !== 'stock_sufficient') return 1;
+  if (dateA.source !== 'stock_sufficient' && dateB.source === 'stock_sufficient') return -1;
+  
+  // Rule 0b: Orders with no date/no match go after dated orders
+  if (dateA.date && !dateB.date) return -1;
+  if (!dateA.date && dateB.date) return 1;
+  
+  // Both have dates — compare
+  if (dateA.date && dateB.date) {
+    
+    // Rule 1: Earlier target date first
+    const dateCompare = dateA.date - dateB.date;
+    if (dateCompare !== 0) return dateCompare;
+    
+    // Rule 2: Same date — lower fulfillment % first (more urgent)
+    const stockA = getStockData(orderA, next10DaysData);
+    const stockB = getStockData(orderB, next10DaysData);
+    
+    if (stockA && stockB) {
+      const pctA = calculateFulfillmentPercentage(stockA);
+      const pctB = calculateFulfillmentPercentage(stockB);
+      
+      if (pctA !== pctB) {
+        return pctA - pctB; // lower % = more urgent = comes first
+      }
+    }
+    
+    // Rule 3: Same date, same % — higher volume first
+    const volA = orderA.adjusted_volume || orderA.volume;
+    const volB = orderB.adjusted_volume || orderB.volume;
+    
+    if (volA !== volB) {
+      return volB - volA; // higher volume first
+    }
+    
+    // All same — maintain original order
+    return 0;
+  }
+  
+  // Both have no dates — maintain original order
+  return 0;
+}
+```
+
+---
+
+### STORE FULFILLMENT DATA ON ORDERS
+
+When matching orders with N10D data, store the fulfillment percentage on each order for reference:
+
+```javascript
+{
+  material_code_fg: "1000000000241",
+  avail_date: "safety stocks",
+  n10d_target_date: "2026-03-28",
+  n10d_due_for_loading: 92.3,
+  n10d_inventory: 310.6,
+  n10d_fulfillment_pct: 29.7,  // (92.3 / 310.6) * 100
+  n10d_gap_pct: 70.3,          // 100 - 29.7
+  n10d_status: "needs_production"
+}
+```
+
+---
+
+### AI INSIGHTS — REFERENCE FULFILLMENT PERCENTAGE
+
+The AI Sequence Analysis should reference the fulfillment percentage when explaining tiebreakers:
+
+**When two orders share the same target date:**
+```
+📋 Sequence Rationale
+
+Elite XP Startex (80 MT) and Classic Hog Growex (60 MT) 
+both have a stock target date of March 28. Elite XP 
+Startex is placed first because its warehouse fulfillment 
+is only 29.7% (92.3 MT loaded out of 310.6 MT target) — 
+meaning 70.3% of production still needs to happen. Classic 
+Hog Growex is at 9.4% fulfillment (20.5 MT of 217.6 MT) 
+so it follows at the next position.
+
+Wait — Classic Hog Growex (9.4%) is actually LESS fulfilled 
+than Elite XP Startex (29.7%), so Classic Hog Growex should 
+be first...
+```
+
+Actually, let me correct — **lower fulfillment = higher priority**, so:
+
+```
+📋 Sequence Rationale
+
+Classic Hog Growex (60 MT) and Elite XP Startex (80 MT) 
+both have a stock target date of March 28. Classic Hog 
+Growex is placed first because its warehouse fulfillment 
+is only 9.4% — the warehouse has only loaded 20.5 MT out 
+of the 217.6 MT target, with 90.6% still needed. 
+
+Elite XP Startex follows with 29.7% fulfillment (92.3 MT 
+of 310.6 MT), meaning 70.3% still needed — urgent but 
+slightly less than Classic Hog Growex.
+```
+
+---
+
+### AUTO-SEQUENCE PREVIEW — SHOW FULFILLMENT DATA
+
+In the auto-sequence preview, add a tooltip or visual indicator showing the fulfillment percentage for non-dated orders matched with N10D data.
+
+**Tooltip on hover over the Avail Date cell (for N10D-matched orders):**
+
+```
+Stock Level Data:
+Due for loading: 92.3 MT
+Inventory target: 310.6 MT
+Fulfillment: 29.7%
+Gap: 70.3% still needed
+Target date: March 28
+```
+
+---
+
+### SUMMARY OF PRIORITY HIERARCHY
+
+```
+1. Earlier effective date (actual avail or N10D target) — FIRST
+2. If same date: Lower fulfillment % (more still needed) — FIRST
+3. If same date AND same %: Higher volume — FIRST
+4. If all same: Maintain original order
+5. No date / no N10D match: After all dated orders
+6. Stock sufficient: Very bottom (lowest priority)
+```
+
+---
+
+### APPLIES TO
+
+- ✅ Auto-Sequence sorting algorithm
+- ✅ Auto-Sequence AI insights (reference fulfillment % in explanations)
+- ✅ Auto-Sequence preview tooltip (show fulfillment data on hover)
+- ❌ Main table sorting — does NOT apply (main table doesn't auto-sort by N10D)
+```

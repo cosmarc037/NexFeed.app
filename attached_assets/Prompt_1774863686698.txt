@@ -1,0 +1,489 @@
+```
+Implement the following changes to the NexFeed application:
+
+---
+
+## FIX: NEXT 10 DAYS — CORRECT DFL AND INVENTORY UNDERSTANDING + NEW COLUMNS
+
+The app's understanding of Due for Loading (DFL) and Inventory was inverted. Fix the logic throughout the app and add new tracking columns.
+
+---
+
+### 1. CORRECT UNDERSTANDING
+
+| Field | What it actually means |
+|---|---|
+| Due for Loading (DFL) | The required amount of MT that needs to be produced/loaded for a product |
+| Inventory | The current available stock / threshold |
+
+### PRIORITIZATION RULE
+
+| Condition | Meaning | Priority |
+|---|---|---|
+| DFL > Inventory | URGENT — required amount exceeds current stock, needs production NOW | ⬆ High |
+| DFL < Inventory | Stock sufficient — current stock covers the requirement | ⬇ Low |
+
+### EXAMPLES
+
+**URGENT:**
+```
+Product: Ave Max Duck Layex 2 Pellet
+DFL: 194.2 MT (required to produce)
+Inventory: 181.5 MT (current stock)
+→ DFL > Inventory → URGENT — produce NOW
+```
+
+**Stock Sufficient:**
+```
+Product: Gallimax Pigeon Pellet
+DFL: 2.5 MT (required to produce)
+Inventory: 27.3 MT (current stock)
+→ DFL < Inventory → Stock sufficient
+```
+
+---
+
+### 2. BALANCE TO PRODUCE CALCULATION
+
+```javascript
+function calculateBalanceToProduce(inventory, dfl, sumOf10Days) {
+  // bal.to.produce = inventory - (DFL + sum of all 10 day values)
+  return inventory - (dfl + sumOf10Days);
+}
+```
+
+**Examples:**
+```
+Product A:
+Inventory: 376.4
+DFL: 127.8
+Sum of 10 day values: 200.0
+Bal to Produce = 376.4 - (127.8 + 200.0) = 48.6 (surplus — still has stock)
+
+Product B:
+Inventory: 181.5
+DFL: 194.2
+Sum of 10 day values: 150.0
+Bal to Produce = 181.5 - (194.2 + 150.0) = -162.7 (deficit — needs production)
+```
+
+- Positive = surplus, still has stock remaining
+- Negative = deficit, needs production
+
+---
+
+### 3. COMPLETION AND AVAIL DATE CALCULATION
+
+Track TWO dates per product based on cumulative sum:
+
+| Column | Definition |
+|---|---|
+| Completion | Last date BEFORE cumulative sum exceeds inventory — the safety date |
+| Avail | Date WHEN cumulative sum exceeds inventory — the actual breach date |
+
+### CALCULATION
+
+```javascript
+function calculateCompletionAndAvail(product, dailyColumns, today) {
+  const inventory = product.inventory;
+  const dfl = product.due_for_loading;
+  
+  let cumulativeSum = 0;
+  let completionDate = null;
+  let availDate = null;
+  
+  // Check if DFL alone already exceeds inventory (Day 0 — critical)
+  if (dfl >= inventory) {
+    completionDate = null;     // No safe date exists
+    availDate = today;         // Already breached, avail is today
+    return { completionDate, availDate };
+  }
+  
+  // Start cumulating from DFL as base
+  cumulativeSum = dfl;
+  
+  for (let i = 0; i < dailyColumns.length; i++) {
+    const dayValue = parseFloat(product[dailyColumns[i].key]) || 0;
+    const previousSum = cumulativeSum;
+    cumulativeSum += dayValue;
+    
+    // Check if cumulative sum exceeds inventory on this day
+    if (cumulativeSum >= inventory && !availDate) {
+      // Completion = previous day (last safe day)
+      if (i > 0) {
+        completionDate = dailyColumns[i - 1].date;
+      } else {
+        completionDate = null; // Exceeded on first day column
+      }
+      
+      // Avail = this day (threshold breached)
+      availDate = dailyColumns[i].date;
+    }
+  }
+  
+  // If never exceeded inventory within 10 days
+  if (!availDate) {
+    completionDate = dailyColumns[dailyColumns.length - 1].date;
+    availDate = null; // Never breached — show "—"
+  }
+  
+  return { completionDate, availDate };
+}
+```
+
+### EDGE CASES
+
+| Scenario | Completion | Avail |
+|---|---|---|
+| DFL already > Inventory (Day 0) | null ("—") | Today's date |
+| Exceeds on first day column (Day 1) | null ("—") | Day 1 date |
+| Exceeds on Day 5 | Day 4 date | Day 5 date |
+| Never exceeds within 10 days | Last day (Day 10) | null ("—") |
+
+### WALKTHROUGH EXAMPLE
+
+```
+Poultry Sol Broiler Starter Cr MD 50kg
+DFL: 127.8 | Inventory: 376.4
+
+Start: cumulativeSum = 127.8 (DFL < 376.4 ✅, not Day 0 critical)
+
+Mar 18: +28.8  → cumulative: 156.6  (under 376.4 ✅)
+Mar 19: +67.0  → cumulative: 223.6  (under 376.4 ✅)
+Mar 20: +0     → cumulative: 223.6  (under 376.4 ✅)
+Mar 21: +61.0  → cumulative: 284.6  (under 376.4 ✅)
+Mar 22: +37.7  → cumulative: 322.3  (under 376.4 ✅) ← last safe day
+Mar 23: +109.0 → cumulative: 431.3  (OVER 376.4 🔴) ← breached!
+
+Completion = Mar 22 (last day before red)
+Avail = Mar 23 (day it goes red)
+```
+
+---
+
+### 4. STATUS DETERMINATION — 4 LEVELS
+
+```javascript
+function determineProductStatus(product, dailyColumns, today) {
+  const dfl = product.due_for_loading;
+  const inventory = product.inventory;
+  
+  // CRITICAL: DFL already greater than inventory from Day 0
+  if (dfl >= inventory) {
+    return 'Critical';
+  }
+  
+  // Calculate which day cumulative sum exceeds inventory
+  let cumulativeSum = dfl;
+  let breachDay = null;
+  
+  for (let i = 0; i < dailyColumns.length; i++) {
+    const dayValue = parseFloat(product[dailyColumns[i].key]) || 0;
+    cumulativeSum += dayValue;
+    
+    if (cumulativeSum >= inventory && breachDay === null) {
+      breachDay = i;
+      break;
+    }
+  }
+  
+  // No breach found in 10 days
+  if (breachDay === null) {
+    return 'Sufficient';
+  }
+  
+  // Calculate days from today to breach date
+  const breachDate = new Date(dailyColumns[breachDay].date);
+  const diffMs = breachDate.getTime() - today.getTime();
+  const daysUntilBreach = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+  
+  // URGENT: Will breach within 3 days
+  if (daysUntilBreach <= 3) {
+    return 'Urgent';
+  }
+  
+  // MONITOR: Will breach within 4-10 days
+  if (daysUntilBreach <= 10) {
+    return 'Monitor';
+  }
+  
+  return 'Sufficient';
+}
+```
+
+### STATUS RULES
+
+| Status | Condition | Color |
+|---|---|---|
+| Critical | DFL ≥ Inventory from Day 0 (before any daily values) | Red |
+| Urgent | Cumulative sum will exceed inventory within 3 days | Orange/amber |
+| Monitor | Cumulative sum will exceed inventory within 4-10 days | Yellow |
+| Sufficient | Never exceeds inventory within 10 days | Green |
+
+---
+
+### 5. STATUS BADGES — STYLING
+
+```css
+.status-badge-critical {
+  background: #fef2f2;
+  color: #dc2626;
+  border: 1px solid #fecaca;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.status-badge-urgent {
+  background: #fff7ed;
+  color: #ea580c;
+  border: 1px solid #fed7aa;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.status-badge-monitor {
+  background: #fefce8;
+  color: #ca8a04;
+  border: 1px solid #fef08a;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.status-badge-sufficient {
+  background: #f0fdf4;
+  color: #16a34a;
+  border: 1px solid #bbf7d0;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+}
+```
+
+---
+
+### 6. N10D TABLE — UPDATED TRACKING COLUMNS
+
+### RENAME AND ADD COLUMNS
+
+| Current Column | New Column Name |
+|---|---|
+| TARGET | COMPLETION |
+| (new column) | AVAIL |
+| BAL. TO PRODUCE | BAL. TO PRODUCE (updated formula) |
+| INVENTORY | INVENTORY (unchanged) |
+| STATUS | STATUS (now 4 levels with badges) |
+
+### TABLE LAYOUT
+
+```
+┌───────────────────┬──────────────────────┬────────────────────────────────────────────────┐
+│  PRODUCT DETAILS  │     NEXT 10 DAYS     │                   TRACKING                     │
+├───────────────────┼──────────────────────┼────────────────────────────────────────────────┤
+│ Material │ Item   │ Mar 18 ... Mar 28    │ Inv  │ Bal     │ Completion │ Avail  │ Status  │
+│ Code     │ Desc   │                      │      │         │            │        │         │
+├──────────┼────────┼──────────────────────┼──────┼─────────┼────────────┼────────┼─────────┤
+│ 10000528 │ Ave..  │ 65.0  12.5  ...      │181.5 │ -162.7  │   —        │ Today  │Critical │
+│ 10000594 │ Gall21 │  —    0.8   ...      │  0.7 │  -23.3  │   —        │ Today  │Critical │
+│ 10000915 │ Salto  │ 1.8   0.5   ...      │ 23.4 │   -1.8  │   —        │ Today  │Critical │
+│ 10000012 │ Poul.. │ 28.8  67.0  ...      │376.4 │   48.6  │ Mar 22     │ Mar 23 │ Urgent  │
+│ 10000013 │ Poul.. │ 4.5   42.9  ...      │405.9 │   17.9  │ Mar 22     │ Mar 23 │ Urgent  │
+│ 10000043 │ Basic  │ 18.5  32.0  ...      │342.8 │    5.5  │ Mar 24     │ Mar 25 │ Monitor │
+│ 10000241 │ Elite  │ 10.5  15.0  ...      │310.6 │    4.5  │ Mar 26     │ Mar 27 │ Monitor │
+│ 10000939 │ Class  │  —    9.3   ...      │217.6 │   57.2  │ Mar 28     │   —    │Suffic.  │
+│ 10000934 │ Gall.. │  —    2.5   ...      │ 27.3 │   14.8  │ Mar 28     │   —    │Suffic.  │
+└──────────┴────────┴──────────────────────┴──────┴─────────┴────────────┴────────┴─────────┘
+```
+
+### COLUMN STYLING
+
+**COMPLETION column:**
+
+| Property | Value |
+|---|---|
+| Header | "COMPLETION" |
+| Font size | 11px |
+| Width | 90px |
+| Alignment | Center |
+| Has date | Dark text (#1a1a1a), format "Mar 22" |
+| Null | Grey "—" |
+| Tooltip on hover | "Last date before inventory threshold is breached" |
+
+**AVAIL column:**
+
+| Property | Value |
+|---|---|
+| Header | "AVAIL" |
+| Font size | 11px |
+| Width | 80px |
+| Alignment | Center |
+| Has date | Dark text (#1a1a1a), format "Mar 23" |
+| Shows today | When DFL ≥ Inventory from Day 0, show today's date |
+| Null (never breached) | Grey "—" |
+| Tooltip on hover | "Date when cumulative demand exceeds inventory" |
+
+---
+
+### 7. RED HIGHLIGHTING — UNCHANGED BEHAVIOR
+
+The red highlighting logic stays the same:
+- Cumulative sum starts with DFL as base
+- Each day's value is added left to right
+- Cells turn red when cumulative sum exceeds inventory
+
+```javascript
+function getCellHighlight(cumulativeSum, inventory) {
+  if (cumulativeSum >= inventory) {
+    return 'red';
+  }
+  return 'none';
+}
+```
+
+---
+
+### 8. UPDATE ALL DEPENDENT FEATURES
+
+### SAFETY STOCK INSIGHTS — AI PROMPT
+
+Update pre-calculation:
+
+```javascript
+function prepareStockInsightData(next10DaysData, today) {
+  const products = next10DaysData.map(product => {
+    const inventory = product.inventory;
+    const dfl = product.due_for_loading;
+    
+    const status = determineProductStatus(product, dailyColumns, today);
+    
+    const bufferPct = inventory > 0 
+      ? Math.round(((inventory - dfl) / inventory) * 100) 
+      : -100;
+    
+    const dates = calculateCompletionAndAvail(product, dailyColumns, today);
+    
+    return {
+      name: product.item_description,
+      dfl: dfl,
+      inventory: inventory,
+      bufferPct: bufferPct,
+      status: status,
+      completionDate: dates.completionDate,
+      availDate: dates.availDate
+    };
+  });
+  
+  return products;
+}
+```
+
+Update AI prompt context:
+
+```
+UNDERSTANDING:
+- Due for Loading (DFL) = required amount of MT to produce
+- Inventory = current available stock
+- DFL > Inventory → needs production immediately (Critical)
+- DFL < Inventory → stock sufficient
+- Completion = last safe date BEFORE threshold breach
+- Avail = date WHEN threshold is breached
+- Higher DFL relative to Inventory = more urgent
+- Balance to Produce = Inventory - (DFL + sum of 10 day values)
+- Positive balance = surplus, negative = deficit
+
+STATUS LEVELS:
+- Critical: DFL already exceeds Inventory from Day 0
+- Urgent: Threshold will be breached within 3 days
+- Monitor: Threshold will be breached within 4-10 days
+- Sufficient: No breach within 10-day window
+```
+
+### AUTO-SEQUENCE — SSL PRIORITIZATION
+
+```javascript
+function getSSLPriority(product) {
+  const dfl = product.due_for_loading;
+  const inventory = product.inventory;
+  
+  // Higher DFL-to-Inventory ratio = more urgent = higher priority
+  const ratio = inventory > 0 ? dfl / inventory : Infinity;
+  
+  return {
+    ratio: ratio,
+    isUrgent: dfl > inventory,
+    status: product.status,
+    priority: ratio
+  };
+}
+
+// Sort: Critical first, then Urgent, Monitor, Sufficient
+// Within same status, higher ratio = more urgent
+const statusOrder = { 'Critical': 0, 'Urgent': 1, 'Monitor': 2, 'Sufficient': 3 };
+
+products.sort((a, b) => {
+  const statusDiff = statusOrder[a.status] - statusOrder[b.status];
+  if (statusDiff !== 0) return statusDiff;
+  return b.ratio - a.ratio;
+});
+```
+
+### BUFFER CALCULATION
+
+```javascript
+function calculateBuffer(dfl, inventory) {
+  if (!inventory || inventory === 0) {
+    return { buffer: -100, status: 'no_inventory' };
+  }
+  
+  // Positive = stock covers DFL, Negative = deficit
+  const buffer = ((inventory - dfl) / inventory) * 100;
+  
+  return {
+    buffer: Math.round(buffer * 10) / 10,
+    status: buffer > 20 ? 'sufficient' :
+            buffer > 0 ? 'low_buffer' :
+            'deficit'
+  };
+}
+```
+
+---
+
+### 9. APPLY CHANGES TO ALL FEATURES
+
+| Feature | What to update |
+|---|---|
+| N10D table rendering | New status levels, rename Target→Completion, add Avail column |
+| N10D table red highlighting | Confirm cumulative starts from DFL |
+| N10D Balance to Produce | New formula: Inventory - (DFL + sum of 10 days) |
+| Safety Stock Insights | AI prompt, pre-calculation, 4 status levels |
+| Auto-Sequence SSL | DFL/Inventory ratio sorting, status-based ordering |
+| Add New Order | Product urgency check |
+| Overview key metrics | "Urgent Orders" count |
+| Smart Production Insight | AI context data |
+| PDF Export | Include Completion and Avail columns |
+| Order diversion | Urgency assessment |
+| Impact Analysis | Deadline calculations using Avail date |
+
+---
+
+### 10. VERIFICATION
+
+| Product | DFL | Inventory | Expected Status | Completion | Avail |
+|---|---|---|---|---|---|
+| Ave Max Duck Layex 2 Pellet | 194.2 | 181.5 | Critical (DFL > Inv from Day 0) | — | Today |
+| Gall 21 Chicken Layer | 24.0 | 0.7 | Critical (DFL > Inv from Day 0) | — | Today |
+| Salto Baby Stag | 25.2 | 23.4 | Critical (DFL > Inv from Day 0) | — | Today |
+| Poultry Sol Broiler Starter | 127.8 | 376.4 | Urgent (breaches within 3 days) | Mar 22 | Mar 23 |
+| Poultry Sol Broiler Finisher | 217.7 | 405.9 | Urgent (breaches within 3 days) | Mar 22 | Mar 23 |
+| Basic Broiler Finex Crumble | 158.4 | 342.8 | Monitor (breaches within 4-10 days) | Mar 24 | Mar 25 |
+| Elite XP Startex | 92.3 | 310.6 | Monitor (breaches within 4-10 days) | Mar 26 | Mar 27 |
+| Classic Hog Growex | 20.5 | 217.6 | Sufficient (never breaches in 10 days) | Mar 28 | — |
+| Gallimax Pigeon Pellet | 2.5 | 27.3 | Sufficient (never breaches in 10 days) | Mar 28 | — |
+```

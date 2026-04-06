@@ -1,0 +1,226 @@
+```
+Implement the following fix:
+
+---
+
+## FIX: ORDER TABLE — TEXT SELECTABLE VS DRAG
+
+Currently, clicking and dragging on an order row always initiates a drag/reorder action. This prevents users from selecting text in the row cells. Fix so that text is selectable, and drag only activates from a specific drag handle.
+
+---
+
+### THE PROBLEM
+
+- User tries to select text in a cell (e.g., item description, material code)
+- Mouse down + mouse move triggers row drag instead of text selection
+- User cannot copy text from order rows
+
+---
+
+### THE FIX — USE DRAG HANDLE ONLY
+
+Drag should ONLY initiate from the drag handle icon (⠿ / grip dots), NOT from anywhere on the row.
+
+### STEP 1: ADD DRAG HANDLE COLUMN
+
+Each row has a small drag handle icon on the left side. Only this icon triggers drag:
+
+```jsx
+function OrderRow({ order, onDragStart, onDragEnd, onDragOver }) {
+  const [isDragging, setIsDragging] = useState(false);
+  
+  function handleDragHandleMouseDown(e) {
+    // Only the handle triggers drag
+    setIsDragging(true);
+  }
+  
+  return (
+    <tr
+      draggable={isDragging}
+      onDragStart={(e) => {
+        if (!isDragging) {
+          e.preventDefault();
+          return;
+        }
+        onDragStart(e, order);
+      }}
+      onDragEnd={(e) => {
+        setIsDragging(false);
+        onDragEnd(e);
+      }}
+      onDragOver={onDragOver}
+    >
+      {/* Drag handle — ONLY this triggers drag */}
+      <td className="drag-handle-cell">
+        <div 
+          className="drag-handle"
+          onMouseDown={handleDragHandleMouseDown}
+          onMouseUp={() => setIsDragging(false)}
+        >
+          ⠿
+        </div>
+      </td>
+      
+      {/* All other cells — text is selectable */}
+      <td className="selectable-cell">{order.prio}</td>
+      <td className="selectable-cell">{order.fpr}</td>
+      <td className="selectable-cell">{order.material_code_fg}</td>
+      <td className="selectable-cell">{order.item_description}</td>
+      {/* ... other cells ... */}
+    </tr>
+  );
+}
+```
+
+### STEP 2: PREVENT ROW-LEVEL DRAG
+
+Remove any `draggable="true"` or `onDragStart` that is directly on the `<tr>` or on cell elements. Drag should ONLY come from the handle:
+
+```javascript
+// WRONG — do NOT put draggable on the entire row
+<tr draggable="true" onDragStart={handleDrag}>
+
+// CORRECT — row is only draggable when handle is engaged
+<tr draggable={isDragging} onDragStart={handleDrag}>
+```
+
+### STEP 3: CSS — SELECTABLE TEXT + DRAG HANDLE
+
+```css
+/* All cells — text is selectable */
+.selectable-cell {
+  user-select: text;
+  cursor: text;
+}
+
+/* Editable cells that are inputs — keep existing behavior */
+.selectable-cell input,
+.selectable-cell textarea {
+  user-select: text;
+  cursor: text;
+}
+
+/* Drag handle — shows grab cursor */
+.drag-handle-cell {
+  width: 24px;
+  min-width: 24px;
+  max-width: 24px;
+  padding: 0 4px;
+  user-select: none;
+}
+
+.drag-handle {
+  cursor: grab;
+  color: #d1d5db;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 2px;
+  border-radius: 3px;
+  transition: color 0.15s, background 0.15s;
+}
+
+.drag-handle:hover {
+  color: #6b7280;
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.drag-handle:active {
+  cursor: grabbing;
+  color: #374151;
+  background: rgba(0, 0, 0, 0.08);
+}
+
+/* While dragging — row visual feedback */
+tr.dragging {
+  opacity: 0.5;
+  background: #f9fafb;
+}
+
+/* Remove any existing user-select: none on cells */
+/* SEARCH AND DELETE these if they exist: */
+/*
+td { user-select: none; }
+tr { user-select: none; }
+.order-row { user-select: none; }
+*/
+```
+
+### STEP 4: REMOVE OLD DRAG BEHAVIOR
+
+Search the codebase and remove any of these patterns that make the entire row draggable:
+
+```javascript
+// REMOVE these from <tr> or row containers:
+draggable="true"
+onMouseDown={startDrag}
+onDragStart={handleRowDrag}
+style={{ cursor: 'grab' }}
+style={{ cursor: 'move' }}
+user-select: none  // on cells
+-webkit-user-select: none  // on cells
+
+// KEEP these only on the drag handle:
+// draggable, onMouseDown, cursor: grab
+```
+
+### STEP 5: LOCKED ORDERS — NO DRAG HANDLE
+
+For orders that cannot be dragged (Done, Cancel PO, In Production, On-going), hide or disable the drag handle:
+
+```jsx
+<td className="drag-handle-cell">
+  {canDragOrder(order) ? (
+    <div 
+      className="drag-handle"
+      onMouseDown={handleDragHandleMouseDown}
+      onMouseUp={() => setIsDragging(false)}
+    >
+      ⠿
+    </div>
+  ) : (
+    <div className="drag-handle-disabled">
+      {/* Empty or a lock icon */}
+    </div>
+  )}
+</td>
+```
+
+```css
+.drag-handle-disabled {
+  width: 14px;
+  height: 14px;
+  /* Empty space — no handle shown */
+}
+```
+
+---
+
+### VERIFICATION
+
+1. Text selection
+   - ✅ Can click and drag to select text in item description
+   - ✅ Can click and drag to select text in material code
+   - ✅ Can click and drag to select text in FPR
+   - ✅ Can double-click to select a word
+   - ✅ Can triple-click to select entire cell text
+   - ✅ Can Ctrl+C to copy selected text
+
+2. Drag handle
+   - ✅ Hovering drag handle shows grab cursor
+   - ✅ Clicking drag handle and dragging moves the row
+   - ✅ Clicking anywhere else on the row does NOT start drag
+   - ✅ Drag handle shows ⠿ dots icon
+
+3. Locked orders
+   - ✅ Done orders — no drag handle, text still selectable
+   - ✅ Cancel PO — no drag handle, text still selectable
+   - ✅ In Production — no drag handle, text still selectable
+   - ✅ Planned — drag handle visible (can be dragged)
+   - ✅ Plotted — drag handle visible
+
+4. Editable cells
+   - ✅ Input fields still work (start date, notes, etc.)
+   - ✅ Clicking input fields focuses them, does not trigger drag
+```

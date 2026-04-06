@@ -1,0 +1,290 @@
+```
+Implement the following change across the entire NexFeed application:
+
+---
+
+## RENAME: "KNOWLEDGE BASE" → "MASTER DATA"
+
+Replace all occurrences of "Knowledge Base" with "Master Data" throughout the entire app — UI text, labels, headers, tooltips, tour descriptions, notifications, dialogs, comments, and variable names where they appear in user-facing text.
+
+---
+
+### LOCATIONS TO UPDATE
+
+**1. SIDEBAR NAVIGATION**
+
+```jsx
+{/* BEFORE */}
+<a data-tour="sidebar-knowledge-base">Knowledge Base</a>
+
+{/* AFTER */}
+<a data-tour="sidebar-master-data">Master Data</a>
+```
+
+**2. PAGE HEADER**
+
+```jsx
+{/* BEFORE */}
+<h2>Knowledge Base</h2>
+<p>Upload and manage master data for auto-populating order details</p>
+
+{/* AFTER */}
+<h2>Master Data</h2>
+<p>Upload and manage master data for auto-populating order details</p>
+```
+
+**3. UPLOAD BUTTON**
+
+```jsx
+{/* BEFORE */}
+<button>Upload Knowledge Base</button>
+
+{/* AFTER */}
+<button>Upload Master Data</button>
+```
+
+**4. RE-APPLY BUTTON — TOOLTIP AND NOTIFICATIONS**
+
+```jsx
+{/* BEFORE */}
+<button title="Re-apply Knowledge Base to existing orders">
+  Re-apply to Existing Orders
+</button>
+
+{/* AFTER */}
+<button title="Re-apply Master Data to existing orders">
+  Re-apply to Existing Orders
+</button>
+```
+
+**5. NOTIFICATIONS / TOAST MESSAGES**
+
+```javascript
+// BEFORE
+showNotification('success', 'Knowledge Base saved successfully.');
+showNotification('info', 'Knowledge Base history cleared. Upload a new file or add data manually.');
+showNotification('success', 'Knowledge Base reverted successfully.');
+
+// AFTER
+showNotification('success', 'Master Data saved successfully.');
+showNotification('info', 'Master Data history cleared. Upload a new file or add data manually.');
+showNotification('success', 'Master Data reverted successfully.');
+```
+
+**6. HISTORY TABLE — NOTES COLUMN**
+
+```javascript
+// BEFORE
+summary: `Uploaded: ${filename} (${recordCount} records)`
+summary: `Reverted to version from ${formatDateTimeFull(entry.timestamp)}`
+details: `File "${filename}" uploaded and applied as new Knowledge Base with ${recordCount} records.`
+details: `Knowledge Base reverted to: ${entry.summary}`
+
+// AFTER
+summary: `Uploaded: ${filename} (${recordCount} records)`
+summary: `Reverted to version from ${formatDateTimeFull(entry.timestamp)}`
+details: `File "${filename}" uploaded and applied as new Master Data with ${recordCount} records.`
+details: `Master Data reverted to: ${entry.summary}`
+```
+
+**7. DELETE CONFIRMATION DIALOG**
+
+```jsx
+{/* BEFORE */}
+<p>This is the only history entry. Deleting it will clear the entire
+Knowledge Base. You will need to upload a new file or add data manually.</p>
+
+{/* AFTER */}
+<p>This is the only history entry. Deleting it will clear the entire
+Master Data. You will need to upload a new file or add data manually.</p>
+```
+
+**8. REVERT CONFIRMATION DIALOG**
+
+```jsx
+{/* BEFORE */}
+<span>⚠ Revert Knowledge Base</span>
+<p>This will replace the current Knowledge Base with this version.</p>
+
+{/* AFTER */}
+<span>⚠ Revert Master Data</span>
+<p>This will replace the current Master Data with this version.</p>
+```
+
+**9. DOWNLOAD FILENAME**
+
+```javascript
+// BEFORE
+const filename = `Knowledge_Base_${typeStr}_${dateStr}.xlsx`;
+
+// AFTER
+const filename = `Master_Data_${typeStr}_${dateStr}.xlsx`;
+```
+
+**10. DOWNLOAD EXCEL — SHEET NAME**
+
+```javascript
+// BEFORE
+XLSX.utils.book_append_sheet(wb, ws, 'Knowledge Base');
+
+// AFTER
+XLSX.utils.book_append_sheet(wb, ws, 'Master Data');
+```
+
+**11. TOUR STEPS — ALL REFERENCES**
+
+```javascript
+// BEFORE — Sidebar
+{
+  target: '[data-tour="sidebar-knowledge-base"]',
+  title: 'Knowledge Base',
+  description: 'Master product data — material codes, batch sizes, run rates. Auto-populates order details and drives production calculations.',
+}
+
+// AFTER — Sidebar
+{
+  target: '[data-tour="sidebar-master-data"]',
+  title: 'Master Data',
+  description: 'Master product data — material codes, batch sizes, run rates. Auto-populates order details and drives production calculations.',
+}
+
+// BEFORE — KB page tour
+{
+  target: '[data-tour="kb-upload"]',
+  title: 'Upload Knowledge Base',
+  description: 'Upload your master product data Excel file containing material codes, batch sizes, run rates, and formulations. This data auto-populates when creating new orders.',
+}
+
+// AFTER — Master Data page tour
+{
+  target: '[data-tour="kb-upload"]',
+  title: 'Upload Master Data',
+  description: 'Upload your master product data Excel file containing material codes, batch sizes, run rates, and formulations. This data auto-populates when creating new orders.',
+}
+
+// BEFORE — Full app tour
+{
+  target: '[data-tour="kb-table"]',
+  title: 'Knowledge Base Data',
+  description: 'Master product data that auto-populates orders. Edit cells directly, track changes with history, and download any version.',
+}
+
+// AFTER — Full app tour
+{
+  target: '[data-tour="kb-table"]',
+  title: 'Master Data',
+  description: 'Master product data that auto-populates orders. Edit cells directly, track changes with history, and download any version.',
+}
+```
+
+**12. ORDERS PAGE — ADD ORDER DESCRIPTION**
+
+```javascript
+// BEFORE
+'Enter a material code and the Knowledge Base auto-fills product details'
+
+// AFTER
+'Enter a material code and the Master Data auto-fills product details'
+```
+
+**13. SMART ASSISTANT / CHATBOT SYSTEM PROMPT**
+
+```javascript
+// BEFORE
+'Knowledge Base: Master product data...'
+'the Knowledge Base auto-populates when creating orders'
+
+// AFTER
+'Master Data: Master product data...'
+'the Data Settings auto-populates when creating orders'
+```
+
+**14. PRODUCT INSIGHTS / SUMMARY TEMPLATE**
+
+```javascript
+// If any template or AI prompt references "Knowledge Base", update:
+
+// BEFORE
+'Revisit this product\'s status when the next N10D file is uploaded to confirm demand trends remain stable.'
+// This one doesn't reference KB so no change needed
+
+// But check all prompts for "Knowledge Base" mentions and replace with "Master Data"
+```
+
+**15. SEARCH — GLOBAL SEARCH**
+
+```
+// BEFORE
+Any search text or placeholder referencing "Knowledge Base"
+
+// AFTER
+Replace with "Master Data"
+```
+
+---
+
+### HOW TO FIND ALL OCCURRENCES
+
+Search the entire codebase for these terms and replace:
+
+| Search term | Replace with |
+|---|---|
+| `Knowledge Base` | `Master Data` |
+| `knowledge base` | `master data` |
+| `Knowledge base` | `Master data` |
+| `knowledge-base` | `master-data` |
+| `knowledgeBase` | `masterData` |
+| `KnowledgeBase` | `MasterData` |
+| `KNOWLEDGE_BASE` | `MASTER_DATA` |
+| `Knowledge_Base` | `Master_Data` |
+
+**IMPORTANT:** Only rename user-facing text and route paths. Internal variable names that don't appear in the UI can optionally stay as-is to avoid breaking code, but any string that appears on screen must be updated.
+
+---
+
+### DO NOT CHANGE
+
+- ❌ Do NOT change the data-tour attribute values that use "kb-" prefix (e.g., `data-tour="kb-upload"` stays) — these are internal selectors, not user-facing
+- ❌ Do NOT change localStorage keys if they use "kb" — to avoid losing saved data
+- ❌ Do NOT change API endpoint paths if they use "knowledge-base" — unless the backend is also updated
+
+---
+
+## VERIFICATION
+
+1. Sidebar
+   - ✅ Shows "Master Data" not "Knowledge Base"
+
+2. Page header
+   - ✅ Shows "Master Data" as page title
+
+3. Upload button
+   - ✅ Says "Upload Master Data"
+
+4. Notifications
+   - ✅ "Master Data saved successfully"
+   - ✅ "Master Data reverted successfully"
+   - ✅ "Master Data history cleared..."
+
+5. Dialogs
+   - ✅ Revert dialog says "Revert Master Data"
+   - ✅ Delete dialog references "Master Data"
+
+6. Downloads
+   - ✅ Filename: "Master_Data_Upload_2026-04-06.xlsx"
+   - ✅ Sheet name: "Master Data"
+
+7. Tour
+   - ✅ Sidebar tour step says "Master Data"
+   - ✅ Page tour steps say "Master Data"
+   - ✅ Full app tour says "Master Data"
+
+8. Chat assistant
+   - ✅ System prompt references "Master Data"
+
+9. Orders page
+   - ✅ Add Order description references "Master Data"
+
+10. Zero occurrences
+    - ✅ Search entire app for "Knowledge Base" — zero results in UI text
+```

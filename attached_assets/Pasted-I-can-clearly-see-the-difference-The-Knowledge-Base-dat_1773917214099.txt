@@ -1,0 +1,155 @@
+I can clearly see the difference. The Knowledge Base data rows use a smaller, lighter font while the Next 10 Days data rows are noticeably larger and bolder.
+
+```
+Implement the following fix to the NexFeed application:
+
+---
+
+## FIX: NEXT 10 DAYS TABLE — MATCH KNOWLEDGE BASE FONT SIZES EXACTLY
+
+The Next 10 Days table fonts are visibly larger than the Knowledge Base table. They must be made identical.
+
+---
+
+### IDENTIFY THE KNOWLEDGE BASE TABLE STYLES
+
+**Step 1:** Open the browser Developer Tools (F12).
+
+**Step 2:** Inspect a data cell in the Knowledge Base table (e.g., "1000000000933" or "Civic Hog Growex, Pellet 50kg").
+
+**Step 3:** Note the EXACT computed styles:
+- font-size (e.g., 13px, 12px, 0.8rem, etc.)
+- font-weight (e.g., 400, 500)
+- line-height (e.g., 1.4, 1.5, 20px)
+- padding (e.g., 8px 12px)
+- color (e.g., #374151)
+- font-family
+
+**Step 4:** Inspect a column header in the Knowledge Base table (e.g., "FG Material Code").
+
+**Step 5:** Note the EXACT computed styles for headers.
+
+---
+
+### APPLY THE EXACT SAME STYLES TO NEXT 10 DAYS TABLE
+
+**Option A — Share the same CSS class (RECOMMENDED):**
+
+If the Knowledge Base table uses a CSS class like `.kb-table` or a component style, apply the SAME class or styles to the Next 10 Days table.
+
+```jsx
+// Knowledge Base table
+<table className="kb-data-table">
+
+// Next 10 Days table — use the SAME class
+<table className="kb-data-table">
+```
+
+**Option B — Copy exact values:**
+
+If sharing a class isn't possible, copy the exact computed values:
+
+```css
+/* Next 10 Days table — must match Knowledge Base exactly */
+.next10-table th {
+  font-size: /* EXACT same as KB th */;
+  font-weight: /* EXACT same as KB th */;
+  line-height: /* EXACT same as KB th */;
+  padding: /* EXACT same as KB th */;
+  color: /* EXACT same as KB th */;
+  text-transform: /* EXACT same as KB th */;
+  letter-spacing: /* EXACT same as KB th */;
+  border-bottom: /* EXACT same as KB th */;
+}
+
+.next10-table td {
+  font-size: /* EXACT same as KB td */;
+  font-weight: /* EXACT same as KB td */;
+  line-height: /* EXACT same as KB td */;
+  padding: /* EXACT same as KB td */;
+  color: /* EXACT same as KB td */;
+  border-bottom: /* EXACT same as KB td */;
+}
+```
+
+---
+
+### SPECIFIC ELEMENTS TO CHECK AND MATCH
+
+**Column headers (sub-headers like MATERIAL CODE, CATEGORY, etc.):**
+
+| Property | Must match KB header |
+|---|---|
+| font-size | EXACT match |
+| font-weight | EXACT match |
+| text-transform | EXACT match (uppercase) |
+| letter-spacing | EXACT match |
+| color | EXACT match |
+| padding | EXACT match |
+| border-bottom | EXACT match |
+
+**Data cells (values like "1000000000543", "Gamefowl", "Salto Stag Developer..."):**
+
+| Property | Must match KB data cells |
+|---|---|
+| font-size | EXACT match |
+| font-weight | 400 (regular) — EXACT match |
+| line-height | EXACT match |
+| color | EXACT match |
+| padding | EXACT match |
+
+**Bold values (Due for Loading, Inventory):**
+- Same font-size as other data cells (matching KB).
+- font-weight: 700 (bold) — this is the ONLY difference from regular cells.
+
+**Numeric values in date columns:**
+- Same font-size as other data cells (matching KB).
+- font-weight: 400 (regular).
+- color: slightly lighter grey (#6b7280) — to make them visually quieter than main data.
+
+**Red-highlighted values:**
+- Same font-size as other data cells.
+- color: #ef4444 (red).
+- font-weight: 400 (regular, NOT bold).
+
+**Main header row (PRODUCT DETAILS, NEXT 10 DAYS, TRACKING):**
+- font-size: same as KB header OR 1px smaller since KB doesn't have grouped headers.
+- font-weight: 600.
+- text-transform: uppercase.
+- These grouped headers are additional to what KB has, so they should be subtle — not larger than the sub-headers.
+
+---
+
+### ROW HEIGHT AND DENSITY
+
+The row height/density must also match. Looking at the screenshots:
+
+- KB rows appear tighter/more compact.
+- Next 10 Days rows have more vertical space.
+
+**Fix row padding:**
+```css
+.next10-table td {
+  padding-top: /* same as KB */;
+  padding-bottom: /* same as KB */;
+}
+```
+
+If KB uses ~8px vertical padding, Next 10 Days should use the same ~8px, not 12px or more.
+
+---
+
+### VERIFICATION STEPS
+
+After implementing:
+
+1. Open Knowledge Base tab in the browser.
+2. Take a screenshot or note the visual appearance.
+3. Switch to Next 10 Days tab.
+4. Compare side by side.
+5. The text size, row height, and overall density should be INDISTINGUISHABLE.
+
+If any difference is visible:
+- Use browser DevTools to compare computed styles of a KB cell vs a Next 10 Days cell.
+- Adjust until they match exactly.
+```

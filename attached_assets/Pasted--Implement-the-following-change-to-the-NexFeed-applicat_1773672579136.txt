@@ -1,0 +1,60 @@
+```
+Implement the following change to the NexFeed application:
+
+---
+
+## PANEL PLACEMENT — BELOW KEY METRIC CARDS
+
+Position the Production Insights and Alerts & Reminders panels BELOW the 4 Key Metric Cards and ABOVE the Interactive Table.
+
+### LAYOUT ORDER (top to bottom):
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  [Metric 1]   [Metric 2]   [Metric 3]   [Metric 4]        │  ← Key Metric Cards
+└─────────────────────────────────────────────────────────────┘
+
+┌────────────────────────────┬────────────────────────────────┐
+│ 🧠 Production Insights   ∧ │ 🔔 Alerts & Reminders       ∧ │  ← Insight Panels
+│                            │                                │
+│ [insights]                 │ [alerts]                       │
+│                            │                                │
+└────────────────────────────┴────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│  Interactive Table                                           │  ← Table
+│  ...                                                         │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### SPACING:
+- Gap between Key Metric Cards and Insight Panels: 16px
+- Gap between Insight Panels and Interactive Table: 16px
+- Consistent with existing spacing in the app.
+
+### WHEN BOTH PANELS ARE COLLAPSED:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  [Metric 1]   [Metric 2]   [Metric 3]   [Metric 4]        │
+└─────────────────────────────────────────────────────────────┘
+
+┌────────────────────────────┬────────────────────────────────┐
+│ 🧠 Production Insights (3) ∨ │ 🔔 Alerts & Reminders (2) 🔴 ∨ │
+└────────────────────────────┴────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│  Interactive Table                                           │
+│  ...                                                         │
+└─────────────────────────────────────────────────────────────┘
+```
+
+- Collapsed panels take minimal vertical space (single header row).
+- The Interactive Table moves up closer to the metrics.
+- This gives the user maximum table viewing space when panels are collapsed.
+
+### NO OTHER CHANGES:
+- Key Metric Cards remain exactly as they are (no visual or functional changes).
+- Interactive Table remains exactly as it is.
+- Only the POSITION of the Insight Panels changes — they move from their current location to between the metrics and the table.
+```

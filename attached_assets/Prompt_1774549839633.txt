@@ -1,0 +1,237 @@
+```
+Implement the following fixes to the Feedmill Shutdown feature:
+
+---
+
+## FIX 1: REASON FIELD — USE PREDEFINED DROPDOWN, NOT FREE TEXT
+
+The Reason field is currently a free text input. Change it to a dropdown with predefined reasons.
+
+### CURRENT (WRONG)
+
+```
+REASON
+[e.g. Scheduled maintenance          ]  ← free text input
+```
+
+### CORRECT
+
+```
+REASON *
+[Select a reason...                ▼ ]  ← dropdown
+
+Options:
+┌──────────────────────────────────────┐
+│ Scheduled maintenance                 │
+│ Equipment breakdown                   │
+│ Natural disaster                      │
+│ Power outage                          │
+│ Supply shortage                       │
+│ Staff shortage                        │
+│ Quality issue                         │
+│ Regulatory compliance                 │
+│ Other                                 │
+└──────────────────────────────────────┘
+```
+
+| Property | Value |
+|---|---|
+| Type | Dropdown select |
+| Placeholder | "Select a reason..." |
+| Required | Yes (*) |
+| Options | Predefined list (see above) |
+| Width | 100% |
+| Border | 1px solid #d1d5db |
+| Border-radius | 6px |
+| Padding | 8px 12px |
+| Font size | 12px |
+
+When "Other" is selected, the Notes field below becomes required and placeholder changes to "Please specify the reason..."
+
+---
+
+## FIX 2: SHUTDOWN TEXT — INSIDE FEEDMILL CARD, BELOW TOTAL
+
+The "Shutdown" clickable text should be inside the expanded feedmill card, at the very bottom — below the Total row in the Category Breakdown. NOT beside the feedmill header.
+
+### CURRENT (WRONG) — Beside header
+
+```
+┌─────────────────────────────────────┐
+│ FM1    ⏻ Shutdown               ▼   │  ← WRONG, beside header
+├─────────────────────────────────────┤
+│ ...                                 │
+```
+
+### CORRECT — Below Total, inside expanded card
+
+```
+┌─────────────────────────────────────┐
+│ FM1                             ▼   │
+├─────────────────────────────────────┤
+│                                     │
+│ [stacked bar]                       │
+│ 2,306 MT total · 40 MT/hr          │
+│                                     │
+│ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─    │
+│                                     │
+│ Line 1                              │
+│ [stacked bar]                       │
+│ 822 MT · 20 MT/hr                   │
+│                                     │
+│ Line 2                              │
+│ [stacked bar]                       │
+│ 1,484 MT · 20 MT/hr                 │
+│                                     │
+│ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─    │
+│                                     │
+│ Category Breakdown                  │
+│ ● Completed          2,400 MT       │
+│ ● In Progress        1,200 MT       │
+│ ● Scheduled            800 MT       │
+│ ● On Hold              300 MT       │
+│ ● Cancelled            200 MT       │
+│ ─────────────────────────           │
+│ Total                4,900 MT       │
+│                                     │
+│ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─    │
+│                                     │
+│            ⏻ Shutdown               │  ← HERE, below total
+│                                     │
+└─────────────────────────────────────┘
+```
+
+- Only visible when card is EXPANDED
+- Hidden when card is collapsed
+- Centered at the bottom of the card
+- Separated from Total by a dashed line
+
+### SHUTDOWN TEXT STYLING
+
+| Property | Value |
+|---|---|
+| Text | "⏻ Shutdown" |
+| Font size | 11px |
+| Font weight | 500 |
+| Color | Red (#e53935) |
+| Cursor | Pointer |
+| Hover | Darker red (#c62828), underline |
+| Text align | Center |
+| Padding-top | 8px |
+| Border-top | 1px dashed #e5e7eb |
+| Margin-top | 8px |
+
+---
+
+## FIX 3: UPDATED SHUTDOWN DIALOG
+
+```
+╔══════════════════════════════════════════════════════════╗
+║                                                          ║
+║  🚫 Mark Feedmill 1 Shutdown                        ✕   ║
+║                                                          ║
+║  SHUTDOWN DATE                                           ║
+║  ┌──────────────────────────────────────────────┐        ║
+║  │ 03/26/2026                               📅  │        ║
+║  └──────────────────────────────────────────────┘        ║
+║                                                          ║
+║  REASON *                                                ║
+║  ┌──────────────────────────────────────────────┐        ║
+║  │ Select a reason...                        ▼  │        ║
+║  └──────────────────────────────────────────────┘        ║
+║                                                          ║
+║  NOTES (OPTIONAL)                                        ║
+║  ┌──────────────────────────────────────────────┐        ║
+║  │ Any additional details...                    │        ║
+║  │                                              │        ║
+║  │                                              │        ║
+║  └──────────────────────────────────────────────┘        ║
+║                                                          ║
+║                  [Cancel]    [Mark Shutdown]              ║
+║                                                          ║
+╚══════════════════════════════════════════════════════════╝
+```
+
+### DIALOG TITLE
+
+| Property | Value |
+|---|---|
+| Icon | 🚫 (red circle) |
+| Text | "Mark [Feedmill Name] Shutdown" |
+| Font size | 16px |
+| Font weight | 700 |
+| Color | Dark text (#1a1a1a) |
+
+### SHUTDOWN DATE
+
+| Property | Value |
+|---|---|
+| Label | "SHUTDOWN DATE" |
+| Label font | 11px, font-weight 600, uppercase, grey (#6b7280) |
+| Type | Date picker |
+| Default | Today's date |
+| Width | 100% |
+| Border | 1px solid #d1d5db |
+| Border-radius | 6px |
+| Padding | 8px 12px |
+| Font size | 12px |
+| Calendar icon | Right side (📅) |
+
+### REASON DROPDOWN
+
+| Property | Value |
+|---|---|
+| Label | "REASON *" |
+| Label font | 11px, font-weight 600, uppercase, grey (#6b7280) |
+| Type | Dropdown select |
+| Placeholder | "Select a reason..." |
+| Required | Yes |
+| Width | 100% |
+| Border | 1px solid #d1d5db |
+| Border-radius | 6px |
+| Padding | 8px 12px |
+| Font size | 12px |
+
+### NOTES TEXTAREA
+
+| Property | Value |
+|---|---|
+| Label | "NOTES (OPTIONAL)" |
+| Label font | 11px, font-weight 600, uppercase, grey (#6b7280) |
+| Type | Textarea |
+| Placeholder | "Any additional details..." |
+| Width | 100% |
+| Height | 80px |
+| Border | 1px solid #d1d5db |
+| Border-radius | 6px |
+| Padding | 8px 12px |
+| Font size | 12px |
+| Resizable | Vertical only |
+| Required | Only when "Other" is selected as reason |
+
+### FIELD SPACING
+
+| Property | Value |
+|---|---|
+| Gap between fields | 16px |
+| Label to input gap | 6px |
+
+### BUTTONS
+
+| Button | Styling |
+|---|---|
+| Cancel | Grey outlined. Border: 1px solid #d1d5db. Text: grey (#374151), 13px |
+| Mark Shutdown | Red filled (#e53935). White text, 13px, font-weight 600 |
+| Mark Shutdown disabled | Light grey (#f3f4f6), text #d1d5db. Disabled until reason is selected |
+
+### DIALOG CONTAINER
+
+| Property | Value |
+|---|---|
+| Max width | 440px |
+| Background | White |
+| Border-radius | 12px |
+| Padding | 24px 28px |
+| Overlay | rgba(0,0,0,0.4) |
+| Close on background click | ❌ No |
+```

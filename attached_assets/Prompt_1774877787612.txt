@@ -1,0 +1,159 @@
+```
+Add the following to the Smart Insight prompt:
+
+---
+
+## CRITICAL INSTRUCTION — AI MUST BE USED
+
+IMPORTANT:
+- Parts A and B MUST use the AI API (callAI / OpenAI) to generate insights.
+- Do NOT use template-based text for products that have N10D data.
+- Do NOT use template-based text for dated MTO orders.
+- Part C (template fallback) is ONLY for orders that have NO N10D data AND no avail date — these are the only ones allowed to use a static template.
+- If the AI API fails or is unavailable, show a loading/error state — do NOT silently fall back to templates for Parts A and B.
+
+---
+
+## CRITICAL INSTRUCTION — AUTO-POPULATE ON LOAD
+
+The Smart Insight column must populate AUTOMATICALLY without the user clicking any button. Do NOT wait for "Re-apply to Existing Orders" or any other user action to generate insights.
+
+### TRIGGER POINTS — GENERATE AUTOMATICALLY
+
+```javascript
+// Generate insights automatically at ALL of these points:
+
+// 1. When the app first loads and N10D data exists in state
+useEffect(() => {
+  if (n10dData && n10dData.length > 0 && !hasInsights()) {
+    generateAndCacheInsights(n10dData, allOrders, today, dailyColumns);
+  }
+}, [n10dData]);
+
+// 2. When N10D file is uploaded
+async function handleN10DUpload(file) {
+  const parsedData = parseN10DFile(file);
+  setN10dData(parsedData);
+  // Auto-generate insights immediately after upload
+  await generateAndCacheInsights(parsedData, allOrders, today, dailyColumns);
+}
+
+// 3. When "Re-apply to Existing Orders" is clicked (manual refresh)
+async function handleReapplyToOrders() {
+  const updatedProducts = recalculateN10DStatuses(n10dData, today);
+  await generateAndCacheInsights(updatedProducts, allOrders, today, dailyColumns);
+  updateAvailDateIcons(allOrders, updatedProducts);
+  triggerOrderTableRefresh();
+}
+
+// 4. When orders are added, removed, or modified
+useEffect(() => {
+  if (n10dData && n10dData.length > 0) {
+    // Check for new orders that don't have cached insights
+    const uncachedOrders = allOrders.filter(
+      o => !insightCache[o.material_code_fg]
+    );
+    if (uncachedOrders.length > 0) {
+      generateInsightsForNewOrders(uncachedOrders, n10dData, today, dailyColumns);
+    }
+  }
+}, [allOrders]);
+
+// 5. When switching to any tab that shows Smart Insight
+// (Orders tab, Auto-Sequence preview)
+// If insights exist in cache, display immediately — no regeneration needed
+// If cache is empty and N10D data exists, generate on the spot
+```
+
+### LOADING STATE
+
+While AI is generating insights, show a loading indicator in the Smart Insight cells:
+
+```jsx
+function SmartInsightCell({ order }) {
+  const insight = getSmartInsight(order.material_code_fg);
+  const isLoading = isInsightLoading();
+  
+  if (isLoading) {
+    return (
+      <td className="smart-insight-cell">
+        <div className="smart-insight-loading">
+          <span className="loading-dots">Generating insight</span>
+        </div>
+      </td>
+    );
+  }
+  
+  return (
+    <td className="smart-insight-cell">
+      <div className="smart-insight-text">
+        {insight}
+      </div>
+    </td>
+  );
+}
+```
+
+### LOADING STYLING
+
+```css
+.smart-insight-loading {
+  font-size: 10px;
+  color: #9ca3af;
+  font-style: italic;
+}
+
+.loading-dots::after {
+  content: '';
+  animation: dots 1.5s steps(4, end) infinite;
+}
+
+@keyframes dots {
+  0% { content: ''; }
+  25% { content: '.'; }
+  50% { content: '..'; }
+  75% { content: '...'; }
+  100% { content: ''; }
+}
+```
+
+### ERROR STATE
+
+If AI API fails:
+
+```jsx
+<div className="smart-insight-error">
+  ⚠ Unable to generate insight. Click Re-apply to retry.
+</div>
+```
+
+```css
+.smart-insight-error {
+  font-size: 10px;
+  color: #dc2626;
+  font-style: italic;
+}
+```
+
+---
+
+### SUMMARY — WHEN INSIGHTS GENERATE
+
+| Trigger | AI called? | User action needed? |
+|---|---|---|
+| App loads with existing N10D data | ✅ Yes, automatically | ❌ No |
+| N10D file uploaded | ✅ Yes, automatically | ❌ No |
+| "Re-apply to Existing Orders" clicked | ✅ Yes, manually | ✅ Yes (refresh) |
+| New order added | ✅ Yes, for new order only | ❌ No |
+| Order modified | ❌ No, use cached | ❌ No |
+| Switch tabs | ❌ No, use cached | ❌ No |
+| Cache empty + N10D exists | ✅ Yes, automatically | ❌ No |
+
+### DO NOT
+
+- ❌ Do NOT wait for user to click a button before showing insights
+- ❌ Do NOT show empty cells if N10D data is available
+- ❌ Do NOT use templates for products that have N10D data
+- ❌ Do NOT use templates for dated MTO orders
+- ❌ Do NOT silently fail — show loading or error state
+```

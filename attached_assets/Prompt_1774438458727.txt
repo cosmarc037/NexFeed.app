@@ -1,0 +1,348 @@
+```
+Implement the following fixes to the Safety Stock Insights section in the NexFeed application:
+
+---
+
+## 1. FIX MARKDOWN BOLD RENDERING
+
+The Safety Stock Insights text is not rendering bold properly. The **text** markdown is showing as raw text instead of being converted to actual bold HTML.
+
+### FIX
+
+Ensure the AI output is parsed and rendered with proper markdown-to-HTML conversion:
+
+```javascript
+// When rendering the Safety Stock Insights text
+// Convert markdown bold to HTML bold
+function renderInsightText(text) {
+  // Convert **text** to <strong>text</strong>
+  let html = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+  
+  // Convert *text* to <em>text</em>
+  html = html.replace(/\*(.*?)\*/g, '<em>$1</em>');
+  
+  // Convert \n to <br> for line breaks
+  html = html.replace(/\n/g, '<br>');
+  
+  // Convert bullet points
+  html = html.replace(/^• /gm, '<li>');
+  
+  return html;
+}
+```
+
+Or use a markdown rendering library (e.g., react-markdown, marked) to handle all formatting.
+
+Apply to:
+- ✅ Safety Stock Insights
+- ✅ Auto-Sequence AI Analysis
+- ✅ Impact Analysis (Add New Order)
+- ✅ Any other AI-generated text in the app
+
+---
+
+## 2. FIX DATE FORMAT
+
+The AI output uses "2026-03-23" format. It should use human-readable format.
+
+### FIX
+
+Update the AI prompt to enforce date formatting:
+
+```
+RULES:
+- ALWAYS format dates as "March 23" or "March 23, 2026" 
+- NEVER use "2026-03-23" or "03-23-2026" format
+- Use the month name, not number
+```
+
+Also, if the AI still outputs raw date formats, apply a post-processing fix:
+
+```javascript
+function formatDatesInText(text) {
+  // Match patterns like 2026-03-23
+  return text.replace(/(\d{4})-(\d{2})-(\d{2})/g, (match, year, month, day) => {
+    const date = new Date(year, month - 1, day);
+    return date.toLocaleDateString('en-US', { 
+      month: 'long', 
+      day: 'numeric', 
+      year: 'numeric' 
+    });
+  });
+}
+```
+
+---
+
+## 3. UPDATED AI PROMPT — STRUCTURED OUTPUT
+
+Replace the Safety Stock Insights AI prompt with this improved version:
+
+```
+Generate a safety stock insight analysis based on the Next 10 Days 
+data provided. Follow these rules STRICTLY:
+
+FORMAT RULES:
+- Use proper paragraph breaks between sections
+- Use bullet points (•) for individual product listings
+- Bold section headers using **text**
+- Bold product names using **text**
+- Format dates as "March 23, 2026" — NEVER "2026-03-23"
+- Do NOT include material codes in the text body
+- Instead, wrap product names in a clickable reference format: 
+  [Product Name](material_code) so the app can make them clickable
+- Use clear, professional language that a production planner 
+  can quickly scan and understand
+- Use proper punctuation and grammar throughout
+
+SECTION RULES:
+- Only include sections that have products to report
+- If a section has zero products, SKIP IT ENTIRELY — do not show it
+- Sections should be labeled A, B, C, etc. in order of what's shown
+
+SECTIONS TO INCLUDE (only if products exist):
+
+**A) Overview**
+A brief 2-3 sentence summary of the overall stock situation.
+Include: total products analyzed, how many need production, 
+how many are sufficient, and any key highlights.
+
+**B) Urgent — Production Needed Soon**
+Products with target dates within the next 3 days.
+For each product:
+• **[Product Name]** — Target date: [date]. 
+  Demand: [X MT] | Inventory: [X MT] | Gap: [X]%.
+  [One sentence about why it's urgent]
+
+**C) Production Needed**
+Products with target dates within 4-7 days.
+Same format as above but less urgent tone.
+
+**D) Extended Production Needed**
+Products with target dates within 8-10 days.
+Same format. Only include if products exist in this window.
+
+**E) Stock Sufficient — No Immediate Action**
+Products where inventory meets or exceeds demand.
+For each product:
+• **[Product Name]** — Inventory: [X MT] | Demand: [X MT].
+  Currently sufficient, no production needed.
+
+**F) SAP Order Match**
+Brief note about whether all N10D products are matched 
+with SAP orders. Highlight any unmatched products.
+
+TONE:
+- Professional and scannable
+- Use short sentences
+- Prioritize clarity over detail
+- A planner should be able to read this in 30 seconds 
+  and know what actions to take
+
+EXAMPLE OUTPUT:
+
+**A) Overview**
+
+Analysis of 20 products shows 17 requiring production with a total 
+negative balance of approximately 403 MT. Three products currently 
+have sufficient stock. Seven products have urgent production needs 
+within the next two days.
+
+**B) Urgent — Production Needed Soon**
+
+These products need immediate attention:
+
+• **[Gallimax 2 Plus Ready Mix (Natural) 50kg](1000000000039)** — 
+  Target date: March 23, 2026.
+  Demand: 455.3 MT | Inventory: 759.3 MT | Fulfillment: 60%.
+  High volume demand requires prioritization in the next schedule run.
+
+• **[Gallimax 3 Maintenance (Natural) P, 50Kg](1000000000219)** — 
+  Target date: March 19, 2026.
+  Demand: 46.3 MT | Inventory: 74.9 MT | Fulfillment: 62%.
+  Already past target date — requires immediate scheduling.
+
+• **[Elite XP GestaPro, Pellet 50kg](1000000000235)** — 
+  Target date: March 26, 2026.
+  Demand: 28.4 MT | Inventory: 72.5 MT | Fulfillment: 39%.
+  Low fulfillment percentage — production should be scheduled soon.
+
+**C) Production Needed**
+
+These products require production within the next 4-7 days:
+
+• **[Elite XP Startex, Mini-pellet 50kg](1000000000241)** — 
+  Target date: March 28, 2026.
+  Demand: 92.3 MT | Inventory: 310.6 MT | Fulfillment: 30%.
+  Significant gap between demand and fulfillment.
+
+• **[Classic Hog Growex, Pellet 50kg](1000000000939)** — 
+  Target date: March 28, 2026.
+  Demand: 20.5 MT | Inventory: 217.6 MT | Fulfillment: 9%.
+  Very low fulfillment — high priority among March 28 targets.
+
+**D) Stock Sufficient — No Immediate Action**
+
+These products have adequate inventory levels:
+
+• **[Gall 21 Chicken Layer P (Breeder) 50Kg](1000000000594)** — 
+  Inventory: 0.7 MT | Demand: 24.0 MT.
+  Currently sufficient. Continue monitoring.
+
+• **[Ave Max Duck Layex 2 Pellet, 50kg](1000000000528)** — 
+  Inventory: 181.5 MT | Demand: 194.2 MT.
+  Ample inventory available. No immediate action needed.
+
+**E) SAP Order Match**
+
+All products are currently matched with SAP orders. No discrepancies 
+found between stock requirements and production orders.
+```
+
+---
+
+## 4. CLICKABLE PRODUCT NAMES
+
+Product names in the Safety Stock Insights should be clickable, navigating the user to the Next 10 Days tab and highlighting that product.
+
+### HOW IT WORKS
+
+The AI outputs product references in this format:
+```
+[Product Name](material_code)
+```
+
+The app parses this and renders it as a clickable link:
+
+```javascript
+function renderProductLinks(text) {
+  // Match [Product Name](material_code) pattern
+  return text.replace(
+    /\[(.*?)\]\(([\d]+)\)/g,
+    '<a class="product-link" data-material-code="$2" href="#">$1</a>'
+  );
+}
+```
+
+### ON CLICK
+
+When the user clicks a product name:
+1. Navigate to the Next 10 Days tab
+2. Scroll to the row with that material code
+3. Highlight the row briefly (yellow flash, 2 seconds)
+
+### LINK STYLING
+
+| Property | Value |
+|---|---|
+| Color | Orange (#fd5108) |
+| Font weight | 600 (bold, same as the bold product name) |
+| Text decoration | None by default |
+| Hover | Underline, darker orange (#c2410c) |
+| Cursor | Pointer |
+
+---
+
+## 5. SECTION SPACING AND VISUAL STRUCTURE
+
+### BETWEEN SECTIONS
+
+| Property | Value |
+|---|---|
+| Margin between sections | 20px |
+| Section header margin-bottom | 8px |
+
+### SECTION HEADERS
+
+| Property | Value |
+|---|---|
+| Format | "A) Overview", "B) Urgent — Production Needed Soon" |
+| Font size | 13px |
+| Font weight | 700 |
+| Color | Dark text (#1a1a1a) |
+| Margin-top | 20px |
+| Margin-bottom | 8px |
+
+### BULLET POINTS
+
+| Property | Value |
+|---|---|
+| Bullet character | • (bullet dot) |
+| Indent | 16px left |
+| Spacing between bullets | 12px |
+| Product name | Bold, orange link (clickable) |
+| Details | 12px, grey (#4b5563), line-height 1.6 |
+
+### OVERVIEW PARAGRAPH
+
+| Property | Value |
+|---|---|
+| Font size | 12px |
+| Color | Dark text (#374151) |
+| Line height | 1.6 |
+| Max width | 100% |
+
+---
+
+## 6. HIDE EMPTY SECTIONS
+
+If a section has zero products, do NOT show it at all.
+
+```javascript
+function shouldShowSection(sectionProducts) {
+  return sectionProducts && sectionProducts.length > 0;
+}
+
+// In the AI prompt, instruct to skip empty sections
+// In the rendering, also filter out empty sections as a safety net
+```
+
+### SECTION VISIBILITY
+
+| Section | Condition to show |
+|---|---|
+| A) Overview | ✅ Always show (summary always relevant) |
+| B) Urgent — Production Needed Soon | Only if products with target date within 3 days |
+| C) Production Needed | Only if products with target date within 4-7 days |
+| D) Extended Production Needed | Only if products with target date within 8-10 days |
+| E) Stock Sufficient | Only if stock sufficient products exist |
+| F) SAP Order Match | ✅ Always show (confirmation is useful) |
+
+---
+
+## 7. POST-PROCESSING — SAFETY NET
+
+Even after improving the AI prompt, apply post-processing to ensure clean output:
+
+```javascript
+function cleanInsightOutput(text) {
+  // Fix date formats
+  text = text.replace(/(\d{4})-(\d{2})-(\d{2})/g, (match, y, m, d) => {
+    const date = new Date(y, m - 1, d);
+    return date.toLocaleDateString('en-US', { 
+      month: 'long', day: 'numeric', year: 'numeric' 
+    });
+  });
+  
+  // Convert markdown bold to HTML
+  text = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+  
+  // Convert product links
+  text = text.replace(
+    /\[(.*?)\]\(([\d]+)\)/g,
+    '<a class="product-link" data-code="$2">$1</a>'
+  );
+  
+  // Ensure proper line breaks
+  text = text.replace(/\n\n/g, '</p><p>');
+  text = text.replace(/\n/g, '<br>');
+  
+  // Convert bullets
+  text = text.replace(/^• /gm, '<li>');
+  
+  return text;
+}
+```
+
+Apply to ALL AI-generated text across the app.
+```

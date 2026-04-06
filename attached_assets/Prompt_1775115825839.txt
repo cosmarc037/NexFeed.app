@@ -1,0 +1,573 @@
+```
+Implement the following date restriction rules across the entire NexFeed application:
+
+---
+
+## DATE FIELDS — DEFINITIONS
+
+| Field | What it means | Auto or Manual |
+|---|---|---|
+| Start Date | Expected production start date | Manual — user sets |
+| Completion Date | Expected production finish date | Auto-cascaded or manual |
+| Avail Date | Customer deadline / availability target | From SAP upload, N10D, or manual |
+| End Date | ACTUAL date production completed | Auto-set on Done, can be overridden |
+
+---
+
+## DATE RULES
+
+### CORE RULE
+
+```
+Start Date ≤ Completion Date ≤ Avail Date
+End Date ≥ Start Date (if start date exists)
+End Date — fallback to Avail Date check if Start Date is empty
+```
+
+### PER-FIELD CONSTRAINTS
+
+| Field | Min date | Max date | Fallback |
+|---|---|---|---|
+| Start Date | Today | Avail Date (if real date) | If no avail date: no max |
+| Completion Date | Start Date (if set), else Today | Avail Date (if real date) | If no start date: Today. If no avail: no max |
+| Avail Date | Today | No upper limit | — |
+| End Date | Start Date (if set) | No upper limit | If no Start Date: no min restriction, but warn if below Avail Date |
+
+---
+
+## IMPLEMENTATION
+
+### 1. HELPER FUNCTIONS
+
+```javascript
+function getMinSelectableDate() {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return today;
+}
+
+function isRealDate(availDate) {
+  if (!availDate) return false;
+  
+  const nonDateValues = [
+    'prio replenish', 'safety stocks', 'safety stock',
+    'stock sufficient'
+  ];
+  
+  if (typeof availDate === 'string' && 
+      nonDateValues.includes(availDate.toLowerCase())) return false;
+  
+  const parsed = parseDate(availDate);
+  return parsed !== null && !isNaN(parsed.getTime());
+}
+```
+
+### 2. CONSTRAINT FUNCTIONS
+
+#### START DATE
+
+```javascript
+function getStartDateConstraints(order) {
+  const today = getMinSelectableDate();
+  
+  let maxDate = null;
+  
+  if (order.avail_date && isRealDate(order.avail_date)) {
+    maxDate = parseDate(order.avail_date);
+  }
+  
+  return {
+    minDate: today,
+    maxDate: maxDate
+  };
+}
+```
+
+#### COMPLETION DATE
+
+```javascript
+function getCompletionDateConstraints(order) {
+  const today = getMinSelectableDate();
+  
+  let minDate = today;
+  if (order.start_date) {
+    const startDate = parseDate(order.start_date);
+    if (startDate && startDate > today) {
+      minDate = startDate;
+    }
+  }
+  
+  let maxDate = null;
+  if (order.avail_date && isRealDate(order.avail_date)) {
+    maxDate = parseDate(order.avail_date);
+  }
+  
+  return {
+    minDate: minDate,
+    maxDate: maxDate
+  };
+}
+```
+
+#### AVAIL DATE
+
+```javascript
+function getAvailDateConstraints(order) {
+  const today = getMinSelectableDate();
+  
+  return {
+    minDate: today,
+    maxDate: null
+  };
+}
+```
+
+#### END DATE
+
+```javascript
+function getEndDateConstraints(order) {
+  // If Start Date exists — End Date must be on or after Start Date
+  if (order.start_date) {
+    const startDate = parseDate(order.start_date);
+    if (startDate) {
+      return {
+        minDate: startDate,
+        maxDate: null,
+        warnIfBelowAvail: true
+      };
+    }
+  }
+  
+  // If Start Date is empty — no min restriction
+  // But warn if End Date is before Avail Date
+  return {
+    minDate: null,  // No restriction — user can pick any date
+    maxDate: null,
+    warnIfBelowAvail: true
+  };
+}
+```
+
+### 3. CALENDAR DATE PICKER — GREY OUT PAST DATES
+
+```jsx
+function DatePickerField({ 
+  value, 
+  minDate, 
+  maxDate, 
+  onChange, 
+  onWarnBelowAvail,
+  order,
+  field
+}) {
+  function handleDateSelect(selectedDate) {
+    // Check min date
+    if (minDate && selectedDate < minDate) {
+      return; // Greyed out, shouldn't reach here
+    }
+    
+    // Check max date
+    if (maxDate && selectedDate > maxDate) {
+      return; // Greyed out, shouldn't reach here
+    }
+    
+    // End Date — check if below Avail Date
+    if (field === 'end_date' && onWarnBelowAvail) {
+      const availDate = isRealDate(order.avail_date) 
+        ? parseDate(order.avail_date) 
+        : null;
+      
+      if (availDate && selectedDate < availDate) {
+        // Show warning dialog
+        onWarnBelowAvail(selectedDate, availDate);
+        return;
+      }
+    }
+    
+    onChange(selectedDate);
+  }
+  
+  function isDayDisabled(day) {
+    if (minDate && day < minDate) return true;
+    if (maxDate && day > maxDate) return true;
+    return false;
+  }
+  
+  return (
+    <Calendar
+      value={value ? parseDate(value) : null}
+      onChange={handleDateSelect}
+      tileDisabled={({ date }) => isDayDisabled(date)}
+      tileClassName={({ date }) => isDayDisabled(date) ? 'date-disabled' : ''}
+    />
+  );
+}
+```
+
+### 4. END DATE — BELOW AVAIL WARNING DIALOG
+
+When user selects an End Date that is before the Avail Date:
+
+```jsx
+function EndDateWarningDialog({ selectedDate, availDate, onCancel, onProceed }) {
+  return (
+    <div className="dialog-overlay">
+      <div className="dialog-container" style={{ maxWidth: '440px' }}>
+        <div className="dialog-header">
+          <span>⚠ End Date Before Availability Date</span>
+          <button className="dialog-close" onClick={onCancel}>✕</button>
+        </div>
+        
+        <div className="dialog-body">
+          <p style={{ fontSize: '12px', color: '#374151', lineHeight: 1.6 }}>
+            The selected end date ({formatDateFull(selectedDate)}) is before 
+            the availability date ({formatDateFull(availDate)}). This means 
+            production was completed before the customer's target deadline.
+          </p>
+          <p style={{ fontSize: '12px', color: '#374151', lineHeight: 1.6, marginTop: '8px' }}>
+            Do you want to proceed with this end date?
+          </p>
+        </div>
+        
+        <div className="dialog-footer" style={{ 
+          display: 'flex', 
+          justifyContent: 'flex-end', 
+          gap: '8px' 
+        }}>
+          <button 
+            onClick={onCancel}
+            style={{
+              background: '#ffffff',
+              color: '#374151',
+              border: '1px solid #d1d5db',
+              borderRadius: '6px',
+              padding: '8px 20px',
+              fontSize: '13px',
+              fontWeight: 500,
+              cursor: 'pointer'
+            }}
+          >
+            Cancel
+          </button>
+          <button 
+            onClick={() => onProceed(selectedDate)}
+            style={{
+              background: '#fd5108',
+              color: '#ffffff',
+              border: 'none',
+              borderRadius: '6px',
+              padding: '8px 20px',
+              fontSize: '13px',
+              fontWeight: 600,
+              cursor: 'pointer'
+            }}
+          >
+            Proceed Anyway
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+```
+
+### HANDLER
+
+```javascript
+function handleEndDateSelection(order, field, allOrders, line) {
+  const constraints = getEndDateConstraints(order);
+  
+  openCalendar({
+    currentValue: order.end_date,
+    minDate: constraints.minDate,
+    maxDate: constraints.maxDate,
+    onSelect: (selectedDate) => {
+      // Check if below avail date
+      const availDate = isRealDate(order.avail_date) 
+        ? parseDate(order.avail_date) 
+        : null;
+      
+      if (availDate && selectedDate < availDate) {
+        // Show warning dialog
+        showEndDateWarningDialog({
+          selectedDate: selectedDate,
+          availDate: availDate,
+          onCancel: () => {
+            // Do nothing — calendar stays open or closes
+          },
+          onProceed: (date) => {
+            order.end_date = formatDateFull(date);
+            // No cascade needed for end date
+          }
+        });
+      } else {
+        // No issue — apply directly
+        order.end_date = formatDateFull(selectedDate);
+      }
+    }
+  });
+}
+```
+
+---
+
+### 5. DATE CONFLICT WARNINGS — RED CELL HIGHLIGHT
+
+For any dates that violate the rules (e.g., existing orders with conflicting dates):
+
+```javascript
+function checkDateConflicts(order) {
+  const warnings = [];
+  
+  const startDate = order.start_date ? parseDate(order.start_date) : null;
+  const completionDate = order.completion_date ? parseDate(order.completion_date) : null;
+  const availDate = isRealDate(order.avail_date) ? parseDate(order.avail_date) : null;
+  const endDate = order.end_date ? parseDate(order.end_date) : null;
+  
+  // Start date after completion date
+  if (startDate && completionDate && startDate > completionDate) {
+    warnings.push({
+      field: 'start_date',
+      type: 'conflict',
+      message: 'Start date is after the completion date.'
+    });
+  }
+  
+  // Start date after avail date
+  if (startDate && availDate && startDate > availDate) {
+    warnings.push({
+      field: 'start_date',
+      type: 'conflict',
+      message: 'Start date is after the availability date.'
+    });
+  }
+  
+  // Completion date after avail date
+  if (completionDate && availDate && completionDate > availDate) {
+    warnings.push({
+      field: 'completion_date',
+      type: 'conflict',
+      message: 'Completion date is after the availability date.'
+    });
+  }
+  
+  // End date before start date
+  if (endDate && startDate && endDate < startDate) {
+    warnings.push({
+      field: 'end_date',
+      type: 'conflict',
+      message: 'End date is before the start date.'
+    });
+  }
+  
+  // End date before avail date (soft warning — allowed but flagged)
+  if (endDate && availDate && endDate < availDate) {
+    warnings.push({
+      field: 'end_date',
+      type: 'info',
+      message: 'End date is before the availability date.'
+    });
+  }
+  
+  return warnings;
+}
+```
+
+### WARNING CELL STYLING
+
+```jsx
+function DateCell({ order, field, value }) {
+  const warnings = checkDateConflicts(order);
+  const fieldWarning = warnings.find(w => w.field === field);
+  const hasConflict = fieldWarning && fieldWarning.type === 'conflict';
+  const hasInfo = fieldWarning && fieldWarning.type === 'info';
+  
+  return (
+    <td className={`date-cell ${hasConflict ? 'date-conflict' : ''} ${hasInfo ? 'date-info' : ''}`}>
+      <span className="text-content">{value}</span>
+      {fieldWarning && (
+        <span 
+          className={`date-warning-icon ${hasInfo ? 'info' : ''}`}
+          title={fieldWarning.message}
+        >
+          ⚠
+        </span>
+      )}
+    </td>
+  );
+}
+```
+
+```css
+/* Hard conflict — red */
+.date-cell.date-conflict {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+}
+
+.date-warning-icon {
+  color: #dc2626;
+  font-size: 12px;
+  margin-left: 4px;
+}
+
+/* Soft info — yellow */
+.date-cell.date-info {
+  background: #fefce8;
+  border: 1px solid #fef08a;
+}
+
+.date-warning-icon.info {
+  color: #ca8a04;
+}
+
+/* Disabled dates in calendar */
+.date-disabled {
+  color: #d1d5db;
+  cursor: not-allowed;
+  pointer-events: none;
+  opacity: 0.4;
+}
+```
+
+---
+
+### 6. EXISTING PAST DATES — KEEP BUT RESTRICT ON EDIT
+
+Orders with dates already in the past display their dates normally. When user opens calendar to change, past dates are greyed out:
+
+```javascript
+function handleDateEdit(order, field) {
+  const currentValue = order[field];
+  const constraints = getConstraintsForField(order, field);
+  
+  openCalendar({
+    currentValue: currentValue,
+    minDate: constraints.minDate,
+    maxDate: constraints.maxDate,
+    onSelect: (newDate) => {
+      if (constraints.minDate && newDate < constraints.minDate) {
+        return;
+      }
+      if (constraints.maxDate && newDate > constraints.maxDate) {
+        return;
+      }
+      
+      order[field] = formatDateFull(newDate);
+      
+      // Trigger cascade if needed
+      if (field === 'start_date' || field === 'completion_date') {
+        recalculateCompletionDates(order.line);
+      }
+    }
+  });
+}
+
+function getConstraintsForField(order, field) {
+  switch (field) {
+    case 'start_date':
+      return getStartDateConstraints(order);
+    case 'completion_date':
+      return getCompletionDateConstraints(order);
+    case 'avail_date':
+      return getAvailDateConstraints(order);
+    case 'end_date':
+      return getEndDateConstraints(order);
+    default:
+      return { minDate: getMinSelectableDate(), maxDate: null };
+  }
+}
+```
+
+---
+
+### 7. ADD NEW ORDER — DATE RESTRICTIONS
+
+```jsx
+function AddNewOrderForm() {
+  const [availDate, setAvailDate] = useState(null);
+  const [startDate, setStartDate] = useState(null);
+  
+  return (
+    <div>
+      <DatePickerField
+        label="Avail Date"
+        field="avail_date"
+        minDate={getMinSelectableDate()}
+        maxDate={null}
+        onChange={setAvailDate}
+      />
+      
+      <DatePickerField
+        label="Start Date"
+        field="start_date"
+        minDate={getMinSelectableDate()}
+        maxDate={availDate ? parseDate(availDate) : null}
+        onChange={setStartDate}
+      />
+    </div>
+  );
+}
+```
+
+---
+
+### 8. NON-DATE AVAIL — BEHAVIOR
+
+When avail date is "prio replenish" or "safety stocks":
+
+| Field | Behavior |
+|---|---|
+| Start Date | Min: today, Max: none (no avail date to limit) |
+| Completion Date | Min: start date or today, Max: none |
+| End Date | No min restriction, no max, but warn if later a real avail date is assigned and end date conflicts |
+
+If N10D later assigns a real avail date and existing Start/Completion dates conflict:
+- ✅ Show red cell highlight + ⚠ icon
+- ❌ Do NOT auto-change the dates
+- Let user fix manually
+
+---
+
+## VERIFICATION
+
+### Past date restriction
+1. ✅ All calendars — dates before today greyed out and unclickable
+2. ✅ Today is selectable
+3. ✅ Existing past dates display as-is
+4. ✅ Editing existing past dates — calendar restricts to today or later
+
+### Start Date
+5. ✅ Min: today
+6. ✅ Max: avail date (if real date)
+7. ✅ If no avail date: no max limit
+8. ✅ If start date > avail date: red cell + ⚠
+
+### Completion Date
+9. ✅ Min: start date (if set), else today
+10. ✅ Max: avail date (if real date)
+11. ✅ If completion date > avail date: red cell + ⚠
+12. ✅ If completion date < start date: red cell + ⚠
+
+### Avail Date
+13. ✅ Min: today
+14. ✅ No max limit
+15. ✅ Existing past avail dates display but can only be changed to today or later
+
+### End Date
+16. ✅ If start date exists: min is start date
+17. ✅ If start date empty: no min restriction (any date selectable)
+18. ✅ No max limit
+19. ✅ If end date < avail date: warning dialog with Cancel / Proceed Anyway
+20. ✅ Warning dialog has orange Proceed button
+21. ✅ If user proceeds: end date is set, yellow info highlight on cell
+22. ✅ If user cancels: end date not changed
+
+### Add New Order
+23. ✅ Avail date picker: min today
+24. ✅ Start date picker: min today, max avail date
+
+### Conflict highlights
+25. ✅ Red cell + ⚠ for hard conflicts (start > avail, completion > avail)
+26. ✅ Yellow cell + ⚠ for soft info (end < avail — allowed but flagged)
+```

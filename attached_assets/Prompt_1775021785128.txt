@@ -1,0 +1,465 @@
+```
+Implement the following fixes and updates:
+
+---
+
+## FIX 1: PLANNED — STAYS AT CURRENT PRIO, DOES NOT JUMP TO TOP
+
+When an order is set to "Planned", it stays at its current priority number. It does NOT automatically move to the top.
+
+```javascript
+function handleStatusChange(order, newStatus) {
+  if (newStatus === 'Planned') {
+    // Just change the status, do NOT change the prio
+    order.status = 'Planned';
+    // order.prio stays the same
+    return;
+  }
+  // ... other status handling
+}
+```
+
+---
+
+## FIX 2: PLANNED — CAN BE MANUALLY DRAGGED
+
+Planned orders CAN be dragged by the user to a different priority. When dragged, the new position becomes the new locked position.
+
+```javascript
+function canDragOrder(order) {
+  // Planned orders CAN be dragged
+  if (order.status === 'Planned') return true;
+  
+  // Done and Cancel PO cannot be dragged (already implemented)
+  if (order.status === 'Done' || order.status === 'Cancel PO') return false;
+  
+  // In Production and On-going cannot be dragged
+  if (order.status === 'In Production') return false;
+  if (order.status.startsWith('On-going')) return false;
+  
+  // Movable statuses can be dragged
+  return true;
+}
+```
+
+### WHEN MOVABLE ORDER IS DRAGGED ABOVE PLANNED
+
+If a user tries to insert a movable order above a Planned order (which would push the Planned order down), show a warning:
+
+```
+╔════════════════════════════════════════════════════╗
+║                                                    ║
+║  ⚠ Planned Order Will Be Affected            ✕   ║
+║                                                    ║
+║  Inserting this order here will push               ║
+║  "Product F" (Planned at Priority 6) down          ║
+║  to Priority 7.                                    ║
+║                                                    ║
+║  Consider adjusting the Planned order first,       ║
+║  or proceed if this is intentional.                ║
+║                                                    ║
+║              [Cancel]    [Proceed Anyway]           ║
+║                                                    ║
+╚════════════════════════════════════════════════════╝
+```
+
+| Button | Action |
+|---|---|
+| Cancel | Revert the drag |
+| Proceed Anyway | Allow the move, Planned order shifts down |
+
+---
+
+## FIX 3: CUSTOM STATUS — KEEP ALL CELLS EDITABLE
+
+Orders with a custom free text status should have the SAME editable cells as Plotted orders. Do NOT disable any cells.
+
+```javascript
+function isCellEditable(order, cellType) {
+  // Done and Cancel PO — specific cells locked (already implemented)
+  if (order.status === 'Done' || order.status === 'Cancel PO') {
+    return isDoneEditableCell(cellType); // existing logic
+  }
+  
+  // In Production / On-going — specific cells may be locked
+  if (order.status === 'In Production' || order.status.startsWith('On-going')) {
+    return isInProductionEditableCell(cellType);
+  }
+  
+  // Plotted, Planned, Hold, Cut, Uncombine, Merge Back, Custom — ALL cells editable
+  return true;
+}
+
+function isCustomStatus(status) {
+  const knownStatuses = [
+    'Plotted', 'Planned', 'Hold', 'Cut', 
+    'In Production', 
+    'On-going batching', 'On-going pelleting', 'On-going bagging',
+    'Done', 'Cancel PO',
+    'Uncombine', 'Merge Back'
+  ];
+  
+  return !knownStatuses.includes(status);
+}
+```
+
+---
+
+## FIX 4: IN PRODUCTION / ON-GOING — ONLY AFTER DONE ORDERS
+
+User can only set an order to "In Production" or "On-going" if ALL orders above it are "Done", "In Production", "On-going", or "Planned" — NOT if a Plotted/Hold/Custom order is above it.
+
+```javascript
+function canSetToInProductionOrOngoing(order, newStatus, allOrders) {
+  if (newStatus !== 'In Production' && !newStatus.startsWith('On-going')) {
+    return { allowed: true };
+  }
+  
+  const orderIndex = allOrders.findIndex(o => o.id === order.id);
+  
+  // Check all orders above this one
+  for (let i = 0; i < orderIndex; i++) {
+    const aboveOrder = allOrders[i];
+    const aboveStatus = aboveOrder.status;
+    
+    // Allowed above statuses
+    const allowedAbove = [
+      'Done', 
+      'In Production', 
+      'On-going batching', 'On-going pelleting', 'On-going bagging',
+      'Planned',
+      'Cancel PO'
+    ];
+    
+    if (!allowedAbove.includes(aboveStatus)) {
+      return {
+        allowed: false,
+        message: `Cannot set to "${newStatus}" because "${aboveOrder.item_description}" at Priority ${i + 1} is "${aboveStatus}". All orders above must be Done, In Production, On-going, or Planned before this order can begin production.`
+      };
+    }
+  }
+  
+  // Additional check: only 1 "In Production" per line
+  if (newStatus === 'In Production') {
+    const existingInProduction = allOrders.find(
+      o => o.line === order.line && 
+           o.status === 'In Production' && 
+           o.id !== order.id
+    );
+    
+    if (existingInProduction) {
+      return {
+        allowed: false,
+        message: `"${existingInProduction.item_description}" is currently In Production on this line. Mark it as Done or On-going before setting another order to In Production.`
+      };
+    }
+  }
+  
+  return { allowed: true };
+}
+```
+
+### VALID EXAMPLES
+
+```
+✅ VALID:
+Prio 1: Order A → Done
+Prio 2: Order B → In Production (directly after Done ✅)
+Prio 3: Order C → On-going batching (after In Production ✅)
+
+✅ VALID:
+Prio 1: Order A → Done
+Prio 2: Order B → Done
+Prio 3: Order C → Planned
+Prio 4: Order D → In Production (all above are Done/Planned ✅)
+
+❌ INVALID:
+Prio 1: Order A → Plotted
+Prio 2: Order B → In Production ← BLOCKED, Plotted is above
+
+❌ INVALID:
+Prio 1: Order A → Done
+Prio 2: Order B → Plotted
+Prio 3: Order C → In Production ← BLOCKED, Plotted at Prio 2
+```
+
+### WARNING DIALOG
+
+```
+╔════════════════════════════════════════════════════╗
+║                                                    ║
+║  ⚠ Cannot Set In Production                  ✕   ║
+║                                                    ║
+║  "Elite XP Startex" at Priority 2 is currently     ║
+║  "Plotted." All orders above must be Done, In      ║
+║  Production, On-going, or Planned before this      ║
+║  order can begin production.                       ║
+║                                                    ║
+║  Consider marking Priority 2 as Done or Planned    ║
+║  first.                                            ║
+║                                                    ║
+║                              [OK]                  ║
+║                                                    ║
+╚════════════════════════════════════════════════════╝
+```
+
+---
+
+## FIX 5: AUTO-SEQUENCE PREVIEW — EXCLUDE LOCKED, SHOW PLANNED IN PLACE
+
+### EXCLUDED FROM AUTO-SEQUENCE PREVIEW (not shown at all)
+
+| Status | Shown in preview? |
+|---|---|
+| Done | ❌ Not shown |
+| Cancel PO | ❌ Not shown |
+| In Production | ❌ Not shown |
+| On-going batching | ❌ Not shown |
+| On-going pelleting | ❌ Not shown |
+| On-going bagging | ❌ Not shown |
+
+### SHOWN IN PREVIEW BUT LOCKED IN PLACE
+
+| Status | Shown? | Sortable? |
+|---|---|---|
+| Planned | ✅ Shown | ❌ Stays at its prio number |
+
+### SHOWN AND SORTED
+
+| Status | Shown? | Sortable? |
+|---|---|---|
+| Plotted | ✅ Shown | ✅ Sorted chronologically |
+| Hold | ✅ Shown | ✅ Sorted chronologically |
+| Cut | ✅ Shown | ✅ Sorted chronologically |
+| Uncombine | ✅ Shown | ✅ Sorted chronologically |
+| Merge Back | ✅ Shown | ✅ Sorted chronologically |
+| Custom | ✅ Shown | ✅ Sorted chronologically |
+
+### AUTO-SEQUENCE LOGIC
+
+```javascript
+function runAutoSequence(allOrders, n10dData, dailyColumns, today) {
+  // Step 1: Separate into three groups
+  const excludedOrders = []; // Done, Cancel, In Prod, On-going — not in preview
+  const plannedOrders = [];  // Planned — shown but locked at their prio
+  const movableOrders = [];  // Everything else — sorted
+  
+  allOrders.forEach((order, index) => {
+    const prio = index + 1;
+    
+    if (['Done', 'Cancel PO', 'In Production', 
+         'On-going batching', 'On-going pelleting', 'On-going bagging'
+        ].includes(order.status)) {
+      excludedOrders.push({ ...order, _originalPrio: prio });
+    } else if (order.status === 'Planned') {
+      plannedOrders.push({ ...order, _originalPrio: prio });
+    } else {
+      movableOrders.push({ ...order, _originalPrio: prio });
+    }
+  });
+  
+  // Step 2: Determine which prio slots are available for the preview
+  // Exclude slots taken by Done/Cancel/InProd/OnGoing (not shown)
+  // Planned orders keep their prio slot
+  
+  const excludedPrios = excludedOrders.map(o => o._originalPrio);
+  const plannedPrioMap = {};
+  plannedOrders.forEach(o => {
+    plannedPrioMap[o._originalPrio] = o;
+  });
+  
+  // Step 3: Get available slots (not excluded)
+  const totalOrders = allOrders.length;
+  const availableSlots = [];
+  for (let i = 1; i <= totalOrders; i++) {
+    if (!excludedPrios.includes(i)) {
+      availableSlots.push(i);
+    }
+  }
+  
+  // Step 4: Assign avail dates to movable orders and sort
+  const movableWithDates = assignAvailDates(movableOrders, n10dData, dailyColumns, today);
+  
+  movableWithDates.sort((a, b) => {
+    const dateA = a._sortDate;
+    const dateB = b._sortDate;
+    
+    if (dateA && !dateB) return -1;
+    if (!dateA && dateB) return 1;
+    if (!dateA && !dateB) return 0;
+    
+    const dateDiff = dateA.getTime() - dateB.getTime();
+    if (dateDiff !== 0) return dateDiff;
+    
+    const statusOrder = { 'Critical': 0, 'Urgent': 1, 'Monitor': 2, 'Sufficient': 3 };
+    const statusA = statusOrder[a._n10dStatus] ?? 2;
+    const statusB = statusOrder[b._n10dStatus] ?? 2;
+    if (statusA !== statusB) return statusA - statusB;
+    
+    const volA = parseFloat(a.volume) || 0;
+    const volB = parseFloat(b.volume) || 0;
+    return volB - volA;
+  });
+  
+  // Step 5: Build preview — place Planned at their slots, fill rest with sorted movable
+  const previewResult = [];
+  let movableIndex = 0;
+  
+  availableSlots.forEach(slot => {
+    if (plannedPrioMap[slot]) {
+      // Planned order stays at this slot
+      previewResult.push({
+        ...plannedPrioMap[slot],
+        prio: slot,
+        _isLocked: true
+      });
+    } else {
+      // Fill with next sorted movable order
+      if (movableIndex < movableWithDates.length) {
+        previewResult.push({
+          ...movableWithDates[movableIndex],
+          prio: slot,
+          _isLocked: false
+        });
+        movableIndex++;
+      }
+    }
+  });
+  
+  return previewResult;
+}
+```
+
+### EXAMPLE
+
+Before:
+```
+Prio 1: A — Done
+Prio 2: B — In Production
+Prio 3: C — Planned
+Prio 4: D — Plotted (avail: Apr 9)
+Prio 5: E — Plotted (avail: Apr 5)
+Prio 6: F — Cancel PO
+```
+
+Excluded from preview: A (Done), B (In Prod), F (Cancel PO)
+
+Preview shows:
+```
+Prio 3: C — Planned (LOCKED at 3)
+Prio 4: E — Plotted (SORTED, Apr 5 — earliest)
+Prio 5: D — Plotted (SORTED, Apr 9)
+```
+
+After applying, full table becomes:
+```
+Prio 1: A — Done (untouched)
+Prio 2: B — In Production (untouched)
+Prio 3: C — Planned (untouched)
+Prio 4: E — Plotted (sorted)
+Prio 5: D — Plotted (sorted)
+Prio 6: F — Cancel PO (untouched)
+```
+
+### PREVIEW VISUAL — PLANNED ORDER INDICATOR
+
+In the preview, Planned orders should have a visual indicator that they are locked:
+
+```
+┌──────┬────────────────────────┬──────────┬─────────────────┐
+│ Prio │ Item Description       │ Volume   │ Avail Date      │
+├──────┼────────────────────────┼──────────┼─────────────────┤
+│  3   │ Product C              │ 24 MT    │ Apr 9, 2026     │
+│  🔒  │ Planned — locked       │          │                 │
+├──────┼────────────────────────┼──────────┼─────────────────┤
+│  4   │ Product E              │ 80 MT    │ Apr 5, 2026     │
+│      │                        │          │                 │
+├──────┼────────────────────────┼──────────┼─────────────────┤
+│  5   │ Product D              │ 32 MT    │ Apr 9, 2026     │
+│      │                        │          │                 │
+└──────┴────────────────────────┴──────────┴─────────────────┘
+```
+
+Planned row styling:
+
+```css
+.preview-row-planned {
+  background: #eff6ff;
+  border-left: 3px solid #2563eb;
+}
+
+.planned-lock-indicator {
+  font-size: 10px;
+  color: #2563eb;
+  font-weight: 500;
+}
+```
+
+---
+
+## 6. METRIC CARDS — UPDATED COUNTS
+
+```javascript
+function calculatePreviewMetrics(previewOrders, excludedOrders) {
+  let withDeadline = 0;
+  let noDeadline = 0;
+  let stockSufficient = 0;
+  let planned = 0;
+  let conflicts = 0;
+  
+  previewOrders.forEach(order => {
+    if (order.status === 'Planned') {
+      planned++;
+    } else if (order._n10dStatus === 'Sufficient') {
+      stockSufficient++;
+    } else if (order._sortDate) {
+      withDeadline++;
+    } else {
+      noDeadline++;
+    }
+  });
+  
+  return {
+    total: previewOrders.length,
+    withDeadline,
+    noDeadline,
+    stockSufficient,
+    planned,
+    conflicts
+  };
+}
+```
+
+---
+
+## VERIFICATION
+
+### Planned status
+1. ✅ Setting order to Planned — stays at current prio (no jumping to top)
+2. ✅ Planned order can be manually dragged to different prio
+3. ✅ After dragging, new position becomes the locked position
+4. ✅ Auto-sequence does NOT move Planned orders
+5. ✅ Movable orders sorted around Planned orders in gaps
+
+### Custom status
+6. ✅ All cells remain editable (same as Plotted)
+7. ✅ Custom status text displays as plain text, no badge
+8. ✅ Treated as movable in auto-sequence
+
+### In Production / On-going
+9. ✅ Can only set if all above orders are Done/InProd/OnGoing/Planned
+10. ✅ Warning shown if Plotted/Hold/Custom is above
+11. ✅ Only 1 In Production per line
+12. ✅ On-going can coexist with In Production
+
+### Auto-sequence preview
+13. ✅ Done, Cancel, In Production, On-going — NOT shown
+14. ✅ Planned — shown but locked at its prio
+15. ✅ Movable — shown and sorted chronologically
+16. ✅ Planned row has blue left border and lock indicator
+
+### Drag and drop
+17. ✅ Dragging movable above Planned — warning with Proceed/Cancel option
+18. ✅ Dragging Planned — allowed, updates locked position
+19. ✅ Dragging movable above Done/InProd/OnGoing — blocked
+```

@@ -1,0 +1,548 @@
+Implement the following fixes to the Knowledge Base:
+
+---
+
+## FIX 1: FIX THE DOWNLOAD BUTTON FOR KNOWLEDGE BASE HISTORY
+
+The download button in the Knowledge Base history table is not clickable or not functioning. Users cannot download the Knowledge Base data from a history entry.
+
+### THE PROBLEM
+
+The download button in the history actions column is either:
+1. Not wired to any click handler
+2. Being blocked by another element overlapping it (z-index or layout issue)
+3. The click handler exists but doesn't trigger the actual file download
+4. The button is disabled or has `pointer-events: none` unintentionally
+
+### THE FIX
+
+#### ENSURE THE DOWNLOAD BUTTON HAS A PROPER CLICK HANDLER
+
+```jsx
+<td className="history-actions">
+  {/* Download button */}
+  <button
+    title="Download this version"
+    className="action-btn action-download"
+    onClick={(e) => {
+      e.stopPropagation(); // Prevent row click interference
+      handleDownloadHistory(entry);
+    }}
+    style={{ cursor: 'pointer', pointerEvents: 'auto' }}
+  >
+    <FiDownload size={14} />
+  </button>
+
+  {/* Revert button — only show if NOT active */}
+  {entry.status !== 'Active' && (
+    <button
+      title="Revert to this version"
+      className="action-btn action-revert"
+      onClick={(e) => {
+        e.stopPropagation();
+        handleRevert(entry);
+      }}
+    >
+      <FiRotateCcw size={14} />
+    </button>
+  )}
+
+  {/* Delete button */}
+  <button
+    title="Delete this history"
+    className="action-btn action-delete"
+    onClick={(e) => {
+      e.stopPropagation();
+      handleDeleteHistory(entry);
+    }}
+  >
+    <FiTrash2 size={14} />
+  </button>
+</td>
+```
+
+#### IMPLEMENT THE DOWNLOAD HANDLER FOR KNOWLEDGE BASE
+
+This function takes a history entry's snapshot and exports it as an Excel file:
+
+```javascript
+import * as XLSX from 'xlsx';
+
+function handleDownloadHistory(entry) {
+  if (!entry || !entry.snapshot || entry.snapshot.length === 0) {
+    showNotification('error', 'No data available to download for this history entry.');
+    return;
+  }
+
+  try {
+    // Prepare data — remove internal fields (_rowId, _originalIndex)
+    const exportData = entry.snapshot.map((row) => {
+      const cleanRow = {};
+      Object.keys(row).forEach((key) => {
+        if (!key.startsWith('_')) {
+          cleanRow[key] = row[key];
+        }
+      });
+      return cleanRow;
+    });
+
+    // Define column headers in the desired order
+    const columnOrder = [
+      'fgMaterialCode',
+      'fgItemDescription',
+      'sfg1MaterialCode',
+      'sfgItemDescription',
+      'form',
+      'batchFm1',
+      'batchFm2',
+      'batchFm3',
+      'batchPmx',
+      'fgWeight',
+      'thickness',
+      'label1',
+      'label2',
+      'l1Rate',
+      'l2Rate',
+      'l3Rate',
+      'l4Rate',
+      'l5Rate',
+      'l6Rate',
+      'l7Rate',
+    ];
+
+    // Map to display-friendly column headers
+    const headerMap = {
+      fgMaterialCode: 'FG Material Code',
+      fgItemDescription: 'FG Item Description',
+      sfg1MaterialCode: 'SFG1 Material Code',
+      sfgItemDescription: 'SFG Item Description',
+      form: 'Form',
+      batchFm1: 'Batch FM1',
+      batchFm2: 'Batch FM2',
+      batchFm3: 'Batch FM3',
+      batchPmx: 'Batch PMX',
+      fgWeight: 'FG Weight',
+      thickness: 'Thickness',
+      label1: 'Label 1',
+      label2: 'Label 2',
+      l1Rate: 'L1 Rate',
+      l2Rate: 'L2 Rate',
+      l3Rate: 'L3 Rate',
+      l4Rate: 'L4 Rate',
+      l5Rate: 'L5 Rate',
+      l6Rate: 'L6 Rate',
+      l7Rate: 'L7 Rate',
+    };
+
+    // Build ordered export rows with display headers
+    const orderedExportData = exportData.map((row) => {
+      const orderedRow = {};
+      columnOrder.forEach((key) => {
+        const header = headerMap[key] || key;
+        orderedRow[header] = row[key] ?? '';
+      });
+      return orderedRow;
+    });
+
+    // Create workbook and worksheet
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(orderedExportData);
+
+    // Auto-size columns
+    const colWidths = {};
+    orderedExportData.forEach((row) => {
+      Object.keys(row).forEach((key) => {
+        const valLength = String(row[key] || '').length;
+        const headerLength = key.length;
+        const maxLength = Math.max(valLength, headerLength, 10);
+        if (!colWidths[key] || colWidths[key] < maxLength) {
+          colWidths[key] = maxLength;
+        }
+      });
+    });
+    ws['!cols'] = Object.values(colWidths).map((w) => ({ wch: Math.min(w + 2, 40) }));
+
+    XLSX.utils.book_append_sheet(wb, ws, 'Knowledge Base');
+
+    // Generate filename based on history entry
+    const dateStr = new Date(entry.timestamp).toISOString().split('T')[0]; // YYYY-MM-DD
+    const typeStr = entry.type === 'file_upload' ? 'Upload' : entry.type === 'manual_edit' ? 'Edit' : 'Revert';
+    const filename = `Knowledge_Base_${typeStr}_${dateStr}.xlsx`;
+
+    // Trigger download
+    XLSX.writeFile(wb, filename);
+
+    showNotification('success', `Downloaded: ${filename}`);
+  } catch (error) {
+    console.error('Download failed:', error);
+    showNotification('error', 'Failed to download. Please try again.');
+  }
+}
+```
+
+#### ENSURE BUTTON IS NOT BLOCKED BY CSS
+
+Check that the action buttons are not being covered by other elements:
+
+```css
+.history-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  position: relative;
+  z-index: 1; /* Ensure buttons are above any overlapping elements */
+}
+
+.action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: none;
+  background: transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  color: #6b7280;
+  transition: background-color 0.15s, color 0.15s;
+  pointer-events: auto; /* Ensure clickable */
+  position: relative;
+  z-index: 2;
+}
+
+.action-btn:hover {
+  background-color: #f3f4f6;
+  color: #374151;
+}
+
+.action-btn.action-download:hover {
+  background-color: #eff6ff;
+  color: #2563eb;
+}
+
+.action-btn.action-revert:hover {
+  background-color: #f0fdf4;
+  color: #16a34a;
+}
+
+.action-btn.action-delete:hover {
+  background-color: #fef2f2;
+  color: #dc2626;
+}
+
+/* Ensure the table cell doesn't clip the buttons */
+.history-actions td,
+td.history-actions {
+  overflow: visible;
+  white-space: nowrap;
+}
+```
+
+#### IF USING AN OVERFLOW CONTAINER, ENSURE IT DOESN'T BLOCK CLICKS
+
+```css
+/* If the history table is inside a scrollable container */
+.history-table-container {
+  overflow-x: auto;
+  overflow-y: visible; /* Don't clip vertically */
+}
+
+/* Ensure no parent has overflow: hidden that clips the buttons */
+.kb-history {
+  overflow: visible;
+}
+```
+
+---
+
+## FIX 2: EXTEND DOWNLOAD CAPABILITY TO THE N10D TABLE
+
+The N10D table (Next 10 Days production orders table) should also have a download/export button that allows users to download the N10D data as an Excel file.
+
+### THE FIX
+
+#### ADD A DOWNLOAD BUTTON TO THE N10D TABLE HEADER
+
+Place the download button in the N10D section header, next to any existing action buttons:
+
+```jsx
+<div className="n10d-header">
+  <div className="n10d-header-left">
+    <h2>Next 10 Days Production Orders</h2>
+    <p>Showing {filteredN10DData.length} of {n10dData.length} orders</p>
+  </div>
+  <div className="n10d-header-actions">
+    {/* Other existing buttons */}
+    <button
+      className="btn-download-n10d"
+      onClick={handleDownloadN10D}
+      disabled={!n10dData || n10dData.length === 0}
+      title="Download N10D data as Excel"
+    >
+      <FiDownload size={14} />
+      <span>Download N10D</span>
+    </button>
+  </div>
+</div>
+```
+
+#### IMPLEMENT THE N10D DOWNLOAD HANDLER
+
+```javascript
+function handleDownloadN10D() {
+  if (!n10dData || n10dData.length === 0) {
+    showNotification('error', 'No N10D data available to download.');
+    return;
+  }
+
+  try {
+    // Prepare data — remove internal fields
+    const exportData = n10dData.map((row) => {
+      const cleanRow = {};
+      Object.keys(row).forEach((key) => {
+        if (!key.startsWith('_')) {
+          cleanRow[key] = row[key];
+        }
+      });
+      return cleanRow;
+    });
+
+    // Define N10D column order — adjust these to match your actual N10D columns
+    const columnOrder = [
+      'orderNumber',
+      'productionDate',
+      'fgMaterialCode',
+      'fgItemDescription',
+      'sfg1MaterialCode',
+      'sfgItemDescription',
+      'form',
+      'batchFm1',
+      'batchFm2',
+      'batchFm3',
+      'batchPmx',
+      'fgWeight',
+      'thickness',
+      'label1',
+      'label2',
+      'l1Rate',
+      'l2Rate',
+      'l3Rate',
+      'l4Rate',
+      'l5Rate',
+      'l6Rate',
+      'l7Rate',
+      'orderQty',
+      'status',
+    ];
+
+    // Map to display-friendly column headers
+    const headerMap = {
+      orderNumber: 'Order Number',
+      productionDate: 'Production Date',
+      fgMaterialCode: 'FG Material Code',
+      fgItemDescription: 'FG Item Description',
+      sfg1MaterialCode: 'SFG1 Material Code',
+      sfgItemDescription: 'SFG Item Description',
+      form: 'Form',
+      batchFm1: 'Batch FM1',
+      batchFm2: 'Batch FM2',
+      batchFm3: 'Batch FM3',
+      batchPmx: 'Batch PMX',
+      fgWeight: 'FG Weight',
+      thickness: 'Thickness',
+      label1: 'Label 1',
+      label2: 'Label 2',
+      l1Rate: 'L1 Rate',
+      l2Rate: 'L2 Rate',
+      l3Rate: 'L3 Rate',
+      l4Rate: 'L4 Rate',
+      l5Rate: 'L5 Rate',
+      l6Rate: 'L6 Rate',
+      l7Rate: 'L7 Rate',
+      orderQty: 'Order Qty',
+      status: 'Status',
+    };
+
+    // Build ordered export rows with display headers
+    // Only include columns that actually exist in the data
+    const availableColumns = columnOrder.filter((key) =>
+      exportData.some((row) => row[key] !== undefined)
+    );
+
+    // Also include any columns in the data that are NOT in columnOrder (catch-all)
+    const allDataKeys = new Set();
+    exportData.forEach((row) => {
+      Object.keys(row).forEach((key) => allDataKeys.add(key));
+    });
+    const extraColumns = [...allDataKeys].filter(
+      (key) => !columnOrder.includes(key) && !key.startsWith('_')
+    );
+    const finalColumnOrder = [...availableColumns, ...extraColumns];
+
+    const orderedExportData = exportData.map((row) => {
+      const orderedRow = {};
+      finalColumnOrder.forEach((key) => {
+        const header = headerMap[key] || key;
+        orderedRow[header] = row[key] ?? '';
+      });
+      return orderedRow;
+    });
+
+    // Create workbook and worksheet
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(orderedExportData);
+
+    // Auto-size columns
+    const colWidths = {};
+    orderedExportData.forEach((row) => {
+      Object.keys(row).forEach((key) => {
+        const valLength = String(row[key] || '').length;
+        const headerLength = key.length;
+        const maxLength = Math.max(valLength, headerLength, 10);
+        if (!colWidths[key] || colWidths[key] < maxLength) {
+          colWidths[key] = maxLength;
+        }
+      });
+    });
+    ws['!cols'] = Object.values(colWidths).map((w) => ({
+      wch: Math.min(w + 2, 40),
+    }));
+
+    XLSX.utils.book_append_sheet(wb, ws, 'N10D Orders');
+
+    // Generate filename with current date
+    const dateStr = new Date().toISOString().split('T')[0];
+    const filename = `N10D_Production_Orders_${dateStr}.xlsx`;
+
+    // Trigger download
+    XLSX.writeFile(wb, filename);
+
+    showNotification('success', `Downloaded: ${filename}`);
+  } catch (error) {
+    console.error('N10D download failed:', error);
+    showNotification('error', 'Failed to download N10D data. Please try again.');
+  }
+}
+```
+
+#### STYLE THE N10D DOWNLOAD BUTTON
+
+```css
+.n10d-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.n10d-header-left h2 {
+  font-size: 18px;
+  font-weight: 600;
+  color: #1a1a1a;
+  margin: 0;
+}
+
+.n10d-header-left p {
+  font-size: 12px;
+  color: #6b7280;
+  margin: 4px 0 0 0;
+}
+
+.n10d-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.btn-download-n10d {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #374151;
+  background-color: #ffffff;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.btn-download-n10d:hover {
+  background-color: #f9fafb;
+  border-color: #9ca3af;
+  color: #1a1a1a;
+}
+
+.btn-download-n10d:active {
+  background-color: #f3f4f6;
+}
+
+.btn-download-n10d:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background-color: #f9fafb;
+}
+
+/* Icon inside button */
+.btn-download-n10d svg {
+  flex-shrink: 0;
+}
+```
+
+#### ENSURE xlsx PACKAGE IS IMPORTED
+
+Make sure the `xlsx` library is imported in the component file where both download handlers are used:
+
+```javascript
+import * as XLSX from 'xlsx';
+// or if using named import:
+// import { utils, writeFile } from 'xlsx';
+```
+
+If not installed:
+
+```bash
+npm install xlsx
+```
+
+---
+
+## VERIFICATION
+
+### Knowledge Base Download Button
+1. ✅ Download button in KB history is clickable
+2. ✅ Clicking download triggers an Excel file download
+3. ✅ Downloaded file contains all rows from that history entry's snapshot
+4. ✅ Downloaded file has proper column headers (display-friendly names, not camelCase)
+5. ✅ Downloaded file does NOT contain internal fields (_rowId, _originalIndex)
+6. ✅ Columns are in logical order (FG Material Code, FG Item Description, SFG1 Material Code, etc.)
+7. ✅ Column widths are auto-sized in the downloaded Excel
+8. ✅ Filename includes the history type and date (e.g., `Knowledge_Base_Upload_2026-04-04.xlsx`)
+9. ✅ Download button for a File Upload entry downloads the original uploaded data
+10. ✅ Download button for a Manual Edit entry downloads the data as it was after that edit
+11. ✅ If snapshot is empty or missing, shows error notification instead of crashing
+12. ✅ Success notification shown after download completes
+
+### Download Button Not Blocked
+13. ✅ Button is not covered by any overlapping element
+14. ✅ Button shows pointer cursor on hover
+15. ✅ Button has hover state (background color change)
+16. ✅ `e.stopPropagation()` prevents row click interference
+17. ✅ Works on all history entries (File Upload, Manual Edit, Revert)
+
+### N10D Download Button
+18. ✅ Download button visible in N10D section header
+19. ✅ Button is styled consistently with other action buttons
+20. ✅ Clicking triggers an Excel file download of N10D data
+21. ✅ Downloaded file contains all N10D order rows
+22. ✅ Downloaded file has proper column headers
+23. ✅ Downloaded file does NOT contain internal fields
+24. ✅ Columns are in logical order
+25. ✅ Column widths are auto-sized
+26. ✅ Filename includes date (e.g., `N10D_Production_Orders_2026-04-04.xlsx`)
+27. ✅ Button is disabled when N10D data is empty (greyed out, not clickable)
+28. ✅ Error notification shown if download fails
+29. ✅ Success notification shown after download completes
+30. ✅ Any extra columns in N10D data that are not in the predefined list are still included at the end

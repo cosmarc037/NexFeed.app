@@ -1,0 +1,430 @@
+```
+Implement the following changes to the Auto-Sequence Preview:
+
+---
+
+## 1. DRAG AND DROP IN AUTO-SEQUENCE PREVIEW
+
+Apply the same drag and drop behavior from the order table to the auto-sequence preview.
+
+### RULES
+
+| Order type | Can drag? | Grip icon? |
+|---|---|---|
+| Planned (locked) | ✅ Yes, with warning | ✅ Yes |
+| Movable (Plotted, Hold, etc.) | ✅ Yes | ✅ Yes |
+
+### SAME BEHAVIOR AS ORDER TABLE
+
+- ⠿ grip icon on left side for drag
+- Text is selectable (click on text = select, click on empty = drag)
+- Cannot drag above excluded orders (they're not in preview)
+- Warning if dragging movable order above Planned order
+
+### DRAG WARNINGS
+
+#### MOVING ABOVE PLANNED ORDER
+
+```
+╔════════════════════════════════════════════════════════╗
+║                                                        ║
+║  ⚠ Planned Order Will Be Affected                ✕   ║
+║                                                        ║
+║  Inserting this order here will push                   ║
+║  "Product F" (Planned at Priority 6) down              ║
+║  to Priority 7.                                        ║
+║                                                        ║
+║  Consider adjusting the Planned order first,           ║
+║  or proceed if this is intentional.                    ║
+║                                                        ║
+║              [Cancel]    [Proceed Anyway]               ║
+║                                                        ║
+╚════════════════════════════════════════════════════════╝
+```
+
+#### MOVING A PLANNED ORDER
+
+When user drags a Planned order to a different position:
+
+```
+╔════════════════════════════════════════════════════════╗
+║                                                        ║
+║  ⚠ Moving Planned Order                          ✕   ║
+║                                                        ║
+║  "Gallimax Pigeon Pellet" is currently Planned         ║
+║  at Priority 2. Moving it to Priority 5 will           ║
+║  change its locked position.                           ║
+║                                                        ║
+║  Do you want to proceed?                               ║
+║                                                        ║
+║              [Cancel]    [Proceed]                      ║
+║                                                        ║
+╚════════════════════════════════════════════════════════╝
+```
+
+Apply this SAME warning to the order table as well — currently the order table shows a notification instead of a proper dialog.
+
+### IMPLEMENTATION
+
+```jsx
+function PreviewRow({ order, index, onDragStart, onDragEnd, onDragOver, onDrop }) {
+  const [isDragReady, setIsDragReady] = useState(false);
+  
+  function isOverText(e) {
+    const target = e.target;
+    
+    if (['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON'].includes(target.tagName)) {
+      return true;
+    }
+    
+    if (target.closest('.drag-handle')) return false;
+    
+    if (document.caretRangeFromPoint) {
+      const range = document.caretRangeFromPoint(e.clientX, e.clientY);
+      if (range && range.startContainer.nodeType === Node.TEXT_NODE) {
+        const text = range.startContainer.textContent.trim();
+        if (text.length > 0) {
+          const textRange = document.createRange();
+          textRange.selectNodeContents(range.startContainer);
+          const rects = textRange.getClientRects();
+          for (let i = 0; i < rects.length; i++) {
+            if (e.clientX >= rects[i].left && e.clientX <= rects[i].right &&
+                e.clientY >= rects[i].top && e.clientY <= rects[i].bottom) {
+              return true;
+            }
+          }
+        }
+      }
+    }
+    
+    if (target.closest('.text-content')) return true;
+    
+    return false;
+  }
+  
+  function handleMouseDown(e) {
+    if (e.target.closest('.drag-handle')) {
+      setIsDragReady(true);
+      return;
+    }
+    
+    if (isOverText(e)) {
+      setIsDragReady(false);
+      return;
+    }
+    
+    setIsDragReady(true);
+  }
+  
+  function handleMouseUp() {
+    setIsDragReady(false);
+  }
+  
+  return (
+    <tr
+      draggable={isDragReady}
+      onMouseDown={handleMouseDown}
+      onMouseUp={handleMouseUp}
+      onDragStart={(e) => {
+        if (!isDragReady) { e.preventDefault(); return; }
+        onDragStart(e, order, index);
+      }}
+      onDragEnd={onDragEnd}
+      onDragOver={onDragOver}
+      onDrop={(e) => onDrop(e, index)}
+      className={`preview-row ${order._isLocked ? 'preview-row-planned' : ''}`}
+    >
+      <td className="drag-handle-cell">
+        <div className="drag-handle">⠿</div>
+      </td>
+      
+      <td className="data-cell">
+        <span className="text-content">
+          {order.prio}
+          {order._isLocked && <span className="lock-icon">🔒</span>}
+        </span>
+      </td>
+      
+      {/* ... other cells ... */}
+    </tr>
+  );
+}
+```
+
+### DRAG HANDLER — WITH WARNINGS
+
+```javascript
+function handlePreviewDrop(draggedOrder, targetIndex, previewOrders) {
+  const targetOrder = previewOrders[targetIndex];
+  
+  // Warning: Dragging above a Planned order
+  if (targetOrder && targetOrder._isLocked && !draggedOrder._isLocked) {
+    showDialog({
+      title: 'Planned Order Will Be Affected',
+      message: `Inserting this order here will push "${targetOrder.item_description}" (Planned at Priority ${targetOrder.prio}) down. Consider adjusting the Planned order first, or proceed if this is intentional.`,
+      buttons: [
+        { label: 'Cancel', action: 'cancel' },
+        { label: 'Proceed Anyway', action: 'proceed', style: 'orange' }
+      ],
+      onAction: (action) => {
+        if (action === 'proceed') {
+          executePreviewDrop(draggedOrder, targetIndex, previewOrders);
+        }
+      }
+    });
+    return;
+  }
+  
+  // Warning: Moving a Planned order
+  if (draggedOrder._isLocked) {
+    const newPrio = previewOrders[targetIndex]?.prio || targetIndex + 1;
+    showDialog({
+      title: 'Moving Planned Order',
+      message: `"${draggedOrder.item_description}" is currently Planned at Priority ${draggedOrder.prio}. Moving it to Priority ${newPrio} will change its locked position. Do you want to proceed?`,
+      buttons: [
+        { label: 'Cancel', action: 'cancel' },
+        { label: 'Proceed', action: 'proceed', style: 'orange' }
+      ],
+      onAction: (action) => {
+        if (action === 'proceed') {
+          draggedOrder._plannedPrio = newPrio;
+          executePreviewDrop(draggedOrder, targetIndex, previewOrders);
+        }
+      }
+    });
+    return;
+  }
+  
+  // No warning needed — execute directly
+  executePreviewDrop(draggedOrder, targetIndex, previewOrders);
+}
+
+function executePreviewDrop(draggedOrder, targetIndex, previewOrders) {
+  // Remove from current position
+  const currentIndex = previewOrders.findIndex(o => o.id === draggedOrder.id);
+  if (currentIndex === -1) return;
+  
+  previewOrders.splice(currentIndex, 1);
+  previewOrders.splice(targetIndex, 0, draggedOrder);
+  
+  // Reassign prio numbers using available slots
+  // (same slot assignment as auto-sequence — skip excluded prios)
+  reassignPreviewPrios(previewOrders);
+  
+  // Mark as manually modified
+  draggedOrder._manuallyMoved = true;
+  
+  triggerPreviewRefresh();
+}
+```
+
+### RE-ANALYZE — KEEP MANUAL DRAGS
+
+When user clicks "Re-analyze", keep manually moved orders at their new positions:
+
+```javascript
+function handleReanalyze(previewOrders, n10dData, dailyColumns, today) {
+  // Separate manually moved orders
+  const manuallyMoved = previewOrders.filter(o => o._manuallyMoved);
+  const autoSortable = previewOrders.filter(o => !o._manuallyMoved && !o._isLocked);
+  const planned = previewOrders.filter(o => o._isLocked);
+  
+  // Re-sort only the auto-sortable orders
+  const resorted = assignAvailDates(autoSortable, n10dData, dailyColumns, today);
+  resorted.sort(/* same sorting logic */);
+  
+  // Rebuild: manually moved at their positions, planned at theirs, rest re-sorted
+  // ... merge logic
+}
+```
+
+---
+
+## 2. APPLY PLANNED ORDER WARNING TO ORDER TABLE TOO
+
+Currently the order table shows a notification when dragging a Planned order. Replace with the same dialog:
+
+```javascript
+// In order table drag handler
+function handleOrderTableDrop(draggedOrder, targetIndex, allOrders) {
+  // Moving a Planned order — show dialog instead of notification
+  if (draggedOrder.status === 'Planned') {
+    const newPrio = targetIndex + 1;
+    showDialog({
+      title: 'Moving Planned Order',
+      message: `"${draggedOrder.item_description}" is currently Planned at Priority ${draggedOrder.prio}. Moving it to Priority ${newPrio} will change its locked position. Do you want to proceed?`,
+      buttons: [
+        { label: 'Cancel', action: 'cancel' },
+        { label: 'Proceed', action: 'proceed', style: 'orange' }
+      ],
+      onAction: (action) => {
+        if (action === 'proceed') {
+          draggedOrder._plannedPrio = newPrio;
+          executeOrderTableDrop(draggedOrder, targetIndex, allOrders);
+        }
+      }
+    });
+    return;
+  }
+  
+  // ... existing warnings for movable above locked, etc.
+}
+```
+
+---
+
+## 3. ADD "PRODUCTION TIME" COLUMN
+
+Add a column between "Batches" and "Start Date" showing production time and changeover.
+
+### COLUMN HEADER
+
+```
+Production Time
+```
+
+### CELL FORMAT — TWO LINES
+
+```
+2.30 hours
+Changeover: 0:17
+```
+
+### IMPLEMENTATION
+
+```jsx
+<td className="data-cell production-time-cell">
+  <div className="text-content">
+    <div className="prod-time-value">
+      {formatProductionHours(order.production_time)} hours
+    </div>
+    <div className="changeover-value">
+      Changeover: {formatChangeover(order.changeover)}
+    </div>
+  </div>
+</td>
+```
+
+### HELPER FUNCTIONS
+
+```javascript
+function formatProductionHours(hours) {
+  if (!hours || hours === 0) return '0.00';
+  return parseFloat(hours).toFixed(2);
+}
+
+function formatChangeover(hours) {
+  if (!hours || hours === 0) return '0:00';
+  
+  const totalMinutes = Math.round(parseFloat(hours) * 60);
+  const h = Math.floor(totalMinutes / 60);
+  const m = totalMinutes % 60;
+  return `${h}:${m.toString().padStart(2, '0')}`;
+}
+```
+
+### EXAMPLES
+
+```
+Production time: 4.19 hrs, Changeover: 0.17 hrs
+Display:
+4.19 hours
+Changeover: 0:10
+
+Production time: 2.30 hrs, Changeover: 0.17 hrs
+Display:
+2.30 hours
+Changeover: 0:10
+
+Production time: 0.42 hrs, Changeover: 0.17 hrs
+Display:
+0.42 hours
+Changeover: 0:10
+```
+
+### STYLING
+
+```css
+.production-time-cell {
+  min-width: 120px;
+}
+
+.prod-time-value {
+  font-size: 12px;
+  font-weight: 600;
+  color: #1a1a1a;
+}
+
+.changeover-value {
+  font-size: 10px;
+  font-weight: 400;
+  color: #9ca3af;
+  margin-top: 2px;
+}
+```
+
+---
+
+## 4. RENAME "MATERIAL CODE" TO "MATERIAL CODE (FG)"
+
+### PREVIEW TABLE HEADER
+
+```
+BEFORE: Material Code
+AFTER:  Material Code (FG)
+```
+
+```jsx
+<th>Material Code (FG)</th>
+```
+
+---
+
+## 5. UPDATED PREVIEW TABLE LAYOUT
+
+```
+┌────┬─────┬────────────┬──────────────────┬────────────────────────────┬──────┬──────────┬──────────┬─────────┬────────────┬────────────┬──────────┬──────────────────┐
+│    │Prio │ FPR        │ Planned Order    │ Material Code (FG)         │ Item │ Form     │ Volume   │ Batch   │ Batches    │ Production │ Start    │ Start    │ Avail        │ Completion   │
+│ ⠿ │     │            │                  │                            │ Desc │          │ (MT)     │ Size    │            │ Time       │ Date     │ Time     │ Date         │ Date         │
+├────┼─────┼────────────┼──────────────────┼────────────────────────────┼──────┼──────────┼──────────┼─────────┼────────────┼────────────┼──────────┼──────────┼──────────────┼──────────────┤
+│ ⠿ │  2  │ 260330     │ 5925175          │ 1000000000934              │ Gal..│ MP-CS    │ 24 MT    │ 4.00    │ 6          │ 2.30 hours │Set start │Set start │ Apr 9, 2026  │ Set          │
+│    │ 🔒 │            │ 5792802          │                            │      │          │          │         │            │ CO: 0:10   │ date     │ time     │ Sufficient ✅│ completion   │
+├────┼─────┼────────────┼──────────────────┼────────────────────────────┼──────┼──────────┼──────────┼─────────┼────────────┼────────────┼──────────┼──────────┼──────────────┼──────────────┤
+│ ⠿ │  3  │ 260330     │ 5882491          │ 1000000000219              │ Gal..│ MP-CS    │ 80 MT    │ 4.00    │ 20         │ 4.19 hours │Set start │Set start │ Mar 31, 2026 │ Set          │
+│    │     │            │ 5915609          │                            │      │          │          │         │            │ CO: 0:10   │ date     │ time     │              │ completion   │
+└────┴─────┴────────────┴──────────────────┴────────────────────────────┴──────┴──────────┴──────────┴─────────┴────────────┴────────────┴──────────┴──────────┴──────────────┴──────────────┘
+```
+
+---
+
+## VERIFICATION
+
+### Drag and drop in preview
+1. ✅ ⠿ grip icon on each row
+2. ✅ Drag from grip icon reorders
+3. ✅ Drag from empty cell area reorders
+4. ✅ Click on text selects text (no drag)
+5. ✅ Dragging movable above Planned — warning dialog with Cancel/Proceed
+6. ✅ Dragging Planned order — warning dialog about changing locked position
+7. ✅ After proceed — order moves to new position
+
+### Order table — Planned drag warning
+8. ✅ Dragging Planned order shows dialog (not just notification)
+9. ✅ Dialog has Cancel and Proceed buttons (orange)
+10. ✅ Cancel reverts, Proceed moves and updates locked position
+
+### Production Time column
+11. ✅ Shows between Batches and Start Date
+12. ✅ Line 1: "2.30 hours" (bold)
+13. ✅ Line 2: "Changeover: 0:10" (grey, smaller)
+
+### Material Code header
+14. ✅ Header says "Material Code (FG)"
+
+### Apply to Schedule
+15. ✅ Manually dragged positions are preserved when applying
+
+### Re-analyze
+16. ✅ Manually moved orders stay at their positions
+17. ✅ Only auto-sortable orders are re-sorted
+```

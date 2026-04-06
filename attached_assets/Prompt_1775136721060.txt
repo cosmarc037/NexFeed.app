@@ -1,0 +1,310 @@
+```
+Implement the following change:
+
+---
+
+## RIGHT-CLICK ON MAIN HEADER — HIDE ENTIRE GROUP
+
+When user right-clicks on a main/group header (e.g., "ORDER DETAILS", "SCHEDULING"), show a context menu with the option to hide ALL sub-columns under that group at once.
+
+---
+
+### CONTEXT MENU FOR MAIN HEADER
+
+```jsx
+function GroupHeaderContextMenu({ group, position, onHideGroup, onClose }) {
+  return (
+    <div 
+      className="context-menu"
+      style={{
+        position: 'fixed',
+        left: position.x,
+        top: position.y,
+        zIndex: 9999
+      }}
+    >
+      <div 
+        className="context-menu-item" 
+        onClick={() => { onHideGroup(group); onClose(); }}
+      >
+        Hide {group.label}
+      </div>
+    </div>
+  );
+}
+```
+
+### MAIN HEADER — RIGHT-CLICK HANDLER
+
+```jsx
+function GroupHeader({ group, colSpan, onContextMenu }) {
+  return (
+    <th
+      colSpan={colSpan}
+      className={`group-header ${group.className || ''}`}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        onContextMenu(e, group);
+      }}
+    >
+      {group.label}
+    </th>
+  );
+}
+```
+
+### GROUP-TO-COLUMNS MAPPING
+
+```javascript
+const HEADER_GROUP_COLUMNS = {
+  'ORDER DETAILS': [
+    'fpr', 'planned_order', 'production_order', 
+    'material_code_sfg', 'material_code_fg', 'item_description'
+  ],
+  'PRODUCTION PARAMETERS': [
+    'form', 'volume', 'batch_size', 'batches', 'bags', 'production_time'
+  ],
+  'MIXER DETAILS': [
+    'ha_info', 'ha_prep'
+  ],
+  'OPERATOR': [
+    'status'
+  ],
+  'SCHEDULING': [
+    'start_date', 'start_time', 'avail_date', 'completion_date'
+  ],
+  'PRODUCT INSIGHTS': [
+    'summary'
+  ],
+  'NOTES': [
+    'fpr_notes', 'special_remarks'
+  ],
+  'BAGGER DETAILS': [
+    'threads', 'sacks', 'markings', 'tags'
+  ],
+  'COMPLETION & TRACKING': [
+    'end_date', 'history'
+  ]
+};
+```
+
+### HIDE GROUP HANDLER
+
+```javascript
+function handleHideGroup(group) {
+  const columnsToHide = HEADER_GROUP_COLUMNS[group.label];
+  
+  if (!columnsToHide) return;
+  
+  setVisibleColumns(prev => {
+    const updated = { ...prev };
+    columnsToHide.forEach(col => {
+      updated[col] = false;
+    });
+    return updated;
+  });
+}
+```
+
+### RESTORE — SAME MECHANISM AS INDIVIDUAL COLUMNS
+
+When restoring, ALL columns in the group are restored together.
+
+The existing column visibility toggle/mechanism should recognize that when all columns of a group are hidden, the group header is also hidden. When any column of the group is restored, the group header reappears.
+
+```javascript
+function isGroupVisible(groupLabel) {
+  const columns = HEADER_GROUP_COLUMNS[groupLabel];
+  if (!columns) return true;
+  
+  // Group is visible if ANY of its columns are visible
+  return columns.some(col => visibleColumns[col] !== false);
+}
+
+function getGroupColspan(groupLabel) {
+  const columns = HEADER_GROUP_COLUMNS[groupLabel];
+  if (!columns) return 0;
+  
+  // Count only visible columns
+  return columns.filter(col => visibleColumns[col] !== false).length;
+}
+```
+
+### RENDER GROUP HEADERS CONDITIONALLY
+
+```jsx
+<thead>
+  <tr>
+    {/* Only render group headers that have at least one visible column */}
+    
+    {isGroupVisible('ORDER DETAILS') && (
+      <GroupHeader
+        group={{ label: 'ORDER DETAILS' }}
+        colSpan={getGroupColspan('ORDER DETAILS')}
+        onContextMenu={handleGroupContextMenu}
+      />
+    )}
+    
+    {isGroupVisible('PRODUCTION PARAMETERS') && (
+      <GroupHeader
+        group={{ label: 'PRODUCTION PARAMETERS' }}
+        colSpan={getGroupColspan('PRODUCTION PARAMETERS')}
+        onContextMenu={handleGroupContextMenu}
+      />
+    )}
+    
+    {isGroupVisible('MIXER DETAILS') && (
+      <GroupHeader
+        group={{ label: 'MIXER DETAILS' }}
+        colSpan={getGroupColspan('MIXER DETAILS')}
+        onContextMenu={handleGroupContextMenu}
+      />
+    )}
+    
+    {isGroupVisible('OPERATOR') && (
+      <GroupHeader
+        group={{ label: 'OPERATOR' }}
+        colSpan={getGroupColspan('OPERATOR')}
+        onContextMenu={handleGroupContextMenu}
+      />
+    )}
+    
+    {isGroupVisible('SCHEDULING') && (
+      <GroupHeader
+        group={{ label: 'SCHEDULING' }}
+        colSpan={getGroupColspan('SCHEDULING')}
+        onContextMenu={handleGroupContextMenu}
+      />
+    )}
+    
+    {isGroupVisible('PRODUCT INSIGHTS') && (
+      <GroupHeader
+        group={{ label: 'PRODUCT INSIGHTS', className: 'ai-header' }}
+        colSpan={getGroupColspan('PRODUCT INSIGHTS')}
+        onContextMenu={handleGroupContextMenu}
+      />
+    )}
+    
+    {isGroupVisible('NOTES') && (
+      <GroupHeader
+        group={{ label: 'NOTES' }}
+        colSpan={getGroupColspan('NOTES')}
+        onContextMenu={handleGroupContextMenu}
+      />
+    )}
+    
+    {isGroupVisible('BAGGER DETAILS') && (
+      <GroupHeader
+        group={{ label: 'BAGGER DETAILS' }}
+        colSpan={getGroupColspan('BAGGER DETAILS')}
+        onContextMenu={handleGroupContextMenu}
+      />
+    )}
+    
+    {isGroupVisible('COMPLETION & TRACKING') && (
+      <GroupHeader
+        group={{ label: 'COMPLETION & TRACKING' }}
+        colSpan={getGroupColspan('COMPLETION & TRACKING')}
+        onContextMenu={handleGroupContextMenu}
+      />
+    )}
+  </tr>
+  
+  <tr>
+    {/* Sub-headers — only render visible columns */}
+    {/* Same as existing, filtered by visibleColumns */}
+  </tr>
+</thead>
+```
+
+### COLLAPSED GROUP — SAME AS INDIVIDUAL HIDDEN COLUMNS
+
+When all columns of a group are hidden, the group shows as the same thin collapsed strip used by individual hidden columns. Clicking or using the same restore mechanism brings back all columns in the group.
+
+```javascript
+// When restoring a group from the collapsed strip
+function handleRestoreGroup(groupLabel) {
+  const columnsToRestore = HEADER_GROUP_COLUMNS[groupLabel];
+  
+  if (!columnsToRestore) return;
+  
+  setVisibleColumns(prev => {
+    const updated = { ...prev };
+    columnsToRestore.forEach(col => {
+      updated[col] = true;
+    });
+    return updated;
+  });
+}
+```
+
+---
+
+### BOTH RIGHT-CLICK MENUS — MAIN AND SUB HEADERS
+
+```jsx
+function handleHeaderContextMenu(e, target) {
+  e.preventDefault();
+  
+  if (target.type === 'group') {
+    // Main header right-clicked
+    setContextMenu({
+      type: 'group',
+      group: target,
+      position: { x: e.clientX, y: e.clientY }
+    });
+  } else if (target.type === 'column') {
+    // Sub-header right-clicked
+    setContextMenu({
+      type: 'column',
+      column: target,
+      position: { x: e.clientX, y: e.clientY }
+    });
+  }
+}
+
+// Render context menu
+{contextMenu && contextMenu.type === 'group' && (
+  <GroupHeaderContextMenu
+    group={contextMenu.group}
+    position={contextMenu.position}
+    onHideGroup={handleHideGroup}
+    onClose={() => setContextMenu(null)}
+  />
+)}
+
+{contextMenu && contextMenu.type === 'column' && (
+  <ColumnHeaderContextMenu
+    column={contextMenu.column}
+    position={contextMenu.position}
+    onHide={handleHideColumn}
+    onClose={() => setContextMenu(null)}
+  />
+)}
+```
+
+---
+
+## VERIFICATION
+
+1. Right-click main header
+   - ✅ "ORDER DETAILS" → context menu shows "Hide ORDER DETAILS"
+   - ✅ Click → all sub-columns (FPR, Planned Order, etc.) hidden
+   - ✅ Group header disappears
+
+2. Right-click sub-header
+   - ✅ Same as before — "Hide column" for individual column
+   - ✅ Group header adjusts colspan
+
+3. Restore group
+   - ✅ Same mechanism as individual columns (collapsed strip or toggle)
+   - ✅ Restoring brings back ALL columns in the group
+
+4. Partial hide
+   - ✅ If 3 of 6 ORDER DETAILS columns are hidden individually, group header shows with colspan 3
+   - ✅ Right-clicking group header still shows "Hide ORDER DETAILS" which hides remaining 3
+
+5. Filter icons unaffected
+   - ✅ No filter icon on main headers
+   - ✅ Filter icons only on sub-headers
+```

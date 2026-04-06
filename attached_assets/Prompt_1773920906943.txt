@@ -1,0 +1,154 @@
+```
+Implement the following change to the NexFeed application:
+
+---
+
+## DELETE UPLOAD — CONFIRMATION DIALOG WITH "CONFIRM" TEXT INPUT
+
+When a user clicks the 🗑 delete button on any upload history entry, a confirmation dialog appears that requires the user to type "Confirm" before the delete action proceeds.
+
+---
+
+### DIALOG LAYOUT
+
+**For non-active files:**
+
+```
+╔══════════════════════════════════════════════════════╗
+║  🗑 Delete Upload                                     ║
+║                                                       ║
+║  Are you sure you want to delete this file?           ║
+║                                                       ║
+║  File:       Dummy 10 Days.xlsx                       ║
+║  Uploaded:   03/19/2026 03:18 PM                      ║
+║  Records:    20 products                              ║
+║                                                       ║
+║  ⚠ This action cannot be undone.                     ║
+║                                                       ║
+║  Type "Confirm" to proceed:                           ║
+║  ┌──────────────────────────────────┐                 ║
+║  │                                  │                 ║
+║  └──────────────────────────────────┘                 ║
+║                                                       ║
+║              [Cancel]    [Delete]                      ║
+╚══════════════════════════════════════════════════════╝
+```
+
+**For active files (extra warning):**
+
+```
+╔══════════════════════════════════════════════════════╗
+║  🗑 Delete Upload                                     ║
+║                                                       ║
+║  Are you sure you want to delete this file?           ║
+║                                                       ║
+║  File:       Dummy 10 Days.xlsx                       ║
+║  Uploaded:   03/19/2026 04:22 PM                      ║
+║  Records:    20 products                              ║
+║  Status:     Active ✅                                ║
+║                                                       ║
+║  ⚠ This is the currently ACTIVE file. Deleting it    ║
+║  will remove all associated data. The next most       ║
+║  recent upload will become active, or the page will   ║
+║  revert to empty state if no other uploads exist.     ║
+║  This action cannot be undone.                        ║
+║                                                       ║
+║  Type "Confirm" to proceed:                           ║
+║  ┌──────────────────────────────────┐                 ║
+║  │                                  │                 ║
+║  └──────────────────────────────────┘                 ║
+║                                                       ║
+║              [Cancel]    [Delete]                      ║
+╚══════════════════════════════════════════════════════╝
+```
+
+---
+
+### DIALOG STYLING
+
+| Element | Styling |
+|---|---|
+| Dialog title "🗑 Delete Upload" | 14px, font-weight 600, dark text (#1a1a1a) |
+| Description text | 12px, grey (#6b7280) |
+| File details labels (File, Uploaded, Records) | 11px, grey (#6b7280) |
+| File details values | 11px, font-weight 500, dark text (#1a1a1a) |
+| "Status: Active ✅" | 11px, green (#43a047), font-weight 600 |
+| Warning section background | Light red (#fef2f2) |
+| Warning section border | 1px solid #fecaca |
+| Warning section border-radius | 6px |
+| Warning section padding | 8px 12px |
+| Warning icon ⚠ | Red (#e53935) |
+| Warning text | 11px, dark red (#991b1b) |
+| "Type Confirm to proceed:" label | 12px, dark text (#1a1a1a), font-weight 500 |
+| Dialog max-width | 420px |
+| Dialog padding | 20px 24px |
+| Dialog border-radius | 12px |
+| Dialog background | White |
+| Overlay | Semi-transparent black (rgba(0,0,0,0.4)) |
+
+---
+
+### TEXT INPUT — "CONFIRM"
+
+| Property | Value |
+|---|---|
+| Width | 100% (fills dialog width) |
+| Height | ~32px |
+| Border | 1px solid #d1d5db |
+| Border radius | 6px |
+| Font size | 12px |
+| Padding | 6px 10px |
+| Placeholder | "Type Confirm here..." in grey italic |
+| Focus border | Red (#e53935) — red to emphasize destructive action |
+
+**Validation:**
+- The user must type exactly "Confirm" (case-sensitive, capital C).
+- The [Delete] button is DISABLED until the input matches "Confirm" exactly.
+- As the user types, check in real-time:
+  - Input is empty or doesn't match → [Delete] button remains disabled (greyed out).
+  - Input matches "Confirm" exactly → [Delete] button becomes enabled (turns red).
+
+**Visual feedback while typing:**
+- Partial match (e.g., "Con") → input border stays grey, no error, button disabled.
+- Wrong text (e.g., "confirm" lowercase, "delete", etc.) → subtle red border on input (#fecaca), small error text below: "Please type 'Confirm' exactly." in red (#e53935), 10px.
+- Exact match "Confirm" → input border turns green (#43a047), [Delete] button enables.
+
+---
+
+### BUTTONS
+
+| Button | Disabled State | Enabled State |
+|---|---|---|
+| [Cancel] | Always enabled. Grey outlined. Border: 1px solid #d1d5db. Text: grey (#374151), 12px. | Same |
+| [Delete] | Greyed out. Background: #f3f4f6. Text: #d1d5db. Cursor: not-allowed. | Red filled (#e53935). Text: white, 12px, font-weight 600. Cursor: pointer. Hover: darker red (#c62828). |
+
+---
+
+### KEYBOARD BEHAVIOR
+
+- Enter key: If "Confirm" is typed and [Delete] is enabled, pressing Enter triggers delete.
+- Escape key: Closes the dialog (same as clicking Cancel).
+- Focus: Auto-focus the text input when dialog opens so user can start typing immediately.
+
+---
+
+### APPLIES TO BOTH PAGES
+
+This confirmation dialog with "Confirm" text input applies to:
+
+1. **Knowledge Base** upload history delete.
+2. **Next 10 Days** upload history delete.
+
+Both use the same dialog design and behavior.
+
+---
+
+### AFTER SUCCESSFUL DELETE
+
+Same behavior as previously defined:
+- Non-active file: entry removed, no data impact.
+- Active file: data cleared, next most recent becomes active (or empty state).
+- Toast notification confirms deletion.
+- Dialog closes.
+- Input resets.
+```

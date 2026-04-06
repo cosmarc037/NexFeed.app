@@ -1,0 +1,406 @@
+```
+Implement the following fix:
+
+---
+
+## FIX: ORDER TABLE — TEXT SELECTABLE + DRAG FROM EMPTY AREAS
+
+Text in order rows should be selectable. Dragging to reorder works from the grip icon AND from empty areas (padding, gaps, cells with no text). Clicking on actual text characters selects text, not drag.
+
+---
+
+### BEHAVIOR SUMMARY
+
+| Mouse position | Cursor | Click action | Click + drag action |
+|---|---|---|---|
+| Over actual text characters | I-beam (text) | Place cursor / select | Select text |
+| Over empty area in row (padding, gaps) | Grab hand | Nothing | Drag to reorder |
+| Over ⠿ grip icon | Grab hand | Nothing | Drag to reorder |
+| Over placeholder text ("Set start date") | Pointer | Trigger edit/input | Trigger edit/input |
+| Over placeholder padding area | Grab hand | Nothing | Drag to reorder |
+
+---
+
+### IMPLEMENTATION
+
+The key is to detect whether the mouse is over actual text content or empty space. Use event target inspection:
+
+```jsx
+function OrderRow({ order, index, onDragStart, onDragEnd, onDragOver, onDrop }) {
+  const rowRef = useRef(null);
+  const [isDragReady, setIsDragReady] = useState(false);
+  
+  function isOverText(e) {
+    const target = e.target;
+    
+    // Check if target is an input, textarea, select, or button — not draggable
+    if (['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON'].includes(target.tagName)) {
+      return true;
+    }
+    
+    // Check if target is a placeholder element (Set start date, Add note, etc.)
+    if (target.classList.contains('placeholder-text') || 
+        target.classList.contains('editable-trigger')) {
+      return true;
+    }
+    
+    // Check if the click is over actual text content
+    // Use document.caretRangeFromPoint (or caretPositionFromPoint)
+    const range = document.caretRangeFromPoint 
+      ? document.caretRangeFromPoint(e.clientX, e.clientY)
+      : null;
+    
+    if (range) {
+      const node = range.startContainer;
+      // If we hit a text node with actual content (not whitespace only)
+      if (node.nodeType === Node.TEXT_NODE && node.textContent.trim().length > 0) {
+        // Check if the click X is within the text bounds
+        const textRange = document.createRange();
+        textRange.selectNodeContents(node);
+        const rects = textRange.getClientRects();
+        
+        for (let i = 0; i < rects.length; i++) {
+          const rect = rects[i];
+          if (e.clientX >= rect.left && e.clientX <= rect.right &&
+              e.clientY >= rect.top && e.clientY <= rect.bottom) {
+            return true; // Mouse is over actual text
+          }
+        }
+      }
+    }
+    
+    return false; // Mouse is over empty space
+  }
+  
+  function handleMouseDown(e) {
+    // Grip icon always triggers drag
+    if (e.target.closest('.drag-handle')) {
+      setIsDragReady(true);
+      return;
+    }
+    
+    // If over text — allow text selection, no drag
+    if (isOverText(e)) {
+      setIsDragReady(false);
+      return;
+    }
+    
+    // Over empty space — prepare for drag
+    if (canDragOrder(order)) {
+      setIsDragReady(true);
+    }
+  }
+  
+  function handleMouseUp() {
+    setIsDragReady(false);
+  }
+  
+  function handleDragStart(e) {
+    if (!isDragReady || !canDragOrder(order)) {
+      e.preventDefault();
+      return;
+    }
+    onDragStart(e, order, index);
+  }
+  
+  function handleDragEnd(e) {
+    setIsDragReady(false);
+    onDragEnd(e);
+  }
+  
+  return (
+    <tr
+      ref={rowRef}
+      draggable={isDragReady}
+      onMouseDown={handleMouseDown}
+      onMouseUp={handleMouseUp}
+      onDragStart={handleDragStart}
+      onDragEnd={handleDragEnd}
+      onDragOver={onDragOver}
+      onDrop={(e) => onDrop(e, index)}
+      className={`order-row ${isDragReady ? 'drag-ready' : ''}`}
+    >
+      {/* Drag handle */}
+      <td className="drag-handle-cell">
+        {canDragOrder(order) ? (
+          <div className="drag-handle">⠿</div>
+        ) : (
+          <div className="drag-handle-disabled"></div>
+        )}
+      </td>
+      
+      {/* Data cells — text selectable */}
+      <td className="data-cell">{order.prio}</td>
+      <td className="data-cell">{order.fpr}</td>
+      <td className="data-cell">{order.material_code_fg}</td>
+      <td className="data-cell">{order.item_description}</td>
+      {/* ... other cells ... */}
+    </tr>
+  );
+}
+```
+
+---
+
+### CSS — CURSOR BEHAVIOR
+
+```css
+/* Row default — grab cursor for empty areas */
+.order-row {
+  cursor: grab;
+}
+
+/* When drag is engaged */
+.order-row.drag-ready {
+  cursor: grabbing;
+}
+
+/* Data cells — text cursor over text content */
+.data-cell {
+  user-select: text;
+  -webkit-user-select: text;
+  position: relative;
+}
+
+/* Text content inside cells — text cursor */
+.data-cell span,
+.data-cell .text-content,
+.data-cell a {
+  cursor: text;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* Empty areas inside cells — inherit grab from row */
+.data-cell {
+  cursor: grab;
+}
+
+/* But actual text overrides to text cursor */
+.data-cell span:not(.placeholder-text),
+.data-cell .text-content {
+  cursor: text;
+}
+
+/* Placeholder / editable triggers — pointer cursor */
+.placeholder-text,
+.editable-trigger {
+  cursor: pointer;
+  user-select: none;
+}
+
+/* Drag handle */
+.drag-handle-cell {
+  width: 24px;
+  min-width: 24px;
+  max-width: 24px;
+  padding: 0 4px;
+  user-select: none;
+}
+
+.drag-handle {
+  cursor: grab;
+  color: #d1d5db;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 2px;
+  border-radius: 3px;
+  transition: color 0.15s, background 0.15s;
+  user-select: none;
+}
+
+.drag-handle:hover {
+  color: #6b7280;
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.drag-handle:active {
+  cursor: grabbing;
+  color: #374151;
+  background: rgba(0, 0, 0, 0.08);
+}
+
+.drag-handle-disabled {
+  width: 14px;
+  height: 14px;
+}
+
+/* Locked orders — no grab cursor on empty areas */
+.order-row.locked {
+  cursor: default;
+}
+
+.order-row.locked .data-cell {
+  cursor: default;
+}
+
+.order-row.locked .data-cell span:not(.placeholder-text),
+.order-row.locked .data-cell .text-content {
+  cursor: text;
+}
+
+/* While dragging — row feedback */
+.order-row.dragging {
+  opacity: 0.5;
+  background: #f9fafb;
+}
+```
+
+---
+
+### WRAP TEXT CONTENT IN SPANS
+
+To properly detect text vs empty space, wrap actual text content in elements:
+
+```jsx
+// Material code cell
+<td className="data-cell">
+  <span className="text-content">{order.material_code_fg}</span>
+</td>
+
+// Item description cell
+<td className="data-cell">
+  <span className="text-content">
+    {order.item_description}
+    <span className="category-label">{order.category}</span>
+  </span>
+</td>
+
+// FPR cell
+<td className="data-cell">
+  <span className="text-content">{order.fpr}</span>
+</td>
+
+// Volume cell
+<td className="data-cell">
+  <span className="text-content">{order.volume} MT</span>
+</td>
+
+// Placeholder cells (Set start date, Add note, etc.)
+<td className="data-cell">
+  <span className="placeholder-text" onClick={handleEdit}>
+    Set start date
+  </span>
+</td>
+
+// Empty cells — no text content, entire cell is draggable
+<td className="data-cell">
+  {/* Empty — draggable area */}
+</td>
+```
+
+---
+
+### LOCKED ORDERS — TEXT SELECTABLE, NO DRAG
+
+```jsx
+<tr
+  className={`order-row ${!canDragOrder(order) ? 'locked' : ''}`}
+  draggable={false} // Never draggable for locked orders
+>
+  {/* No drag handle */}
+  <td className="drag-handle-cell">
+    <div className="drag-handle-disabled"></div>
+  </td>
+  
+  {/* Text is still selectable */}
+  <td className="data-cell">
+    <span className="text-content">{order.material_code_fg}</span>
+  </td>
+  {/* ... */}
+</tr>
+```
+
+---
+
+### BROWSER COMPATIBILITY — caretRangeFromPoint
+
+```javascript
+function isOverText(e) {
+  const target = e.target;
+  
+  if (['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON'].includes(target.tagName)) {
+    return true;
+  }
+  
+  if (target.classList.contains('placeholder-text') || 
+      target.classList.contains('editable-trigger')) {
+    return true;
+  }
+  
+  // Chrome, Safari, Edge
+  if (document.caretRangeFromPoint) {
+    const range = document.caretRangeFromPoint(e.clientX, e.clientY);
+    if (range && range.startContainer.nodeType === Node.TEXT_NODE) {
+      const text = range.startContainer.textContent.trim();
+      if (text.length > 0) {
+        const textRange = document.createRange();
+        textRange.selectNodeContents(range.startContainer);
+        const rects = textRange.getClientRects();
+        for (let i = 0; i < rects.length; i++) {
+          if (e.clientX >= rects[i].left && e.clientX <= rects[i].right &&
+              e.clientY >= rects[i].top && e.clientY <= rects[i].bottom) {
+            return true;
+          }
+        }
+      }
+    }
+    return false;
+  }
+  
+  // Firefox
+  if (document.caretPositionFromPoint) {
+    const pos = document.caretPositionFromPoint(e.clientX, e.clientY);
+    if (pos && pos.offsetNode && pos.offsetNode.nodeType === Node.TEXT_NODE) {
+      const text = pos.offsetNode.textContent.trim();
+      if (text.length > 0) {
+        return true;
+      }
+    }
+    return false;
+  }
+  
+  // Fallback — check if target has text content
+  if (target.closest('.text-content')) {
+    return true;
+  }
+  
+  return false;
+}
+```
+
+---
+
+## VERIFICATION
+
+1. Text selection
+   - ✅ Click on "260330" text → places cursor, can select
+   - ✅ Click on "Elite XP Startex" → places cursor, can select
+   - ✅ Double-click on word → selects word
+   - ✅ Triple-click → selects entire cell content
+   - ✅ Click + drag over text → selects text range
+   - ✅ Ctrl+C → copies selected text
+
+2. Drag from empty space
+   - ✅ Click on cell padding (not on text) → grab cursor, drag reorders row
+   - ✅ Click on empty cell → grab cursor, drag reorders row
+   - ✅ Click between cells (gap) → grab cursor, drag reorders row
+
+3. Drag from grip icon
+   - ✅ ⠿ icon shows grab cursor
+   - ✅ Clicking and dragging grip icon reorders row
+   - ✅ Grip icon is primary visual indicator for drag
+
+4. Placeholder cells
+   - ✅ "Set start date" → pointer cursor, click triggers edit
+   - ✅ Padding around placeholder → grab cursor, drag reorders
+   - ✅ "Add note..." → pointer cursor, click triggers edit
+
+5. Locked orders
+   - ✅ Done rows — no grip icon, no drag, text selectable
+   - ✅ Cancel PO — no grip icon, no drag, text selectable
+   - ✅ In Production — no grip icon, no drag, text selectable
+   - ✅ Planned — grip icon visible, draggable, text selectable
+```

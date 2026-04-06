@@ -1,0 +1,134 @@
+```
+Implement the following fixes to the Smart Combine panel:
+
+---
+
+## FIX 1: SAFETY STOCKS COLOR — NOT GREEN
+
+"Safety stocks" text is showing in green. It should use the same orange color as used in the order table for safety stocks.
+
+### CURRENT (WRONG)
+
+```css
+.avail-value.safety-stocks {
+  color: #16a34a; /* green — WRONG */
+}
+```
+
+### CORRECT
+
+```css
+.avail-value.safety-stocks {
+  color: #ea580c; /* orange — same as order table */
+}
+
+.avail-value.prio-replenish {
+  color: #ea580c; /* orange — same as order table */
+}
+```
+
+Both "safety stocks" and "prio replenish" should be orange (#ea580c), matching the order table styling.
+
+---
+
+## FIX 2: ORDER ROWS — ALIGN LEFT EDGE WITH DETAILS ABOVE
+
+The order rows (FPR, time, volume) are indented differently from the Material Code / Category / Form details above. They should share the same left padding so everything lines up.
+
+### THE PROBLEM
+
+```
+Material Code (FG):     1000000000241     ← starts at X padding
+Material Code (SFG):    3000000000571
+Category:               Hogs
+Form:                   MP
+Batch Size:             4.00
+Line:                   Line 1
+Formula Version:        —
+
+    FPR: 260330    4 hrs 11 min    80 MT  ← starts further right, misaligned
+    FG: 5869937
+```
+
+### THE FIX
+
+Ensure the details section and order rows use the same left padding:
+
+```css
+/* Details section — Material Code, Category, etc. */
+.combine-details-section {
+  padding: 12px 16px;
+}
+
+/* Order rows — FPR, Time, Volume */
+.smart-combine-order-row {
+  padding: 10px 16px;       /* SAME left padding as details section */
+  padding-right: 28px;      /* space for × button */
+}
+```
+
+### VISUAL — ALIGNED
+
+```
+│← 16px padding                                    │
+│                                                   │
+│ Material Code (FG):     1000000000241             │
+│ Material Code (SFG):    3000000000571             │
+│ Category:               Hogs                      │
+│ Form:                   MP                        │
+│ Batch Size:             4.00                      │
+│ Line:                   Line 1                    │
+│ Formula Version:        —                         │
+│                                                   │
+│───────────────────────────────────────────────────│
+│                                                   │
+│ FPR: 260330    4 hrs 11 min           80 MT     × │
+│ FG: 5869937    CD: April 11, 2026     Availability│
+│ SFG: 5877608   CT: 01:55 PM     prio replenish   │
+│                                                   │
+│ FPR: 260330    4 hrs 11 min           80 MT     × │
+│ FG: 5873008    CD: April 12, 2026     Availability│
+│ SFG: 5920946   CT: 12:48 AM      safety stocks   │
+│                                                   │
+```
+
+"FPR: 260330" starts at the exact same left position as "Material Code (FG):"
+
+### CHECK ALL SECTIONS
+
+Ensure ALL sections in the Smart Combine panel share the same left padding:
+
+```css
+/* All sections use same horizontal padding */
+.combine-strategy-section {
+  padding: 12px 16px;
+}
+
+.combine-details-section {
+  padding: 12px 16px;
+}
+
+.smart-combine-order-row {
+  padding: 10px 16px;
+  padding-right: 28px;
+}
+
+.combine-production-summary {
+  padding: 12px 16px;
+}
+
+.combine-scheduling-impact {
+  padding: 12px 16px;
+}
+
+.combine-ai-analysis {
+  padding: 12px 16px;
+}
+
+.combine-ceiling-warning {
+  padding: 10px 16px;
+}
+```
+
+All use `16px` left padding for consistent alignment.
+```

@@ -1,0 +1,188 @@
+```
+Implement the following changes to the NexFeed application:
+
+---
+
+## 1. AUTO-SEQUENCE PREVIEW — USE ADJUSTED/SUGGESTED MT, NOT ORIGINAL
+
+The auto-sequence preview must show the ADJUSTED volume (suggested MT) that has been rounded up to be divisible by the batch size, NOT the original SAP volume.
+
+### THE BUG
+
+When orders have volumes that aren't divisible by their batch size, the app adjusts/suggests a new volume (rounds up to nearest divisible number). This adjusted volume is what's used in the main interactive table. But the auto-sequence preview is showing the ORIGINAL volume instead.
+
+**Example:**
+```
+Original volume: 5 MT
+Batch size: 4.00
+5 ÷ 4 = 1.25 batches — NOT whole
+
+Adjusted/suggested volume: 8 MT
+8 ÷ 4 = 2 batches — whole ✅
+
+Main table shows: 8 MT ✅
+Auto-sequence preview shows: 5 MT ❌ ← BUG
+```
+
+Another example:
+```
+Original volume: 10 MT
+Batch size: 4.00
+10 ÷ 4 = 2.5 batches — NOT whole
+
+Adjusted/suggested volume: 12 MT
+12 ÷ 4 = 3 batches — whole ✅
+
+Main table shows: 12 MT ✅
+Auto-sequence preview shows: 10 MT ❌ ← BUG
+```
+
+### THE FIX
+
+When building the auto-sequence preview table, use the SAME volume values that are displayed in the main interactive table — which is the adjusted/suggested MT.
+
+```javascript
+// When populating auto-sequence preview rows:
+// Use the adjusted volume, NOT the original SAP volume
+
+const volumeToDisplay = order.adjusted_volume || order.suggested_volume || order.volume;
+// NOT: order.original_volume or order.sap_volume
+```
+
+**Also recalculate dependent fields based on adjusted volume:**
+
+| Field | Calculation |
+|---|---|
+| Volume (MT) | Use adjusted/suggested volume |
+| Number of Batches | Adjusted Volume ÷ Batch Size |
+| Number of Bags | Adjusted Volume × bags_per_MT |
+| Production Hours | Based on adjusted batches |
+| HA Info | Same as Number of Batches (auto-populated) |
+
+**All these fields in the auto-sequence preview must use the adjusted volume, not the original.**
+
+---
+
+## 2. AUTO-SEQUENCE PREVIEW — REFLECT COMBINED ORDERS FROM MAIN TABLE
+
+If orders are already combined in the main interactive table, the auto-sequence preview must reflect that — showing the combined group together with Lead/Child badges.
+
+### CORE RULE
+
+The auto-sequence preview mirrors the combined state from the main table. It does NOT create new combines or break existing ones.
+
+- If orders are combined in the main table → they appear combined in the preview.
+- If orders are NOT combined in the main table → they appear as standalone in the preview.
+- Combined groups move as a BLOCK in the auto-sequence — the lead order determines the group's position.
+
+### COMBINED GROUP SEQUENCING
+
+When the auto-sequence algorithm positions orders:
+
+**Step 1:** Treat each combined group as a SINGLE unit.
+- Use the LEAD order's effective date (avail date or stock target date) to determine the group's position.
+- The entire block (lead + all children) moves together.
+
+**Step 2:** Insert the block at the correct chronological position.
+- The lead order determines WHERE the block goes.
+- Children follow immediately below the lead.
+
+**Example:**
+```
+Main table has:
+- Lead: FPR 260309, 80 MT, safety stocks, Target: Mar 28 (combined group)
+  - Child 1: FPR 260309, 8 MT, safety stocks
+  - Child 2: FPR 260309, 12 MT, safety stocks
+  - Child 3: FPR 260309, 20 MT, safety stocks
+- Standalone: FPR 260309, 80 MT, prio replenish, Target: Mar 28
+
+Auto-sequence uses Lead's effective date (Mar 28) to position the entire block.
+```
+
+### DISPLAY IN AUTO-SEQUENCE PREVIEW
+
+Combined orders in the preview must look the same as in the main table:
+
+**Lead order row:**
+
+| Property | Value |
+|---|---|
+| [Lead] badge | ✅ Shown — blue badge, same as main table |
+| Row background | Blue tint (#e3f2fd) |
+| Left border | 3px solid blue (#1976d2) |
+| All fields | Normal display |
+| Volume | Lead order's adjusted volume |
+
+**Child order rows (immediately below lead):**
+
+| Property | Value |
+|---|---|
+| [Child] badge | ✅ Shown — blue badge, same as main table |
+| Row background | Blue tint (#e3f2fd) |
+| Left border | 3px solid blue (#1976d2), continuing from lead |
+| All fields | Normal display |
+| Volume | Each child's adjusted volume |
+| Indentation | Slight left indent (~16px) on the Item Description or a visual cue showing they're children |
+
+**The blue tint and left border run continuously from the lead row through all child rows, creating a visual bracket.**
+
+### EXAMPLE IN AUTO-SEQUENCE PREVIEW
+
+```
+Prio 1:  Gallimax 3 Maintenance    | 80 MT  | safety stocks  ⚠     ← standalone
+Prio 2:  Salto Conditioner         | 3 MT   | Mar 22, 2026          ← standalone
+Prio 3:  [Lead]  Elite XP Startex  | 80 MT  | safety stocks  ⚠     ← combined group start (blue tint)
+Prio 4:  [Child] Elite XP Startex  | 8 MT   | safety stocks  ⚠     ← child (blue tint, indented)
+Prio 5:  [Child] Elite XP Startex  | 12 MT  | safety stocks  ⚠     ← child (blue tint, indented)
+Prio 6:  [Child] Elite XP Startex  | 20 MT  | safety stocks  ⚠     ← child (blue tint, indented)
+Prio 7:  Gallimax Pigeon Pellet    | 24 MT  | prio replenish ⚠     ← standalone
+Prio 8:  Elite XP Startex          | 30 MT  | safety stocks  ⚠     ← standalone
+Prio 9:  Elite XP Startex          | 12 MT  | safety stocks  ⚠     ← standalone (adjusted from 10)
+Prio 10: Elite XP Startex          | 8 MT   | safety stocks  ⚠     ← standalone (adjusted from 5)
+Prio 11: Gall 21 Chicken Layer     | 39 MT  | safety stocks  ✅     ← standalone (stock sufficient)
+```
+
+### COMBINED GROUP BLOCK INTEGRITY IN PREVIEW
+
+- Children ALWAYS stay immediately below their lead — no other orders can be inserted between them.
+- When the auto-sequence places the group, it places the ENTIRE block at the lead's determined position.
+- If the user drags a combined group in the preview (if dragging is allowed in preview), the entire block moves together.
+- The auto-sequence algorithm treats combined groups as atomic units — it never separates lead from children.
+
+### PRIO NUMBERING FOR COMBINED GROUPS
+
+Each row (lead and child) gets its own Prio number:
+
+```
+Prio 3: [Lead]  — counted
+Prio 4: [Child] — counted
+Prio 5: [Child] — counted
+Prio 6: [Child] — counted
+Prio 7: Next order
+```
+
+Children are individually numbered in the sequence, just like in the main table.
+
+### COMBINED GROUP PRODUCTION METRICS IN PREVIEW
+
+The preview calculations should account for combined orders:
+
+- **Production time:** The lead order's production time covers the ENTIRE combined volume (lead + all children).
+- **Changeover:** No changeover between lead and children (same product). Changeover only applies before the lead (from previous order) and after the last child (to next order).
+- **Completion date cascade:** The lead's completion cascades through children (since they're part of the same production run). The next standalone order's cascade starts from the last child's completion + changeover.
+
+### AI INSIGHTS — REFERENCE COMBINED GROUPS
+
+The AI Sequence Analysis should recognize and mention combined groups:
+
+```
+📋 Sequence Rationale
+
+Elite XP Startex has a combined group at Prio 3-6 
+(Lead: 80 MT + 3 children: 8 MT, 12 MT, 20 MT = 
+total 120 MT). This group runs as a single production 
+block with no changeovers between orders, saving 
+approximately 90 minutes. The group is positioned 
+based on its stock target date of March 28.
+```
+```

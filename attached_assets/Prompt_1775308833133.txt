@@ -1,0 +1,1008 @@
+```
+Implement the following feature to the NexFeed application:
+
+---
+
+## ADD "TAKE A TOUR" — GUIDED TUTORIAL FEATURE
+
+A guided tour system that highlights parts of the app and explains their functionality. Users can choose between a full app tour or a page-specific tour.
+
+---
+
+### 1. "TAKE A TOUR" BUTTON — TOP RIGHT HEADER
+
+Place "Take a tour" as clickable text in the top-right header, before the Help and User icons:
+
+```jsx
+<div className="header-right">
+  <button className="take-tour-btn" onClick={() => setShowTourMenu(true)}>
+    Take a tour
+  </button>
+  <button className="help-btn">
+    <FiHelpCircle size={16} />
+    <span>Help</span>
+  </button>
+  <button className="user-btn">
+    <FiUser size={16} />
+  </button>
+</div>
+```
+
+### BUTTON STYLING
+
+```css
+.take-tour-btn {
+  background: none;
+  border: none;
+  color: #4b5563;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 6px 10px;
+  border-radius: 4px;
+  transition: color 0.15s, background 0.15s;
+}
+
+.take-tour-btn:hover {
+  color: #fd5108;
+  background: rgba(253, 81, 8, 0.05);
+}
+```
+
+---
+
+### 2. TOUR SELECTION MENU
+
+When user clicks "Take a tour", show a small dropdown with two options:
+
+```jsx
+function TourSelectionMenu({ onSelect, onClose }) {
+  return (
+    <div className="tour-menu-overlay" onClick={onClose}>
+      <div className="tour-menu" onClick={e => e.stopPropagation()}>
+        <div className="tour-menu-header">
+          <h3>Choose a Tour</h3>
+          <button className="tour-menu-close" onClick={onClose}>✕</button>
+        </div>
+        
+        <div className="tour-menu-options">
+          <button 
+            className="tour-menu-option"
+            onClick={() => onSelect('full')}
+          >
+            <div className="tour-option-icon">🏭</div>
+            <div className="tour-option-info">
+              <span className="tour-option-title">Full App Tour</span>
+              <span className="tour-option-desc">
+                Complete walkthrough of all features and pages
+              </span>
+            </div>
+          </button>
+          
+          <button 
+            className="tour-menu-option"
+            onClick={() => onSelect('page')}
+          >
+            <div className="tour-option-icon">📄</div>
+            <div className="tour-option-info">
+              <span className="tour-option-title">This Page Only</span>
+              <span className="tour-option-desc">
+                Quick tour of the current page you're on
+              </span>
+            </div>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+```
+
+### TOUR MENU STYLING
+
+```css
+.tour-menu-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.3);
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tour-menu {
+  background: #ffffff;
+  border-radius: 12px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.15);
+  width: 360px;
+  overflow: hidden;
+}
+
+.tour-menu-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.tour-menu-header h3 {
+  font-size: 16px;
+  font-weight: 700;
+  color: #1a1a1a;
+  margin: 0;
+}
+
+.tour-menu-close {
+  background: none;
+  border: none;
+  color: #9ca3af;
+  font-size: 18px;
+  cursor: pointer;
+}
+
+.tour-menu-options {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tour-menu-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.tour-menu-option:hover {
+  border-color: #fd5108;
+  background: #fff7ed;
+}
+
+.tour-option-icon {
+  font-size: 24px;
+  flex-shrink: 0;
+}
+
+.tour-option-title {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: #1a1a1a;
+}
+
+.tour-option-desc {
+  display: block;
+  font-size: 11px;
+  color: #6b7280;
+  margin-top: 2px;
+}
+```
+
+---
+
+### 3. TOUR ENGINE — STEP MANAGEMENT
+
+```jsx
+function TourProvider({ children }) {
+  const [isTouring, setIsTouring] = useState(false);
+  const [currentStepIndex, setCurrentStepIndex] = useState(0);
+  const [tourSteps, setTourSteps] = useState([]);
+  
+  function startTour(type) {
+    const currentPage = getCurrentPage(); // 'overview', 'orders', 'n10d', 'knowledgeBase', 'analytics', 'orderHistory', 'configurations'
+    
+    let steps;
+    if (type === 'full') {
+      steps = FULL_APP_TOUR_STEPS;
+    } else {
+      steps = getPageTourSteps(currentPage);
+    }
+    
+    setTourSteps(steps);
+    setCurrentStepIndex(0);
+    setIsTouring(true);
+  }
+  
+  function nextStep() {
+    if (currentStepIndex < tourSteps.length - 1) {
+      setCurrentStepIndex(prev => prev + 1);
+    } else {
+      endTour();
+    }
+  }
+  
+  function prevStep() {
+    if (currentStepIndex > 0) {
+      setCurrentStepIndex(prev => prev - 1);
+    }
+  }
+  
+  function endTour() {
+    setIsTouring(false);
+    setCurrentStepIndex(0);
+    setTourSteps([]);
+  }
+  
+  const currentStep = tourSteps[currentStepIndex] || null;
+  
+  return (
+    <TourContext.Provider value={{ startTour, isTouring }}>
+      {children}
+      {isTouring && currentStep && (
+        <TourOverlay
+          step={currentStep}
+          stepIndex={currentStepIndex}
+          totalSteps={tourSteps.length}
+          onNext={nextStep}
+          onPrev={prevStep}
+          onSkip={endTour}
+        />
+      )}
+    </TourContext.Provider>
+  );
+}
+```
+
+---
+
+### 4. TOUR OVERLAY — HIGHLIGHT AND TOOLTIP
+
+```jsx
+function TourOverlay({ step, stepIndex, totalSteps, onNext, onPrev, onSkip }) {
+  const [targetRect, setTargetRect] = useState(null);
+  
+  useEffect(() => {
+    // Find the target element
+    const element = document.querySelector(step.target);
+    if (element) {
+      const rect = element.getBoundingClientRect();
+      setTargetRect(rect);
+      
+      // Scroll element into view
+      element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      
+      // Recalculate after scroll
+      setTimeout(() => {
+        setTargetRect(element.getBoundingClientRect());
+      }, 400);
+    } else {
+      setTargetRect(null);
+    }
+  }, [step]);
+  
+  if (!targetRect) {
+    // If target not found, show centered tooltip
+    return (
+      <div className="tour-overlay-backdrop">
+        <TourTooltip
+          step={step}
+          stepIndex={stepIndex}
+          totalSteps={totalSteps}
+          onNext={onNext}
+          onPrev={onPrev}
+          onSkip={onSkip}
+          position={{ top: '50%', left: '50%', transform: 'translate(-50%, -50%)' }}
+        />
+      </div>
+    );
+  }
+  
+  const padding = 8;
+  const highlightStyle = {
+    position: 'fixed',
+    top: targetRect.top - padding,
+    left: targetRect.left - padding,
+    width: targetRect.width + padding * 2,
+    height: targetRect.height + padding * 2,
+    borderRadius: '8px',
+    boxShadow: '0 0 0 9999px rgba(0, 0, 0, 0.5)',
+    zIndex: 10001,
+    pointerEvents: 'none',
+  };
+  
+  // Calculate tooltip position
+  const tooltipPosition = calculateTooltipPosition(targetRect, step.position || 'bottom');
+  
+  return (
+    <>
+      {/* Backdrop with cutout */}
+      <div className="tour-overlay-backdrop" onClick={onSkip} />
+      
+      {/* Highlight cutout */}
+      <div className="tour-highlight" style={highlightStyle} />
+      
+      {/* Tooltip */}
+      <TourTooltip
+        step={step}
+        stepIndex={stepIndex}
+        totalSteps={totalSteps}
+        onNext={onNext}
+        onPrev={onPrev}
+        onSkip={onSkip}
+        position={tooltipPosition}
+      />
+    </>
+  );
+}
+
+function calculateTooltipPosition(targetRect, preferredPosition) {
+  const tooltipWidth = 340;
+  const tooltipHeight = 200;
+  const gap = 16;
+  const viewportWidth = window.innerWidth;
+  const viewportHeight = window.innerHeight;
+  
+  let top, left;
+  
+  switch (preferredPosition) {
+    case 'bottom':
+      top = targetRect.bottom + gap;
+      left = targetRect.left + (targetRect.width / 2) - (tooltipWidth / 2);
+      break;
+    case 'top':
+      top = targetRect.top - tooltipHeight - gap;
+      left = targetRect.left + (targetRect.width / 2) - (tooltipWidth / 2);
+      break;
+    case 'right':
+      top = targetRect.top + (targetRect.height / 2) - (tooltipHeight / 2);
+      left = targetRect.right + gap;
+      break;
+    case 'left':
+      top = targetRect.top + (targetRect.height / 2) - (tooltipHeight / 2);
+      left = targetRect.left - tooltipWidth - gap;
+      break;
+    default:
+      top = targetRect.bottom + gap;
+      left = targetRect.left;
+  }
+  
+  // Clamp to viewport
+  if (left < 16) left = 16;
+  if (left + tooltipWidth > viewportWidth - 16) left = viewportWidth - tooltipWidth - 16;
+  if (top < 16) top = 16;
+  if (top + tooltipHeight > viewportHeight - 16) {
+    top = targetRect.top - tooltipHeight - gap;
+  }
+  
+  return { position: 'fixed', top: `${top}px`, left: `${left}px`, zIndex: 10002 };
+}
+```
+
+### TOUR TOOLTIP COMPONENT
+
+```jsx
+function TourTooltip({ step, stepIndex, totalSteps, onNext, onPrev, onSkip, position }) {
+  const isFirst = stepIndex === 0;
+  const isLast = stepIndex === totalSteps - 1;
+  
+  return (
+    <div className="tour-tooltip" style={position}>
+      {/* Header */}
+      <div className="tour-tooltip-header">
+        <h4 className="tour-tooltip-title">{step.title}</h4>
+        <button className="tour-tooltip-skip" onClick={onSkip}>
+          Skip Tour
+        </button>
+      </div>
+      
+      {/* Body */}
+      <div className="tour-tooltip-body">
+        <p>{step.description}</p>
+      </div>
+      
+      {/* Footer */}
+      <div className="tour-tooltip-footer">
+        <span className="tour-tooltip-counter">
+          Step {stepIndex + 1} of {totalSteps}
+        </span>
+        
+        <div className="tour-tooltip-actions">
+          {!isFirst && (
+            <button className="tour-btn-back" onClick={onPrev}>
+              Back
+            </button>
+          )}
+          <button className="tour-btn-next" onClick={onNext}>
+            {isLast ? 'Finish' : 'Next'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+```
+
+### TOUR TOOLTIP STYLING
+
+```css
+.tour-overlay-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 10000;
+}
+
+.tour-highlight {
+  transition: all 0.3s ease;
+}
+
+.tour-tooltip {
+  width: 340px;
+  background: #ffffff;
+  border-radius: 12px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.2);
+  overflow: hidden;
+  animation: tourTooltipFadeIn 0.2s ease;
+}
+
+@keyframes tourTooltipFadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.tour-tooltip-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px 0 20px;
+}
+
+.tour-tooltip-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #1a1a1a;
+  margin: 0;
+}
+
+.tour-tooltip-skip {
+  background: none;
+  border: none;
+  color: #fd5108;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.tour-tooltip-skip:hover {
+  text-decoration: underline;
+}
+
+.tour-tooltip-body {
+  padding: 12px 20px;
+}
+
+.tour-tooltip-body p {
+  font-size: 13px;
+  color: #4b5563;
+  line-height: 1.6;
+  margin: 0;
+}
+
+.tour-tooltip-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 20px 16px 20px;
+}
+
+.tour-tooltip-counter {
+  font-size: 11px;
+  color: #9ca3af;
+  font-weight: 500;
+}
+
+.tour-tooltip-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.tour-btn-back {
+  padding: 8px 20px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #fd5108;
+  background: #ffffff;
+  border: 1px solid #fd5108;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.tour-btn-back:hover {
+  background: #fff7ed;
+}
+
+.tour-btn-next {
+  padding: 8px 20px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #ffffff;
+  background: #fd5108;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.tour-btn-next:hover {
+  background: #e8490b;
+}
+```
+
+---
+
+### 5. TOUR STEPS — FULL APP TOUR
+
+```javascript
+const FULL_APP_TOUR_STEPS = [
+  // === SIDEBAR NAVIGATION ===
+  {
+    target: '.sidebar',
+    title: 'Navigation Sidebar',
+    description: 'This is your main navigation. Access all sections of NexFeed from here — Overview, Orders, Analytics, Configurations, Order History, Knowledge Base, and Next 10 Days.',
+    position: 'right'
+  },
+  {
+    target: '.sidebar-item-overview',
+    title: 'Overview',
+    description: 'Get a bird\'s-eye view of all feedmills and lines. See production volumes, category breakdowns, and line utilization at a glance.',
+    position: 'right'
+  },
+  {
+    target: '.sidebar-item-orders',
+    title: 'Orders',
+    description: 'This is your main workspace. View, manage, and schedule production orders across all feedmills and lines.',
+    position: 'right'
+  },
+  {
+    target: '.sidebar-item-analytics',
+    title: 'Analytics',
+    description: 'Access production analytics, trends, and performance dashboards to track your planning efficiency.',
+    position: 'right'
+  },
+  {
+    target: '.sidebar-item-configurations',
+    title: 'Configurations',
+    description: 'Set up feedmill configurations, line settings, changeover times, and other operational parameters.',
+    position: 'right'
+  },
+  {
+    target: '.sidebar-item-order-history',
+    title: 'Order History',
+    description: 'View completed, cancelled, and archived orders. Track what was produced and when.',
+    position: 'right'
+  },
+  {
+    target: '.sidebar-item-knowledge-base',
+    title: 'Knowledge Base',
+    description: 'Manage your master product data — material codes, batch sizes, run rates, and formulations. This data auto-populates when creating orders.',
+    position: 'right'
+  },
+  {
+    target: '.sidebar-item-n10d',
+    title: 'Next 10 Days',
+    description: 'Upload daily stock level data to prioritize production. The system analyzes inventory vs demand and flags Critical, Urgent, Monitor, and Sufficient products.',
+    position: 'right'
+  },
+  
+  // === ORDERS PAGE ===
+  {
+    target: '.feedmill-tabs',
+    title: 'Feedmill Tabs',
+    description: 'Switch between feedmills here. Each feedmill has its own set of production lines. FM1 has Lines 1-2, FM2 has Lines 3-4, FM3 has Lines 6-7, and Powermix has Line 5.',
+    position: 'bottom'
+  },
+  {
+    target: '.line-tabs',
+    title: 'Line Tabs',
+    description: 'View orders for a specific line or see all lines at once in the "All" tab. Each line has its own production queue.',
+    position: 'bottom'
+  },
+  {
+    target: '.search-bar-container',
+    title: 'Search & Filters',
+    description: 'Search for orders by item name, material code, FPR, or any other field. Use filters to narrow down by status, category, or date.',
+    position: 'bottom'
+  },
+  {
+    target: '.metrics-cards',
+    title: 'Production Metrics',
+    description: 'Quick summary cards showing total orders, active orders, urgent orders, and loading switch counts. These update in real-time as you manage orders.',
+    position: 'bottom'
+  },
+  {
+    target: '.production-insights',
+    title: 'Production Insights',
+    description: 'AI-generated insights about your production schedule — potential conflicts, optimization suggestions, and alerts.',
+    position: 'bottom'
+  },
+  {
+    target: '.alerts-reminders',
+    title: 'Alerts & Reminders',
+    description: 'Important notifications about upcoming deadlines, stock alerts, and scheduling conflicts that need your attention.',
+    position: 'bottom'
+  },
+  {
+    target: '.add-order-btn',
+    title: 'Add Order',
+    description: 'Create a new production order. The system auto-populates product details from the Knowledge Base when you enter a material code.',
+    position: 'bottom'
+  },
+  {
+    target: '.order-table-header-order-details',
+    title: 'Order Details',
+    description: 'Core order information — priority number, FPR, planned orders, material codes (FG and SFG), and item description with category.',
+    position: 'bottom'
+  },
+  {
+    target: '.order-table-header-production-params',
+    title: 'Production Parameters',
+    description: 'Technical production details — form, volume, batch size, number of batches, bags, and estimated production time with changeover.',
+    position: 'bottom'
+  },
+  {
+    target: '.order-table-header-mixer-details',
+    title: 'Mixer Details',
+    description: 'Mixer-specific information including HA Info, HA Prep, SCADA formula version, and product version.',
+    position: 'bottom'
+  },
+  {
+    target: '.order-table-header-operator',
+    title: 'Operator Status',
+    description: 'Set the order status here — Plotted, Planned, Hold, Cut, In Production, On-going, Done, or Cancel PO. Status controls what can be moved and sequenced.',
+    position: 'bottom'
+  },
+  {
+    target: '.order-table-header-scheduling',
+    title: 'Scheduling',
+    description: 'Set start date, start time, availability date, and view the completion date. Non-dated orders (safety stocks, prio replenish) get dates from the N10D data.',
+    position: 'bottom'
+  },
+  {
+    target: '.order-table-header-product-insights',
+    title: 'Product Insights',
+    description: 'AI-powered production insights for each order. Shows stock status summary and actionable recommendations. Click the ✨ sparkle button to enhance with detailed AI analysis.',
+    position: 'bottom'
+  },
+  {
+    target: '.order-table-header-notes',
+    title: 'Notes',
+    description: 'Add FPR notes and special remarks for each order. These are visible to all planners and can be used for communication.',
+    position: 'bottom'
+  },
+  {
+    target: '.auto-sequence-btn',
+    title: 'Auto-Sequence',
+    description: 'Automatically sort and sequence all movable orders by their availability dates. Critical orders are prioritized first. Locked orders (Done, In Production, Planned) stay in place.',
+    position: 'left'
+  },
+  {
+    target: '.smart-combine-btn',
+    title: 'Smart Combine',
+    description: 'Intelligently combine multiple orders of the same product into one. The system checks material codes, form, batch size, line, and SCADA to find combinable orders.',
+    position: 'left'
+  },
+  {
+    target: '.drag-handle',
+    title: 'Drag to Reorder',
+    description: 'Grab the drag handle (⋮⋮) to manually reorder orders. Drag up or down to change priority. Note: you cannot drag movable orders above locked orders (Done, In Production, Planned).',
+    position: 'right'
+  },
+  
+  // === FINAL ===
+  {
+    target: '.chat-bubble',
+    title: 'Smart Assistant',
+    description: 'Your AI production planning assistant. Ask questions about orders, stock levels, line capacity, or even execute actions like combining orders or running auto-sequence — all from chat.',
+    position: 'left'
+  }
+];
+```
+
+---
+
+### 6. TOUR STEPS — PAGE-SPECIFIC TOURS
+
+```javascript
+function getPageTourSteps(currentPage) {
+  switch (currentPage) {
+    case 'overview':
+      return OVERVIEW_TOUR_STEPS;
+    case 'orders':
+      return ORDERS_TOUR_STEPS;
+    case 'n10d':
+      return N10D_TOUR_STEPS;
+    case 'knowledgeBase':
+      return KNOWLEDGE_BASE_TOUR_STEPS;
+    case 'analytics':
+      return ANALYTICS_TOUR_STEPS;
+    case 'orderHistory':
+      return ORDER_HISTORY_TOUR_STEPS;
+    case 'configurations':
+      return CONFIGURATIONS_TOUR_STEPS;
+    default:
+      return FULL_APP_TOUR_STEPS;
+  }
+}
+
+const ORDERS_TOUR_STEPS = [
+  {
+    target: '.feedmill-tabs',
+    title: 'Feedmill Tabs',
+    description: 'Switch between feedmills. FM1 (Lines 1-2), FM2 (Lines 3-4), FM3 (Lines 6-7), Powermix (Line 5).',
+    position: 'bottom'
+  },
+  {
+    target: '.line-tabs',
+    title: 'Line Tabs',
+    description: 'View orders per line or all lines together. Each line has its own production queue sorted by priority.',
+    position: 'bottom'
+  },
+  {
+    target: '.search-bar-container',
+    title: 'Search & Filters',
+    description: 'Search across all lines by item name, material code, FPR, or status. Filters help narrow results further.',
+    position: 'bottom'
+  },
+  {
+    target: '.metrics-cards',
+    title: 'Metrics at a Glance',
+    description: 'Real-time counts of total orders, active orders, urgent orders, and loading switches.',
+    position: 'bottom'
+  },
+  {
+    target: '.add-order-btn',
+    title: 'Add New Order',
+    description: 'Create a production order. Enter a material code and the Knowledge Base auto-fills product details.',
+    position: 'bottom'
+  },
+  {
+    target: '.order-table tbody tr:first-child',
+    title: 'Order Row',
+    description: 'Each row is a production order. You can edit cells, change status, set dates, drag to reorder, and more. Right-click for additional actions like cut, divert, or combine.',
+    position: 'bottom'
+  },
+  {
+    target: '.order-table-header-operator',
+    title: 'Order Status',
+    description: 'Status controls the order lifecycle: Plotted → Planned → In Production → On-going → Done. Locked statuses cannot be moved by auto-sequence.',
+    position: 'bottom'
+  },
+  {
+    target: '.auto-sequence-btn',
+    title: 'Auto-Sequence',
+    description: 'Sorts movable orders chronologically. Critical products go first, then by availability date. Locked orders stay in place.',
+    position: 'left'
+  },
+  {
+    target: '.smart-combine-btn',
+    title: 'Smart Combine',
+    description: 'Find and combine orders with matching product details. Reduces changeover time and improves production efficiency.',
+    position: 'left'
+  },
+  {
+    target: '.ai-header',
+    title: 'Product Insights',
+    description: 'Template-based stock insights auto-generated from N10D data. Click ✨ to enhance with AI-powered recommendations.',
+    position: 'bottom'
+  }
+];
+
+const N10D_TOUR_STEPS = [
+  {
+    target: '.n10d-upload-btn',
+    title: 'Upload Next 10 Days',
+    description: 'Upload daily stock level data (Excel file). This data drives production prioritization, status determination, and availability dates.',
+    position: 'bottom'
+  },
+  {
+    target: '.n10d-reapply-btn',
+    title: 'Re-apply to Existing Orders',
+    description: 'After uploading new N10D data, click this to update all order availability dates, stock status icons, and product insights.',
+    position: 'bottom'
+  },
+  {
+    target: '.n10d-table-header-product-details',
+    title: 'Product Details',
+    description: 'Material code, category, item description, and the Due for Loading (DFL) — the total demand volume for this product.',
+    position: 'bottom'
+  },
+  {
+    target: '.n10d-table-header-next10days',
+    title: 'Next 10 Days Demand',
+    description: 'Daily demand breakdown over the next 10 days. Red-highlighted cells indicate where cumulative demand exceeds inventory.',
+    position: 'bottom'
+  },
+  {
+    target: '.n10d-table-header-tracking',
+    title: 'Tracking',
+    description: 'Inventory level, balance to produce, completion and availability dates, and the product status — Critical, Urgent, Monitor, or Sufficient.',
+    position: 'bottom'
+  },
+  {
+    target: '.n10d-table tbody tr:first-child',
+    title: 'Hover for Details',
+    description: 'Hover over a product row to see DFL, inventory, ratio, buffer, and AI-generated summary. Hover over a day cell to see cumulative demand vs inventory.',
+    position: 'bottom'
+  }
+];
+
+const KNOWLEDGE_BASE_TOUR_STEPS = [
+  {
+    target: '.kb-upload-btn',
+    title: 'Upload Knowledge Base',
+    description: 'Upload your master product data Excel file. This contains material codes, batch sizes, run rates, and formulations used to auto-populate orders.',
+    position: 'bottom'
+  },
+  {
+    target: '.kb-edit-mode-btn',
+    title: 'Edit Mode',
+    description: 'Toggle edit mode to manually modify cells. Edited cells are highlighted in yellow. Duplicate material codes are highlighted in red.',
+    position: 'bottom'
+  },
+  {
+    target: '.kb-reapply-btn',
+    title: 'Re-apply to Orders',
+    description: 'After editing the Knowledge Base, click this to update all existing orders with the new product data.',
+    position: 'bottom'
+  },
+  {
+    target: '.kb-table',
+    title: 'Product Data Table',
+    description: 'Master product data including material codes, descriptions, forms, batch sizes per feedmill, and run rates per line. This data auto-populates when creating new orders.',
+    position: 'top'
+  },
+  {
+    target: '.kb-history',
+    title: 'History',
+    description: 'Track all changes — file uploads, manual edits, and reverts. Each entry stores a complete snapshot. You can revert to any previous version or download any version.',
+    position: 'top'
+  }
+];
+
+const OVERVIEW_TOUR_STEPS = [
+  {
+    target: '.feedmill-card:first-child',
+    title: 'Feedmill Cards',
+    description: 'Each card shows a feedmill\'s production summary — total volume, run rate, line-level breakdown, and category distribution (Completed, In Progress, On Hold, Cancelled, Scheduled).',
+    position: 'bottom'
+  },
+  {
+    target: '.feedmill-card .line-progress',
+    title: 'Line Progress',
+    description: 'Visual progress bars showing how much of each line\'s capacity is utilized. Volume and run rate shown per line.',
+    position: 'bottom'
+  },
+  {
+    target: '.feedmill-card .category-breakdown',
+    title: 'Category Breakdown',
+    description: 'Shows the volume distribution by status — how many MT are completed, in progress, on hold, cancelled, or scheduled.',
+    position: 'bottom'
+  },
+  {
+    target: '.shutdown-btn',
+    title: 'Shutdown',
+    description: 'Simulate a line shutdown to see which orders would be delayed and by how much. Useful for maintenance planning.',
+    position: 'top'
+  }
+];
+
+const ANALYTICS_TOUR_STEPS = [
+  {
+    target: '.analytics-dashboard',
+    title: 'Analytics Dashboard',
+    description: 'View production performance metrics, trends, and KPIs across all feedmills and lines.',
+    position: 'bottom'
+  }
+];
+
+const ORDER_HISTORY_TOUR_STEPS = [
+  {
+    target: '.order-history-table',
+    title: 'Order History',
+    description: 'View all completed and archived orders. Orders are moved here when they rotate out of the top 3 Done orders on any line.',
+    position: 'bottom'
+  }
+];
+
+const CONFIGURATIONS_TOUR_STEPS = [
+  {
+    target: '.configurations-page',
+    title: 'Configurations',
+    description: 'Set up feedmill parameters, line configurations, changeover times, and operational settings.',
+    position: 'bottom'
+  }
+];
+```
+
+---
+
+### 7. NAVIGATION DURING FULL TOUR
+
+For the full app tour, some steps may require navigating to different pages. Handle this by checking if the target element exists and navigating if needed:
+
+```javascript
+function navigateToStepPage(step) {
+  if (step.page && step.page !== getCurrentPage()) {
+    navigateTo(step.page);
+    // Wait for page to load before showing tooltip
+    return new Promise(resolve => setTimeout(resolve, 500));
+  }
+  return Promise.resolve();
+}
+```
+
+Add a `page` property to full tour steps that require navigation:
+
+```javascript
+{
+  target: '.n10d-upload-btn',
+  title: 'Next 10 Days',
+  description: '...',
+  position: 'bottom',
+  page: 'n10d' // Navigate to N10D page for this step
+}
+```
+
+---
+
+### 8. VERIFICATION
+
+### Tour trigger
+1. ✅ "Take a tour" text visible in header, before Help and User icons
+2. ✅ Clicking opens tour selection menu (Full App / This Page)
+3. ✅ Does NOT auto-launch — only on click
+
+### Tour menu
+4. ✅ Two options: "Full App Tour" and "This Page Only"
+5. ✅ Selecting an option starts the appropriate tour
+6. ✅ Menu closes when option selected
+
+### Tour overlay
+7. ✅ Dark backdrop covers entire screen
+8. ✅ Target element is highlighted (cutout in backdrop)
+9. ✅ Tooltip appears near the highlighted element
+10. ✅ Smooth transition between steps
+
+### Tour tooltip
+11. ✅ Shows step title and description
+12. ✅ "Skip Tour" link in top right
+13. ✅ "Back" button (not on first step)
+14. ✅ "Next" button (shows "Finish" on last step)
+15. ✅ Step counter "Step X of Y"
+16. ✅ Orange buttons matching app theme
+
+### Full app tour
+17. ✅ Covers sidebar navigation items
+18. ✅ Covers order table sections
+19. ✅ Covers key features (Auto-Sequence, Smart Combine, etc.)
+20. ✅ Navigates between pages when needed
+21. ✅ Ends with Smart Assistant chat bubble
+
+### Page-specific tours
+22. ✅ Orders page tour covers line tabs, search, metrics, table, auto-sequence
+23. ✅ N10D page tour covers upload, table, tracking
+24. ✅ Knowledge Base tour covers upload, edit mode, history
+25. ✅ Overview tour covers feedmill cards, progress, shutdown
+
+### Edge cases
+26. ✅ If target element not found, tooltip shows centered
+27. ✅ Tooltip doesn't overflow viewport
+28. ✅ Tour can be skipped at any step
+29. ✅ Tour can go back and forward
+30. ✅ Closing tour removes all overlay elements
+```

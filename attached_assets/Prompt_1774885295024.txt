@@ -1,0 +1,146 @@
+```
+Implement the following change to the order table:
+
+---
+
+## SMART INSIGHT — SEPARATE HEADER GROUP
+
+Separate the Smart Insight column from the NOTES header group. Make it an independent column group with its own header.
+
+---
+
+### CURRENT (WRONG)
+
+```
+┌────────────────┬────────────────────────────────────────────────────────┐
+│   SCHEDULING   │                        NOTES                          │
+├────┬────┬──────┼─────────────┬──────────────────┬──────────┬───────────┤
+│Start│Start│Avail│ Completion  │ ✨ Smart Insight  │FPR Notes │Sp. Remarks│
+│Date │Time │Date │ Date        │                  │          │           │
+```
+
+Smart Insight is under NOTES — WRONG.
+
+### CORRECT
+
+```
+┌────────────────┬──────────────────┬───────────────────────────────────┐
+│   SCHEDULING   │        AI        │              NOTES                │
+├────┬────┬──────┼──────────────────┼─────────────┬──────────┬──────────┤
+│Start│Start│Avail│  Smart Insight   │ Completion  │FPR Notes │Sp.       │
+│Date │Time │Date │                  │ Date        │          │Remarks   │
+```
+
+Smart Insight is under its own "AI" header — independent from NOTES.
+
+---
+
+### TABLE HEADER STRUCTURE
+
+```jsx
+<thead>
+  {/* Row 1: Group headers */}
+  <tr>
+    <th colSpan={/* order details columns */}>ORDER DETAILS</th>
+    <th colSpan={/* production params columns */}>PRODUCTION PARAMETERS</th>
+    <th colSpan={/* operator columns */}>OPERATOR</th>
+    <th colSpan={3}>SCHEDULING</th>
+    <th colSpan={1} className="ai-header">AI</th>
+    <th colSpan={3}>NOTES</th>
+  </tr>
+  
+  {/* Row 2: Sub-headers */}
+  <tr>
+    {/* ... other sub-headers ... */}
+    
+    {/* Scheduling */}
+    <th>Start Date</th>
+    <th>Start Time</th>
+    <th>Avail Date</th>
+    
+    {/* AI — independent */}
+    <th className="ai-subheader">Smart Insight</th>
+    
+    {/* Notes — now 3 columns, not 4 */}
+    <th>Completion Date</th>
+    <th>FPR Notes</th>
+    <th>Special Remarks</th>
+  </tr>
+</thead>
+```
+
+NOTES colspan is now **3** (was 4):
+- Completion Date
+- FPR Notes
+- Special Remarks
+
+AI colspan is **1**:
+- Smart Insight
+
+---
+
+### AI HEADER STYLING — YELLOW
+
+```css
+/* AI group header */
+.ai-header {
+  background: #fbbf24 !important;
+  color: #1a1a1a !important;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  text-align: center;
+  padding: 6px 8px;
+  letter-spacing: 0.5px;
+}
+
+/* AI sub-header */
+.ai-subheader {
+  background: #fde68a !important;
+  color: #1a1a1a !important;
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
+  padding: 6px 8px;
+}
+```
+
+| Element | Background | Text color | Font weight |
+|---|---|---|---|
+| "AI" header | Yellow (#fbbf24) | Dark text (#1a1a1a) | 700 |
+| "Smart Insight" sub-header | Light yellow (#fde68a) | Dark text (#1a1a1a) | 600 |
+
+### COMPARISON WITH OTHER HEADERS
+
+| Header group | Header BG | Sub-header BG |
+|---|---|---|
+| ORDER DETAILS | App default (dark/orange) | App default |
+| PRODUCTION PARAMETERS | App default | App default |
+| OPERATOR | App default | App default |
+| SCHEDULING | App default | App default |
+| **AI** | **Yellow (#fbbf24)** | **Light yellow (#fde68a)** |
+| NOTES | App default | App default |
+
+The AI header stands out visually with yellow to indicate it's AI-powered content.
+
+---
+
+### COLUMN ORDER (LEFT TO RIGHT)
+
+```
+... | Start Date | Start Time | Avail Date | Smart Insight | Completion Date | FPR Notes | Special Remarks
+         SCHEDULING              |      AI      |              NOTES
+```
+
+Smart Insight sits between Avail Date (last SCHEDULING column) and Completion Date (first NOTES column).
+
+---
+
+### DO NOT CHANGE
+
+- ❌ Smart Insight cell styling — keep as-is (no emoji, no bold, full text)
+- ❌ Smart Insight content/generation — keep as-is
+- ❌ Column width — keep 300px
+- ❌ Other header group colors — keep as-is
+- Only separate the header grouping and apply yellow color
+```

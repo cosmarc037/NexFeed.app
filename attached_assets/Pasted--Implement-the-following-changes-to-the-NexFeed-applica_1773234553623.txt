@@ -1,0 +1,368 @@
+```
+Implement the following changes to the NexFeed application:
+
+---
+
+## 1. CUT ORDERS — STATUS DROPDOWN CHANGES
+
+### STATUS DROPDOWN FOR CUT ORDERS:
+
+| # | Status | Behavior |
+|---|---|---|
+| 1 | Merge Back | Triggers merge confirmation dialog. Merges the two portions back into one order. |
+| 2 | Cut | Remains visible but DISABLED/greyed out — indicates current state, cannot cut again. |
+| 3 | Hold | Normal status change |
+| 4 | In production | Normal status change |
+| 5 | On-going batching | Normal status change |
+| 6 | On-going pelleting | Normal status change |
+| 7 | On-going bagging | Normal status change |
+| 8 | Done | Normal Done behavior |
+| 9 | Cancel PO | Triggers cancel dialog |
+
+**Hidden from cut order dropdown:**
+- ❌ Plotted (replaced by "Merge Back")
+- ❌ Combined with other PO
+
+**"Cut" in dropdown:**
+- Remains visible in the dropdown list.
+- But is DISABLED — greyed out text, not clickable.
+- Shows the current state. Serves as a visual indicator that this order has already been cut.
+- Tooltip on hover: "This order has already been cut."
+
+**"Merge Back" styling:**
+- Background: Light grey (#f3f4f6)
+- Text: Grey (#6b7280)
+- Same visual style as "Plotted" and "Uncombine" — subtle, not alarming.
+- Capital "M" and "B".
+
+---
+
+## 2. MERGE BACK — CONFIRMATION DIALOG
+
+When the user selects "Merge Back" on a cut order, a confirmation dialog appears.
+
+```
+╔══════════════════════════════════════════════════════════════╗
+║  ↩ Merge Back                                                 ║
+║                                                               ║
+║  This will merge both cut portions back into one order.       ║
+║  Are you sure?                                                ║
+║                                                               ║
+║  Line:           1                                            ║
+║  FPR:            260309                                       ║
+║  Item:           Gallimax Pigeon Pellet, 50kg                 ║
+║                                                               ║
+║  Current portions:                                            ║
+║  ┌────────────────────────────────────────────────────────┐   ║
+║  │ Portion 1  │  16 MT  (4 batches)   │  Prio 5          │   ║
+║  │ Portion 2  │   8 MT  (2 batches)   │  Prio 9          │   ║
+║  └────────────────────────────────────────────────────────┘   ║
+║                                                               ║
+║  Merged order:                                                ║
+║  ┌────────────────────────────────────────────────────────┐   ║
+║  │ Volume:  24 MT  (6 batches)                            │   ║
+║  └────────────────────────────────────────────────────────┘   ║
+║                                                               ║
+║  ⚠ After merging:                                            ║
+║  • Both portions will become one order again.                 ║
+║  • The merged order will be placed at Portion 1's             ║
+║    current position (Prio 5).                                 ║
+║  • Portion 2 will be removed from the table.                  ║
+║  • The "Cut" tag will be removed.                             ║
+║  • Status will reset to "Plotted".                            ║
+║  • Production hours and completion dates will recalculate.    ║
+║                                                               ║
+║              [Go Back]    [Confirm Merge]                     ║
+╚══════════════════════════════════════════════════════════════╝
+```
+
+**Dialog details:**
+
+| Label | Value | Styling |
+|---|---|---|
+| Line: | [line number] | Bold, dark text (#1a1a1a) |
+| FPR: | [FPR value] | Bold, dark text (#1a1a1a) |
+| Item: | [Item description, NO form] | Black text (#1a1a1a), bold |
+
+**Current portions table:**
+- Shows both cut portions with their current volumes, batch counts, and current Prio positions.
+- Light border, clean layout.
+
+**Merged order box:**
+- Shows the resulting combined volume and batch count.
+- Green-tinted background (#dcfce7) to indicate a positive/constructive action.
+
+**"After merging" info section:**
+- Light amber background (#fef3c7)
+- Amber text (#92400e)
+- ⚠ icon
+- Bullet points explaining what will happen
+
+**Buttons:**
+- [Go Back]: Grey outlined button. Closes dialog, nothing changes.
+- [Confirm Merge]: Orange filled button (#fd5108), white text.
+
+### WHAT HAPPENS ON CONFIRM MERGE:
+
+1. **Portion 1 absorbs Portion 2:**
+   - Portion 1's volume updates to: Portion 1 + Portion 2 (original total).
+   - Production hours, batches, bags recalculate based on merged volume.
+
+2. **Portion 2 is removed:**
+   - Portion 2 row is deleted from the interactive table.
+   - Prio numbers re-sequence.
+
+3. **Tags removed:**
+   - "Cut" tag is removed from the merged order.
+
+4. **Status reset:**
+   - Merged order's status resets to "Plotted".
+
+5. **Position:**
+   - Merged order stays at Portion 1's current position.
+
+6. **FPR Notes:**
+   - Append to existing notes:
+     ```
+     Merged: Portions merged back from 16 MT + 8 MT to 24 MT — March 11, 2026 10:30 AM
+     ```
+   - Note text in dark text (not colored — this is a neutral action).
+
+7. **Cascade recalculation:**
+   - Downstream orders recalculate completion dates.
+
+### MERGE BACK — WHICH ORDER TRIGGERS IT:
+
+- The user can select "Merge Back" from EITHER Portion 1 or Portion 2.
+- Both trigger the same dialog and same merge result.
+- The merged order always takes Portion 1's position (the earlier Prio).
+
+### EDGE CASES FOR MERGE BACK:
+
+**Edge case 1 — One portion is "Done", the other is active:**
+- "Merge Back" is NOT available if either portion has status "Done".
+- Hide "Merge Back" from dropdown if the OTHER portion's status is "Done".
+- Tooltip: "Cannot merge — the other portion is already completed."
+
+**Edge case 2 — One portion is cancelled:**
+- "Merge Back" is NOT available if either portion is cancelled.
+- Hide "Merge Back" from dropdown.
+- Tooltip: "Cannot merge — the other portion is cancelled."
+
+**Edge case 3 — One portion is part of a combined group:**
+- "Merge Back" is NOT available if either portion is part of a combined group.
+- The user must uncombine first, then merge back.
+
+---
+
+## 3. CUT TAG — RED COLOR
+
+The "Cut" tag/badge displayed on cut orders in the interactive table uses RED color.
+
+**Cut tag styling:**
+- Background: Light red (#fef2f2)
+- Text: Red (#e53935)
+- Label: "Cut"
+- Border: 1px solid light red (#fecaca)
+
+**Placement:**
+- Next to the FPR number, in the same column/position as "Lead" and "Child" badges for combined orders.
+
+**Example in table:**
+```
+Prio 5: [Cut] FPR: 260309    16 MT    Status: Cut (purple badge)
+                               Original: 24 MT
+
+Prio 9: [Cut] FPR: 260309     8 MT    Status: Cut (purple badge)
+                               Original: 24 MT
+```
+
+**Visual distinction:**
+- The "Cut" TAG (next to FPR) = RED (#e53935) — identifies the order as a cut portion.
+- The "Cut" STATUS BADGE (in Status column) = PURPLE (#7c3aed) — unchanged, stays purple as the status color.
+- These are two separate visual elements:
+  - TAG = red, small, next to FPR → identifies the order type
+  - STATUS BADGE = purple, in status column → shows current workflow status
+
+---
+
+## 4. CUT DIALOG — ORANGE BUTTON COLOR
+
+Update the "Confirm Cut" button in the Cut Order dialog to use the app's orange palette.
+
+**Previous:**
+```
+[Confirm Cut]: Purple filled button (#7c3aed), white text
+```
+
+**Updated:**
+```
+[Confirm Cut]: Orange filled button (#fd5108), white text
+```
+
+- The "Confirm Cut" button matches the app's primary action color (orange #fd5108).
+- White text.
+- Hover state: slightly darker orange (#e8490b).
+- Disabled state: light orange (#fed7aa), grey text, not clickable.
+
+---
+
+## 5. AI INSIGHTS — USER-FRIENDLY NARRATIVES
+
+Replace the current detailed/technical AI insights with simpler, conversational, user-friendly narratives. The insights should feel like a helpful colleague giving advice, not a technical report.
+
+**Tone:** Casual professional. Short sentences. Easy to scan. Actionable.
+
+**Font:** 12px (0.75rem), line-height 1.5.
+
+**Background:** Light orange tint (#fff7ed), border 1px solid #fed7aa, border-radius 8px, padding 14px.
+
+---
+
+### THE THREE INSIGHT TYPES:
+
+Only show 2-3 insights per cut — not a wall of text. Pick the most relevant ones based on the order data.
+
+---
+
+#### INSIGHT 1 — PLACEMENT TIP
+
+Shown when there are compatible orders on the same line where Portion 2 could fit efficiently.
+
+**Example (same form nearby):**
+```
+💡 You can slip the 8 MT portion between Prio 6 
+(FPR: 260310, Elite XP Growex) and Prio 7 (FPR: 260312, 
+Salto Grower). They share the same form, so there's 
+no extra changeover needed.
+```
+
+**Example (end of line):**
+```
+💡 Consider placing the 8 MT portion at the end of 
+the line after Prio 12 (FPR: 260320). It won't disrupt 
+the current schedule, and it should complete by 
+around March 20, 8:00 AM.
+```
+
+**Example (no obvious spot):**
+```
+💡 There's no ideal slot for the 8 MT portion right 
+now without adding changeover time. You might want to 
+place it right after the 16 MT portion to keep them 
+back-to-back and avoid extra setup.
+```
+
+---
+
+#### INSIGHT 2 — BATCH SIZE GUIDANCE
+
+Shown when the user enters an invalid value OR when providing helpful context about valid splits.
+
+**When valid:**
+```
+✅ 16 MT splits cleanly into 4 batches, and the 
+remaining 8 MT gives you 2 batches. No partial 
+batches — you're good to go.
+```
+
+**When invalid:**
+```
+⚠ Heads up — 15 MT doesn't divide evenly by the 
+batch size (4.00). You'd end up with 3.75 batches, 
+which isn't possible. Try 16 MT or 12 MT instead.
+```
+
+**When close to valid:**
+```
+⚠ 30 MT doesn't work with a batch size of 4.00. 
+The closest options are 28 MT (7 batches + 52 MT 
+remaining) or 32 MT (8 batches + 48 MT remaining).
+```
+
+---
+
+#### INSIGHT 3 — COMPLETION DATE IMPACT
+
+Shown when the order has a start date or completion date.
+
+**When start date exists:**
+```
+📅 Cutting this order means each portion finishes at 
+a different time. The 16 MT portion should be done 
+around 11:34 AM — that's about 2.5 hours earlier 
+than the original 24 MT order would have finished. 
+The 8 MT portion's completion depends on where you 
+place it.
+```
+
+**When no start date:**
+```
+📅 Once you set a start date, each portion will get 
+its own completion time. The 16 MT portion will 
+finish faster (~3.6 hrs) than the original order 
+(~6.3 hrs), so you can deliver part of it sooner.
+```
+
+**When availability date is relevant:**
+```
+📅 Your availability date is March 22. The 16 MT 
+portion should finish well before that — around 
+March 19. Plenty of buffer. The 8 MT portion should 
+also make it, even if placed later in the schedule.
+```
+
+**When availability is prio replenish:**
+```
+📅 This is flagged as prio replenish, so getting the 
+16 MT portion done first makes sense — it'll be ready 
+sooner to cover the replenishment need. Schedule the 
+8 MT portion based on remaining line capacity.
+```
+
+---
+
+### AI INSIGHTS — LAYOUT
+
+```
+┌─ 🤖 AI INSIGHTS ────────────────────────────────────────┐
+│                                                          │ ← bg: #fff7ed
+│ 💡 You can slip the 8 MT portion between Prio 6          │
+│ (FPR: 260310, Elite XP Growex) and Prio 7                │
+│ (FPR: 260312, Salto Grower). They share the same         │
+│ form, so there's no extra changeover needed.              │
+│                                                          │
+│ ✅ 16 MT splits cleanly into 4 batches, and the          │
+│ remaining 8 MT gives you 2 batches. No partial           │
+│ batches — you're good to go.                             │
+│                                                          │
+│ 📅 Cutting this order means each portion finishes        │
+│ at a different time. The 16 MT portion should be         │
+│ done around 11:34 AM — that's about 2.5 hours            │
+│ earlier than the original 24 MT order.                    │
+│                                                          │
+└──────────────────────────────────────────────────────────┘
+```
+
+- No separators between insights — just spacing (10-12px gap between insight paragraphs).
+- Each insight starts with an emoji icon on the first line.
+- No bold headers — the emoji serves as the visual cue.
+- Text flows naturally as a paragraph.
+- Keep it to 2-3 insights maximum. Don't overwhelm the user.
+- Prioritize: Batch validation > Placement tip > Completion date.
+
+---
+
+### WHEN PORTION 1 IS EMPTY OR BEING TYPED:
+
+```
+┌─ 🤖 AI INSIGHTS ────────────────────────────────────────┐
+│                                                          │
+│ Enter a volume for Portion 1 to see suggestions.         │
+│                                                          │
+└──────────────────────────────────────────────────────────┘
+```
+
+- Grey text (#a1a8b3), italic.
+- Simple placeholder message.
+```

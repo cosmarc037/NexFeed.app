@@ -1,0 +1,1124 @@
+```
+Implement the following changes to the Knowledge Base:
+
+---
+
+## 1. EDIT MODE — INLINE TABLE EDITING
+
+### EDIT MODE TOGGLE
+
+Add an "Edit Table" clickable text link aligned right, next to the search bar:
+
+```
+[🔍 Search by code or description...]  Showing 353 of 353 products        Edit Table
+```
+
+```jsx
+function KnowledgeBaseHeader({ isEditMode, onToggleEdit, onSave, onDiscard, hasChanges }) {
+  return (
+    <div className="kb-header-row">
+      <div className="kb-search-area">
+        <input type="text" placeholder="Search by code or description..." className="kb-search-input" />
+        <span className="kb-count">Showing 353 of 353 products</span>
+      </div>
+      
+      <div className="kb-edit-area">
+        {!isEditMode ? (
+          <span className="kb-edit-link" onClick={onToggleEdit}>
+            Edit Table
+          </span>
+        ) : (
+          <div className="kb-edit-actions">
+            <button className="kb-discard-btn" onClick={onDiscard}>
+              Discard
+            </button>
+            <button className="kb-save-btn" onClick={onSave}>
+              Save Changes
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+```
+
+### STYLING
+
+```css
+.kb-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 0;
+}
+
+.kb-search-area {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.kb-edit-link {
+  font-size: 13px;
+  color: #fd5108;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.kb-edit-link:hover {
+  color: #e8490b;
+}
+
+.kb-edit-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.kb-discard-btn {
+  background: #ffffff;
+  color: #374151;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  padding: 6px 16px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.kb-discard-btn:hover {
+  background: #f9fafb;
+}
+
+.kb-save-btn {
+  background: #fd5108;
+  color: #ffffff;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 16px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.kb-save-btn:hover {
+  background: #e8490b;
+}
+```
+
+---
+
+## 2. EDITABLE CELLS — IN EDIT MODE
+
+When Edit Mode is active, all cells become editable inputs:
+
+```jsx
+function KBEditableCell({ value, onChange, type = 'text', required = false, hasError = false }) {
+  return (
+    <td className={`kb-cell ${hasError ? 'kb-cell-error' : ''}`}>
+      <input
+        type={type}
+        value={value || ''}
+        onChange={(e) => onChange(e.target.value)}
+        className="kb-cell-input"
+        placeholder={required ? 'Required' : '-'}
+      />
+    </td>
+  );
+}
+
+function KBReadOnlyCell({ value }) {
+  return (
+    <td className="kb-cell">
+      <span className="text-content">{value || '-'}</span>
+    </td>
+  );
+}
+```
+
+```css
+.kb-cell-input {
+  width: 100%;
+  padding: 4px 6px;
+  font-size: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 3px;
+  outline: none;
+  background: #ffffff;
+}
+
+.kb-cell-input:focus {
+  border-color: #fd5108;
+  box-shadow: 0 0 0 2px rgba(253, 81, 8, 0.1);
+}
+
+.kb-cell-error {
+  background: #fef2f2 !important;
+}
+
+.kb-cell-error .kb-cell-input {
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+```
+
+---
+
+## 3. ADD ROW — EXCEL-STYLE ROW INSERT
+
+When in Edit Mode, hovering between rows shows a "+" insert button:
+
+```jsx
+function KBRowInsertLine({ onInsert }) {
+  const [isVisible, setIsVisible] = useState(false);
+  
+  return (
+    <tr 
+      className="kb-insert-line-row"
+      onMouseEnter={() => setIsVisible(true)}
+      onMouseLeave={() => setIsVisible(false)}
+    >
+      <td colSpan="100%" className="kb-insert-line-cell">
+        {isVisible && (
+          <div className="kb-insert-line">
+            <button className="kb-insert-btn" onClick={onInsert}>
+              <span className="kb-insert-icon">+</span>
+            </button>
+            <div className="kb-insert-line-bar" />
+          </div>
+        )}
+      </td>
+    </tr>
+  );
+}
+```
+
+### STYLING
+
+```css
+.kb-insert-line-row {
+  height: 8px;
+}
+
+.kb-insert-line-cell {
+  padding: 0 !important;
+  position: relative;
+  height: 8px;
+}
+
+.kb-insert-line {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  z-index: 5;
+}
+
+.kb-insert-btn {
+  position: absolute;
+  left: -12px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #fd5108;
+  color: #ffffff;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 700;
+  z-index: 6;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+}
+
+.kb-insert-btn:hover {
+  background: #e8490b;
+  transform: scale(1.1);
+}
+
+.kb-insert-line-bar {
+  width: 100%;
+  height: 2px;
+  background: #fd5108;
+  opacity: 0.4;
+}
+
+.kb-insert-icon {
+  line-height: 1;
+}
+```
+
+### INSERT HANDLER
+
+```javascript
+function handleInsertRow(afterIndex) {
+  const newRow = {
+    id: `new_${Date.now()}`,
+    fg_material_code: '',
+    fg_item_description: '',
+    sfg1_material_code: '',
+    sfg_item_description: '',
+    form: '',
+    batch_fm1: '',
+    batch_fm2: '',
+    batch_fm3: '',
+    batch_pm: '',
+    fg_weight: '',
+    thread_color: '',
+    sack_material_code: '',
+    sack_description: '',
+    tag_material_code: '',
+    tag_description: '',
+    marking: '',
+    run_rate_line1: '',
+    run_rate_line2: '',
+    run_rate_line3: '',
+    run_rate_line4: '',
+    run_rate_line5: '',
+    run_rate_line6: '',
+    run_rate_line7: '',
+    _isNew: true
+  };
+  
+  const updated = [...kbData];
+  updated.splice(afterIndex + 1, 0, newRow);
+  setKbData(updated);
+  
+  trackChange('add', newRow);
+}
+```
+
+---
+
+## 4. DELETE ROW — MULTIPLE OPTIONS
+
+### OPTION A: TRASH ICON ON EACH ROW
+
+In Edit Mode, a trash icon appears at the END of each row:
+
+```jsx
+{isEditMode && (
+  <td className="kb-delete-cell">
+    <button 
+      className="kb-delete-btn"
+      onClick={() => handleDeleteRow(row.id)}
+      title="Delete row"
+    >
+      🗑
+    </button>
+  </td>
+)}
+```
+
+```css
+.kb-delete-cell {
+  width: 32px;
+  text-align: center;
+}
+
+.kb-delete-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  color: #d1d5db;
+  padding: 4px;
+  border-radius: 4px;
+}
+
+.kb-delete-btn:hover {
+  color: #dc2626;
+  background: #fef2f2;
+}
+```
+
+### OPTION B: CHECKBOX MULTI-SELECT + DELETE BUTTON
+
+```jsx
+{isEditMode && (
+  <td className="kb-select-cell">
+    <input
+      type="checkbox"
+      checked={selectedRows.has(row.id)}
+      onChange={() => toggleRowSelection(row.id)}
+    />
+  </td>
+)}
+```
+
+When rows are selected, show a "Delete Selected" button:
+
+```jsx
+{selectedRows.size > 0 && (
+  <button className="kb-delete-selected-btn" onClick={handleDeleteSelected}>
+    Delete {selectedRows.size} selected
+  </button>
+)}
+```
+
+```css
+.kb-delete-selected-btn {
+  background: #dc2626;
+  color: #ffffff;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  margin-left: 8px;
+}
+```
+
+### OPTION C: RIGHT-CLICK CONTEXT MENU
+
+```jsx
+function handleRowContextMenu(e, row) {
+  e.preventDefault();
+  if (!isEditMode) return;
+  
+  setContextMenu({
+    type: 'kb-row',
+    row: row,
+    position: { x: e.clientX, y: e.clientY }
+  });
+}
+```
+
+```jsx
+{contextMenu && contextMenu.type === 'kb-row' && (
+  <div className="context-menu" style={{ left: contextMenu.position.x, top: contextMenu.position.y }}>
+    <div className="context-menu-item" onClick={() => handleInsertRow(getRowIndex(contextMenu.row))}>
+      Insert row above
+    </div>
+    <div className="context-menu-item" onClick={() => handleInsertRow(getRowIndex(contextMenu.row) + 1)}>
+      Insert row below
+    </div>
+    <div className="context-menu-item context-menu-item-danger" onClick={() => handleDeleteRow(contextMenu.row.id)}>
+      Delete row
+    </div>
+  </div>
+)}
+```
+
+```css
+.context-menu-item-danger {
+  color: #dc2626;
+}
+
+.context-menu-item-danger:hover {
+  background: #fef2f2;
+}
+```
+
+### DELETE HANDLER
+
+```javascript
+function handleDeleteRow(rowId) {
+  const row = kbData.find(r => r.id === rowId);
+  if (!row) return;
+  
+  trackChange('delete', row);
+  
+  setKbData(prev => prev.filter(r => r.id !== rowId));
+}
+
+function handleDeleteSelected() {
+  selectedRows.forEach(rowId => {
+    const row = kbData.find(r => r.id === rowId);
+    if (row) trackChange('delete', row);
+  });
+  
+  setKbData(prev => prev.filter(r => !selectedRows.has(r.id)));
+  setSelectedRows(new Set());
+}
+```
+
+---
+
+## 5. VALIDATION — ON SAVE
+
+### REQUIRED FIELDS
+
+```javascript
+const REQUIRED_FIELDS = [
+  { key: 'fg_material_code', label: 'FG Material Code' },
+  { key: 'fg_item_description', label: 'FG Item Description' },
+  { key: 'sfg1_material_code', label: 'SFG1 Material Code' },
+  { key: 'sfg_item_description', label: 'SFG Item Description' },
+  { key: 'form', label: 'Form' },
+  { key: 'fg_weight', label: 'FG Weight' },
+];
+
+// Batch sizes — at least one required
+const BATCH_FIELDS = ['batch_fm1', 'batch_fm2', 'batch_fm3', 'batch_pm'];
+
+// Run rates — at least one required
+const RUN_RATE_FIELDS = [
+  'run_rate_line1', 'run_rate_line2', 'run_rate_line3', 'run_rate_line4',
+  'run_rate_line5', 'run_rate_line6', 'run_rate_line7'
+];
+```
+
+### VALIDATION FUNCTION
+
+```javascript
+function validateKnowledgeBase(data) {
+  const errors = []; // { rowIndex, rowId, field, message }
+  
+  data.forEach((row, index) => {
+    // Required fields
+    REQUIRED_FIELDS.forEach(f => {
+      const value = row[f.key];
+      if (!value || value.toString().trim() === '' || value === '-') {
+        errors.push({
+          rowIndex: index,
+          rowId: row.id,
+          field: f.key,
+          message: `${f.label} is required`
+        });
+      }
+    });
+    
+    // Batch sizes — check all required
+    BATCH_FIELDS.forEach(f => {
+      const value = row[f];
+      if (!value || value.toString().trim() === '' || value === '-') {
+        errors.push({
+          rowIndex: index,
+          rowId: row.id,
+          field: f,
+          message: `Batch size is required`
+        });
+      }
+    });
+    
+    // Run rates — at least one must be filled
+    const hasAnyRunRate = RUN_RATE_FIELDS.some(f => {
+      const val = row[f];
+      return val && val.toString().trim() !== '' && val !== '-' && parseFloat(val) > 0;
+    });
+    
+    if (!hasAnyRunRate) {
+      RUN_RATE_FIELDS.forEach(f => {
+        errors.push({
+          rowIndex: index,
+          rowId: row.id,
+          field: f,
+          message: `At least one run rate must be specified`
+        });
+      });
+    }
+    
+    // Numeric validation for batch sizes
+    BATCH_FIELDS.forEach(f => {
+      const val = row[f];
+      if (val && val !== '-' && (isNaN(parseFloat(val)) || parseFloat(val) <= 0)) {
+        errors.push({
+          rowIndex: index,
+          rowId: row.id,
+          field: f,
+          message: `Must be a positive number`
+        });
+      }
+    });
+    
+    // Numeric validation for run rates
+    RUN_RATE_FIELDS.forEach(f => {
+      const val = row[f];
+      if (val && val !== '-' && val.toString().trim() !== '' && (isNaN(parseFloat(val)) || parseFloat(val) <= 0)) {
+        errors.push({
+          rowIndex: index,
+          rowId: row.id,
+          field: f,
+          message: `Must be a positive number`
+        });
+      }
+    });
+    
+    // Numeric validation for FG Weight
+    const fgWeight = row.fg_weight;
+    if (fgWeight && fgWeight !== '-' && (isNaN(parseFloat(fgWeight)) || parseFloat(fgWeight) <= 0)) {
+      errors.push({
+        rowIndex: index,
+        rowId: row.id,
+        field: 'fg_weight',
+        message: `FG Weight must be a positive number`
+      });
+    }
+    
+    // Form validation
+    const validForms = ['P', 'MP', 'MP-CS', 'M', 'MX', 'C-S', 'C-M', 'C-L'];
+    if (row.form && !validForms.includes(row.form)) {
+      errors.push({
+        rowIndex: index,
+        rowId: row.id,
+        field: 'form',
+        message: `Form must be one of: ${validForms.join(', ')}`
+      });
+    }
+  });
+  
+  return errors;
+}
+```
+
+### SAVE HANDLER
+
+```javascript
+function handleSaveChanges() {
+  const errors = validateKnowledgeBase(kbData);
+  
+  if (errors.length > 0) {
+    setValidationErrors(errors);
+    
+    // Scroll to first error
+    const firstError = errors[0];
+    scrollToRow(firstError.rowIndex);
+    
+    showNotification('error', 
+      `Cannot save. ${errors.length} validation error(s) found. Please fix the highlighted fields.`
+    );
+    return;
+  }
+  
+  // No errors — save
+  saveKnowledgeBase(kbData);
+  
+  // Create history entry
+  createHistoryEntry();
+  
+  setIsEditMode(false);
+  setChanges([]);
+  setValidationErrors([]);
+  
+  showNotification('success', 'Knowledge Base saved successfully.');
+}
+```
+
+### ERROR HIGHLIGHTING
+
+```javascript
+function getCellError(rowId, field) {
+  return validationErrors.find(e => e.rowId === rowId && e.field === field);
+}
+```
+
+```jsx
+<KBEditableCell
+  value={row.run_rate_line1}
+  onChange={(val) => handleCellChange(row.id, 'run_rate_line1', val)}
+  type="number"
+  hasError={!!getCellError(row.id, 'run_rate_line1')}
+/>
+```
+
+---
+
+## 6. CHANGE TRACKING
+
+```javascript
+function useChangeTracker() {
+  const [changes, setChanges] = useState([]);
+  const [originalData, setOriginalData] = useState(null);
+  
+  function startTracking(data) {
+    setOriginalData(JSON.parse(JSON.stringify(data)));
+    setChanges([]);
+  }
+  
+  function trackChange(type, row, field = null, oldValue = null, newValue = null) {
+    setChanges(prev => [...prev, {
+      type, // 'add' | 'delete' | 'modify'
+      rowId: row.id,
+      materialCode: row.fg_material_code,
+      itemDescription: row.fg_item_description,
+      field,
+      oldValue,
+      newValue,
+      timestamp: new Date().toISOString()
+    }]);
+  }
+  
+  function handleCellChange(rowId, field, newValue) {
+    const row = kbData.find(r => r.id === rowId);
+    if (!row) return;
+    
+    const oldValue = row[field];
+    if (oldValue === newValue) return;
+    
+    trackChange('modify', row, field, oldValue, newValue);
+    
+    row[field] = newValue;
+    setKbData([...kbData]);
+  }
+  
+  function generateChangeSummary() {
+    const added = changes.filter(c => c.type === 'add');
+    const deleted = changes.filter(c => c.type === 'delete');
+    
+    // Deduplicate modifications per row+field (keep latest)
+    const modMap = {};
+    changes.filter(c => c.type === 'modify').forEach(c => {
+      const key = `${c.rowId}_${c.field}`;
+      modMap[key] = c;
+    });
+    const modified = Object.values(modMap);
+    
+    // Group modifications by row
+    const modifiedByRow = {};
+    modified.forEach(c => {
+      if (!modifiedByRow[c.rowId]) {
+        modifiedByRow[c.rowId] = { materialCode: c.materialCode, itemDescription: c.itemDescription, changes: [] };
+      }
+      modifiedByRow[c.rowId].changes.push(c);
+    });
+    
+    const modifiedRowCount = Object.keys(modifiedByRow).length;
+    
+    // Summary line
+    const parts = [];
+    if (modifiedRowCount > 0) parts.push(`${modifiedRowCount} row(s) modified`);
+    if (added.length > 0) parts.push(`${added.length} row(s) added`);
+    if (deleted.length > 0) parts.push(`${deleted.length} row(s) deleted`);
+    const summary = `Manual edit — ${parts.join(', ')}`;
+    
+    // Details
+    const details = [];
+    added.forEach(c => {
+      details.push(`Added new row: ${c.materialCode || 'New'} - ${c.itemDescription || 'Untitled'}`);
+    });
+    deleted.forEach(c => {
+      details.push(`Deleted row: ${c.materialCode} - ${c.itemDescription}`);
+    });
+    Object.values(modifiedByRow).forEach(row => {
+      const fieldChanges = row.changes.map(c => {
+        const fieldLabel = getFieldLabel(c.field);
+        return `${fieldLabel} changed from ${c.oldValue || '-'} to ${c.newValue || '-'}`;
+      }).join(', ');
+      details.push(`Modified row ${row.materialCode}: ${fieldChanges}`);
+    });
+    
+    return { summary, details: details.join('\n') };
+  }
+  
+  return {
+    changes,
+    trackChange,
+    handleCellChange,
+    generateChangeSummary,
+    startTracking,
+    hasChanges: changes.length > 0
+  };
+}
+
+function getFieldLabel(field) {
+  const labels = {
+    fg_material_code: 'FG Material Code',
+    fg_item_description: 'FG Item Description',
+    sfg1_material_code: 'SFG1 Material Code',
+    sfg_item_description: 'SFG Item Description',
+    form: 'Form',
+    batch_fm1: 'Batch FM1',
+    batch_fm2: 'Batch FM2',
+    batch_fm3: 'Batch FM3',
+    batch_pm: 'Batch PM',
+    fg_weight: 'FG Weight',
+    thread_color: 'Thread Color',
+    sack_material_code: 'Sack Material Code',
+    sack_description: 'Sack Description',
+    tag_material_code: 'Tag Material Code',
+    tag_description: 'Tag Description',
+    marking: 'Marking',
+    run_rate_line1: 'Run Rate Line 1',
+    run_rate_line2: 'Run Rate Line 2',
+    run_rate_line3: 'Run Rate Line 3',
+    run_rate_line4: 'Run Rate Line 4',
+    run_rate_line5: 'Run Rate Line 5',
+    run_rate_line6: 'Run Rate Line 6',
+    run_rate_line7: 'Run Rate Line 7',
+  };
+  return labels[field] || field;
+}
+```
+
+---
+
+## 7. HISTORY — UPDATED WITH NOTES AND REVERT
+
+### HISTORY ENTRY STRUCTURE
+
+```javascript
+function createHistoryEntry() {
+  const { summary, details } = changeTracker.generateChangeSummary();
+  
+  const entry = {
+    id: Date.now(),
+    type: 'manual_edit', // 'manual_edit' | 'file_upload'
+    timestamp: new Date().toISOString(),
+    summary: summary,
+    details: details,
+    snapshot: JSON.parse(JSON.stringify(kbData)), // Full table snapshot for revert
+    user: getCurrentUser(),
+  };
+  
+  addToHistory(entry);
+}
+
+// When file is uploaded
+function createUploadHistoryEntry(filename) {
+  const entry = {
+    id: Date.now(),
+    type: 'file_upload',
+    timestamp: new Date().toISOString(),
+    summary: `Uploaded new file: ${filename}`,
+    details: `File "${filename}" uploaded and applied as new Knowledge Base.`,
+    snapshot: JSON.parse(JSON.stringify(kbData)),
+    filename: filename,
+    user: getCurrentUser(),
+  };
+  
+  addToHistory(entry);
+}
+```
+
+### HISTORY TABLE — UPDATED COLUMNS
+
+```
+┌──────────────────┬──────────┬─────────────────────────────────────────────┬──────────┬──────────┬──────────┐
+│ Date             │ Type     │ Notes                                       │ Download │ Revert   │ Delete   │
+├──────────────────┼──────────┼─────────────────────────────────────────────┼──────────┼──────────┼──────────┤
+│ Apr 2, 2026      │ Upload   │ Uploaded new file: kb_apr2.xlsx              │    📥    │    ↩     │    🗑    │
+│ 10:30 AM         │          │                                             │          │          │          │
+├──────────────────┼──────────┼─────────────────────────────────────────────┼──────────┼──────────┼──────────┤
+│ Apr 2, 2026      │ Manual   │ Manual edit — 3 rows modified, 1 row a...   │    📥    │    ↩     │    🗑    │
+│ 02:15 PM         │ Edit     │                                             │          │          │          │
+├──────────────────┼──────────┼─────────────────────────────────────────────┼──────────┼──────────┼──────────┤
+│ Apr 1, 2026      │ Upload   │ Uploaded new file: kb_apr1.xlsx              │    📥    │    ↩     │    🗑    │
+│ 08:00 AM         │          │                                             │          │          │          │
+└──────────────────┴──────────┴─────────────────────────────────────────────┴──────────┴──────────┴──────────┘
+```
+
+### NOTES CELL — TRUNCATED WITH HOVER TOOLTIP
+
+```jsx
+function HistoryNotesCell({ summary, details }) {
+  const [showTooltip, setShowTooltip] = useState(false);
+  const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
+  const timeoutRef = useRef(null);
+  
+  const fullText = details ? `${summary}\n\nDetails:\n${details}` : summary;
+  
+  return (
+    <td
+      className="history-notes-cell"
+      onMouseEnter={(e) => {
+        timeoutRef.current = setTimeout(() => {
+          setTooltipPos(clampToViewport(e.clientX + 12, e.clientY + 12, 400, 200));
+          setShowTooltip(true);
+        }, 300);
+      }}
+      onMouseMove={(e) => {
+        if (showTooltip) {
+          setTooltipPos(clampToViewport(e.clientX + 12, e.clientY + 12, 400, 200));
+        }
+      }}
+      onMouseLeave={() => {
+        clearTimeout(timeoutRef.current);
+        setShowTooltip(false);
+      }}
+    >
+      <span className="history-notes-text">{summary}</span>
+      
+      {showTooltip && (
+        <TooltipPortal>
+          <div className="history-notes-tooltip" style={{
+            position: 'fixed',
+            left: tooltipPos.x,
+            top: tooltipPos.y,
+            zIndex: 99999
+          }}>
+            <div className="tooltip-summary">{summary}</div>
+            {details && (
+              <>
+                <div className="tooltip-divider" />
+                <div className="tooltip-label">Details:</div>
+                <div className="tooltip-details">
+                  {details.split('\n').map((line, i) => (
+                    <div key={i} className="tooltip-detail-line">{line}</div>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        </TooltipPortal>
+      )}
+    </td>
+  );
+}
+```
+
+```css
+.history-notes-cell {
+  max-width: 300px;
+  cursor: pointer;
+}
+
+.history-notes-text {
+  font-size: 11px;
+  color: #374151;
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.history-notes-tooltip {
+  background: #1a1a1a;
+  color: #ffffff;
+  border-radius: 8px;
+  padding: 12px 16px;
+  max-width: 400px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.25);
+}
+
+.tooltip-summary {
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.tooltip-divider {
+  height: 1px;
+  background: rgba(255,255,255,0.15);
+  margin: 8px 0;
+}
+
+.tooltip-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: rgba(255,255,255,0.6);
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+
+.tooltip-details {
+  font-size: 11px;
+  color: rgba(255,255,255,0.85);
+  line-height: 1.6;
+}
+
+.tooltip-detail-line {
+  padding: 1px 0;
+}
+```
+
+### REVERT BUTTON — WITH CONFIRMATION
+
+```jsx
+function RevertButton({ entry, onRevert }) {
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [confirmText, setConfirmText] = useState('');
+  
+  return (
+    <>
+      <button 
+        className="history-action-btn revert-btn"
+        onClick={() => setShowConfirm(true)}
+        title="Revert to this version"
+      >
+        ↩
+      </button>
+      
+      {showConfirm && (
+        <div className="dialog-overlay">
+          <div className="dialog-container" style={{ maxWidth: '440px' }}>
+            <div className="dialog-header">
+              <span>⚠ Revert Knowledge Base</span>
+              <button className="dialog-close" onClick={() => setShowConfirm(false)}>✕</button>
+            </div>
+            
+            <div className="dialog-body">
+              <p style={{ fontSize: '12px', color: '#374151', lineHeight: 1.6 }}>
+                You are about to revert the Knowledge Base to the version from:
+              </p>
+              <p style={{ fontSize: '13px', fontWeight: 600, color: '#1a1a1a', margin: '8px 0' }}>
+                {formatDateTimeFull(entry.timestamp)}
+              </p>
+              <p style={{ fontSize: '11px', color: '#6b7280', marginBottom: '12px' }}>
+                {entry.summary}
+              </p>
+              <p style={{ fontSize: '12px', color: '#374151', lineHeight: 1.6 }}>
+                This will replace the current Knowledge Base with this version. 
+                All changes made after this point will be lost.
+              </p>
+              <p style={{ fontSize: '12px', color: '#374151', lineHeight: 1.6, marginTop: '12px' }}>
+                Type <strong>Confirm</strong> to proceed:
+              </p>
+              <input
+                type="text"
+                value={confirmText}
+                onChange={(e) => setConfirmText(e.target.value)}
+                placeholder="Type Confirm"
+                className="confirm-input"
+                style={{
+                  width: '100%',
+                  padding: '8px 12px',
+                  fontSize: '13px',
+                  border: '1px solid #e5e7eb',
+                  borderRadius: '6px',
+                  marginTop: '8px',
+                  outline: 'none'
+                }}
+              />
+            </div>
+            
+            <div className="dialog-footer" style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+              <button 
+                onClick={() => { setShowConfirm(false); setConfirmText(''); }}
+                style={{
+                  background: '#ffffff',
+                  color: '#374151',
+                  border: '1px solid #d1d5db',
+                  borderRadius: '6px',
+                  padding: '8px 20px',
+                  fontSize: '13px',
+                  cursor: 'pointer'
+                }}
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={() => {
+                  if (confirmText === 'Confirm') {
+                    onRevert(entry);
+                    setShowConfirm(false);
+                    setConfirmText('');
+                  }
+                }}
+                disabled={confirmText !== 'Confirm'}
+                style={{
+                  background: confirmText === 'Confirm' ? '#fd5108' : '#d1d5db',
+                  color: '#ffffff',
+                  border: 'none',
+                  borderRadius: '6px',
+                  padding: '8px 20px',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  cursor: confirmText === 'Confirm' ? 'pointer' : 'not-allowed'
+                }}
+              >
+                Revert
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+```
+
+### REVERT HANDLER
+
+```javascript
+function handleRevert(entry) {
+  if (!entry.snapshot) {
+    showNotification('error', 'Cannot revert — no snapshot available for this version.');
+    return;
+  }
+  
+  // Replace current KB data with snapshot
+  setKbData(JSON.parse(JSON.stringify(entry.snapshot)));
+  
+  // Create a new history entry recording the revert
+  const revertEntry = {
+    id: Date.now(),
+    type: 'revert',
+    timestamp: new Date().toISOString(),
+    summary: `Reverted to version from ${formatDateTimeFull(entry.timestamp)}`,
+    details: `Knowledge Base reverted to: ${entry.summary}`,
+    snapshot: JSON.parse(JSON.stringify(entry.snapshot)),
+    user: getCurrentUser(),
+  };
+  
+  addToHistory(revertEntry);
+  
+  showNotification('success', `Knowledge Base reverted to version from ${formatDateTimeFull(entry.timestamp)}.`);
+}
+```
+
+---
+
+## 8. DISCARD CHANGES
+
+```javascript
+function handleDiscard() {
+  if (!changeTracker.hasChanges) {
+    setIsEditMode(false);
+    return;
+  }
+  
+  showDialog({
+    title: 'Discard Changes',
+    message: 'You have unsaved changes. Are you sure you want to discard all changes?',
+    buttons: [
+      { label: 'Keep Editing', action: 'cancel' },
+      { label: 'Discard', action: 'discard', style: 'danger' }
+    ],
+    onAction: (action) => {
+      if (action === 'discard') {
+        setKbData(JSON.parse(JSON.stringify(changeTracker.originalData)));
+        setIsEditMode(false);
+        setChanges([]);
+        setValidationErrors([]);
+      }
+    }
+  });
+}
+```
+
+---
+
+## VERIFICATION
+
+### Edit Mode
+1. ✅ "Edit Table" text link visible, right-aligned with search bar
+2. ✅ Click → cells become editable inputs
+3. ✅ "Save Changes" and "Discard" buttons appear
+4. ✅ "Edit Table" link disappears while in edit mode
+
+### Add Row
+5. ✅ Hover between rows → "+" button appears
+6. ✅ Click → new empty row inserted at that position
+7. ✅ Works at top, bottom, and between any rows
+
+### Delete Row
+8. ✅ Trash icon on each row in edit mode
+9. ✅ Checkbox multi-select + "Delete selected" button
+10. ✅ Right-click → "Delete row" option
+
+### Validation
+11. ✅ Required fields empty → red highlight on Save
+12. ✅ All run rates empty → all run rate cells highlighted red
+13. ✅ Invalid numbers → red highlight
+14. ✅ Invalid form → red highlight
+15. ✅ Error notification with count
+
+### History
+16. ✅ Manual edits create history entry with summary + details
+17. ✅ File uploads create separate history entry
+18. ✅ Notes column truncated with hover tooltip showing full details
+19. ✅ Revert button with "Confirm" dialog
+20. ✅ Revert replaces current KB with snapshot
+
+### Discard
+21. ✅ Discard with unsaved changes → confirmation dialog
+22. ✅ Discard restores original data
+```

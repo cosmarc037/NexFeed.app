@@ -1,0 +1,451 @@
+```
+Implement the following CRITICAL fix:
+
+---
+
+## SINGLE SOURCE OF TRUTH — ONE STATUS FUNCTION FOR THE ENTIRE APP
+
+Create ONE function that determines product status. EVERY part of the app must call this ONE function. Delete ALL other status determination logic. No duplicates, no copies, no alternative calculations.
+
+---
+
+### THE ONE FUNCTION
+
+```javascript
+/**
+ * THE ONLY STATUS DETERMINATION FUNCTION IN THE ENTIRE APP
+ * 
+ * RULE:
+ * - DFL >= Inventory → CRITICAL (demand exceeds stock)
+ * - DFL < Inventory, breaches within 3 days → URGENT
+ * - DFL < Inventory, breaches within 4-10 days → MONITOR
+ * - DFL < Inventory, never breaches → SUFFICIENT
+ * 
+ * EXAMPLES:
+ * - DFL 24.0, Inventory 0.7 → 24.0 >= 0.7 → CRITICAL
+ * - DFL 92.3, Inventory 310.6 → 92.3 < 310.6, never breaches → SUFFICIENT
+ * 
+ * @param {number} dfl - Due for Loading (required demand)
+ * @param {number} inventory - Current available stock
+ * @param {Array} dailyColumns - Array of {key, date} for 10-day columns
+ * @param {Object} product - Product row from N10D with daily values
+ * @param {Date} today - Current date
+ * @returns {string} 'Critical' | 'Urgent' | 'Monitor' | 'Sufficient'
+ */
+function getProductStatus(dfl, inventory, dailyColumns = [], product = null, today = new Date()) {
+  // Parse to ensure numbers
+  const dflNum = parseFloat(dfl) || 0;
+  const invNum = parseFloat(inventory) || 0;
+  
+  // CRITICAL: DFL >= Inventory
+  // The required demand EXCEEDS or EQUALS current stock
+  // Production is needed IMMEDIATELY
+  if (dflNum >= invNum) {
+    return 'Critical';
+  }
+  
+  // From here: DFL < Inventory (stock covers base demand)
+  // But check if cumulative daily demand will breach inventory
+  
+  if (!dailyColumns || dailyColumns.length === 0 || !product) {
+    return 'Sufficient';
+  }
+  
+  let cumulativeSum = dflNum;
+  let breachDayIndex = null;
+  
+  for (let i = 0; i < dailyColumns.length; i++) {
+    const dayValue = parseFloat(product[dailyColumns[i].key]) || 0;
+    cumulativeSum += dayValue;
+    
+    if (cumulativeSum >= invNum && breachDayIndex === null) {
+      breachDayIndex = i;
+      break;
+    }
+  }
+  
+  // Never breaches within 10 days
+  if (breachDayIndex === null) {
+    return 'Sufficient';
+  }
+  
+  // Calculate days until breach
+  const breachDate = new Date(dailyColumns[breachDayIndex].date);
+  const todayClean = new Date(today);
+  todayClean.setHours(0, 0, 0, 0);
+  breachDate.setHours(0, 0, 0, 0);
+  const diffMs = breachDate.getTime() - todayClean.getTime();
+  const daysUntilBreach = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+  
+  if (daysUntilBreach <= 3) {
+    return 'Urgent';
+  }
+  
+  return 'Monitor';
+}
+```
+
+### QUICK VERSION — FOR PLACES THAT ONLY HAVE DFL AND INVENTORY
+
+```javascript
+/**
+ * QUICK STATUS CHECK — when daily columns are not available
+ * Only determines Critical vs Not-Critical
+ * Used in tooltips, icons, labels where full 10-day data isn't accessible
+ * 
+ * MUST still follow same rule: DFL >= Inventory → Critical
+ */
+function getQuickStatus(dfl, inventory) {
+  const dflNum = parseFloat(dfl) || 0;
+  const invNum = parseFloat(inventory) || 0;
+  
+  if (dflNum >= invNum) {
+    return 'Critical';
+  }
+  return null; // Needs full calculation with daily columns
+}
+```
+
+---
+
+### DELETE ALL OTHER STATUS LOGIC
+
+Search the ENTIRE codebase and DELETE every other function, condition, or calculation that determines status. Replace each one with a call to `getProductStatus()`.
+
+### SEARCH FOR AND REPLACE
+
+```
+SEARCH: determineProductStatus
+REPLACE WITH: getProductStatus
+
+SEARCH: calculateStatus
+REPLACE WITH: getProductStatus
+
+SEARCH: getStatus
+REPLACE WITH: getProductStatus
+
+SEARCH: stockStatus
+REPLACE WITH: getProductStatus
+
+SEARCH: getStockStatus
+REPLACE WITH: getProductStatus
+
+SEARCH: isStockSufficient
+REPLACE WITH: getProductStatus(...) === 'Sufficient'
+
+SEARCH: needsProduction
+REPLACE WITH: getProductStatus(...) === 'Critical'
+
+SEARCH: isCritical
+REPLACE WITH: getProductStatus(...) === 'Critical'
+
+SEARCH: isUrgent
+REPLACE WITH: getProductStatus(...) === 'Urgent'
+```
+
+### SEARCH FOR THESE COMPARISON PATTERNS AND REPLACE
+
+```javascript
+// FIND any of these and REPLACE with getProductStatus() call:
+
+// Pattern: direct DFL vs Inventory comparison
+if (dfl > inventory)    // → getProductStatus(dfl, inventory, ...)
+if (dfl >= inventory)   // → getProductStatus(dfl, inventory, ...)
+if (dfl < inventory)    // → getProductStatus(dfl, inventory, ...)
+if (dfl <= inventory)   // → getProductStatus(dfl, inventory, ...)
+if (inventory > dfl)    // → getProductStatus(dfl, inventory, ...)
+if (inventory >= dfl)   // → getProductStatus(dfl, inventory, ...)
+if (inventory < dfl)    // → getProductStatus(dfl, inventory, ...)
+if (inventory <= dfl)   // → getProductStatus(dfl, inventory, ...)
+
+// Pattern: ratio/fulfillment based
+if (ratio > 1)          // → getProductStatus(dfl, inventory, ...)
+if (ratio < 1)          // → getProductStatus(dfl, inventory, ...)
+if (fulfillment > X)    // → getProductStatus(dfl, inventory, ...)
+if (fulfillment < X)    // → getProductStatus(dfl, inventory, ...)
+if (buffer > 0)         // → getProductStatus(dfl, inventory, ...)
+if (buffer < 0)         // → getProductStatus(dfl, inventory, ...)
+if (gap > 0)            // → getProductStatus(dfl, inventory, ...)
+
+// Pattern: string comparison with old labels
+status === 'needs_production'   // → status === 'Critical'
+status === 'stock_sufficient'   // → status === 'Sufficient'
+status === 'Needs Production'   // → status === 'Critical'
+status === 'Stock Sufficient'   // → status === 'Sufficient'
+```
+
+---
+
+### APPLY TO EVERY LOCATION
+
+### 1. N10D TAB — STATUS COLUMN
+
+```javascript
+// BEFORE (possibly inverted)
+const status = someOldFunction(product);
+
+// AFTER
+const status = getProductStatus(
+  product.due_for_loading,
+  product.inventory,
+  dailyColumns,
+  product,
+  today
+);
+product.status = status;
+```
+
+### 2. N10D TAB — HOVER TOOLTIP STATUS
+
+```javascript
+// The tooltip Status field must read from the SAME product.status
+// that was set by getProductStatus()
+// Do NOT recalculate — just display product.status
+
+<span style={{ color: statusColors[product.status] }}>
+  {product.status}
+</span>
+```
+
+### 3. AUTO-SEQUENCE — STOCK STATUS DETERMINATION
+
+```javascript
+// BEFORE
+const stockStatus = someOldAutoSequenceFunction(order, n10dData);
+
+// AFTER
+function getOrderStockStatus(order, n10dData, dailyColumns, today) {
+  const product = n10dData?.find(
+    p => String(p.material_code_fg) === String(order.material_code_fg)
+  );
+  
+  if (!product) return null;
+  
+  // USE THE ONE FUNCTION
+  return getProductStatus(
+    product.due_for_loading,
+    product.inventory,
+    dailyColumns,
+    product,
+    today
+  );
+}
+```
+
+### 4. AUTO-SEQUENCE — SORTING
+
+```javascript
+function runAutoSequence(orders, n10dData, dailyColumns, today) {
+  const ordersWithDates = orders.map(order => {
+    const updatedOrder = { ...order };
+    
+    // Dated orders keep their date
+    if (order.avail_date && 
+        order.avail_date !== 'prio replenish' && 
+        order.avail_date !== 'safety stocks') {
+      updatedOrder._sortDate = parseDate(order.avail_date);
+      updatedOrder._dateSource = 'dated';
+      return updatedOrder;
+    }
+    
+    // Non-dated: get status using THE ONE FUNCTION
+    const product = n10dData?.find(
+      p => String(p.material_code_fg) === String(order.material_code_fg)
+    );
+    
+    if (!product) {
+      updatedOrder._sortDate = null;
+      updatedOrder._n10dStatus = null;
+      return updatedOrder;
+    }
+    
+    const status = getProductStatus(
+      product.due_for_loading,
+      product.inventory,
+      dailyColumns,
+      product,
+      today
+    );
+    
+    updatedOrder._n10dStatus = status;
+    
+    if (status === 'Critical') {
+      updatedOrder._sortDate = today;
+      updatedOrder._assignedAvailDate = formatDateFull(today);
+    } else if (product.availDate) {
+      updatedOrder._sortDate = parseDate(product.availDate);
+      updatedOrder._assignedAvailDate = formatDateFull(product.availDate);
+    } else {
+      updatedOrder._sortDate = null;
+    }
+    
+    return updatedOrder;
+  });
+  
+  // Sort chronologically
+  ordersWithDates.sort((a, b) => {
+    if (a._sortDate && !b._sortDate) return -1;
+    if (!a._sortDate && b._sortDate) return 1;
+    if (!a._sortDate && !b._sortDate) return 0;
+    return a._sortDate.getTime() - b._sortDate.getTime();
+  });
+  
+  return ordersWithDates;
+}
+```
+
+### 5. AUTO-SEQUENCE — AVAIL DATE LABEL
+
+```javascript
+function getAvailLabel(order) {
+  if (order._dateSource === 'dated') {
+    return { text: formatDateFull(order._sortDate), color: '#1a1a1a' };
+  }
+  
+  // USE THE STATUS FROM THE ONE FUNCTION
+  switch (order._n10dStatus) {
+    case 'Critical':
+      return { text: order._assignedAvailDate || 'Today', color: '#dc2626', icon: '⚠' };
+    case 'Urgent':
+      return { text: order._assignedAvailDate, color: '#ea580c', icon: '⚠' };
+    case 'Monitor':
+      return { text: order._assignedAvailDate, color: '#ca8a04', icon: '⚠' };
+    case 'Sufficient':
+      return { text: 'Stock sufficient', color: '#16a34a', icon: '✅' };
+    default:
+      return { text: order.avail_date || '—', color: '#6b7280' };
+  }
+}
+```
+
+### 6. AUTO-SEQUENCE — METRIC CARDS
+
+```javascript
+function calculateMetrics(orders) {
+  let withDeadline = 0, noDeadline = 0, stockSufficient = 0, conflicts = 0;
+  
+  orders.forEach(order => {
+    if (order._dateSource === 'dated') {
+      withDeadline++;
+    } else if (order._n10dStatus === 'Sufficient') {
+      stockSufficient++;
+    } else if (order._n10dStatus) {
+      withDeadline++; // Critical/Urgent/Monitor have N10D deadlines
+    } else {
+      noDeadline++;
+    }
+  });
+  
+  return { total: orders.length, withDeadline, noDeadline, stockSufficient, conflicts };
+}
+```
+
+### 7. ORDER TABLE — AVAIL DATE ICON
+
+```javascript
+function getAvailDateIcon(order, n10dData, dailyColumns, today) {
+  const product = n10dData?.find(
+    p => String(p.material_code_fg) === String(order.material_code_fg)
+  );
+  
+  if (!product) return null;
+  
+  // USE THE ONE FUNCTION
+  const status = getProductStatus(
+    product.due_for_loading,
+    product.inventory,
+    dailyColumns,
+    product,
+    today
+  );
+  
+  switch (status) {
+    case 'Critical': return { icon: '⚠', color: '#dc2626' };
+    case 'Urgent': return { icon: '⚠', color: '#ea580c' };
+    case 'Monitor': return { icon: '⚠', color: '#ca8a04' };
+    case 'Sufficient': return { icon: '✅', color: '#16a34a' };
+    default: return null;
+  }
+}
+```
+
+### 8. TEMPLATE LINE GENERATION
+
+```javascript
+function generateTemplateLine(product, order, today, includeEmoji = false) {
+  // product.status MUST already be set by getProductStatus()
+  // Do NOT recalculate here
+  const status = product?.status;
+  
+  // ... rest of template generation using status
+}
+```
+
+### 9. HOVER TOOLTIP — STATUS DISPLAY
+
+```javascript
+// In the tooltip, display the status that was ALREADY calculated by getProductStatus()
+// Do NOT have a separate status calculation in the tooltip
+
+function getTooltipData(order, n10dData, dailyColumns, today) {
+  const product = n10dData?.find(
+    p => String(p.material_code_fg) === String(order.material_code_fg)
+  );
+  
+  if (!product) return null;
+  
+  // USE THE ONE FUNCTION
+  const status = getProductStatus(
+    product.due_for_loading,
+    product.inventory,
+    dailyColumns,
+    product,
+    today
+  );
+  
+  return {
+    dfl: product.due_for_loading,
+    inventory: product.inventory,
+    ratio: product.inventory > 0 ? (product.due_for_loading / product.inventory).toFixed(2) : '∞',
+    buffer: product.inventory > 0 
+      ? (((product.inventory - product.due_for_loading) / product.inventory) * 100).toFixed(1)
+      : '-100.0',
+    status: status,  // FROM THE ONE FUNCTION
+    completionDate: product.completionDate,
+    availDate: product.availDate
+  };
+}
+```
+
+---
+
+### VERIFICATION CHECKLIST
+
+After implementing, check EVERY location shows the SAME status for Gall 21 Chicken Layer (DFL 24.0, Inv 0.7):
+
+| Location | Expected Status | Check |
+|---|---|---|
+| N10D table — Status column | Critical | ☐ |
+| N10D table — hover tooltip Status field | Critical | ☐ |
+| N10D table — row sort position | #1 (top) | ☐ |
+| Auto-Sequence — avail date label | Today's date + ⚠ red | ☐ |
+| Auto-Sequence — sort position | Near top (earliest date) | ☐ |
+| Auto-Sequence — hover tooltip Status | Critical | ☐ |
+| Auto-Sequence — metric card | NOT counted as "Stock Sufficient" | ☐ |
+| Order table — avail date icon | ⚠ Red | ☐ |
+| Order table — avail date tooltip | Status: Critical | ☐ |
+| Order table — Summary column template | "This product is on Critical..." | ☐ |
+
+ALL must say "Critical". If ANY says "Sufficient" — there is still a duplicate/old function somewhere.
+
+### ALSO CHECK ELITE XP STARTEX (DFL 92.3, Inv 310.6):
+
+| Location | Expected Status | Check |
+|---|---|---|
+| N10D table — Status column | Sufficient | ☐ |
+| Auto-Sequence — avail date label | "Stock sufficient ✅" | ☐ |
+| Auto-Sequence — sort position | Near bottom | ☐ |
+| Order table — avail date icon | ✅ Green | ☐ |
+
+ALL must say "Sufficient".
+```

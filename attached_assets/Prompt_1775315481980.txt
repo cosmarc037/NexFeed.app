@@ -1,0 +1,95 @@
+```
+Fix the following in the Tour feature:
+
+---
+
+## FIX: ANALYTICS TOUR — SIMPLIFY TO 3 STEPS ONLY
+
+The analytics tour currently goes through each chart individually. Simplify to just 3 steps: metrics, one chart, and smart insights.
+
+### BEFORE (TOO MANY STEPS)
+
+```javascript
+const ANALYTICS_TOUR_STEPS = [
+  { target: '[data-tour="analytics-metrics"]', title: 'Key Metrics', ... },
+  { target: '[data-tour="analytics-volume-category"]', title: 'Volume by Category', ... },
+  { target: '[data-tour="analytics-orders-line"]', title: 'Orders by Feedmill Line', ... },
+  { target: '[data-tour="analytics-top-items"]', title: 'Top 5 Most Ordered Items', ... },
+  { target: '[data-tour="analytics-smart-insight"]', title: 'Smart Insights', ... },
+];
+```
+
+### AFTER (3 STEPS ONLY)
+
+```javascript
+const ANALYTICS_TOUR_STEPS = [
+  {
+    target: '[data-tour="analytics-metrics"]',
+    title: 'Key Metrics',
+    description: 'High-level production KPIs — total volume across all orders, average order size, completed count, and total order count.',
+    position: 'bottom'
+  },
+  {
+    target: '[data-tour="analytics-charts"]',
+    title: 'Charts & Visualizations',
+    description: 'Visual breakdowns of your production data — volume by category, order distribution across lines, and top ordered items. Helps identify trends and imbalances at a glance.',
+    position: 'bottom'
+  },
+  {
+    target: '[data-tour="analytics-smart-insight"]',
+    title: 'Smart Insights',
+    description: 'Analysis of your production data with actionable recommendations — which lines to rebalance, which products to prioritize, and optimization opportunities.',
+    position: 'top'
+  }
+];
+```
+
+### ADD data-tour FOR CHARTS SECTION
+
+Wrap all charts in a single container with one `data-tour` attribute:
+
+```jsx
+<div data-tour="analytics-charts" className="analytics-charts-section">
+  <div className="chart-card">
+    <h3>Volume by Category (MT)</h3>
+    {/* bar chart */}
+  </div>
+  <div className="chart-card">
+    <h3>Orders by Feedmill Line</h3>
+    {/* donut chart */}
+  </div>
+  <div className="chart-card">
+    <h3>Top 5 Most Ordered Items</h3>
+    {/* bar chart */}
+  </div>
+</div>
+```
+
+This highlights all charts as one group in a single step, instead of stepping through each individually.
+
+### ALSO UPDATE FULL APP TOUR — ANALYTICS REFERENCE
+
+If the full app tour has an analytics step, keep it simple:
+
+```javascript
+// In FULL_APP_TOUR_STEPS — analytics page highlight
+{
+  target: '[data-tour="analytics-charts"]',
+  title: 'Analytics & Insights',
+  description: 'View production analytics with key metrics, visual charts, and actionable insights for data-driven planning decisions.',
+  position: 'bottom',
+  page: 'analytics'
+}
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Analytics "This Page" tour has exactly 3 steps
+2. ✅ Step 1: Key Metrics cards
+3. ✅ Step 2: All charts highlighted as one group
+4. ✅ Step 3: Smart Insights section
+5. ✅ No individual chart steps (Volume by Category, Orders by Line, Top 5 are NOT separate steps)
+6. ✅ Full app tour analytics reference updated to single step
+```

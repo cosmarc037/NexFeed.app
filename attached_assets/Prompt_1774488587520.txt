@@ -1,0 +1,287 @@
+```
+Implement the following fix to the NexFeed application:
+
+---
+
+## FIX: COMMENTS — TRIANGLE ON WRONG CELL AND COMMENTS SHARED ACROSS CELLS
+
+Two bugs:
+1. Triangle indicator appears on the first column instead of the actual cell where the comment was left
+2. Comments left on one cell (e.g., Material Code) show up when opening comments on other cells — comments are being shared across the entire row instead of being cell-specific
+
+---
+
+### ROOT CAUSE
+
+The comment is likely being stored and keyed by ORDER ID only, not by ORDER ID + COLUMN NAME. This causes:
+- All cells in the same row share the same comments
+- The triangle renders on the first cell (or a default cell) instead of the specific cell
+
+---
+
+### FIX 1: COMMENT KEY MUST INCLUDE COLUMN NAME
+
+```javascript
+// WRONG — keyed by order ID only
+const commentKey = `order_${orderId}`;
+
+// CORRECT — keyed by order ID AND column name
+const commentKey = `order_${orderId}__${columnName}`;
+```
+
+Every function that reads, writes, or checks comments must use the combined key:
+
+```javascript
+// Store comment
+function postComment(orderId, columnName, text) {
+  const key = `${orderId}__${columnName}`;
+  
+  if (!commentsStore[key]) {
+    commentsStore[key] = [];
+  }
+  
+  commentsStore[key].push({
+    id: generateId(),
+    user: getCurrentUser(),
+    text: text,
+    timestamp: new Date().toISOString(),
+    edited: false
+  });
+  
+  saveToStorage(commentsStore);
+  triggerRerender();
+}
+
+// Get comments for a specific cell
+function getCommentsForCell(orderId, columnName) {
+  const key = `${orderId}__${columnName}`;
+  return commentsStore[key] || [];
+}
+
+// Check if a specific cell has comments
+function cellHasComments(orderId, columnName) {
+  const key = `${orderId}__${columnName}`;
+  return commentsStore[key] && commentsStore[key].length > 0;
+}
+
+// Delete comment from specific cell
+function deleteComment(orderId, columnName, commentId) {
+  const key = `${orderId}__${columnName}`;
+  
+  if (commentsStore[key]) {
+    commentsStore[key] = commentsStore[key].filter(c => c.id !== commentId);
+    
+    if (commentsStore[key].length === 0) {
+      delete commentsStore[key];
+    }
+  }
+  
+  saveToStorage(commentsStore);
+  triggerRerender();
+}
+```
+
+---
+
+### FIX 2: TRIANGLE RENDERS ON THE SPECIFIC CELL ONLY
+
+Each cell independently checks if IT has comments, not if the row has comments:
+
+```jsx
+function TableCell({ orderId, columnName, children }) {
+  // Check THIS specific cell — not the row
+  const hasComments = cellHasComments(orderId, columnName);
+  
+  return (
+    <td 
+      style={{ position: 'relative', overflow: 'visible' }}
+      onContextMenu={(e) => handleRightClick(e, orderId, columnName)}
+    >
+      {/* Triangle ONLY on THIS cell if THIS cell has comments */}
+      {hasComments && (
+        <div 
+          className="cell-comment-indicator"
+          onClick={(e) => {
+            e.stopPropagation();
+            openCommentPopover(e, orderId, columnName);
+          }}
+        />
+      )}
+      
+      {children}
+    </td>
+  );
+}
+```
+
+**Critical:** The `columnName` passed to each cell MUST be unique per column. Verify that each cell component passes the correct column identifier:
+
+```jsx
+// Each cell must pass its own unique column name
+<TableCell orderId={order.id} columnName="material_code_fg">
+  {order.material_code_fg}
+</TableCell>
+
+<TableCell orderId={order.id} columnName="item_description">
+  {order.item_description}
+</TableCell>
+
+<TableCell orderId={order.id} columnName="volume">
+  {order.volume}
+</TableCell>
+
+<TableCell orderId={order.id} columnName="avail_date">
+  {order.avail_date}
+</TableCell>
+
+// NOT like this — all cells using the same columnName or no columnName
+<TableCell orderId={order.id}>  ← WRONG, no columnName
+  {order.material_code_fg}
+</TableCell>
+```
+
+---
+
+### FIX 3: COMMENT POPOVER — SHOW ONLY THAT CELL'S COMMENTS
+
+When opening the comment popover, pass BOTH orderId and columnName:
+
+```javascript
+function openCommentPopover(event, orderId, columnName) {
+  // Get comments for THIS SPECIFIC CELL only
+  const cellComments = getCommentsForCell(orderId, columnName);
+  
+  setPopoverState({
+    visible: true,
+    x: event.clientX,
+    y: event.clientY,
+    orderId: orderId,
+    columnName: columnName,  // MUST be included
+    comments: cellComments
+  });
+}
+```
+
+The popover MUST use both orderId AND columnName when:
+- Displaying comments → `getCommentsForCell(orderId, columnName)`
+- Posting new comment → `postComment(orderId, columnName, text)`
+- Editing comment → `editComment(orderId, columnName, commentId, newText)`
+- Deleting comment → `deleteComment(orderId, columnName, commentId)`
+
+---
+
+### FIX 4: COMMENT POPOVER HEADER — SHOW COLUMN NAME
+
+The popover header should indicate which cell the comment belongs to:
+
+```
+┌──────────────────────────────────────────────┐
+│ 💬 Comment on Material Code (FG)         ✕   │
+├──────────────────────────────────────────────┤
+│                                              │
+│ Hello                                        │
+│ Planner · Mar 26, 9:23 AM          ✏️ 🗑    │
+│                                              │
+│ ┌──────────────────────────────────────────┐ │
+│ │ Add a comment...                         │ │
+│ └──────────────────────────────────────────┘ │
+│                                         ➤    │
+└──────────────────────────────────────────────┘
+```
+
+The header says "Comment on [Column Name]" — e.g., "Comment on Material Code (FG)", "Comment on Volume (MT)", "Comment on Avail Date".
+
+### COLUMN NAME DISPLAY MAP
+
+| Column Key | Display Name |
+|---|---|
+| prio | Prio |
+| fpr | FPR |
+| planned_order_fg | Planned Order FG |
+| planned_order_sfg | Planned Order SFG |
+| planned_order_pmx | Planned Order PMX |
+| production_order_fg1 | Production Order FG1 |
+| production_order_sfg1 | Production Order SFG1 |
+| production_order_sfgpmx | Production Order SFGPMX |
+| material_code_sfg | Material Code (SFG) |
+| material_code_fg | Material Code (FG) |
+| item_description | Item Description |
+| form | Form |
+| volume | Volume (MT) |
+| batch_size | Batch Size |
+| batches | Batches |
+| bags | Bags |
+| production_time | Production Time |
+| ha_info | HA Info |
+| ha_prep | HA Prep |
+| status | Status |
+| start_date | Start Date |
+| start_time | Start Time |
+| avail_date | Avail Date |
+| completion_date | Completion Date |
+| fpr_notes | FPR Notes |
+| special_remarks | Special Remarks |
+| threads | Threads |
+| sacks | Sacks |
+| markings | Markings |
+| tags | Tags |
+| end_date | End Date |
+| history | History |
+
+---
+
+### FIX 5: RIGHT-CLICK — PASS COLUMN NAME
+
+The right-click handler must capture which specific cell was clicked:
+
+```jsx
+<td 
+  onContextMenu={(e) => {
+    e.preventDefault();
+    handleRightClick(e, orderId, 'material_code_fg'); // specific column
+  }}
+>
+```
+
+And the context menu must pass columnName to "Leave a comment":
+
+```jsx
+<div 
+  className="context-menu-item"
+  onClick={() => openCommentPopover(menuPosition, orderId, columnName)}
+>
+  💬 Leave a comment
+</div>
+```
+
+---
+
+### VERIFICATION AFTER FIX
+
+**Test 1: Comment on Material Code cell**
+1. Right-click Material Code (FG) cell → Leave a comment
+2. Type "Hello" → Post
+3. ✅ Triangle appears on Material Code (FG) cell ONLY
+4. ✅ No triangle on any other cell in the same row
+
+**Test 2: Comment on a different cell in the same row**
+1. Right-click Volume (MT) cell → Leave a comment
+2. Type "Volume adjusted" → Post
+3. ✅ Triangle appears on Volume (MT) cell
+4. ✅ Triangle still on Material Code (FG) cell
+5. ✅ Opening Volume comment shows "Volume adjusted" ONLY
+6. ✅ Opening Material Code comment shows "Hello" ONLY
+7. ❌ They do NOT show each other's comments
+
+**Test 3: Comment on same column, different row**
+1. Right-click Volume (MT) on Row 1 → Leave comment "Row 1 note"
+2. Right-click Volume (MT) on Row 2 → Leave comment "Row 2 note"
+3. ✅ Row 1 Volume shows "Row 1 note" only
+4. ✅ Row 2 Volume shows "Row 2 note" only
+5. ❌ They do NOT share comments
+
+**Test 4: Delete last comment**
+1. Delete the only comment on Material Code cell
+2. ✅ Triangle disappears from that cell
+3. ✅ Triangle still present on Volume cell (which still has its comment)
+```

@@ -1,0 +1,308 @@
+The daily date columns are completely missing AND all values show 0.0. The parser is not detecting or reading the date columns from the uploaded file at all. That's why:
+
+1. No date columns displayed (Mar-18 through Mar-28 are gone)
+2. Due for Loading = 0.0 for all products
+3. Inventory = 0.0 for all products
+4. All statuses = "Stock Sufficient" (because 0.0 >= 0.0)
+
+The parser is likely only reading the fixed/known column headers and ignoring everything else.
+
+```
+Implement the following critical fix to the NexFeed application:
+
+---
+
+## CRITICAL FIX: NEXT 10 DAYS FILE PARSER — READ ALL COLUMNS INCLUDING DATES
+
+The Next 10 Days file parser is NOT reading the daily date columns or the numeric values correctly. All values show 0.0 and no date columns are displayed. The parser must be completely rewritten to handle the file structure properly.
+
+---
+
+### THE PROBLEM
+
+The uploaded Excel file has this structure:
+```
+Material Code | Category | Item Description | Due for loading | Mar-18 | Mar-19 | Mar-20 | Mar-21 | Mar-22 | Mar-23 | Mar-24 | Mar-25 | Mar-26 | Mar-27 | Mar-28 | Inventory | Bal. to produce
+```
+
+But the parser is only reading:
+```
+Material Code | Category | Item Description | Due for loading (0.0) | Inventory (0.0) | Bal. to produce (0.0)
+```
+
+The date columns (Mar-18 through Mar-28) are being skipped entirely, and the numeric values for Due for Loading, Inventory, and Bal. to Produce are all reading as 0.0.
+
+---
+
+### THE FIX — COMPLETE PARSER REWRITE
+
+**Step 1: Read ALL column headers from the Excel file**
+
+```javascript
+function parseNext10DaysFile(workbook) {
+  const sheet = workbook.Sheets[workbook.SheetNames[0]];
+  const rawData = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+  
+  // First row = headers
+  const headers = rawData[0];
+  
+  console.log('ALL HEADERS:', headers); // DEBUG — log every header
+  console.log('HEADER COUNT:', headers.length); // DEBUG
+  
+  // Identify fixed columns by name (case-insensitive)
+  const fixedColumnMap = {};
+  const dateColumns = [];
+  
+  headers.forEach((header, index) => {
+    const headerStr = String(header).trim();
+    const headerLower = headerStr.toLowerCase();
+    
+    // Match known fixed columns
+    if (headerLower.includes('material') && headerLower.includes('code')) {
+      fixedColumnMap.material_code = index;
+    } else if (headerLower === 'category') {
+      fixedColumnMap.category = index;
+    } else if (headerLower.includes('item') && headerLower.includes('description')) {
+      fixedColumnMap.item_description = index;
+    } else if (headerLower.includes('due') && headerLower.includes('loading')) {
+      fixedColumnMap.due_for_loading = index;
+    } else if (headerLower === 'inventory') {
+      fixedColumnMap.inventory = index;
+    } else if (headerLower.includes('bal') && headerLower.includes('produce')) {
+      fixedColumnMap.bal_to_produce = index;
+    } else {
+      // Try to parse as a date
+      const parsedDate = tryParseExcelDateHeader(headerStr, header);
+      if (parsedDate) {
+        dateColumns.push({
+          index: index,
+          originalHeader: headerStr,
+          parsedDate: parsedDate
+        });
+      } else {
+        console.log('UNRECOGNIZED HEADER:', headerStr, 'at index', index);
+      }
+    }
+  });
+  
+  console.log('FIXED COLUMNS:', fixedColumnMap); // DEBUG
+  console.log('DATE COLUMNS:', dateColumns); // DEBUG
+  console.log('DATE COLUMN COUNT:', dateColumns.length); // DEBUG
+  
+  // Sort date columns chronologically
+  dateColumns.sort((a, b) => a.parsedDate - b.parsedDate);
+  
+  // Step 2: Parse data rows
+  const products = [];
+  
+  for (let i = 1; i < rawData.length; i++) {
+    const row = rawData[i];
+    
+    // Skip empty rows
+    if (!row || !row[fixedColumnMap.material_code]) continue;
+    
+    // Read fixed columns
+    const materialCode = String(row[fixedColumnMap.material_code] || '').trim();
+    const category = String(row[fixedColumnMap.category] || '').trim();
+    const itemDescription = String(row[fixedColumnMap.item_description] || '').trim();
+    const dueForLoading = parseFloat(row[fixedColumnMap.due_for_loading]) || 0;
+    const inventory = parseFloat(row[fixedColumnMap.inventory]) || 0;
+    const balToProduce = parseFloat(row[fixedColumnMap.bal_to_produce]) || null;
+    
+    // Read date columns
+    const dailyValues = dateColumns.map(dc => ({
+      date: dc.parsedDate,
+      dateHeader: dc.originalHeader,
+      value: parseFloat(row[dc.index]) || 0
+    }));
+    
+    console.log('ROW:', materialCode, itemDescription);
+    console.log('  Due:', dueForLoading, 'Inventory:', inventory);
+    console.log('  Daily values:', dailyValues.map(d => d.dateHeader + ':' + d.value));
+    
+    products.push({
+      material_code: materialCode,
+      category: category,
+      item_description: itemDescription,
+      due_for_loading: dueForLoading,
+      inventory: inventory,
+      bal_to_produce: balToProduce,
+      daily_values: dailyValues
+    });
+  }
+  
+  return { products, dateColumns };
+}
+```
+
+---
+
+### DATE HEADER PARSING FUNCTION
+
+The date headers in the Excel file can come in various formats. Handle all common ones:
+
+```javascript
+function tryParseExcelDateHeader(headerStr, rawValue) {
+  
+  // If the raw value is a number, it might be an Excel date serial
+  if (typeof rawValue === 'number') {
+    // Excel date serial: days since 1900-01-01 (with the 1900 bug)
+    const excelEpoch = new Date(1899, 11, 30); // Dec 30, 1899
+    const date = new Date(excelEpoch.getTime() + rawValue * 86400000);
+    if (!isNaN(date.getTime())) {
+      return date;
+    }
+  }
+  
+  // Try common string formats
+  const str = String(headerStr).trim();
+  
+  // Format: "Mar-18", "Feb-26", "Jan-05"
+  const monthDayMatch = str.match(/^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)-(\d{1,2})$/i);
+  if (monthDayMatch) {
+    const monthNames = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
+    const month = monthNames.indexOf(monthDayMatch[1].toLowerCase());
+    const day = parseInt(monthDayMatch[2]);
+    // Assume current year or next year
+    const year = new Date().getFullYear();
+    const date = new Date(year, month, day);
+    return date;
+  }
+  
+  // Format: "26-Feb", "1-Mar"
+  const dayMonthMatch = str.match(/^(\d{1,2})-(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)$/i);
+  if (dayMonthMatch) {
+    const monthNames = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
+    const day = parseInt(dayMonthMatch[1]);
+    const month = monthNames.indexOf(dayMonthMatch[2].toLowerCase());
+    const year = new Date().getFullYear();
+    const date = new Date(year, month, day);
+    return date;
+  }
+  
+  // Format: "3/18", "3/19", "12/25"
+  const slashMatch = str.match(/^(\d{1,2})\/(\d{1,2})$/);
+  if (slashMatch) {
+    const month = parseInt(slashMatch[1]) - 1;
+    const day = parseInt(slashMatch[2]);
+    const year = new Date().getFullYear();
+    const date = new Date(year, month, day);
+    return date;
+  }
+  
+  // Format: "3/18/2026", "03/18/2026"
+  const fullSlashMatch = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (fullSlashMatch) {
+    const month = parseInt(fullSlashMatch[1]) - 1;
+    const day = parseInt(fullSlashMatch[2]);
+    const year = parseInt(fullSlashMatch[3]);
+    const date = new Date(year, month, day);
+    return date;
+  }
+  
+  // Format: "2026-03-18" (ISO)
+  const isoMatch = str.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (isoMatch) {
+    return new Date(parseInt(isoMatch[1]), parseInt(isoMatch[2]) - 1, parseInt(isoMatch[3]));
+  }
+  
+  // Try native Date.parse as last resort
+  const nativeParsed = new Date(str);
+  if (!isNaN(nativeParsed.getTime())) {
+    return nativeParsed;
+  }
+  
+  // Also try: the raw Excel value might be a Date object already
+  if (rawValue instanceof Date) {
+    return rawValue;
+  }
+  
+  return null; // Not a date
+}
+```
+
+---
+
+### IMPORTANT: EXCEL DATE SERIAL NUMBERS
+
+When Excel files are read with XLSX library, date-formatted column headers might come through as:
+
+1. **String:** "Mar-18" — parse as string format ✅
+2. **Number:** 46093 — this is an Excel date serial number. Must convert to a JS Date.
+3. **Date object:** Already parsed by XLSX library.
+
+**The parser MUST handle all three cases.**
+
+If using the XLSX library with `{ header: 1 }` option, headers might be raw values. Try also using `{ raw: false }` or `{ cellDates: true }` to get formatted strings:
+
+```javascript
+// Option A: Read with cellDates
+const rawData = XLSX.utils.sheet_to_json(sheet, { 
+  header: 1, 
+  cellDates: true,  // Convert Excel dates to JS Date objects
+  raw: false         // Get formatted strings instead of raw values
+});
+
+// Option B: If headers are serial numbers, convert them
+headers.forEach((header, index) => {
+  if (typeof header === 'number' && header > 40000 && header < 60000) {
+    // Likely an Excel date serial
+    const date = XLSX.SSF.parse_date_code(header);
+    // date = { y, m, d, H, M, S }
+    const jsDate = new Date(date.y, date.m - 1, date.d);
+    // Use jsDate
+  }
+});
+```
+
+---
+
+### PREVIEW TABLE — DISPLAY ALL COLUMNS
+
+After parsing, the preview table must show ALL columns:
+
+```
+Material Code | Category | Item Description | Due for Loading | 
+[Date Col 1] | [Date Col 2] | ... | [Date Col N] | 
+Inventory | Bal. to Produce | Target Date | Status
+```
+
+**Date column headers:**
+- Display the original header text from the file (e.g., "Mar-18", "Mar-19").
+- If the header was an Excel serial number, format it as "MMM-DD" (e.g., "Mar-18").
+
+**Cell values:**
+- Numeric values displayed with 1 decimal place.
+- Empty/zero cells: display as blank (empty cell), NOT "0.0".
+- Red highlighting: apply cumulative logic as previously defined.
+
+---
+
+### VERIFICATION AFTER FIX
+
+After implementing, verify:
+
+1. **Console logs show all headers including dates:**
+   ```
+   ALL HEADERS: ["Material Code", "Category", "Item Description", 
+   "Due for loading", "Mar-18", "Mar-19", ..., "Mar-28", "Inventory", "Bal. to produce"]
+   DATE COLUMN COUNT: 11
+   ```
+
+2. **Console logs show actual values per row:**
+   ```
+   ROW: 1000000000039 Gallimax 2 Plus Ready Mix (Natural) 50kg
+     Due: 455.3 Inventory: 759.3
+     Daily values: Mar-18:10, Mar-19:29, Mar-20:51.7, ...
+   ```
+
+3. **Preview table shows date columns with values**
+
+4. **Target dates are calculated correctly:**
+   - Gallimax 3 Maintenance → Target: Mar 19
+   - Gallimax 2 Plus Ready Mix → Target: Mar 23
+
+5. **Products with Due >= Inventory → Stock Sufficient**
+   - Salto Baby Stag (25.2 >= 23.4) → Stock Sufficient
+   - Gall 21 Chicken Layer (24.0 >= 0.7) → Stock Sufficient
+```

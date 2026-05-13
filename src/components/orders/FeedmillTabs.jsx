@@ -19,7 +19,7 @@ export default function FeedmillTabs({ activeTab, onTabChange }) {
           className={cn(
             "px-4 py-1.5 rounded-lg text-sm font-medium transition-all",
             activeTab === tab.id
-              ? "bg-[#fd5108] text-white"
+              ? "bg-[var(--nexfeed-primary)] text-white"
               : "text-[#2e343a] hover:bg-[#fff5ed]"
           )}
         >

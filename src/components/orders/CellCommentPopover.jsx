@@ -128,7 +128,7 @@ export default function CellCommentPopover({
         top,
         zIndex: 10001,
         width: popW,
-        background: "#fff",
+        background: "var(--color-bg-secondary)",
         border: "1px solid #e5e7eb",
         borderRadius: 10,
         boxShadow: "0 12px 36px rgba(0,0,0,0.14)",
@@ -228,7 +228,7 @@ export default function CellCommentPopover({
               style={{
                 marginBottom: 10,
                 padding: "8px 10px",
-                background: "#f9fafb",
+                background: "var(--color-bg-tertiary)",
                 borderRadius: 6,
                 border: "1px solid #e5e7eb",
               }}
@@ -399,7 +399,7 @@ export default function CellCommentPopover({
           onClick={addComment}
           disabled={!text.trim() || saving}
           style={{
-            background: text.trim() ? "#fd5108" : "#e5e7eb",
+            background: text.trim() ? 'var(--nexfeed-primary)' : '#e5e7eb',
             border: "none",
             borderRadius: 6,
             padding: "0 10px",

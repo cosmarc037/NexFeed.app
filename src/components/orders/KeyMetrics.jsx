@@ -14,7 +14,7 @@ function addBusinessDays(date, days) {
   return d;
 }
 
-export default function KeyMetrics({ orders }) {
+export default function KeyMetrics({ orders, inferredTargetMap = {} }) {
   const totalOrders = orders.length;
 
   // Active = not completed and not cancelled
@@ -43,13 +43,23 @@ export default function KeyMetrics({ orders }) {
 
   // Urgent = avail date within next 2 business days, not completed
   const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const twoBizDaysLater = addBusinessDays(now, 2);
+  const NON_DATE_VALUES = ["prio replenish", "safety stocks", "safety stock", "stock sufficient", "for sched", "stock_sufficient"];
   const urgentOrders = orders.filter(order => {
     if (['completed', 'cancel_po'].includes(order.status)) return false;
-    if (!order.target_avail_date) return false;
+    // Safety stock Critical or Urgent always counts as urgent
+    const inf = inferredTargetMap[order.material_code] || inferredTargetMap[order.material_code_fg];
+    if (inf?.status === 'Critical' || inf?.status === 'Urgent') return true;
+    const raw = order.target_avail_date;
+    if (!raw) return false;
+    if (NON_DATE_VALUES.includes(String(raw).toLowerCase().trim())) return false;
     try {
-      const targetDate = new Date(order.target_avail_date);
-      return !isNaN(targetDate.getTime()) && targetDate >= now && targetDate <= twoBizDaysLater;
+      // Parse date-only strings (YYYY-MM-DD) as local midnight to avoid UTC-offset mismatches
+      const targetDate = /^\d{4}-\d{2}-\d{2}$/.test(raw)
+        ? new Date(raw + 'T00:00:00')
+        : new Date(raw);
+      return !isNaN(targetDate.getTime()) && targetDate >= startOfToday && targetDate <= twoBizDaysLater;
     } catch { return false; }
   }).length;
 

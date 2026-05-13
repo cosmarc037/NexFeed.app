@@ -107,7 +107,7 @@ export default function MinVolumeCheckDialog({ isOpen, onClose, order, eligibleS
                     <div
                       key={src.id}
                       onClick={() => handleSelectSource(src)}
-                      className={`p-3 rounded-lg border cursor-pointer transition-all ${selectedSource?.id === src.id ? 'border-[#fd5108] bg-orange-50' : 'border-gray-200 hover:border-gray-300'}`}
+                      className={`p-3 rounded-lg border cursor-pointer transition-all ${selectedSource?.id === src.id ? 'border-[var(--nexfeed-primary)] bg-orange-50' : 'border-gray-200 hover:border-gray-300'}`}
                     >
                       <div className="flex items-center gap-2 mb-0.5">
                         <span className={`text-[11px] font-semibold px-1.5 py-0.5 rounded ${tagColor}`}>{srcTag}</span>
@@ -144,7 +144,7 @@ export default function MinVolumeCheckDialog({ isOpen, onClose, order, eligibleS
               <Button
                 onClick={handleSplitMerge}
                 disabled={!selectedSource || !splitAmount || parseFloat(splitAmount) <= 0 || parseFloat(splitAmount) > (selectedSource?.total_volume_mt || 0)}
-                className="bg-[#fd5108] hover:bg-[#fe7c39] text-[14px] font-semibold h-10 px-5"
+                className="bg-[var(--nexfeed-primary)] hover:bg-[var(--nexfeed-primary-dark)] text-[14px] font-semibold h-10 px-5"
               >
                 Split & Merge, then Produce
               </Button>

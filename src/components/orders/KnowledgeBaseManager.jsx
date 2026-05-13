@@ -29,7 +29,25 @@ const REQUIRED_FIELDS_KB = [
 const BATCH_FIELDS_KB     = ["batch_size_fm1","batch_size_fm2","batch_size_fm3","batch_size_pmx"];
 const RUN_RATE_FIELDS_KB  = ["line_1_run_rate","line_2_run_rate","line_3_run_rate","line_4_run_rate","line_5_run_rate","line_6_run_rate","line_7_run_rate"];
 const VALID_FORMS_KB      = ["P","MP","MP-CS","M","MX","C-S","C-M","C-L"];
-const NUMERIC_COLS_KB     = new Set([...BATCH_FIELDS_KB, ...RUN_RATE_FIELDS_KB, "finished_goods_weight", "diameter", "undetermined_value"]);
+const NUMERIC_COLS_KB     = new Set([...BATCH_FIELDS_KB, ...RUN_RATE_FIELDS_KB, "finished_goods_weight", "diameter", "changeover", "undetermined_value", "pricing_php", "margin"]);
+
+// Parse pricing — strips commas, currency symbols ("₱", "Php", whitespace)
+function parsePricingKB(v) {
+  if (v == null || v === "") return null;
+  const cleaned = String(v).replace(/,/g, "").replace(/₱/g, "").replace(/Php/gi, "").trim();
+  const n = parseFloat(cleaned);
+  return isNaN(n) ? null : n;
+}
+// Parse margin — strips percent signs.
+// Excel %-formatted cells store the decimal internally (e.g. 16.7% → 0.167),
+// so any value in (0, 1) is assumed to be a fraction and multiplied by 100.
+function parseMarginKB(v) {
+  if (v == null || v === "") return null;
+  const cleaned = String(v).replace(/%/g, "").trim();
+  const n = parseFloat(cleaned);
+  if (isNaN(n)) return null;
+  return (n > 0 && n < 1) ? Math.round(n * 10000) / 100 : n;
+}
 const REQUIRED_KEYS_KB    = new Set(REQUIRED_FIELDS_KB.map(f => f.key));
 
 function formatUploadDate(dateStr) {
@@ -64,20 +82,25 @@ const formatRowForSave = (r) => {
     fg_item_description:   toStr(r.fg_item_description),
     sfg1_material_code:    toStr(r.sfg1_material_code),
     sfg_item_description:  toStr(r.sfg_item_description),
-    diameter:              toNum(r.diameter),
+    category:              toStr(r.category),
+    color:                 toStr(r.color),
+    pricing_php:           toNum(r.pricing_php),
+    margin:                toNum(r.margin),
     form:                  toStr(r.form),
+    diameter:              toNum(r.diameter),
+    changeover:            toNum(r.changeover),
+    finished_goods_weight: toNum(r.finished_goods_weight),
     batch_size_fm1:        toNum(r.batch_size_fm1),
     batch_size_fm2:        toNum(r.batch_size_fm2),
     batch_size_fm3:        toNum(r.batch_size_fm3),
     batch_size_pmx:        toNum(r.batch_size_pmx),
-    finished_goods_weight: toNum(r.finished_goods_weight),
+    label_1:               toStr(r.label_1),
+    label_2:               toStr(r.label_2),
     thread:                toStr(r.thread),
     sacks_material_code:   toStr(r.sacks_material_code),
     sacks_item_description:toStr(r.sacks_item_description),
     tags_material_code:    toStr(r.tags_material_code),
     tags_item_description: toStr(r.tags_item_description),
-    label_1:               toStr(r.label_1),
-    label_2:               toStr(r.label_2),
     line_1_run_rate:       toNum(r.line_1_run_rate),
     line_2_run_rate:       toNum(r.line_2_run_rate),
     line_3_run_rate:       toNum(r.line_3_run_rate),
@@ -92,12 +115,14 @@ function getFieldLabel_kb(field) {
   const L = {
     fg_material_code:"FG Material Code", fg_item_description:"FG Item Description",
     sfg1_material_code:"SFG1 Material Code", sfg_item_description:"SFG Item Description",
-    form:"Form", batch_size_fm1:"Batch FM1", batch_size_fm2:"Batch FM2",
+    category:"Category", color:"Color",
+    pricing_php:"Cost (₱)", margin:"Margin (%)",
+    form:"Form", diameter:"Diameter", changeover:"Changeover", finished_goods_weight:"FG Weight",
+    batch_size_fm1:"Batch FM1", batch_size_fm2:"Batch FM2",
     batch_size_fm3:"Batch FM3", batch_size_pmx:"Batch PMX",
-    finished_goods_weight:"FG Weight", thread:"Thread",
-    sacks_material_code:"Sacks Code", sacks_item_description:"Sacks Desc",
-    tags_material_code:"Tags Code", tags_item_description:"Tags Desc",
     label_1:"Label 1", label_2:"Label 2",
+    thread:"Thread", sacks_material_code:"Sacks Code", sacks_item_description:"Sacks Desc",
+    tags_material_code:"Tags Code", tags_item_description:"Tags Desc",
     line_1_run_rate:"Run Rate L1", line_2_run_rate:"Run Rate L2",
     line_3_run_rate:"Run Rate L3", line_4_run_rate:"Run Rate L4",
     line_5_run_rate:"Run Rate L5", line_6_run_rate:"Run Rate L6",
@@ -244,7 +269,7 @@ function RevertDialog({ entry, onConfirm, onCancel, isSaving }) {
           <button
             onClick={onCancel}
             disabled={isSaving}
-            style={{ background:"#fff", color:"#374151", border:"1px solid #d1d5db", borderRadius:6, padding:"8px 20px", fontSize:13, cursor: isSaving ? "not-allowed" : "pointer", opacity: isSaving ? 0.5 : 1 }}
+            style={{ background:"var(--color-bg-secondary)", color:"#374151", border:"1px solid #d1d5db", borderRadius:6, padding:"8px 20px", fontSize:13, cursor: isSaving ? "not-allowed" : "pointer", opacity: isSaving ? 0.5 : 1 }}
           >
             Cancel
           </button>
@@ -252,7 +277,7 @@ function RevertDialog({ entry, onConfirm, onCancel, isSaving }) {
           <button
             onClick={() => ok && !isSaving && onConfirm()}
             disabled={!ok || isSaving}
-            style={{ background: (ok && !isSaving) ? "#fd5108" : "#d1d5db", color:"#fff", border:"none", borderRadius:6, padding:"8px 20px", fontSize:13, fontWeight:600, cursor: (ok && !isSaving) ? "pointer" : "not-allowed", display:"inline-flex", alignItems:"center", gap:6 }}
+            style={{ background: (ok && !isSaving) ? "var(--nexfeed-primary)" : "#d1d5db", color:"#fff", border:"none", borderRadius:6, padding:"8px 20px", fontSize:13, fontWeight:600, cursor: (ok && !isSaving) ? "pointer" : "not-allowed", display:"inline-flex", alignItems:"center", gap:6 }}
           >
             {isSaving && <Spinner size={12} color="#fff" />}
             {isSaving ? "Reverting…" : "Revert"}
@@ -290,6 +315,7 @@ export default function KnowledgeBaseManager({ orders, onReapply }) {
   const [kbContextMenu,     setKbContextMenu]      = useState(null);
   const [discardConfirmOpen,setDiscardConfirmOpen] = useState(false);
   const [isSaving,          setIsSaving]           = useState(false);
+  const [editSearchTerm,    setEditSearchTerm]      = useState("");
   const [editHistory,       setEditHistory]        = useState(() => {
     try { const s = localStorage.getItem("nexfeed_kb_history"); return s ? JSON.parse(s) : []; }
     catch { return []; }
@@ -304,7 +330,6 @@ export default function KnowledgeBaseManager({ orders, onReapply }) {
     try { const s = localStorage.getItem("nexfeed_kb_upload_snapshots"); return s ? JSON.parse(s) : {}; }
     catch { return {}; }
   });
-
   /* queries */
   const { data: kbRecords = [] } = useQuery({
     queryKey: ["kb"],
@@ -356,7 +381,11 @@ export default function KnowledgeBaseManager({ orders, onReapply }) {
     return code !== '' && duplicateMaterialCodes.has(code);
   }
 
-  /* ── Edited-cell highlighting: baseline = the stored upload snapshot for the active session ── */
+  /* ── Edited-cell highlighting ─────────────────────────────────────────────────
+     Primary baseline: stored upload snapshot (persists across sessions / Azure).
+     Fallback baseline: originalData captured when edit mode was opened.
+     This ensures yellow highlights work even when no stored snapshot exists
+     (e.g. uploads created before the snapshot_json column was added). */
   const baselineByCode = useMemo(() => {
     const snap = uploadSnapshots[activeUpload?.upload_session_id];
     if (!snap?.length) return null;
@@ -364,6 +393,13 @@ export default function KnowledgeBaseManager({ orders, onReapply }) {
     snap.forEach(r => { if (r.fg_material_code) map[r.fg_material_code] = r; });
     return map;
   }, [uploadSnapshots, activeUpload?.upload_session_id]);
+
+  const baselineFromOriginalData = useMemo(() => {
+    if (!originalData?.length) return null;
+    const map = {};
+    originalData.forEach(r => { if (r.fg_material_code) map[r.fg_material_code] = r; });
+    return map;
+  }, [originalData]);
 
   /* Normalize values before comparison — prevents false highlights from:
      - null / undefined vs ""   → all collapse to ''
@@ -386,15 +422,17 @@ export default function KnowledgeBaseManager({ orders, onReapply }) {
   }
 
   function isCellEdited(row, field) {
-    if (!baselineByCode) return false;
-    const base = baselineByCode[row.fg_material_code];
+    const baseline = baselineByCode ?? baselineFromOriginalData;
+    if (!baseline) return false;
+    const base = baseline[row.fg_material_code];
     if (!base) return true; // new row — all data cells considered edited
     return normalizeVal(row[field]) !== normalizeVal(base[field]);
   }
 
   function getOriginalValue(row, field) {
-    if (!baselineByCode) return '';
-    const base = baselineByCode[row.fg_material_code];
+    const baseline = baselineByCode ?? baselineFromOriginalData;
+    if (!baseline) return '';
+    const base = baseline[row.fg_material_code];
     if (!base) return '(new row)';
     return normalizeVal(base[field]);
   }
@@ -410,6 +448,31 @@ export default function KnowledgeBaseManager({ orders, onReapply }) {
     try { localStorage.setItem("nexfeed_kb_upload_snapshots", JSON.stringify(uploadSnapshots)); }
     catch (e) { console.warn("Failed to save upload snapshots:", e); }
   }, [uploadSnapshots]);
+
+  /* ── DB-backed snapshot hydration ────────────────────────────────────────────
+     If uploadSnapshots is missing the active session (e.g. localStorage was
+     cleared, quota exceeded, or the app is running on a new domain/Azure),
+     restore it from the snapshot_json column stored in the upload record.
+     This ensures yellow-highlight baseline and revert data survive across
+     environments and deployments. */
+  useEffect(() => {
+    if (!activeUpload?.upload_session_id || !activeUpload?.snapshot_json) return;
+    const sid = activeUpload.upload_session_id;
+    setUploadSnapshots(prev => {
+      if (prev[sid]?.length) return prev; // already hydrated — no-op
+      try {
+        const snap = typeof activeUpload.snapshot_json === 'string'
+          ? JSON.parse(activeUpload.snapshot_json)
+          : activeUpload.snapshot_json;
+        if (Array.isArray(snap) && snap.length > 0) {
+          return { ...prev, [sid]: snap };
+        }
+      } catch (e) {
+        console.warn("Failed to parse snapshot_json from DB:", e);
+      }
+      return prev;
+    });
+  }, [activeUpload?.upload_session_id, activeUpload?.snapshot_json]);
 
   /* unified history: file uploads (from DB) + manual edits/reverts (from localStorage) */
   const uploadEntries = uploads.map(u => ({
@@ -448,6 +511,10 @@ export default function KnowledgeBaseManager({ orders, onReapply }) {
     };
   }, [kbContextMenu]);
 
+  useEffect(() => {
+    if (!isEditMode) setEditSearchTerm("");
+  }, [isEditMode]);
+
   /* ── Edit-mode handlers ─────────────────────────────────────────────── */
 
   const handleToggleEditMode = () => {
@@ -474,6 +541,7 @@ export default function KnowledgeBaseManager({ orders, onReapply }) {
       fg_material_code:"", fg_item_description:"",
       sfg1_material_code:"", sfg_item_description:"",
       diameter:"", form:"",
+      pricing_php:"", margin:"",
       batch_size_fm1:"", batch_size_fm2:"", batch_size_fm3:"", batch_size_pmx:"",
       finished_goods_weight:"", thread:"",
       sacks_material_code:"", sacks_item_description:"",
@@ -678,12 +746,17 @@ export default function KnowledgeBaseManager({ orders, onReapply }) {
         const rows = snap.map(r => ({
           "FG Material Code": r.fg_material_code, "FG Item Description": r.fg_item_description,
           "SFG1 Material Code": r.sfg1_material_code, "SFG Item Description": r.sfg_item_description,
-          "Form": r.form, "Batch Size FM1": r.batch_size_fm1, "Batch Size FM2": r.batch_size_fm2,
+          "Category": r.category, "Color": r.color,
+          "Cost (Php)": r.pricing_php,
+          "Margin": r.margin != null ? `${r.margin}%` : "",
+          "Form": r.form, "Diameter": r.diameter, "Changeover": r.changeover,
+          "Finished Goods Weight": r.finished_goods_weight,
+          "Batch Size FM1": r.batch_size_fm1, "Batch Size FM2": r.batch_size_fm2,
           "Batch Size FM3": r.batch_size_fm3, "Batch Size PMX": r.batch_size_pmx,
-          "Finished Goods Weight": r.finished_goods_weight, "Thread": r.thread,
+          "Label 1": r.label_1, "Label 2": r.label_2,
+          "Thread": r.thread,
           "Sacks Material Code": r.sacks_material_code, "Sacks Item Description": r.sacks_item_description,
           "Tags Material Code": r.tags_material_code, "Tags Item Description": r.tags_item_description,
-          "Label 1": r.label_1, "Label 2": r.label_2,
           "Line 1 Run Rate": r.line_1_run_rate, "Line 2 Run Rate": r.line_2_run_rate,
           "Line 3 Run Rate": r.line_3_run_rate, "Line 4 Run Rate": r.line_4_run_rate,
           "Line 5 Run Rate": r.line_5_run_rate, "Line 6 Run Rate": r.line_6_run_rate,
@@ -705,12 +778,17 @@ export default function KnowledgeBaseManager({ orders, onReapply }) {
       const rows = entry.snapshot.map(r => ({
         "FG Material Code": r.fg_material_code, "FG Item Description": r.fg_item_description,
         "SFG1 Material Code": r.sfg1_material_code, "SFG Item Description": r.sfg_item_description,
-        "Form": r.form, "Batch Size FM1": r.batch_size_fm1, "Batch Size FM2": r.batch_size_fm2,
+        "Category": r.category, "Color": r.color,
+        "Cost (Php)": r.pricing_php,
+        "Margin": r.margin != null ? `${r.margin}%` : "",
+        "Form": r.form, "Diameter": r.diameter, "Changeover": r.changeover,
+        "Finished Goods Weight": r.finished_goods_weight,
+        "Batch Size FM1": r.batch_size_fm1, "Batch Size FM2": r.batch_size_fm2,
         "Batch Size FM3": r.batch_size_fm3, "Batch Size PMX": r.batch_size_pmx,
-        "Finished Goods Weight": r.finished_goods_weight, "Thread": r.thread,
+        "Label 1": r.label_1, "Label 2": r.label_2,
+        "Thread": r.thread,
         "Sacks Material Code": r.sacks_material_code, "Sacks Item Description": r.sacks_item_description,
         "Tags Material Code": r.tags_material_code, "Tags Item Description": r.tags_item_description,
-        "Label 1": r.label_1, "Label 2": r.label_2,
         "Line 1 Run Rate": r.line_1_run_rate, "Line 2 Run Rate": r.line_2_run_rate,
         "Line 3 Run Rate": r.line_3_run_rate, "Line 4 Run Rate": r.line_4_run_rate,
         "Line 5 Run Rate": r.line_5_run_rate, "Line 6 Run Rate": r.line_6_run_rate,
@@ -834,18 +912,31 @@ export default function KnowledgeBaseManager({ orders, onReapply }) {
       const KB_COLUMN_MAP = {
         "fg material code":"FG Material Code", "fg item description":"FG Item Description",
         "sfg1 material code":"SFG1 Material Code", "sfg item description":"SFG Item Description",
-        diamater:"Diamater", diameter:"Diamater", form:"Form",
-        "batch size fm1":"Batch Size FM1", "batch size fm2":"Batch Size FM2",
-        "batch size fm3":"Batch Size FM3", "batch size pmx":"Batch Size PMX",
-        "finished goods weight":"Finished Goods Weight", thread:"Thread",
-        "sacks material code":"Sacks Material Code", "sacks item description":"Sacks Item Description",
-        "tags material code":"Tags Material Code", "tags item description":"Tags Item Description",
+        category:"Category", color:"Color",
+        "cost (php)":"Cost (Php)", "cost php":"Cost (Php)", cost:"Cost (Php)",
+        "pricing (php)":"Cost (Php)", "pricing php":"Cost (Php)", pricing:"Cost (Php)",
+        "margin (%)":"Margin", margin:"Margin",
+        diamater:"Diamater", diameter:"Diameter", form:"Form",
+        changeover:"Changeover", "changeover time":"Changeover",
+        "batch size fm1":"Batch Size FM1", "batch fm1":"Batch Size FM1",
+        "batch size fm2":"Batch Size FM2", "batch fm2":"Batch Size FM2",
+        "batch size fm3":"Batch Size FM3", "batch fm3":"Batch Size FM3",
+        "batch size pmx":"Batch Size PMX", "batch pmx":"Batch Size PMX",
+        "finished goods weight":"Finished Goods Weight", "fg weight":"Finished Goods Weight",
+        thread:"Thread",
+        "sacks material code":"Sacks Material Code", "sacks code":"Sacks Material Code",
+        "sacks item description":"Sacks Item Description", "sacks desc":"Sacks Item Description",
+        "tags material code":"Tags Material Code", "tags code":"Tags Material Code",
+        "tags item description":"Tags Item Description", "tags desc":"Tags Item Description",
         "label 1":"Label 1", "label 2":"Label 2",
         "undetermined value":"Undetermined Value",
-        "line 1 run rate":"Line 1 Run Rate", "line 2 run rate":"Line 2 Run Rate",
-        "line 3 run rate":"Line 3 Run Rate", "line 4 run rate":"Line 4 Run Rate",
-        "line 5 run rate":"Line 5 Run Rate", "line 6 run rate":"Line 6 Run Rate",
-        "line 7 run rate":"Line 7 Run Rate",
+        "l1 rate":"Line 1 Run Rate", "line 1 run rate":"Line 1 Run Rate",
+        "l2 rate":"Line 2 Run Rate", "line 2 run rate":"Line 2 Run Rate",
+        "l3 rate":"Line 3 Run Rate", "line 3 run rate":"Line 3 Run Rate",
+        "l4 rate":"Line 4 Run Rate", "line 4 run rate":"Line 4 Run Rate",
+        "l5 rate":"Line 5 Run Rate", "line 5 run rate":"Line 5 Run Rate",
+        "l6 rate":"Line 6 Run Rate", "line 6 run rate":"Line 6 Run Rate",
+        "l7 rate":"Line 7 Run Rate", "line 7 run rate":"Line 7 Run Rate",
       };
 
       const colIndex = {};
@@ -869,20 +960,25 @@ export default function KnowledgeBaseManager({ orders, onReapply }) {
         fg_item_description:   r["FG Item Description"] || "",
         sfg1_material_code:    r["SFG1 Material Code"] ? String(r["SFG1 Material Code"]) : "",
         sfg_item_description:  r["SFG Item Description"] || "",
-        diameter:              toNum(r["Diamater"]),
+        category:              r["Category"] || "",
+        color:                 r["Color"] || "",
+        pricing_php:           parsePricingKB(r["Cost (Php)"] ?? r["Pricing (Php)"]),
+        margin:                parseMarginKB(r["Margin"]),
         form:                  r["Form"] || "",
+        diameter:              toNum(r["Diameter"] ?? r["Diamater"]),
+        changeover:            toNum(r["Changeover"]),
+        finished_goods_weight: toNum(r["Finished Goods Weight"]),
         batch_size_fm1:        toNum(r["Batch Size FM1"]),
         batch_size_fm2:        toNum(r["Batch Size FM2"]),
         batch_size_fm3:        toNum(r["Batch Size FM3"]),
         batch_size_pmx:        toNum(r["Batch Size PMX"]),
-        finished_goods_weight: toNum(r["Finished Goods Weight"]),
+        label_1:               r["Label 1"] || "",
+        label_2:               r["Label 2"] || "",
         thread:                r["Thread"] || "",
         sacks_material_code:   r["Sacks Material Code"] ? String(r["Sacks Material Code"]) : "",
         sacks_item_description:r["Sacks Item Description"] || "",
         tags_material_code:    r["Tags Material Code"] ? String(r["Tags Material Code"]) : "",
         tags_item_description: r["Tags Item Description"] || "",
-        label_1:               r["Label 1"] || "",
-        label_2:               r["Label 2"] || "",
         undetermined_value:    toNum(r["Undetermined Value"]),
         line_1_run_rate:       toNum(r["Line 1 Run Rate"]),
         line_2_run_rate:       toNum(r["Line 2 Run Rate"]),
@@ -895,12 +991,14 @@ export default function KnowledgeBaseManager({ orders, onReapply }) {
       }));
 
       await KnowledgeBase.bulkCreate(records);
-      await KnowledgeBaseUpload.create({ filename: file.name, file_url: "", upload_session_id: sessionId, record_count: records.length, is_active: true });
 
       /* Fix 1: store an independent deep-cloned snapshot of the uploaded data.
          This is keyed by sessionId and used for revert/delete-active operations.
-         We add _originalIndex here so stable row-position tracking works. */
+         We add _originalIndex here so stable row-position tracking works.
+         The snapshot is also persisted to the DB (snapshot_json column) so it
+         survives localStorage clears, domain changes, and Azure deployments. */
       const uploadSnap = records.map((r, idx) => ({ ...r, _originalIndex: idx }));
+      await KnowledgeBaseUpload.create({ filename: file.name, file_url: "", upload_session_id: sessionId, record_count: records.length, is_active: true, snapshot_json: JSON.stringify(uploadSnap) });
       setUploadSnapshots(prev => ({ ...prev, [sessionId]: deepClone(uploadSnap) }));
 
       setSavedViewData(null);
@@ -948,31 +1046,114 @@ export default function KnowledgeBaseManager({ orders, onReapply }) {
   /* ── Column definitions ─────────────────────────────────────────────── */
 
   const colHeaders = [
-    { key:"fg_material_code",    label:"FG Material Code",   w:150 },
-    { key:"fg_item_description", label:"FG Item Description",w:280 },
-    { key:"sfg1_material_code",  label:"SFG1 Material Code", w:150 },
-    { key:"sfg_item_description",label:"SFG Item Description",w:220 },
-    { key:"form",                label:"Form",               w:70  },
-    { key:"batch_size_fm1",      label:"Batch FM1",          w:90  },
-    { key:"batch_size_fm2",      label:"Batch FM2",          w:90  },
-    { key:"batch_size_fm3",      label:"Batch FM3",          w:90  },
-    { key:"batch_size_pmx",      label:"Batch PMX",          w:90  },
-    { key:"finished_goods_weight",label:"FG Weight",         w:90  },
-    { key:"thread",              label:"Thread",             w:80  },
-    { key:"sacks_material_code", label:"Sacks Code",         w:130 },
-    { key:"sacks_item_description",label:"Sacks Desc",       w:200 },
-    { key:"tags_material_code",  label:"Tags Code",          w:130 },
-    { key:"tags_item_description",label:"Tags Desc",         w:200 },
-    { key:"label_1",             label:"Label 1",            w:100 },
-    { key:"label_2",             label:"Label 2",            w:100 },
-    { key:"line_1_run_rate",     label:"L1 Rate",            w:90  },
-    { key:"line_2_run_rate",     label:"L2 Rate",            w:90  },
-    { key:"line_3_run_rate",     label:"L3 Rate",            w:90  },
-    { key:"line_4_run_rate",     label:"L4 Rate",            w:90  },
-    { key:"line_5_run_rate",     label:"L5 Rate",            w:90  },
-    { key:"line_6_run_rate",     label:"L6 Rate",            w:90  },
-    { key:"line_7_run_rate",     label:"L7 Rate",            w:90  },
+    // Product Details (6)
+    { key:"fg_material_code",      label:"FG Material Code",    w:150, group:"product"    },
+    { key:"fg_item_description",   label:"FG Item Description", w:280, group:"product"    },
+    { key:"sfg1_material_code",    label:"SFG1 Material Code",  w:150, group:"product"    },
+    { key:"sfg_item_description",  label:"SFG Item Description",w:220, group:"product"    },
+    { key:"category",              label:"Category",            w:100, group:"product"    },
+    { key:"color",                 label:"Color",               w:90,  group:"product",    groupEnd:true },
+    // Pricing (2)
+    { key:"pricing_php",           label:"Cost (₱)",            w:110, group:"pricing"    },
+    { key:"margin",                label:"Margin (%)",          w:90,  group:"pricing",    groupEnd:true },
+    // Production Parameters (4)
+    { key:"form",                  label:"Form",                w:70,  group:"production" },
+    { key:"diameter",              label:"Diameter",            w:90,  group:"production" },
+    { key:"changeover",            label:"Changeover",          w:100, group:"production" },
+    { key:"finished_goods_weight", label:"FG Weight",           w:90,  group:"production", groupEnd:true },
+    // Batch Sizes (4)
+    { key:"batch_size_fm1",        label:"Batch FM1",           w:90,  group:"batch"      },
+    { key:"batch_size_fm2",        label:"Batch FM2",           w:90,  group:"batch"      },
+    { key:"batch_size_fm3",        label:"Batch FM3",           w:90,  group:"batch"      },
+    { key:"batch_size_pmx",        label:"Batch PMX",           w:90,  group:"batch",      groupEnd:true },
+    // Labeling (2)
+    { key:"label_1",               label:"Label 1",             w:100, group:"labeling"   },
+    { key:"label_2",               label:"Label 2",             w:100, group:"labeling",   groupEnd:true },
+    // Packaging (5)
+    { key:"thread",                label:"Thread",              w:80,  group:"packaging"  },
+    { key:"sacks_material_code",   label:"Sacks Code",          w:130, group:"packaging"  },
+    { key:"sacks_item_description",label:"Sacks Desc",          w:200, group:"packaging"  },
+    { key:"tags_material_code",    label:"Tags Code",           w:130, group:"packaging"  },
+    { key:"tags_item_description", label:"Tags Desc",           w:200, group:"packaging",  groupEnd:true },
+    // Run Rates (7)
+    { key:"line_1_run_rate",       label:"L1 Rate",             w:90,  group:"rates"      },
+    { key:"line_2_run_rate",       label:"L2 Rate",             w:90,  group:"rates"      },
+    { key:"line_3_run_rate",       label:"L3 Rate",             w:90,  group:"rates"      },
+    { key:"line_4_run_rate",       label:"L4 Rate",             w:90,  group:"rates"      },
+    { key:"line_5_run_rate",       label:"L5 Rate",             w:90,  group:"rates"      },
+    { key:"line_6_run_rate",       label:"L6 Rate",             w:90,  group:"rates"      },
+    { key:"line_7_run_rate",       label:"L7 Rate",             w:90,  group:"rates"      },
   ];
+
+  const GROUP_DIVIDER = "1px solid #e5e7eb";
+
+  const handleDownloadTemplate = () => {
+    try {
+      const templateHeaders = [
+        'FG Material Code','FG Item Description','SFG1 Material Code','SFG Item Description',
+        'Category','Color',
+        'Cost (Php)','Margin',
+        'Form','Diameter','Changeover','FG Weight',
+        'Batch FM1','Batch FM2','Batch FM3','Batch PMX',
+        'Label 1','Label 2',
+        'Thread','Sacks Code','Sacks Desc','Tags Code','Tags Desc',
+        'L1 Rate','L2 Rate','L3 Rate','L4 Rate','L5 Rate','L6 Rate','L7 Rate',
+      ];
+      const sampleRow = {
+        'FG Material Code':'1000000000001 (example)',
+        'FG Item Description':'Sample Product Name, 50kg (example)',
+        'SFG1 Material Code':'3000000000001 (example)',
+        'SFG Item Description':'Sample SFG Description (example)',
+        'Category':'Broiler (example)','Color':'White (example)',
+        'Cost (Php)':'2664 (example)','Margin':'16.7 (example)',
+        'Form':'MP (example)','Diameter':'3 (example)',
+        'Changeover':'0.17 (example)','FG Weight':'50 (example)',
+        'Batch FM1':'4 (example)','Batch FM2':'4 (example)',
+        'Batch FM3':'4 (example)','Batch PMX':'4 (example)',
+        'Label 1':'(example)','Label 2':'(example)',
+        'Thread':'(example)','Sacks Code':'(example)',
+        'Sacks Desc':'(example)','Tags Code':'(example)','Tags Desc':'(example)',
+        'L1 Rate':'20 (example)','L2 Rate':'20 (example)',
+        'L3 Rate':'10 (example)','L4 Rate':'10 (example)',
+        'L5 Rate':'10 (example)','L6 Rate':'10 (example)','L7 Rate':'10 (example)',
+      };
+      const dataWs = XLSX.utils.json_to_sheet([sampleRow], { header: templateHeaders });
+      dataWs['!cols'] = templateHeaders.map(h => ({ wch: Math.max(h.length + 4, 18) }));
+      const noteWs = XLSX.utils.aoa_to_sheet([
+        ['INSTRUCTIONS'],[''],
+        ['This template contains the required columns for the Master Data upload.'],
+        ['The first data row contains example values — feel free to delete them and enter your own data.'],
+        ['All columns are optional except FG Material Code and FG Item Description.'],[''],
+        ['Column Guide:'],
+        ['PRODUCT DETAILS: FG Material Code, FG Item Description, SFG1 Material Code, SFG Item Description, Category, Color'],
+        ['PRICING: Cost (Php) — cost per MT in Philippine Peso; Margin — gross margin percentage (e.g. 16.7 for 16.7%)'],
+        ['PRODUCTION PARAMETERS: Form, Diameter (mm), Changeover (hrs), FG Weight (kg)'],
+        ['BATCH SIZES: Batch FM1 (Feedmill 1), Batch FM2 (Feedmill 2), Batch FM3 (Feedmill 3), Batch PMX (Powermix)'],
+        ['LABELING: Label 1, Label 2'],
+        ['PACKAGING: Thread, Sacks Code, Sacks Desc, Tags Code, Tags Desc'],
+        ['RUN RATES: L1-L7 Rate (MT/hr per production line)'],
+      ]);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, dataWs, 'Master Data');
+      XLSX.utils.book_append_sheet(wb, noteWs, 'Instructions');
+      XLSX.writeFile(wb, 'Master_Data_Template.xlsx');
+      toast.success('Template downloaded: Master_Data_Template.xlsx');
+    } catch (err) {
+      console.error('Template download failed:', err);
+      toast.error('Failed to download template.');
+    }
+  };
+
+  const filteredEditData = useMemo(() => {
+    if (!editSearchTerm.trim()) return editData;
+    const term = editSearchTerm.toLowerCase().trim();
+    return editData.filter(row =>
+      colHeaders.some(col => {
+        const v = row[col.key];
+        return v != null && String(v).toLowerCase().includes(term);
+      })
+    );
+  }, [editData, editSearchTerm]);
 
   const displayData = isEditMode ? editData : filteredKB;
   const hasChanges = changes.length > 0;
@@ -984,7 +1165,7 @@ export default function KnowledgeBaseManager({ orders, onReapply }) {
       <CardHeader className="pb-4">
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div className="flex items-center gap-2">
-            <Database className="h-8 w-8 text-[#fd5108]" />
+            <Database className="h-8 w-8 text-[var(--nexfeed-primary)]" />
             <div>
               <CardTitle className="text-[16px]">Master Data</CardTitle>
               <p className="text-[12px] text-gray-500 mt-0.5">Upload and manage master data for auto-populating order details</p>
@@ -1000,7 +1181,7 @@ export default function KnowledgeBaseManager({ orders, onReapply }) {
             {!isEditMode && (
               <Button
                 size="sm"
-                className="kb-upload-btn bg-[#fd5108] hover:bg-[#fe7c39] text-white text-[10px]"
+                className="kb-upload-btn bg-[var(--nexfeed-primary)] hover:bg-[var(--nexfeed-primary-dark)] text-white text-[10px]"
                 data-tour="kb-upload"
                 onClick={() => fileRef.current?.click()}
                 disabled={isUploading}
@@ -1020,7 +1201,7 @@ export default function KnowledgeBaseManager({ orders, onReapply }) {
           <div>
             {/* Search + Edit controls */}
             <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:8, gap:12 }}>
-              <div style={{ display:"flex", alignItems:"center", gap:12, flex:1 }}>
+              <div style={{ display:"flex", alignItems:"center", gap:8, flex:1 }}>
                 {!isEditMode ? (
                   <div className="relative" style={{ maxWidth:300, flex:1 }}>
                     <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
@@ -1032,12 +1213,20 @@ export default function KnowledgeBaseManager({ orders, onReapply }) {
                     />
                   </div>
                 ) : (
-                  <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:8, flex:1 }}>
+                    {/* Edit-mode search bar — matches view-mode style */}
+                    <div className="relative" style={{ maxWidth:300, flex:1 }}>
+                      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
+                      <Input
+                        data-testid="input-kb-edit-search"
+                        placeholder="Search by code or description..."
+                        value={editSearchTerm}
+                        onChange={e => setEditSearchTerm(e.target.value)}
+                        className="pl-8 h-8 text-xs"
+                      />
+                    </div>
                     {selectedRows.size > 0 && (
-                      <button
-                        className="kb-delete-selected-btn"
-                        onClick={handleDeleteSelected}
-                      >
+                      <button className="kb-delete-selected-btn" onClick={handleDeleteSelected}>
                         Delete {selectedRows.size} selected
                       </button>
                     )}
@@ -1045,23 +1234,45 @@ export default function KnowledgeBaseManager({ orders, onReapply }) {
                 )}
                 <span style={{ fontSize:10, color:"#6b7280", whiteSpace:"nowrap" }}>
                   {isEditMode
-                    ? `${editData.length} row${editData.length !== 1 ? "s" : ""}`
+                    ? editSearchTerm.trim()
+                      ? `Showing ${filteredEditData.length} of ${editData.length} rows`
+                      : `${editData.length} row${editData.length !== 1 ? "s" : ""}`
                     : `Showing ${displayRows.length} of ${savedViewData ? savedViewData.length : activeKB.length} products`}
                 </span>
               </div>
               <div style={{ display:"flex", alignItems:"center", gap:8 }}>
                 {!isEditMode ? (
-                  activeUpload && (
-                    <span className="kb-edit-link kb-edit-mode-btn" onClick={handleToggleEditMode} data-testid="button-kb-edit-table" data-tour="kb-edit-mode">
-                      Edit Table
+                  <div style={{ display:"flex", alignItems:"center", gap:0 }}>
+                    <span
+                      className="kb-edit-link kb-edit-mode-btn"
+                      onClick={handleDownloadTemplate}
+                      data-testid="button-kb-download-template"
+                      data-tour="kb-download-template"
+                      style={{ color:"#4b5563", fontSize:13, fontWeight:500, cursor:"pointer", padding:"6px 10px", transition:"color 0.15s", display:"inline-flex", alignItems:"center", gap:5, fontStyle:"normal", textDecoration:"none" }}
+                      onMouseEnter={e => e.currentTarget.style.color="var(--nexfeed-primary)"}
+                      onMouseLeave={e => e.currentTarget.style.color="#4b5563"}
+                    >
+                      <Download style={{ width:13, height:13 }} />
+                      Download Template
                     </span>
-                  )
+                    {activeUpload && (
+                      <>
+                        <span style={{ color:"#d1d5db", fontSize:13, userSelect:"none" }}>|</span>
+                        <span className="kb-edit-link kb-edit-mode-btn" onClick={handleToggleEditMode} data-testid="button-kb-edit-table" data-tour="kb-edit-mode" style={{ color:"#4b5563", fontSize:13, fontWeight:500, cursor:"pointer", padding:"6px 10px", transition:"color 0.15s" }}
+                          onMouseEnter={e => e.currentTarget.style.color="var(--nexfeed-primary)"}
+                          onMouseLeave={e => e.currentTarget.style.color="#4b5563"}
+                        >
+                          Edit Table
+                        </span>
+                      </>
+                    )}
+                  </div>
                 ) : (
                   <div style={{ display:"flex", gap:8 }}>
                     <Button variant="outline" size="sm" className="text-[10px]" onClick={handleDiscard} disabled={isSaving} data-testid="button-kb-discard">
                       Discard
                     </Button>
-                    <Button size="sm" className="bg-[#fd5108] hover:bg-[#fe7c39] text-white text-[10px]" onClick={handleSaveChanges} disabled={isSaving} data-testid="button-kb-save">
+                    <Button size="sm" className="bg-[var(--nexfeed-primary)] hover:bg-[var(--nexfeed-primary-dark)] text-white text-[10px]" onClick={handleSaveChanges} disabled={isSaving} data-testid="button-kb-save">
                       {isSaving ? <><Loader2 className="h-3 w-3 mr-1 animate-spin" />Saving…</> : "Save Changes"}
                     </Button>
                   </div>
@@ -1076,11 +1287,11 @@ export default function KnowledgeBaseManager({ orders, onReapply }) {
                 style={{ tableLayout:"fixed", width:"max-content", minWidth:"100%", borderCollapse:"collapse" }}
               >
                 <thead className="bg-gray-50" style={{ position:"sticky", top:0, zIndex:10 }}>
+                  {/* Row 1: Group headers */}
                   <tr>
-                    {/* Fix 2: # row number column */}
-                    <th style={{ width:36, minWidth:36 }} className="px-1 py-2 border-b border-gray-200 text-center font-bold text-gray-500 sticky left-0 bg-gray-50 z-10 text-xs">#</th>
+                    <th rowSpan={2} style={{ width:36, minWidth:36, background:"var(--color-bg-tertiary)", borderBottom:"1px solid #e5e7eb" }} className="px-1 py-2 text-center font-bold text-gray-500 sticky left-0 z-10 text-xs">#</th>
                     {isEditMode && (
-                      <th style={{ width:28, minWidth:28 }} className="px-1 py-2 border-b border-gray-200 text-center">
+                      <th rowSpan={2} style={{ width:28, minWidth:28, background:"var(--color-bg-tertiary)", borderBottom:"1px solid #e5e7eb" }} className="px-1 py-2 text-center">
                         <input
                           type="checkbox"
                           checked={editData.length > 0 && selectedRows.size === editData.length}
@@ -1089,31 +1300,40 @@ export default function KnowledgeBaseManager({ orders, onReapply }) {
                         />
                       </th>
                     )}
+                    <th colSpan={6} style={{ textAlign:"center", fontWeight:600, textTransform:"uppercase", letterSpacing:"0.05em", padding:"5px 8px", background:"var(--color-bg-secondary)", color:"#374151", borderBottom:"2px solid #e5e7eb", borderRight:GROUP_DIVIDER }}>PRODUCT DETAILS</th>
+                    <th colSpan={2} style={{ textAlign:"center", fontWeight:600, textTransform:"uppercase", letterSpacing:"0.05em", padding:"5px 8px", background:"var(--color-bg-secondary)", color:"#374151", borderBottom:"2px solid #e5e7eb", borderRight:GROUP_DIVIDER }}>PRICING</th>
+                    <th colSpan={4} style={{ textAlign:"center", fontWeight:600, textTransform:"uppercase", letterSpacing:"0.05em", padding:"5px 8px", background:"var(--color-bg-secondary)", color:"#374151", borderBottom:"2px solid #e5e7eb", borderRight:GROUP_DIVIDER }}>PRODUCTION PARAMETERS</th>
+                    <th colSpan={4} style={{ textAlign:"center", fontWeight:600, textTransform:"uppercase", letterSpacing:"0.05em", padding:"5px 8px", background:"var(--color-bg-secondary)", color:"#374151", borderBottom:"2px solid #e5e7eb", borderRight:GROUP_DIVIDER }}>BATCH SIZES</th>
+                    <th colSpan={2} style={{ textAlign:"center", fontWeight:600, textTransform:"uppercase", letterSpacing:"0.05em", padding:"5px 8px", background:"var(--color-bg-secondary)", color:"#374151", borderBottom:"2px solid #e5e7eb", borderRight:GROUP_DIVIDER }}>LABELING</th>
+                    <th colSpan={5} style={{ textAlign:"center", fontWeight:600, textTransform:"uppercase", letterSpacing:"0.05em", padding:"5px 8px", background:"var(--color-bg-secondary)", color:"#374151", borderBottom:"2px solid #e5e7eb", borderRight:GROUP_DIVIDER }}>PACKAGING</th>
+                    <th colSpan={7} style={{ textAlign:"center", fontWeight:600, textTransform:"uppercase", letterSpacing:"0.05em", padding:"5px 8px", background:"var(--color-bg-secondary)", color:"#374151", borderBottom:"2px solid #e5e7eb" }}>RUN RATES (MT/HR)</th>
+                    {isEditMode && (
+                      <th rowSpan={2} style={{ width:36, minWidth:36, background:"var(--color-bg-tertiary)", borderBottom:"1px solid #e5e7eb" }} className="px-1 py-2" />
+                    )}
+                  </tr>
+                  {/* Row 2: Individual column headers */}
+                  <tr>
                     {colHeaders.map(col => (
-                      <th key={col.key} style={{ width:col.w, minWidth:col.w }}
-                        className="px-2 py-2 text-left font-bold text-gray-600 whitespace-nowrap border-b border-gray-200">
+                      <th key={col.key} style={{ width:col.w, minWidth:col.w, fontSize:10, fontWeight:500, color:"#6b7280", padding:"8px 8px", textAlign:"left", whiteSpace:"nowrap", background:"var(--color-bg-secondary)", textTransform:"uppercase", letterSpacing:"0.05em", borderBottom:"1px solid #e5e7eb", ...(col.groupEnd ? { borderRight: GROUP_DIVIDER } : {}) }}>
                         {col.label}
                         {isEditMode && REQUIRED_KEYS_KB.has(col.key) && (
-                          <span style={{ color:"#fd5108", marginLeft:2 }}>*</span>
+                          <span style={{ color:"var(--nexfeed-primary)", marginLeft:2 }}>*</span>
                         )}
                       </th>
                     ))}
-                    {isEditMode && (
-                      <th style={{ width:36, minWidth:36 }} className="px-1 py-2 border-b border-gray-200" />
-                    )}
                   </tr>
                 </thead>
                 <tbody>
                   {isEditMode ? (
                     <>
                       <KBRowInsertLine onInsert={() => handleInsertRow(-1)} />
-                      {editData.map((row, i) => {
+                      {filteredEditData.map((row, i) => {
                         const isRowDup = isDuplicateMaterialCode(row);
                         const dupCount = isRowDup ? (duplicateCountMap[normalizeVal(row.fg_material_code)] ?? 0) : 0;
                         return (
                         <React.Fragment key={row.id}>
                           <tr
-                            style={{ background: isRowDup ? "#fef2f2" : (row._isNew ? "#fffbf7" : (i % 2 === 0 ? "#fff" : "#fafafa")) }}
+                            style={{ background: isRowDup ? "#fef2f2" : (row._isNew ? "#fffbf7" : (i % 2 === 0 ? "var(--color-bg-secondary)" : "var(--color-bg-tertiary)")) }}
                             onContextMenu={e => handleRowContextMenu(e, row, i)}
                           >
                             {/* Fix 2: row number cell */}
@@ -1144,7 +1364,7 @@ export default function KnowledgeBaseManager({ orders, onReapply }) {
                               return (
                                 <td
                                   key={col.key}
-                                  style={{ width:col.w, maxWidth:col.w, padding:"2px 4px", borderBottom:"1px solid #f3f4f6", background: cellBg }}
+                                  style={{ width:col.w, maxWidth:col.w, padding:"2px 4px", borderBottom:"1px solid #f3f4f6", background: cellBg, ...(col.groupEnd ? { borderRight: GROUP_DIVIDER } : {}) }}
                                   title={cellTitle}
                                   className={cellClass}
                                 >
@@ -1184,19 +1404,32 @@ export default function KnowledgeBaseManager({ orders, onReapply }) {
                         </td>
                         {colHeaders.map(col => {
                           const val = row[col.key];
-                          const isRate = col.key.includes("run_rate");
-                          const isBatch = col.key.includes("batch_size") || col.key === "finished_goods_weight";
-                          const display = val == null || val === ""
-                            ? "-"
-                            : (isRate || isBatch) ? (isNaN(parseFloat(val)) ? String(val) : parseFloat(val).toFixed(isRate ? 2 : 0))
-                            : String(val);
+                          const isNum2dp = NUMERIC_COLS_KB.has(col.key);
+                          let display;
+                          if (val == null || val === "") {
+                            display = "—";
+                          } else if (col.key === "pricing_php") {
+                            const n = parseFloat(val);
+                            display = isNaN(n) ? String(val) : n.toLocaleString("en-PH", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+                          } else if (col.key === "margin") {
+                            const n = parseFloat(val);
+                            display = isNaN(n) ? String(val) : `${n.toFixed(1)}%`;
+                          } else if (isNum2dp) {
+                            display = isNaN(parseFloat(val)) ? String(val) : parseFloat(val).toFixed(2);
+                          } else {
+                            display = String(val);
+                          }
+                          const marginN = col.key === "margin" ? parseFloat(val) : NaN;
+                          const marginColor = col.key === "margin" && !isNaN(marginN)
+                            ? (marginN >= 20 ? "#16a34a" : marginN >= 10 ? "#ca8a04" : "#dc2626")
+                            : undefined;
                           const edited    = !isRowDup && isCellEdited(row, col.key);
                           const origVal   = edited ? getOriginalValue(row, col.key) : undefined;
                           const cellTitle = isRowDup
                             ? `Duplicated — FG Material Code appears ${dupCount} times`
                             : edited ? `Original: ${origVal === '' ? '(empty)' : origVal}` : undefined;
                           return (
-                            <td key={col.key} style={{ width:col.w, maxWidth:col.w }}
+                            <td key={col.key} style={{ width:col.w, maxWidth:col.w, ...(col.groupEnd ? { borderRight: GROUP_DIVIDER } : {}), ...(marginColor ? { color: marginColor, fontWeight: 600 } : {}) }}
                               className={`px-2 py-1.5 text-gray-700 border-b border-gray-50 truncate whitespace-nowrap overflow-hidden${edited ? ' kb-cell-edited' : ''}`}
                               title={cellTitle}>
                               {display}
@@ -1237,7 +1470,7 @@ export default function KnowledgeBaseManager({ orders, onReapply }) {
                   <input type="text" value={historySearch} onChange={e => setHistorySearch(e.target.value)}
                     placeholder="Search history..." data-testid="input-kb-history-search"
                     style={{ width:"100%", paddingLeft:24, paddingRight:6, paddingTop:4, paddingBottom:4, fontSize:10, border:"1px solid #d1d5db", borderRadius:4, outline:"none", color:"#374151" }}
-                    onFocus={e => e.target.style.borderColor="#fd5108"}
+                    onFocus={e => e.target.style.borderColor="var(--nexfeed-primary)"}
                     onBlur={e => e.target.style.borderColor="#d1d5db"}
                   />
                 </div>
@@ -1246,7 +1479,7 @@ export default function KnowledgeBaseManager({ orders, onReapply }) {
                   <input type="date" value={historyDateFilter} onChange={e => setHistoryDateFilter(e.target.value)}
                     data-testid="input-kb-history-date"
                     style={{ width:"100%", paddingLeft:24, paddingRight:6, paddingTop:4, paddingBottom:4, fontSize:10, border:"1px solid #d1d5db", borderRadius:4, outline:"none", color: historyDateFilter ? "#374151" : "#9ca3af" }}
-                    onFocus={e => e.target.style.borderColor="#fd5108"}
+                    onFocus={e => e.target.style.borderColor="var(--nexfeed-primary)"}
                     onBlur={e => e.target.style.borderColor="#d1d5db"}
                   />
                 </div>
@@ -1264,7 +1497,7 @@ export default function KnowledgeBaseManager({ orders, onReapply }) {
                     <col style={{ width:72 }} />
                     <col style={{ width:80 }} />
                   </colgroup>
-                  <thead style={{ position:"sticky", top:0, background:"#fff", zIndex:1, borderBottom:"1px solid #e5e7eb" }}>
+                  <thead style={{ position:"sticky", top:0, background:"var(--color-bg-secondary)", zIndex:1, borderBottom:"1px solid #e5e7eb" }}>
                     <tr>
                       {["#","DATE","TYPE","NOTES","STATUS","ACTIONS"].map(h => (
                         <th key={h} style={{ fontSize:9, fontWeight:600, color:"#6b7280", letterSpacing:"0.5px", padding:"6px 10px", textAlign: h === "#" || h === "STATUS" || h === "ACTIONS" ? "center" : "left" }}>{h}</th>
@@ -1283,9 +1516,9 @@ export default function KnowledgeBaseManager({ orders, onReapply }) {
                           : { background:"#fff7ed", color:"#92400e" };
                       return (
                         <tr key={entry.id}
-                          style={{ borderBottom:"1px solid #f3f4f6", background: isActive ? "#fafffe" : "#fff" }}
+                          style={{ borderBottom:"1px solid #f3f4f6", background: isActive ? "#fafffe" : "var(--color-bg-secondary)" }}
                           onMouseEnter={e => e.currentTarget.style.background= isActive ? "#f0fdf4" : "#fafafa"}
-                          onMouseLeave={e => e.currentTarget.style.background= isActive ? "#fafffe" : "#fff"}
+                          onMouseLeave={e => e.currentTarget.style.background= isActive ? "#fafffe" : "var(--color-bg-secondary)"}
                           data-testid={`row-kb-history-${i}`}
                         >
                           <td style={{ fontSize:10, color:"#6b7280", padding:"6px 10px", textAlign:"center" }}>{i + 1}</td>
@@ -1318,7 +1551,7 @@ export default function KnowledgeBaseManager({ orders, onReapply }) {
                                     title={snapAvail ? "Download this version" : "Download not available — no snapshot found"}
                                     disabled={!snapAvail}
                                     style={{ color: snapAvail ? "#9ca3af" : "#d1d5db", background:"none", border:"none", cursor: snapAvail ? "pointer" : "default", padding:0, lineHeight:1, opacity: snapAvail ? 1 : 0.45 }}
-                                    onMouseEnter={e => { if (snapAvail) e.currentTarget.style.color="#fd5108"; }}
+                                    onMouseEnter={e => { if (snapAvail) e.currentTarget.style.color="var(--nexfeed-primary)"; }}
                                     onMouseLeave={e => { e.currentTarget.style.color = snapAvail ? "#9ca3af" : "#d1d5db"; }}
                                     data-testid={`button-download-history-${i}`}
                                   ><Download style={{ width:12, height:12 }} /></button>
@@ -1330,7 +1563,7 @@ export default function KnowledgeBaseManager({ orders, onReapply }) {
                                 disabled={isActive}
                                 title={isActive ? "This is the current active version — already in use." : "Revert to this version"}
                                 style={{ color: isActive ? "#d1d5db" : "#9ca3af", background:"none", border:"none", cursor: isActive ? "not-allowed" : "pointer", padding:0, lineHeight:1, fontSize:13, opacity: isActive ? 0.5 : 1 }}
-                                onMouseEnter={e => { if (!isActive) e.currentTarget.style.color="#fd5108"; }}
+                                onMouseEnter={e => { if (!isActive) e.currentTarget.style.color="var(--nexfeed-primary)"; }}
                                 onMouseLeave={e => { if (!isActive) e.currentTarget.style.color="#9ca3af"; }}
                                 data-testid={`button-revert-history-${i}`}
                               >↩</button>
@@ -1391,7 +1624,7 @@ export default function KnowledgeBaseManager({ orders, onReapply }) {
               </p>
             </div>
             <div className="kb-dialog-footer">
-              <button onClick={() => setDiscardConfirmOpen(false)} style={{ background:"#fff", color:"#374151", border:"1px solid #d1d5db", borderRadius:6, padding:"8px 20px", fontSize:13, cursor:"pointer" }}>Keep Editing</button>
+              <button onClick={() => setDiscardConfirmOpen(false)} style={{ background:"var(--color-bg-secondary)", color:"#374151", border:"1px solid #d1d5db", borderRadius:6, padding:"8px 20px", fontSize:13, cursor:"pointer" }}>Keep Editing</button>
               <button onClick={handleConfirmDiscard} style={{ background:"#e53935", color:"#fff", border:"none", borderRadius:6, padding:"8px 20px", fontSize:13, fontWeight:600, cursor:"pointer" }}>Discard</button>
             </div>
           </div>
@@ -1414,7 +1647,7 @@ export default function KnowledgeBaseManager({ orders, onReapply }) {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleReapply} className="bg-[#fd5108] hover:bg-[#fe7c39] text-white">Re-apply</AlertDialogAction>
+            <AlertDialogAction onClick={handleReapply} className="bg-[var(--nexfeed-primary)] hover:bg-[var(--nexfeed-primary-dark)] text-white">Re-apply</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -1487,7 +1720,7 @@ export default function KnowledgeBaseManager({ orders, onReapply }) {
         <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.35)", zIndex:9999, display:"flex", alignItems:"center", justifyContent:"center" }}
           onClick={() => { setDeleteHistoryTarget(null); setDeleteHistoryConfirmText(""); }}
         >
-          <div style={{ background:"#fff", borderRadius:10, padding:28, width:380, maxWidth:"92vw", boxShadow:"0 8px 32px rgba(0,0,0,0.18)" }}
+          <div style={{ background:"var(--color-bg-secondary)", borderRadius:10, padding:28, width:380, maxWidth:"92vw", boxShadow:"0 8px 32px rgba(0,0,0,0.18)" }}
             onClick={e => e.stopPropagation()}
           >
             <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:14 }}>
@@ -1508,7 +1741,7 @@ export default function KnowledgeBaseManager({ orders, onReapply }) {
                         ? "You are about to delete the currently active version."
                         : "This will permanently remove this history entry."}
                   </p>
-                  <div style={{ background:"#f9fafb", border:"1px solid #e5e7eb", borderRadius:6, padding:"8px 12px", marginBottom:10, fontSize:11, color:"#374151" }}>
+                  <div style={{ background:"var(--color-bg-tertiary)", border:"1px solid #e5e7eb", borderRadius:6, padding:"8px 12px", marginBottom:10, fontSize:11, color:"#374151" }}>
                     {deleteHistoryTarget.summary}
                   </div>
                   {/* Fix 3: red warning for last entry, orange for active-but-not-last */}

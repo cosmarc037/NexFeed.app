@@ -115,14 +115,14 @@ const ORDERS_TOUR_STEPS = [
     target: '[data-tour="orders-header-scheduling"]',
     title: "Scheduling",
     description:
-      "Set start date, start time, view availability date and completion date. Non-dated orders get dates from N10D stock data.",
+      "Set start date, start time, view availability date and completion date. Non-dated orders get dates from Future Dispatches stock data.",
     position: "bottom",
   },
   {
     target: '[data-tour="orders-header-product-insights"]',
     title: "Product Insights",
     description:
-      "Stock status summaries auto-generated from N10D data. Click ✨ to enhance with AI-powered actionable recommendations.",
+      "Stock status summaries auto-generated from Future Dispatches data. Click ✨ to enhance with AI-powered actionable recommendations.",
     position: "bottom",
   },
   {
@@ -205,59 +205,59 @@ const ORDER_HISTORY_TOUR_STEPS = [
 
 const N10D_TOUR_STEPS = [
   {
-    target: '[data-tour="n10d-upload"]',
-    title: "Upload Next 10 Days",
+    target: '[data-tour="future-dispatches-upload"]',
+    title: "Upload Future Dispatches",
     description:
-      "Upload your daily stock level data (Excel file). This data drives production prioritization by analyzing inventory levels against demand forecasts for the next 10 days.",
+      "Upload your dispatch forecast data (Excel file). This data drives production prioritization by analyzing inventory levels against demand forecasts.",
     position: "bottom",
   },
   {
-    target: '[data-tour="n10d-reapply"]',
+    target: '[data-tour="future-dispatches-reapply"]',
     title: "Re-apply to Existing Orders",
     description:
-      "After uploading new N10D data, click this to refresh all order availability dates, stock status icons, product insights, and Summary column across the app.",
+      "After uploading new Future Dispatches data, click this to refresh all order availability dates, stock status icons, product insights, and Summary column across the app.",
     position: "bottom",
   },
   {
-    target: '[data-tour="n10d-search"]',
+    target: '[data-tour="future-dispatches-search"]',
     title: "Search Products",
     description:
       "Search for specific products by material code, description, or category to quickly find their stock status.",
     position: "bottom",
   },
   {
-    target: '[data-tour="n10d-header-product"]',
+    target: '[data-tour="future-dispatches-header-product"]',
     title: "Product Details",
     description:
       "Material code, category, item description, and Due for Loading (DFL) — the total demand volume for each product.",
     position: "bottom",
   },
   {
-    target: '[data-tour="n10d-header-days"]',
-    title: "Next 10 Days Demand",
+    target: '[data-tour="future-dispatches-header-days"]',
+    title: "Dispatch Forecast",
     description:
-      "Daily demand breakdown. Red-highlighted cells indicate where cumulative demand exceeds available inventory. Hover over any cell to see cumulative demand vs inventory.",
+      "Daily demand breakdown. Red-highlighted cells indicate where cumulative demand exceeds available inventory. Hover over any cell to see details.",
     position: "bottom",
   },
   {
-    target: '[data-tour="n10d-header-tracking"]',
+    target: '[data-tour="future-dispatches-header-tracking"]',
     title: "Tracking",
     description:
       "Inventory level, balance to produce, completion and availability dates, and product status — Critical (red), Urgent (orange), Monitor (yellow), or Sufficient (green).",
     position: "bottom",
   },
   {
-    target: '[data-tour="n10d-safety-insights"]',
+    target: '[data-tour="future-dispatches-safety-insights"]',
     title: "Safety Stock Insights",
     description:
       "AI-generated analysis of stock levels. Categorizes products by urgency — Critical products need immediate production, Urgent within 1-3 days, Monitor within the week, and Sufficient products are well-stocked.",
     position: "top",
   },
   {
-    target: '[data-tour="n10d-history"]',
+    target: '[data-tour="future-dispatches-history"]',
     title: "Upload History",
     description:
-      "Track all N10D file uploads. View which file is currently active, revert to previous uploads, or download past versions.",
+      "Track all Future Dispatches file uploads. View which file is currently active, revert to previous uploads, or download past versions.",
     position: "top",
   },
 ];
@@ -282,6 +282,13 @@ const KNOWLEDGE_BASE_TOUR_STEPS = [
     title: "Edit Mode",
     description:
       "Toggle edit mode to manually modify cells. Edited cells are highlighted in yellow. Duplicate material codes are highlighted in red. Click Save to create a history entry.",
+    position: "bottom",
+  },
+  {
+    target: '[data-tour="kb-download-template"]',
+    title: "Download Template",
+    description:
+      "Download a blank Excel template pre-formatted with all required columns — material codes, batch sizes, run rates, and more. Fill it in and upload to get started quickly.",
     position: "bottom",
   },
   {
@@ -310,15 +317,40 @@ const CONFIGURATIONS_TOUR_STEPS = [
   },
 ];
 
+const CHANGEOVER_RULES_TOUR_STEPS = [
+  {
+    target: '[data-tour="changeover-rules-page"]',
+    title: "Changeover Rules",
+    description:
+      "Configure additional changeover times for product transitions. These rules automatically add time when consecutive orders differ in diameter, color, or category. Values are per feedmill and stack when multiple conditions apply.",
+    position: "bottom",
+  },
+];
+
 const FULL_APP_TOUR_STEPS = [
   // === SIDEBAR ===
   {
-    target: '[data-tour="sidebar-overview"]',
-    title: "Overview",
+    target: '[data-tour="sidebar-dashboard"]',
+    title: "Dashboard",
     description:
-      "Bird's-eye view of all feedmills and lines. See production volumes, capacity utilization, and category breakdowns.",
+      "Your production dashboard. Contains the Overview for monitoring feedmill status and capacity, and Analytics for charts, KPIs, and insights.",
+    position: "right",
+  },
+  {
+    target: '[data-tour="sidebar-overview"]',
+    title: "Dashboard — Overview",
+    description:
+      "Bird's-eye view of all feedmills and lines. See production volumes, capacity utilization, category breakdowns, and run shutdown simulations.",
     position: "right",
     page: "overview",
+  },
+  {
+    target: '[data-tour="sidebar-analytics"]',
+    title: "Dashboard — Analytics",
+    description:
+      "Production analytics with key metric cards, visual charts (volume by category, orders by line, top items), and smart insights for data-driven planning.",
+    position: "right",
+    page: "analytics",
   },
   {
     target: '[data-tour="sidebar-orders"]',
@@ -329,20 +361,20 @@ const FULL_APP_TOUR_STEPS = [
     page: "orders",
   },
   {
-    target: '[data-tour="sidebar-analytics"]',
-    title: "Analytics",
-    description:
-      "Production analytics with charts, KPIs, and AI-powered insights for data-driven planning decisions.",
-    position: "right",
-    page: "analytics",
-  },
-  {
     target: '[data-tour="sidebar-order-history"]',
     title: "Order History",
     description:
       "Archive of completed and cancelled orders. Track production history across all lines.",
     position: "right",
     page: "orderHistory",
+  },
+  {
+    target: '[data-tour="sidebar-changeover-rules"]',
+    title: "Changeover Rules",
+    description:
+      "Configure additional changeover times for product transitions — diameter changes, color changes, and category changes. These rules automatically add time when consecutive orders differ in these properties.",
+    position: "right",
+    page: "changeoverRules",
   },
   {
     target: '[data-tour="sidebar-master-data"]',
@@ -353,10 +385,10 @@ const FULL_APP_TOUR_STEPS = [
     page: "knowledgeBase",
   },
   {
-    target: '[data-tour="sidebar-n10d"]',
-    title: "Next 10 Days",
+    target: '[data-tour="sidebar-future-dispatches"]',
+    title: "Future Dispatches",
     description:
-      "Daily stock level data for production prioritization. Analyzes inventory vs demand and flags Critical, Urgent, Monitor, and Sufficient products.",
+      "Upload dispatch forecast data for production prioritization. The system analyzes inventory levels against demand and flags Critical, Urgent, Monitor, and Sufficient products.",
     position: "right",
     page: "n10d",
   },
@@ -386,12 +418,12 @@ const FULL_APP_TOUR_STEPS = [
     position: "left",
     page: "orders",
   },
-  // === N10D HIGHLIGHTS ===
+  // === FUTURE DISPATCHES HIGHLIGHTS ===
   {
-    target: '[data-tour="n10d-upload"]',
-    title: "Stock Level Data",
+    target: '[data-tour="future-dispatches-upload"]',
+    title: "Future Dispatches",
     description:
-      "Upload daily stock data to drive production prioritization. The system analyzes 10-day demand against inventory to determine urgency.",
+      "Upload dispatch forecast data to drive production prioritization. The system analyzes demand against inventory to determine urgency.",
     position: "bottom",
     page: "n10d",
   },
@@ -424,6 +456,8 @@ function getPageTourSteps(currentPage) {
       return ANALYTICS_TOUR_STEPS;
     case "orderHistory":
       return ORDER_HISTORY_TOUR_STEPS;
+    case "changeoverRules":
+      return CHANGEOVER_RULES_TOUR_STEPS;
     case "n10d":
       return N10D_TOUR_STEPS;
     case "knowledgeBase":
@@ -450,6 +484,9 @@ function navigateToPage(pageName, onNavigate) {
       break;
     case "orderHistory":
       onNavigate("configurations", "order_history");
+      break;
+    case "changeoverRules":
+      onNavigate("configurations", "changeover_rules");
       break;
     case "knowledgeBase":
       onNavigate("configurations", "knowledge_base");

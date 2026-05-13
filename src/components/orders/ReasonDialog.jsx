@@ -47,7 +47,7 @@ export default function ReasonDialog({ isOpen, onClose, onConfirm, title, descri
           <Button
             onClick={handleConfirm}
             disabled={!reason.trim()}
-            className={`text-[14px] font-semibold h-10 px-5 ${variant === 'destructive' ? 'bg-red-600 hover:bg-red-700' : 'bg-[#fd5108] hover:bg-[#fe7c39]'}`}
+            className={`text-[14px] font-semibold h-10 px-5 ${variant === 'destructive' ? 'bg-red-600 hover:bg-red-700' : 'bg-[var(--nexfeed-primary)] hover:bg-[var(--nexfeed-primary-dark)]'}`}
           >
             {confirmText}
           </Button>

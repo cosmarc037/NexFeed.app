@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   LayoutDashboard,
   BarChart3,
@@ -11,6 +11,7 @@ import {
   History,
   Database,
   CalendarDays,
+  SlidersHorizontal,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -52,7 +53,7 @@ function NavItem({ label, active, onClick, icon: Icon, badge, badgeActive, tourC
       className={cn(
         "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[12px] transition-all",
         active
-          ? "bg-[#fd5108] text-white font-semibold"
+          ? "bg-[var(--nexfeed-primary)] text-white font-semibold"
           : "text-[#2e343a] font-normal hover:bg-[#fff5ed]",
         tourClass,
       )}
@@ -76,6 +77,7 @@ export default function Sidebar({
 }) {
   const [showConfirm, setShowConfirm] = useState(false);
   const [isClearing, setIsClearing] = useState(false);
+  const [dashboardExpanded, setDashboardExpanded] = useState(false);
   const [ordersExpanded, setOrdersExpanded] = useState(true);
   const [configExpanded, setConfigExpanded] = useState(true);
 
@@ -83,6 +85,14 @@ export default function Sidebar({
 
   const isOrdersActive = activeSection === "orders";
   const isConfigActive = activeSection === "configurations";
+  const isDashboardActive = activeSection === "overview" || activeSection === "analytics";
+
+  // Auto-expand Dashboard when Overview or Analytics is active
+  useEffect(() => {
+    if (activeSection === "overview" || activeSection === "analytics") {
+      setDashboardExpanded(true);
+    }
+  }, [activeSection]);
 
   return (
     <aside
@@ -92,15 +102,46 @@ export default function Sidebar({
       )}
     >
       <nav className="flex-1 overflow-y-auto p-3 space-y-0.5">
-        {/* Overview — no sub-tabs, direct navigation */}
-        <NavItem
-          label="Overview"
-          active={activeSection === "overview"}
-          onClick={() => onNavigate("overview", null)}
-          icon={LayoutDashboard}
-          tourClass="sidebar-item-overview"
-          tourAttr="sidebar-overview"
-        />
+
+        {/* Dashboard — collapsible, contains Overview and Analytics */}
+        <button
+          onClick={() => setDashboardExpanded((e) => !e)}
+          className={cn(
+            "sidebar-item-dashboard w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[12px] transition-all",
+            isDashboardActive
+              ? "text-[var(--nexfeed-primary)] font-[500]"
+              : "text-[#2e343a] font-normal hover:bg-[#fff5ed]",
+          )}
+          data-tour="sidebar-dashboard"
+        >
+          <LayoutDashboard className="h-4 w-4 flex-shrink-0" />
+          <span className="text-left flex-1">Dashboard</span>
+          {dashboardExpanded ? (
+            <ChevronDown className="h-3.5 w-3.5 text-[#9ca3af]" />
+          ) : (
+            <ChevronRight className="h-3.5 w-3.5 text-[#9ca3af]" />
+          )}
+        </button>
+        {dashboardExpanded && (
+          <div className="pl-4 space-y-0.5">
+            <NavItem
+              label="Overview"
+              active={activeSection === "overview"}
+              onClick={() => onNavigate("overview", null)}
+              icon={LayoutDashboard}
+              tourClass="sidebar-item-overview"
+              tourAttr="sidebar-overview"
+            />
+            <NavItem
+              label="Analytics"
+              active={activeSection === "analytics"}
+              onClick={() => onNavigate("analytics", null)}
+              icon={BarChart3}
+              tourClass="sidebar-item-analytics"
+              tourAttr="sidebar-analytics"
+            />
+          </div>
+        )}
 
         {/* Orders — collapsible with FM sub-tabs */}
         <button
@@ -108,7 +149,7 @@ export default function Sidebar({
           className={cn(
             "sidebar-item-orders w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[12px] transition-all mt-1",
             isOrdersActive
-              ? "text-[#fd5108] font-[500]"
+              ? "text-[var(--nexfeed-primary)] font-[500]"
               : "text-[#2e343a] font-normal hover:bg-[#fff5ed]",
           )}
           data-tour="sidebar-orders"
@@ -123,6 +164,14 @@ export default function Sidebar({
         </button>
         {ordersExpanded && (
           <div className="feedmill-tabs pl-4 space-y-0.5" data-tour="orders-feedmill-tabs">
+            <NavItem
+              key="ALL_FM"
+              label="All Feedmills"
+              active={activeSection === "orders" && activeFeedmill === "ALL_FM"}
+              onClick={() => onNavigate("orders", "all", "ALL_FM")}
+              icon={LayoutDashboard}
+              badge={getFeedmillCount("ALL_FM")}
+            />
             {FEEDMILL_LINES.map((fm) => {
               const isFmActive =
                 activeSection === "orders" && activeFeedmill === fm.id;
@@ -140,23 +189,13 @@ export default function Sidebar({
           </div>
         )}
 
-        {/* Analytics — no sub-tabs, direct navigation */}
-        <NavItem
-          label="Analytics"
-          active={activeSection === "analytics"}
-          onClick={() => onNavigate("analytics", null)}
-          icon={BarChart3}
-          tourClass="sidebar-item-analytics"
-          tourAttr="sidebar-analytics"
-        />
-
         {/* Configurations — collapsible */}
         <button
           onClick={() => setConfigExpanded((e) => !e)}
           className={cn(
             "sidebar-item-configurations w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[12px] transition-all mt-1",
             isConfigActive
-              ? "text-[#fd5108] font-[500]"
+              ? "text-[var(--nexfeed-primary)] font-[500]"
               : "text-[#2e343a] font-normal hover:bg-[#fff5ed]",
           )}
           data-tour="sidebar-configurations"
@@ -183,6 +222,17 @@ export default function Sidebar({
               tourAttr="sidebar-order-history"
             />
             <NavItem
+              label="Changeover Rules"
+              active={
+                activeSection === "configurations" &&
+                activeSubSection === "changeover_rules"
+              }
+              onClick={() => onNavigate("configurations", "changeover_rules")}
+              icon={SlidersHorizontal}
+              tourClass="sidebar-item-changeover-rules"
+              tourAttr="sidebar-changeover-rules"
+            />
+            <NavItem
               label="Master Data"
               active={
                 activeSection === "configurations" &&
@@ -194,15 +244,15 @@ export default function Sidebar({
               tourAttr="sidebar-master-data"
             />
             <NavItem
-              label="Next 10 Days"
+              label="Future Dispatches"
               active={
                 activeSection === "configurations" &&
                 activeSubSection === "next_10_days"
               }
               onClick={() => onNavigate("configurations", "next_10_days")}
               icon={CalendarDays}
-              tourClass="sidebar-item-n10d"
-              tourAttr="sidebar-n10d"
+              tourClass="sidebar-item-future-dispatches"
+              tourAttr="sidebar-future-dispatches"
             />
           </div>
         )}

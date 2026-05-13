@@ -96,15 +96,260 @@ const EDITABLE_VOLUME = ["plotted", "planned", "cut", "combined", "hold", "norma
 const EDITABLE_COMPLETION = ["plotted", "planned", "cut", "combined", "hold", "normal"];
 
 const editableInputClass =
-  "border-0 border-b border-transparent group-hover:border-gray-300 focus:border-[#fd5108] bg-transparent shadow-none rounded-none px-0 h-7 text-[13px] md:text-[13px] focus-visible:ring-0 focus-visible:ring-offset-0 transition-colors";
+  "border-0 border-b border-transparent group-hover:border-gray-300 focus:border-[var(--nexfeed-primary,var(--nexfeed-primary))] bg-transparent shadow-none rounded-none px-0 h-7 text-[13px] md:text-[13px] focus-visible:ring-0 focus-visible:ring-offset-0 transition-colors";
 const editableSelectTriggerClass =
-  "border-0 border-b border-transparent hover:border-gray-300 focus:border-[#fd5108] bg-transparent shadow-none rounded-none h-7 text-[13px] md:text-[13px] focus:ring-0 transition-colors px-0";
+  "border-0 border-b border-transparent hover:border-gray-300 focus:border-[var(--nexfeed-primary,var(--nexfeed-primary))] bg-transparent shadow-none rounded-none h-7 text-[13px] md:text-[13px] focus:ring-0 transition-colors px-0";
 const line2InputClass =
-  "border-0 border-b border-transparent group-hover:border-gray-200 focus:border-[#fd5108] bg-transparent shadow-none rounded-none px-0 h-5 text-[10px] text-[#6b7280] focus-visible:ring-0 focus-visible:ring-offset-0 transition-colors placeholder:text-[#cbd1d6]";
+  "border-0 border-b border-transparent group-hover:border-gray-200 focus:border-[var(--nexfeed-primary,var(--nexfeed-primary))] bg-transparent shadow-none rounded-none px-0 h-5 text-[10px] text-[#6b7280] focus-visible:ring-0 focus-visible:ring-offset-0 transition-colors placeholder:text-[#cbd1d6]";
 
 function toTitleCase(str) {
   if (!str) return "";
   return str.toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function PlannedOrderCell({ order, isPMX, canEdit, onUpdateOrder }) {
+  const [fg, setFg]   = useState(order.fg  || "");
+  const [sfg, setSfg] = useState(order.sfg || "");
+  const [pmx, setPmx] = useState(order.pmx || "");
+  const fgFocused  = React.useRef(false);
+  const sfgFocused = React.useRef(false);
+  const pmxFocused = React.useRef(false);
+
+  // Sync from server data when not actively editing the field
+  useEffect(() => { if (!fgFocused.current)  setFg(order.fg   || ""); }, [order.fg]);
+  useEffect(() => { if (!sfgFocused.current) setSfg(order.sfg  || ""); }, [order.sfg]);
+  useEffect(() => { if (!pmxFocused.current) setPmx(order.pmx  || ""); }, [order.pmx]);
+
+  function handleBlur(field, value, setter, focusedRef) {
+    focusedRef.current = false;
+    const trimmed = value.trim();
+    setter(trimmed);
+    if (trimmed !== (order[field] || "")) {
+      onUpdateOrder && onUpdateOrder(order.id, { [field]: trimmed });
+    }
+  }
+
+  if (!canEdit) {
+    return (
+      <div className="space-y-0.5">
+        <p className="text-[13px] text-gray-900">{order.fg || "-"}</p>
+        <p className="text-[13px] text-gray-500 text-[10px]">{order.sfg || "-"}</p>
+        {isPMX && <p className="text-[13px] text-gray-900">{order.pmx || "-"}</p>}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-0.5">
+      <div className="group">
+        <Input
+          type="text"
+          value={fg}
+          onChange={e => setFg(e.target.value)}
+          onFocus={() => { fgFocused.current = true; }}
+          onBlur={e => handleBlur("fg", e.target.value, setFg, fgFocused)}
+          placeholder="Enter FG"
+          className={cn(editableInputClass, "w-24 text-[13px] text-gray-900 placeholder:text-gray-300")}
+          data-no-drag="true"
+          data-testid={`input-planned-fg-${order.id}`}
+        />
+      </div>
+      <div className="group">
+        <Input
+          type="text"
+          value={sfg}
+          onChange={e => setSfg(e.target.value)}
+          onFocus={() => { sfgFocused.current = true; }}
+          onBlur={e => handleBlur("sfg", e.target.value, setSfg, sfgFocused)}
+          placeholder="Enter SFG"
+          className={cn(editableInputClass, "w-24 text-[13px] text-gray-900 placeholder:text-gray-300")}
+          data-no-drag="true"
+          data-testid={`input-planned-sfg-${order.id}`}
+        />
+      </div>
+      {isPMX && (
+        <div className="group">
+          <Input
+            type="text"
+            value={pmx}
+            onChange={e => setPmx(e.target.value)}
+            onFocus={() => { pmxFocused.current = true; }}
+            onBlur={e => handleBlur("pmx", e.target.value, setPmx, pmxFocused)}
+            placeholder="Enter PMX"
+            className={cn(editableInputClass, "w-24 text-[13px] text-gray-900 placeholder:text-gray-300")}
+            data-no-drag="true"
+            data-testid={`input-planned-pmx-${order.id}`}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Production Order (FG1 / SFG1 / SFGPMX) inline inputs — controlled so values
+// survive tab switches and server re-renders without losing in-progress edits.
+function ProdOrderInputs({ order, isPMX, onUpdateOrder }) {
+  const [fg1, setFg1]       = useState(order.fg1    || "");
+  const [sfg1, setSfg1]     = useState(order.sfg1   || "");
+  const [sfgpmx, setSfgpmx] = useState(order.sfgpmx || "");
+  const fg1Focused    = React.useRef(false);
+  const sfg1Focused   = React.useRef(false);
+  const sfgpmxFocused = React.useRef(false);
+  const fg1Timer    = React.useRef(null);
+  const sfg1Timer   = React.useRef(null);
+  const sfgpmxTimer = React.useRef(null);
+
+  useEffect(() => { if (!fg1Focused.current)    setFg1(order.fg1    || ""); }, [order.fg1]);
+  useEffect(() => { if (!sfg1Focused.current)   setSfg1(order.sfg1  || ""); }, [order.sfg1]);
+  useEffect(() => { if (!sfgpmxFocused.current) setSfgpmx(order.sfgpmx || ""); }, [order.sfgpmx]);
+
+  useEffect(() => () => {
+    clearTimeout(fg1Timer.current);
+    clearTimeout(sfg1Timer.current);
+    clearTimeout(sfgpmxTimer.current);
+  }, []);
+
+  function makeHandlers(field, setter, focusedRef, timerRef) {
+    return {
+      onChange(e) {
+        const val = e.target.value;
+        setter(val);
+        clearTimeout(timerRef.current);
+        timerRef.current = setTimeout(() => onUpdateOrder(order.id, { [field]: val }), 500);
+      },
+      onFocus() { focusedRef.current = true; },
+      onBlur(e) {
+        focusedRef.current = false;
+        clearTimeout(timerRef.current);
+        onUpdateOrder(order.id, { [field]: e.target.value });
+      },
+    };
+  }
+
+  return (
+    <div className="space-y-0.5">
+      <div className="group">
+        <Input
+          type="text"
+          value={fg1}
+          {...makeHandlers("fg1", setFg1, fg1Focused, fg1Timer)}
+          placeholder="Enter FG1"
+          className={cn(editableInputClass, "w-24 text-[13px] text-gray-900 placeholder:text-gray-300")}
+          data-testid={`input-fg1-${order.id}`}
+        />
+      </div>
+      <div className="group">
+        <Input
+          type="text"
+          value={sfg1}
+          {...makeHandlers("sfg1", setSfg1, sfg1Focused, sfg1Timer)}
+          placeholder="Enter SFG1"
+          className={cn(editableInputClass, "w-24 text-[13px] text-gray-900 placeholder:text-gray-300")}
+          data-testid={`input-sfg1-${order.id}`}
+        />
+      </div>
+      {isPMX && (
+        <div className="group">
+          <Input
+            type="text"
+            value={sfgpmx}
+            {...makeHandlers("sfgpmx", setSfgpmx, sfgpmxFocused, sfgpmxTimer)}
+            placeholder="Enter SFGPMX"
+            className={cn(editableInputClass, "w-24 text-[13px] text-gray-900 placeholder:text-gray-300")}
+            data-testid={`input-sfgpmx-${order.id}`}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// HA Info cell (SCADA / formula_version + PV / prod_version) — controlled so
+// values survive tab switches. SCADA and PV are on separate rows for clarity.
+function HAInfoInputs({ order, batches, canEdit, onUpdateOrder }) {
+  const [scada, setScada] = useState(order.formula_version || "");
+  const [pv, setPv]       = useState(order.prod_version   || "");
+  const scadaFocused = React.useRef(false);
+  const pvFocused    = React.useRef(false);
+  const scadaTimer   = React.useRef(null);
+  const pvTimer      = React.useRef(null);
+
+  useEffect(() => { if (!scadaFocused.current) setScada(order.formula_version || ""); }, [order.formula_version]);
+  useEffect(() => { if (!pvFocused.current)    setPv(order.prod_version   || ""); }, [order.prod_version]);
+
+  useEffect(() => () => {
+    clearTimeout(scadaTimer.current);
+    clearTimeout(pvTimer.current);
+  }, []);
+
+  function makeHandlers(field, setter, focusedRef, timerRef) {
+    return {
+      onChange(e) {
+        const val = e.target.value;
+        setter(val);
+        clearTimeout(timerRef.current);
+        timerRef.current = setTimeout(() => onUpdateOrder(order.id, { [field]: val }), 500);
+      },
+      onFocus() { focusedRef.current = true; },
+      onBlur(e) {
+        focusedRef.current = false;
+        clearTimeout(timerRef.current);
+        onUpdateOrder(order.id, { [field]: e.target.value });
+      },
+    };
+  }
+
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center gap-1">
+        <span className="text-[13px] text-gray-400 shrink-0">HA:</span>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span
+              className="text-[13px] text-gray-700 font-bold cursor-default"
+              data-testid={canEdit ? `display-ha-${order.id}` : `display-ha-readonly-${order.id}`}
+            >
+              {batches > 0 ? batches : "—"}
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="top" className="text-xs">
+            Auto-calculated from Number of Batches
+          </TooltipContent>
+        </Tooltip>
+      </div>
+      {canEdit ? (
+        <>
+          <div className="group flex items-center gap-1">
+            <span className="text-[12px] text-[#6b7280] shrink-0">SCADA:</span>
+            <Input
+              type="text"
+              value={scada}
+              {...makeHandlers("formula_version", setScada, scadaFocused, scadaTimer)}
+              placeholder="-"
+              className={cn(line2InputClass, "w-20 text-gray-700")}
+              data-testid={`input-scada-${order.id}`}
+            />
+          </div>
+          <div className="group flex items-center gap-1">
+            <span className="text-[12px] text-[#6b7280] shrink-0">PV:</span>
+            <Input
+              type="text"
+              value={pv}
+              {...makeHandlers("prod_version", setPv, pvFocused, pvTimer)}
+              placeholder="-"
+              className={cn(line2InputClass, "w-20 text-gray-700")}
+              data-testid={`input-pv-${order.id}`}
+            />
+          </div>
+        </>
+      ) : (
+        <>
+          <p className="text-[12px] text-[#6b7280]">SCADA: {order.formula_version || "-"}</p>
+          <p className="text-[12px] text-[#6b7280]">PV: {order.prod_version || "-"}</p>
+        </>
+      )}
+    </div>
+  );
 }
 
 function getSuggestedVolume(order) {
@@ -352,6 +597,11 @@ const FEEDMILL_SHUTDOWN_LINES = {
   PMX: ["Line 5"],
 };
 
+const LINE_TO_FEEDMILL = {};
+Object.entries(FEEDMILL_SHUTDOWN_LINES).forEach(([fm, lines]) => {
+  lines.forEach((l) => { LINE_TO_FEEDMILL[l] = fm; });
+});
+
 const LINE_RATE_KEYS = {
   "Line 1": "line_1_run_rate",
   "Line 2": "line_2_run_rate",
@@ -362,38 +612,89 @@ const LINE_RATE_KEYS = {
   "Line 7": "line_7_run_rate",
 };
 
-function hasAlternativeLines(order, shutdownLines, kbRecords) {
-  const matCode = String(
-    order.material_code_fg || order.material_code || "",
-  ).trim();
-  const product = (kbRecords || []).find((p) => {
+function findKbProduct(order, kbRecords) {
+  const matCode = String(order.material_code_fg || order.material_code || "").trim();
+  return (kbRecords || []).find((p) => {
     const kbCode = String(
       p.fg_material_code || p.material_code_fg || p["FG Material Code"] || "",
     ).trim();
-    return (
-      kbCode &&
-      matCode &&
-      (kbCode === matCode ||
-        kbCode.replace(/^0+/, "") === matCode.replace(/^0+/, ""))
-    );
-  });
-  if (!product) {
-    console.log("[Divert] No KB match for:", matCode, order.item_description);
-    return false;
+    return kbCode && matCode && (kbCode === matCode || kbCode.replace(/^0+/, "") === matCode.replace(/^0+/, ""));
+  }) || null;
+}
+
+function getDivertInfo(order, allShutdownLines, kbRecords) {
+  const orderLine = order.feedmill_line || order.line || "";
+  if (!allShutdownLines.includes(orderLine)) {
+    return { isDivertible: false, highlightType: null, divertNote: null, partnerLines: [], divertibleOutsideLines: [] };
   }
-  const altLines = Object.entries(LINE_RATE_KEYS).filter(([line, key]) => {
-    if (shutdownLines.includes(line)) return false;
-    return parseFloat(product[key] || 0) > 0;
+
+  const product = findKbProduct(order, kbRecords);
+  const orderFeedmill = LINE_TO_FEEDMILL[orderLine];
+  const feedmillLines = FEEDMILL_SHUTDOWN_LINES[orderFeedmill] || [];
+  const allFeedmillLinesShutdown = feedmillLines.every((l) => allShutdownLines.includes(l));
+
+  const partnerLines = feedmillLines.filter((l) => l !== orderLine && !allShutdownLines.includes(l));
+
+  const divertibleOutsideLines = Object.keys(LINE_RATE_KEYS).filter((l) => {
+    if (feedmillLines.includes(l)) return false;
+    if (allShutdownLines.includes(l)) return false;
+    if (!product) return false;
+    return parseFloat(product[LINE_RATE_KEYS[l]] || 0) > 0;
   });
-  console.log(
-    "[Divert]",
-    order.item_description,
-    "| mat:",
-    matCode,
-    "| KB found | alt lines:",
-    altLines.map(([l]) => l).join(", ") || "NONE",
+
+  const canDivertWithin = partnerLines.length > 0;
+  const canDivertOutside = divertibleOutsideLines.length > 0;
+
+  if (allFeedmillLinesShutdown) {
+    if (canDivertOutside) {
+      return { isDivertible: true, highlightType: "yellow", divertNote: "Feedmill shutdown — right-click to divert to other feedmill lines", canDivertWithin: false, canDivertOutside: true, partnerLines: [], divertibleOutsideLines };
+    }
+    return { isDivertible: false, highlightType: null, divertNote: "Cannot be diverted — awaiting feedmill resume", canDivertWithin: false, canDivertOutside: false, partnerLines: [], divertibleOutsideLines: [] };
+  } else {
+    if (canDivertOutside) {
+      return { isDivertible: true, highlightType: "yellow", divertNote: "Line shutdown — right-click to divert to other feedmill lines", canDivertWithin, canDivertOutside: true, partnerLines, divertibleOutsideLines };
+    } else if (canDivertWithin) {
+      return { isDivertible: true, highlightType: "white", divertNote: "Line shutdown — right-click to divert", canDivertWithin: true, canDivertOutside: false, partnerLines, divertibleOutsideLines: [] };
+    } else {
+      return { isDivertible: false, highlightType: null, divertNote: "Cannot be diverted — awaiting line resume", canDivertWithin: false, canDivertOutside: false, partnerLines: [], divertibleOutsideLines: [] };
+    }
+  }
+}
+
+// ── Pricing lookup helpers ───────────────────────────────────────────────────
+function _normMatCode(v) { return v == null ? '' : String(v).trim(); }
+
+function getPricingFromMasterData(order, kbRecords) {
+  const orderCode = _normMatCode(
+    order.material_code_fg || order.fg_material_code || order.material_code
   );
-  return altLines.length > 0;
+  if (!orderCode) return { cost: null, margin: null };
+  const match = (kbRecords || []).find(md => {
+    const codes = [
+      md.fg_material_code, md.material_code_fg, md.material_code,
+      md.MaterialCode, md['FG Material Code'], md['Material Code (FG)'], md['Material Code'],
+    ].map(_normMatCode);
+    return codes.includes(orderCode);
+  });
+  if (!match) return { cost: null, margin: null };
+  return {
+    cost:   match.pricing_php ?? match.Cost ?? match.cost ?? match['Cost (Php)'] ?? match['Cost (₱)'] ?? match['Cost'] ?? null,
+    margin: match.margin ?? match.Margin ?? match['Margin'] ?? match['Margin (%)'] ?? null,
+  };
+}
+
+function _fmtCost(val) {
+  if (val == null || val === '') return '—';
+  const n = parseFloat(val);
+  if (isNaN(n)) return String(val);
+  return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function _fmtMargin(val) {
+  if (val == null || val === '') return '—';
+  const n = parseFloat(val);
+  if (isNaN(n)) return String(val);
+  return `${n.toFixed(1)}%`;
 }
 
 export default function OrderTable({
@@ -417,6 +718,7 @@ export default function OrderTable({
   suppressCombinedTint = false,
   inferredTargetMap = {},
   feedmillStatus = {},
+  lineShutdowns = {},
   kbRecords = [],
   n10dRecords = [],
   onDivertOrder,
@@ -426,6 +728,7 @@ export default function OrderTable({
   const [historyOrder, setHistoryOrder] = useState(null);
   const [dateViolationToast, setDateViolationToast] = useState(null);
   const [violationHovered, setViolationHovered] = useState(false);
+  const [lockedWarnHovered, setLockedWarnHovered] = useState(false);
   const [lockedStatusWarn, setLockedStatusWarn] = useState(null);
   const [plannedAffectedDialog, setPlannedAffectedDialog] = useState(null); // { from, to, dragged, planned }
   const [movingPlannedDialog, setMovingPlannedDialog] = useState(null); // { from, to, dragged }
@@ -433,6 +736,7 @@ export default function OrderTable({
   const [contextMenu, setContextMenu] = useState(null);
   const [commentPopover, setCommentPopover] = useState(null);
   const [rowHighlights, setRowHighlights] = useState({});
+  const [changeoverTooltip, setChangeoverTooltip] = useState(null); // { x, y, order }
   // Set of lead IDs whose children are currently visible (collapsed by default)
   const [expandedLeads, setExpandedLeads] = useState(new Set());
   const [commentPresence, setCommentPresence] = useState(new Set());
@@ -527,6 +831,7 @@ export default function OrderTable({
 
   const GROUP_LABELS = {
     order_details: "Order Details",
+    pricing: "Pricing",
     production_parameters: "Production Parameters",
     mixer_details: "Mixer Details",
     operator: "Operator",
@@ -553,7 +858,8 @@ export default function OrderTable({
     if (data.values !== undefined) return !data.values || data.values.length === 0;
     if (data.text !== undefined) return !data.text || data.text.trim() === "";
     if (data.items !== undefined || data.categories !== undefined)
-      return (!data.items || data.items.length === 0) && (!data.categories || data.categories.length === 0);
+      return (!data.items || data.items.length === 0) && (!data.categories || data.categories.length === 0) &&
+             (!data.colors || data.colors.length === 0) && (!data.diameters || data.diameters.length === 0);
     if (data.min !== undefined || data.max !== undefined)
       return data.min == null && data.max == null;
     if (data.from !== undefined || data.to !== undefined)
@@ -660,6 +966,8 @@ export default function OrderTable({
     tags: { label: "Tags", width: 200 },
     end_date: { label: "End Date", width: 160 },
     history: { label: "History", width: 64 },
+    cost:    { label: "Cost",    width: 110 },
+    margin:  { label: "Margin",  width: 90  },
   };
   const IND_W = 6;
   const [hiddenCols, setHiddenCols] = useState(() => {
@@ -710,6 +1018,7 @@ export default function OrderTable({
       "mat_code_fg",
       "item_desc",
     ],
+    pricing: ["cost", "margin"],
     production_parameters: [
       "form",
       "volume",
@@ -835,6 +1144,16 @@ export default function OrderTable({
     return () => clearTimeout(violationTimerRef.current);
   }, [dateViolationToast]);
 
+  const lockedStatusWarnTimerRef = React.useRef(null);
+  useEffect(() => {
+    if (!lockedStatusWarn) return;
+    lockedStatusWarnTimerRef.current = setTimeout(
+      () => setLockedStatusWarn(null),
+      12000,
+    );
+    return () => clearTimeout(lockedStatusWarnTimerRef.current);
+  }, [lockedStatusWarn]);
+
   const handleDragStart = (start) => {
     setDragState({ fromIndex: start.source.index, toIndex: null, valid: true });
   };
@@ -873,12 +1192,42 @@ export default function OrderTable({
 
     // ── Locked status check ────────────────────────────────────────────────
     // Only applies to upward moves (to < from).
-    // Hard-locked (InProd, OnGoing): block entirely with red toast.
-    // Planned: soft-warn dialog with Cancel / Proceed Anyway options.
+    // Hard-locked (Done, OnGoing, InProd legacy): block entirely with red toast.
+    // Planned dragged upward: hard-block if Done/OnGoing is in the path,
+    //   otherwise soft-warn dialog with Cancel / Proceed Anyway options.
     const draggedOrder = visibleOrders[from];
 
-    // When dragging a Planned order itself — show a warning dialog
+    // When dragging a Planned order itself — check for hard blockers first,
+    // then fall through to soft warning if the path is clear.
     if (draggedOrder?.status === "planned") {
+      if (to < from) {
+        for (let i = to; i < from; i++) {
+          const o = visibleOrders[i];
+          if (!o || o.status === 'cancel_po') continue;
+          if (HARD_LOCKED_STATUSES.includes(o.status)) {
+            console.debug('[Drag Validation]', {
+              movingOrderId: draggedOrder.id,
+              movingStatus: draggedOrder.status,
+              fromIndex: from,
+              toIndex: to,
+              isNotYetStarted: true,
+              blocked: true,
+              blocker: o.fpr || o.id,
+              blockerStatus: o.status,
+            });
+            setLockedStatusWarn({ dragged: draggedOrder, blocker: o });
+            return;
+          }
+        }
+      }
+      console.debug('[Drag Validation]', {
+        movingOrderId: draggedOrder.id,
+        movingStatus: draggedOrder.status,
+        fromIndex: from,
+        toIndex: to,
+        isNotYetStarted: true,
+        blocked: false,
+      });
       setMovingPlannedDialog({ from, to, dragged: draggedOrder });
       return;
     }
@@ -1039,7 +1388,29 @@ export default function OrderTable({
   const _expandedOrders = orders.filter(
     (o) => !o.parent_id || expandedLeads.has(o.parent_id),
   );
-  const visibleOrders = applyColumnFilters(_expandedOrders, columnFilters);
+  const _filtered = applyColumnFilters(_expandedOrders, columnFilters);
+  // Group sub-orders immediately after their lead so they always appear adjacent
+  const visibleOrders = (() => {
+    const result = [];
+    const added = new Set();
+    for (const order of _filtered) {
+      if (added.has(order.id)) continue;
+      result.push(order);
+      added.add(order.id);
+      if (!order.parent_id && order.original_order_ids?.length > 0) {
+        for (const sub of _filtered) {
+          if (!added.has(sub.id) && String(sub.parent_id) === String(order.id)) {
+            result.push(sub);
+            added.add(sub.id);
+          }
+        }
+      }
+    }
+    for (const order of _filtered) {
+      if (!added.has(order.id)) result.push(order);
+    }
+    return result;
+  })();
 
   return (
     <TooltipProvider delayDuration={200}>
@@ -1093,8 +1464,8 @@ export default function OrderTable({
       .filter-icon-btn { background: none; border: none; cursor: pointer; padding: 2px; border-radius: 3px; display: inline-flex; align-items: center; justify-content: center; color: #9ca3af; transition: color 0.15s, background 0.15s; flex-shrink: 0; opacity: 0; }
       th:hover .filter-icon-btn, .filter-icon-btn.active { opacity: 1; }
       .filter-icon-btn:hover { background: rgba(0,0,0,0.06); color: #6b7280; }
-      .filter-icon-btn.active { color: #fd5108; }
-      .filter-icon-btn.active:hover { color: #e8490b; background: rgba(253,81,8,0.08); }
+      .filter-icon-btn.active { color: var(--nexfeed-primary, var(--nexfeed-primary)); }
+      .filter-icon-btn.active:hover { color: var(--nexfeed-primary-dark, var(--nexfeed-primary-dark)); background: rgba(253,81,8,0.08); }
       .sparkle-btn { background: #fef3c7; border: none; cursor: pointer; font-size: 11px; width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; border-radius: 5px; transition: background 0.15s ease; vertical-align: middle; }
       .sparkle-btn:hover:not(:disabled) { background: #fde68a; }
       .sparkle-btn:active:not(:disabled) { background: #fcd34d; }
@@ -1194,6 +1565,14 @@ export default function OrderTable({
                 ) : (
                   GROUP_COLS.order_details.map((id) => colEl(id))
                 )}
+                {isGroupHidden("pricing") ? (
+                  <col
+                    key="grp-pr"
+                    style={{ width: IND_W, minWidth: IND_W, maxWidth: IND_W }}
+                  />
+                ) : (
+                  GROUP_COLS.pricing.map((id) => colEl(id))
+                )}
                 {isGroupHidden("production_parameters") ? (
                   <col
                     key="grp-pp"
@@ -1257,7 +1636,7 @@ export default function OrderTable({
                   {isDraggable && (
                     <th
                       style={{
-                        background: "#f9fafb",
+                        background: "var(--color-bg-tertiary)",
                         borderBottom: "1px solid #e5e7eb",
                       }}
                     />
@@ -1311,6 +1690,35 @@ export default function OrderTable({
                       </div>
                     </th>
                   )}
+                  {/* PRICING — hideable group */}
+                  {isGroupHidden("pricing") ? (
+                    <th
+                      className="col-hide-indicator"
+                      style={indStyle}
+                      onDoubleClick={() => showGroup("pricing")}
+                      title={`Double-click to show Pricing (${GROUP_COLS.pricing.length} columns)`}
+                    />
+                  ) : (
+                    <th
+                      colSpan={GROUP_COLS.pricing.length}
+                      className={GH}
+                      style={{ background: "#f0fdf4" }}
+                      data-group-key="pricing"
+                    >
+                      <div className="hideable-col-header">
+                        Pricing
+                        <span
+                          className="col-hide-btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            hideGroup("pricing");
+                          }}
+                        >
+                          ◂
+                        </span>
+                      </div>
+                    </th>
+                  )}
                   {/* PRODUCTION PARAMETERS — hideable group */}
                   {isGroupHidden("production_parameters") ? (
                     <th
@@ -1323,7 +1731,7 @@ export default function OrderTable({
                     <th
                       colSpan={GROUP_COLS.production_parameters.length}
                       className={`order-table-header-production-params ${GH}`}
-                      style={{ background: "#ffffff" }}
+                      style={{ background: "var(--color-bg-secondary)" }}
                       data-group-key="production_parameters"
                       data-tour="orders-header-production"
                     >
@@ -1472,7 +1880,7 @@ export default function OrderTable({
                     <th
                       colSpan={GROUP_COLS.notes.length}
                       className={GH}
-                      style={{ background: "#ffffff" }}
+                      style={{ background: "var(--color-bg-secondary)" }}
                       data-group-key="notes"
                     >
                       <div className="hideable-col-header">
@@ -1530,7 +1938,7 @@ export default function OrderTable({
                     <th
                       colSpan={GROUP_COLS.completion_tracking.length}
                       className={GH}
-                      style={{ background: "#ffffff" }}
+                      style={{ background: "var(--color-bg-secondary)" }}
                       data-group-key="completion_tracking"
                     >
                       <div className="hideable-col-header">
@@ -1549,9 +1957,9 @@ export default function OrderTable({
                   )}
                 </tr>
 
-                <tr style={{ background: "#f9fafb" }}>
+                <tr style={{ background: "var(--color-bg-tertiary)" }}>
                   {isDraggable && (
-                    <th style={{ background: "#ffffff" }} className={CH} />
+                    <th style={{ background: "var(--color-bg-secondary)" }} className={CH} />
                   )}
                   {isHidden("readiness") ? (
                     <th
@@ -1770,6 +2178,65 @@ export default function OrderTable({
                       )}
                     </>
                   )}
+                  {/* PRICING — 2 columns */}
+                  {isGroupHidden("pricing") ? (
+                    <th
+                      className="col-hide-indicator"
+                      style={indStyle}
+                      onDoubleClick={() => showGroup("pricing")}
+                    />
+                  ) : (
+                    <>
+                      {isHidden("cost") ? (
+                        <th
+                          className="col-hide-indicator"
+                          style={indStyle}
+                          onClick={() => showCol("cost")}
+                          title="Unhide Cost"
+                        />
+                      ) : (
+                        <th style={{ background: "#f0fdf4" }} className={CH} data-col-key="cost">
+                          <div className="hideable-col-header">
+                            Cost
+                            <FBtn col="cost" />
+                            <span
+                              className="col-hide-btn"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                hideCol("cost");
+                              }}
+                            >
+                              ◂
+                            </span>
+                          </div>
+                        </th>
+                      )}
+                      {isHidden("margin") ? (
+                        <th
+                          className="col-hide-indicator"
+                          style={indStyle}
+                          onClick={() => showCol("margin")}
+                          title="Unhide Margin"
+                        />
+                      ) : (
+                        <th style={{ background: "#f0fdf4" }} className={CH} data-col-key="margin">
+                          <div className="hideable-col-header">
+                            Margin
+                            <FBtn col="margin" />
+                            <span
+                              className="col-hide-btn"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                hideCol("margin");
+                              }}
+                            >
+                              ◂
+                            </span>
+                          </div>
+                        </th>
+                      )}
+                    </>
+                  )}
                   {/* PRODUCTION PARAMETERS — 6 columns */}
                   {isGroupHidden("production_parameters") ? (
                     <th
@@ -1787,7 +2254,7 @@ export default function OrderTable({
                           title="Unhide Form"
                         />
                       ) : (
-                        <th style={{ background: "#ffffff" }} className={CH} data-col-key="form">
+                        <th style={{ background: "var(--color-bg-secondary)" }} className={CH} data-col-key="form">
                           <div className="hideable-col-header">
                             Form
                             <FBtn col="form" />
@@ -1811,7 +2278,7 @@ export default function OrderTable({
                           title="Unhide Volume (MT)"
                         />
                       ) : (
-                        <th style={{ background: "#ffffff" }} className={CH} data-col-key="volume">
+                        <th style={{ background: "var(--color-bg-secondary)" }} className={CH} data-col-key="volume">
                           <div className="hideable-col-header">
                             Volume (MT)
                             <FBtn col="volume" />
@@ -1836,7 +2303,7 @@ export default function OrderTable({
                         />
                       ) : (
                         <th
-                          style={{ background: "#ffffff" }}
+                          style={{ background: "var(--color-bg-secondary)" }}
                           className={`${CH} text-center`}
                           data-col-key="batch_size"
                         >
@@ -1864,7 +2331,7 @@ export default function OrderTable({
                         />
                       ) : (
                         <th
-                          style={{ background: "#ffffff" }}
+                          style={{ background: "var(--color-bg-secondary)" }}
                           className={`${CH} text-center`}
                           data-col-key="num_batches"
                         >
@@ -1892,7 +2359,7 @@ export default function OrderTable({
                         />
                       ) : (
                         <th
-                          style={{ background: "#ffffff" }}
+                          style={{ background: "var(--color-bg-secondary)" }}
                           className={`${CH} text-center`}
                           data-col-key="num_bags"
                         >
@@ -1919,7 +2386,7 @@ export default function OrderTable({
                           title="Unhide Production Time"
                         />
                       ) : (
-                        <th style={{ background: "#ffffff" }} className={CH} data-col-key="prod_time">
+                        <th style={{ background: "var(--color-bg-secondary)" }} className={CH} data-col-key="prod_time">
                           <div className="hideable-col-header">
                             Production Time
                             <FBtn col="prod_time" />
@@ -2184,7 +2651,7 @@ export default function OrderTable({
                                   isEnhancing
                                     ? "Generating…"
                                     : n10dRecords.length === 0
-                                      ? "Upload N10D data to enable AI insights"
+                                      ? "Upload Future Dispatches data to enable AI insights"
                                       : "Enhance with AI"
                                 }
                                 disabled={
@@ -2231,7 +2698,7 @@ export default function OrderTable({
                           title="Unhide FPR Notes"
                         />
                       ) : (
-                        <th style={{ background: "#fff" }} className={CH} data-col-key="fpr_notes">
+                        <th style={{ background: "var(--color-bg-secondary)" }} className={CH} data-col-key="fpr_notes">
                           <div className="hideable-col-header">
                             FPR Notes
                             <FBtn col="fpr_notes" />
@@ -2255,7 +2722,7 @@ export default function OrderTable({
                           title="Unhide Special Remarks"
                         />
                       ) : (
-                        <th style={{ background: "#fff" }} className={CH} data-col-key="special_remarks">
+                        <th style={{ background: "var(--color-bg-secondary)" }} className={CH} data-col-key="special_remarks">
                           <div className="hideable-col-header">
                             Special Remarks
                             <FBtn col="special_remarks" />
@@ -2398,7 +2865,7 @@ export default function OrderTable({
                         />
                       ) : (
                         <th
-                          style={{ background: "#ffffff" }}
+                          style={{ background: "var(--color-bg-secondary)" }}
                           className={cn(CH, "text-center")}
                           data-col-key="history"
                         >
@@ -2515,7 +2982,8 @@ export default function OrderTable({
                             : isEditable(order, "completion");
                         const hasVolumeOverride =
                           order.volume_override != null &&
-                          order.volume_override !== "";
+                          order.volume_override !== "" &&
+                          !(order.original_order_ids && order.original_order_ids.length > 0);
                         const isVolNotMultiple =
                           hasVolumeOverride &&
                           batchSize > 0 &&
@@ -2530,13 +2998,13 @@ export default function OrderTable({
                         // Diversion state
                         const orderLine =
                           order.feedmill_line || order.line || "";
-                        const shutdownLines = Object.entries(
-                          feedmillStatus || {},
-                        )
-                          .filter(([, s]) => s && s.isShutdown)
-                          .flatMap(([fm]) => FEEDMILL_SHUTDOWN_LINES[fm] || []);
-                        const isOnShutdownLine =
-                          shutdownLines.includes(orderLine);
+                        const allShutdownLines = [...new Set([
+                          ...Object.entries(feedmillStatus || {})
+                            .filter(([, s]) => s && s.isShutdown)
+                            .flatMap(([fm]) => FEEDMILL_SHUTDOWN_LINES[fm] || []),
+                          ...Object.keys(lineShutdowns || {}).filter((l) => lineShutdowns[l]?.isShutdown),
+                        ])];
+                        const isOnShutdownLine = allShutdownLines.includes(orderLine);
                         const isDiverted = !!(
                           order.diversion_data &&
                           order.diversion_data.originalLine
@@ -2551,9 +3019,10 @@ export default function OrderTable({
                             "cancel_po",
                             "cancelled",
                           ].includes(statusLower);
-                        const isEligibleForDivert =
-                          isActiveOnShutdown &&
-                          hasAlternativeLines(order, shutdownLines, kbRecords);
+                        const divertInfo = isActiveOnShutdown
+                          ? getDivertInfo(order, allShutdownLines, kbRecords)
+                          : { isDivertible: false, highlightType: null, divertNote: null, partnerLines: [], divertibleOutsideLines: [] };
+                        const isEligibleForDivert = divertInfo.isDivertible;
 
                         let rowBg =
                           index % 2 === 0 ? "bg-white" : "bg-gray-50/50";
@@ -2580,6 +3049,13 @@ export default function OrderTable({
                           order.scheduling_conflict
                         )
                           rowBg = "bg-[#ffebee]";
+                        if (isActiveOnShutdown && !isCancelled && divertInfo.canDivertOutside !== true) {
+                          // Shutdown line but can't divert outside feedmill — strip ANY yellow tint
+                          if (rowBg === "bg-[#fff9c4]" || rowBg === "bg-[#fef9c3]")
+                            rowBg = index % 2 === 0 ? "bg-white" : "bg-gray-50/50";
+                        }
+                        if (isEligibleForDivert && !isCancelled && divertInfo.canDivertOutside === true)
+                          rowBg = "bg-[#fef9c3]";
                         const holdAttr = isOnHold
                           ? isLead || isChild
                             ? "combined"
@@ -2664,7 +3140,7 @@ export default function OrderTable({
                                   rowBg,
                                   isChild && "text-[#8094b4]",
                                   snapshot.isDragging &&
-                                    "shadow-xl bg-white ring-2 ring-[#fd5108]/20",
+                                    "shadow-xl bg-white ring-2 ring-[var(--nexfeed-primary)/20]",
                                   !snapshot.isDragging &&
                                     !isCompleted &&
                                     !isCancelled &&
@@ -2715,7 +3191,7 @@ export default function OrderTable({
                                         }
                                       : {}),
                                     ...(!hl &&
-                                    isEligibleForDivert &&
+                                    divertInfo.canDivertOutside === true &&
                                     !snapshot.isDragging
                                       ? {
                                           borderLeft: "4px solid #eab308",
@@ -2836,7 +3312,7 @@ export default function OrderTable({
                                       )}
                                       {isChild && (
                                         <span className="text-[10px] bg-blue-100 text-blue-600 px-1 rounded">
-                                          {readOnly ? "Sub" : "Child"}
+                                          Sub
                                         </span>
                                       )}
                                       {order.is_cut && (
@@ -2894,33 +3370,12 @@ export default function OrderTable({
                                           "planned_order",
                                           "Planned Order",
                                         )}
-                                        <Tooltip>
-                                          <TooltipTrigger asChild>
-                                            <div>
-                                              <p className="text-[13px] text-gray-900">
-                                                {order.fg || "-"}
-                                              </p>
-                                              <p className="text-[13px] text-gray-900 mt-0.5">
-                                                {order.sfg || "-"}
-                                              </p>
-                                              {isPMX && (
-                                                <p className="text-[13px] text-gray-900 mt-0.5">
-                                                  {order.pmx || "-"}
-                                                </p>
-                                              )}
-                                            </div>
-                                          </TooltipTrigger>
-                                          <TooltipContent
-                                            side="top"
-                                            className="text-xs"
-                                          >
-                                            <p>FG: {order.fg || "-"}</p>
-                                            <p>SFG: {order.sfg || "-"}</p>
-                                            {isPMX && (
-                                              <p>PMX: {order.pmx || "-"}</p>
-                                            )}
-                                          </TooltipContent>
-                                        </Tooltip>
+                                        <PlannedOrderCell
+                                          order={order}
+                                          isPMX={isPMX}
+                                          canEdit={!isChild && !isCancelled}
+                                          onUpdateOrder={onUpdateOrder}
+                                        />
                                       </td>
                                     )}
 
@@ -2950,117 +3405,11 @@ export default function OrderTable({
                                           <TooltipTrigger asChild>
                                             <div>
                                               {canEditHaNotes ? (
-                                                <div className="space-y-0.5">
-                                                  <div className="group">
-                                                    <Input
-                                                      type="text"
-                                                      defaultValue={
-                                                        order.fg1 || ""
-                                                      }
-                                                      onChange={(e) =>
-                                                        debouncedUpdate(
-                                                          order.id,
-                                                          "fg1",
-                                                          e.target.value,
-                                                        )
-                                                      }
-                                                      onBlur={(e) => {
-                                                        clearTimeout(
-                                                          debounceTimers
-                                                            .current[
-                                                            `${order.id}-fg1`
-                                                          ],
-                                                        );
-                                                        onUpdateOrder(
-                                                          order.id,
-                                                          {
-                                                            fg1: e.target.value,
-                                                          },
-                                                        );
-                                                      }}
-                                                      placeholder="Enter FG1"
-                                                      className={cn(
-                                                        editableInputClass,
-                                                        "w-24 text-[13px] text-gray-900 placeholder:text-gray-300",
-                                                      )}
-                                                      data-testid={`input-fg1-${order.id}`}
-                                                    />
-                                                  </div>
-                                                  <div className="group">
-                                                    <Input
-                                                      type="text"
-                                                      defaultValue={
-                                                        order.sfg1 || ""
-                                                      }
-                                                      onChange={(e) =>
-                                                        debouncedUpdate(
-                                                          order.id,
-                                                          "sfg1",
-                                                          e.target.value,
-                                                        )
-                                                      }
-                                                      onBlur={(e) => {
-                                                        clearTimeout(
-                                                          debounceTimers
-                                                            .current[
-                                                            `${order.id}-sfg1`
-                                                          ],
-                                                        );
-                                                        onUpdateOrder(
-                                                          order.id,
-                                                          {
-                                                            sfg1: e.target
-                                                              .value,
-                                                          },
-                                                        );
-                                                      }}
-                                                      placeholder="Enter SFG1"
-                                                      className={cn(
-                                                        editableInputClass,
-                                                        "w-24 text-[13px] text-gray-900 placeholder:text-gray-300",
-                                                      )}
-                                                      data-testid={`input-sfg1-${order.id}`}
-                                                    />
-                                                  </div>
-                                                  {isPMX && (
-                                                    <div className="group">
-                                                      <Input
-                                                        type="text"
-                                                        defaultValue={
-                                                          order.sfgpmx || ""
-                                                        }
-                                                        onChange={(e) =>
-                                                          debouncedUpdate(
-                                                            order.id,
-                                                            "sfgpmx",
-                                                            e.target.value,
-                                                          )
-                                                        }
-                                                        onBlur={(e) => {
-                                                          clearTimeout(
-                                                            debounceTimers
-                                                              .current[
-                                                              `${order.id}-sfgpmx`
-                                                            ],
-                                                          );
-                                                          onUpdateOrder(
-                                                            order.id,
-                                                            {
-                                                              sfgpmx:
-                                                                e.target.value,
-                                                            },
-                                                          );
-                                                        }}
-                                                        placeholder="Enter SFGPMX"
-                                                        className={cn(
-                                                          editableInputClass,
-                                                          "w-24 text-[13px] text-gray-900 placeholder:text-gray-300",
-                                                        )}
-                                                        data-testid={`input-sfgpmx-${order.id}`}
-                                                      />
-                                                    </div>
-                                                  )}
-                                                </div>
+                                                <ProdOrderInputs
+                                                  order={order}
+                                                  isPMX={isPMX}
+                                                  onUpdateOrder={onUpdateOrder}
+                                                />
                                               ) : (
                                                 <div>
                                                   <p className="text-[13px] text-gray-900">
@@ -3226,18 +3575,24 @@ export default function OrderTable({
                                             </button>
                                           )}
                                         </p>
-                                        <p
-                                          className={cn(
-                                            "text-[12px] mt-0.5",
-                                            isCancelled && !isCancelledHistory
-                                              ? "text-[#c0c7d0]"
-                                              : isChild
-                                                ? "text-[#9fb3cc]"
-                                                : "text-[#6b7280]",
-                                          )}
-                                        >
-                                          {toTitleCase(order.category)}
-                                        </p>
+                                        {(order.category || order.color || order.diameter) && (
+                                          <p
+                                            className={cn(
+                                              "text-[12px] mt-0.5",
+                                              isCancelled && !isCancelledHistory
+                                                ? "text-[#c0c7d0]"
+                                                : isChild
+                                                  ? "text-[#9fb3cc]"
+                                                  : "text-[#6b7280]",
+                                            )}
+                                          >
+                                            {[
+                                              order.category ? toTitleCase(order.category) : null,
+                                              order.color || null,
+                                              order.diameter != null && order.diameter !== "" ? `${parseFloat(order.diameter).toFixed(2)}mm` : null,
+                                            ].filter(Boolean).join(" · ")}
+                                          </p>
+                                        )}
                                         {isDiverted && order.diversion_data && (
                                           <p
                                             style={{
@@ -3254,23 +3609,77 @@ export default function OrderTable({
                                               orderLine}
                                           </p>
                                         )}
-                                        {isEligibleForDivert && (
+                                        {isActiveOnShutdown && !isDiverted && divertInfo.divertNote && (
                                           <p
                                             style={{
                                               fontSize: "10px",
-                                              color: "#b45309",
+                                              color: divertInfo.canDivertOutside === true
+                                                ? "#ca8a04"
+                                                : isEligibleForDivert ? "#6b7280" : "#9ca3af",
                                               marginTop: "2px",
-                                              fontWeight: 400,
+                                              fontWeight: divertInfo.canDivertOutside === true ? 500 : 400,
+                                              fontStyle: isEligibleForDivert ? "normal" : "italic",
                                             }}
                                           >
-                                            ⚠ Line shutdown — right-click to
-                                            divert
+                                            {divertInfo.canDivertOutside === true ? "⚠" : isEligibleForDivert ? "↪" : "🔒"} {divertInfo.divertNote}
                                           </p>
                                         )}
                                       </td>
                                     )}
                                   </>
                                 )}
+
+                                {/* PRICING — 2 columns */}
+                                {isGroupHidden("pricing") ? (
+                                  <td
+                                    className="col-hide-indicator"
+                                    style={indStyle}
+                                    onDoubleClick={() => showGroup("pricing")}
+                                    title="Double-click to show Pricing"
+                                  />
+                                ) : (() => {
+                                  const { cost, margin } = getPricingFromMasterData(order, kbRecords);
+                                  return (
+                                    <>
+                                      {isHidden("cost") ? (
+                                        <td
+                                          className="col-hide-indicator"
+                                          style={indStyle}
+                                          onClick={() => showCol("cost")}
+                                          title="Unhide Cost"
+                                        />
+                                      ) : (
+                                        <td
+                                          className={cellBase}
+                                          data-col-key="cost"
+                                          data-col-label="Cost"
+                                        >
+                                          <span className="text-[13px] text-gray-700">
+                                            {_fmtCost(cost)}
+                                          </span>
+                                        </td>
+                                      )}
+                                      {isHidden("margin") ? (
+                                        <td
+                                          className="col-hide-indicator"
+                                          style={indStyle}
+                                          onClick={() => showCol("margin")}
+                                          title="Unhide Margin"
+                                        />
+                                      ) : (
+                                        <td
+                                          className={cellBase}
+                                          data-col-key="margin"
+                                          data-col-label="Margin"
+                                        >
+                                          <span className="text-[13px] text-gray-700">
+                                            {_fmtMargin(margin)}
+                                          </span>
+                                        </td>
+                                      )}
+                                    </>
+                                  );
+                                })()}
 
                                 {/* PRODUCTION PARAMETERS — 6 columns */}
                                 {isGroupHidden("production_parameters") ? (
@@ -3454,13 +3863,26 @@ export default function OrderTable({
                                               ? "—"
                                               : "-"}
                                         </p>
-                                        <p className="text-[12px] text-[#6b7280]">
-                                          CO:{" "}
-                                          {fmtChangeover(order.changeover_time)}{" "}
-                                          | Rate:{" "}
+                                        <p className="text-[12px] text-[#6b7280]" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                          <span
+                                            className="changeover-cell-wrap"
+                                            onMouseEnter={(e) => {
+                                              const rect = e.currentTarget.getBoundingClientRect();
+                                              setChangeoverTooltip({ x: rect.left, y: rect.bottom + 6, order });
+                                            }}
+                                            onMouseLeave={() => setChangeoverTooltip(null)}
+                                          >
+                                            <span
+                                              className={`changeover-cell-total${order._changeoverAdditional > 0 ? " has-additional" : ""}`}
+                                              style={(order.status === "completed" || order.status === "cancel_po") ? { color: "#9ca3af" } : undefined}
+                                            >
+                                              CO: {fmtChangeover(order._changeoverTotal ?? order.changeover_time)}
+                                            </span>
+                                          </span>
+                                          <span>| Rate:{" "}
                                           {order.run_rate != null
                                             ? fmtRunRate(order.run_rate)
-                                            : "-"}
+                                            : "-"}</span>
                                         </p>
                                       </td>
                                     )}
@@ -3498,134 +3920,12 @@ export default function OrderTable({
                                         }}
                                       >
                                         {cellTriangle("ha_info", "HA Info")}
-                                        {canEditHaNotes ? (
-                                          <div className="space-y-1">
-                                            <div className="flex items-center gap-1">
-                                              <span className="text-[13px] text-gray-400 shrink-0">
-                                                HA:
-                                              </span>
-                                              <Tooltip>
-                                                <TooltipTrigger asChild>
-                                                  <span
-                                                    className="text-[13px] text-gray-700 font-bold cursor-default"
-                                                    data-testid={`display-ha-${order.id}`}
-                                                  >
-                                                    {batches > 0
-                                                      ? batches
-                                                      : "—"}
-                                                  </span>
-                                                </TooltipTrigger>
-                                                <TooltipContent
-                                                  side="top"
-                                                  className="text-xs"
-                                                >
-                                                  Auto-calculated from Number of
-                                                  Batches
-                                                </TooltipContent>
-                                              </Tooltip>
-                                            </div>
-                                            <div className="group flex items-center gap-1">
-                                              <span className="text-[12px] text-[#6b7280] shrink-0">
-                                                SCADA:
-                                              </span>
-                                              <Input
-                                                type="text"
-                                                defaultValue={
-                                                  order.formula_version || ""
-                                                }
-                                                onChange={(e) =>
-                                                  debouncedUpdate(
-                                                    order.id,
-                                                    "formula_version",
-                                                    e.target.value,
-                                                  )
-                                                }
-                                                onBlur={(e) => {
-                                                  clearTimeout(
-                                                    debounceTimers.current[
-                                                      `${order.id}-formula_version`
-                                                    ],
-                                                  );
-                                                  onUpdateOrder(order.id, {
-                                                    formula_version:
-                                                      e.target.value,
-                                                  });
-                                                }}
-                                                placeholder="-"
-                                                className={cn(
-                                                  line2InputClass,
-                                                  "w-14 text-gray-700",
-                                                )}
-                                                data-testid={`input-scada-${order.id}`}
-                                              />
-                                              <span className="text-[12px] text-[#6b7280] shrink-0">
-                                                PV:
-                                              </span>
-                                              <Input
-                                                type="text"
-                                                defaultValue={
-                                                  order.prod_version || ""
-                                                }
-                                                onChange={(e) =>
-                                                  debouncedUpdate(
-                                                    order.id,
-                                                    "prod_version",
-                                                    e.target.value,
-                                                  )
-                                                }
-                                                onBlur={(e) => {
-                                                  clearTimeout(
-                                                    debounceTimers.current[
-                                                      `${order.id}-prod_version`
-                                                    ],
-                                                  );
-                                                  onUpdateOrder(order.id, {
-                                                    prod_version:
-                                                      e.target.value,
-                                                  });
-                                                }}
-                                                placeholder="-"
-                                                className={cn(
-                                                  line2InputClass,
-                                                  "w-12 text-gray-700",
-                                                )}
-                                                data-testid={`input-pv-${order.id}`}
-                                              />
-                                            </div>
-                                          </div>
-                                        ) : (
-                                          <div>
-                                            <div className="flex items-center gap-1">
-                                              <span className="text-[13px] text-gray-400 shrink-0">
-                                                HA:
-                                              </span>
-                                              <Tooltip>
-                                                <TooltipTrigger asChild>
-                                                  <span
-                                                    className="text-[13px] text-gray-700 font-bold cursor-default"
-                                                    data-testid={`display-ha-readonly-${order.id}`}
-                                                  >
-                                                    {batches > 0
-                                                      ? batches
-                                                      : "—"}
-                                                  </span>
-                                                </TooltipTrigger>
-                                                <TooltipContent
-                                                  side="top"
-                                                  className="text-xs"
-                                                >
-                                                  Auto-calculated from Number of
-                                                  Batches
-                                                </TooltipContent>
-                                              </Tooltip>
-                                            </div>
-                                            <p className="text-[12px] text-[#6b7280]">
-                                              SCADA:{" "}
-                                              {order.formula_version || "-"} |
-                                              PV: {order.prod_version || "-"}
-                                            </p>
-                                          </div>
-                                        )}
+                                        <HAInfoInputs
+                                          order={order}
+                                          batches={batches}
+                                          canEdit={canEditHaNotes}
+                                          onUpdateOrder={onUpdateOrder}
+                                        />
                                       </td>
                                     )}
 
@@ -3659,7 +3959,7 @@ export default function OrderTable({
                                                   e.target.value,
                                               })
                                             }
-                                            className="text-[13px] bg-transparent border-0 border-b border-transparent hover:border-gray-300 focus:border-[#fd5108] outline-none p-0 h-6 w-full transition-colors"
+                                            className="text-[13px] bg-transparent border-0 border-b border-transparent hover:border-gray-300 focus:border-[var(--nexfeed-primary)] outline-none p-0 h-6 w-full transition-colors"
                                             data-testid={`select-ha-prep-${order.id}`}
                                           >
                                             {haFormOptions.map((opt) => (
@@ -3728,7 +4028,6 @@ export default function OrderTable({
                                         value={order.status || "plotted"}
                                         onChange={(newStatus) => {
                                           const PROD_STATUSES = [
-                                            "in_production",
                                             "ongoing_batching",
                                             "ongoing_pelleting",
                                             "ongoing_bagging",
@@ -4288,10 +4587,13 @@ export default function OrderTable({
         (() => {
           const cmOrder = contextMenu.order;
           const cmLine = cmOrder.feedmill_line || cmOrder.line || "";
-          const cmShutdownLines = Object.entries(feedmillStatus || {})
-            .filter(([, s]) => s && s.isShutdown)
-            .flatMap(([fm]) => FEEDMILL_SHUTDOWN_LINES[fm] || []);
-          const cmIsShutdown = cmShutdownLines.includes(cmLine);
+          const cmAllShutdownLines = [...new Set([
+            ...Object.entries(feedmillStatus || {})
+              .filter(([, s]) => s && s.isShutdown)
+              .flatMap(([fm]) => FEEDMILL_SHUTDOWN_LINES[fm] || []),
+            ...Object.keys(lineShutdowns || {}).filter((l) => lineShutdowns[l]?.isShutdown),
+          ])];
+          const cmIsShutdown = cmAllShutdownLines.includes(cmLine);
           const cmIsDiverted = !!(
             cmOrder.diversion_data && cmOrder.diversion_data.originalLine
           );
@@ -4300,9 +4602,10 @@ export default function OrderTable({
             cmIsShutdown &&
             !cmIsDiverted &&
             !["done", "completed", "cancel_po", "cancelled"].includes(cmStatus);
-          const cmEligibleDivert =
-            cmActiveOnShutdown &&
-            hasAlternativeLines(cmOrder, cmShutdownLines, kbRecords);
+          const cmDivertInfo = cmActiveOnShutdown
+            ? getDivertInfo(cmOrder, cmAllShutdownLines, kbRecords)
+            : { isDivertible: false };
+          const cmEligibleDivert = cmDivertInfo.isDivertible;
           return (
             <OrderContextMenu
               x={contextMenu.x}
@@ -4479,7 +4782,7 @@ export default function OrderTable({
               <div style={{ fontSize: 12, color: "#6b7280", lineHeight: 1.5 }}>
                 💡{" "}
                 {dateViolationToast.isInferredTarget
-                  ? "Edit the availability date in the Avail Date column, or update the Next 10 Days stock data to change the target date."
+                  ? "Edit the availability date in the Avail Date column, or update the Future Dispatches stock data to change the target date."
                   : "Edit the availability date of this order to a date that fits the desired position, then drag it again."}
               </div>
             </div>
@@ -4531,7 +4834,7 @@ export default function OrderTable({
         >
           <div
             style={{
-              background: "white",
+              background: "var(--color-bg-secondary)",
               borderRadius: 10,
               padding: "24px",
               maxWidth: 420,
@@ -4555,7 +4858,7 @@ export default function OrderTable({
                 onClick={() => setPlannedAffectedDialog(null)}
                 style={{
                   padding: "8px 16px", borderRadius: 6, border: "1px solid #d1d5db",
-                  background: "white", color: "#374151", fontSize: 13, cursor: "pointer", fontWeight: 500,
+                  background: "var(--color-bg-secondary)", color: "#374151", fontSize: 13, cursor: "pointer", fontWeight: 500,
                 }}
               >
                 Cancel
@@ -4569,7 +4872,7 @@ export default function OrderTable({
                 }}
                 style={{
                   padding: "8px 16px", borderRadius: 6, border: "none",
-                  background: "#fd5108", color: "white", fontSize: 13, cursor: "pointer", fontWeight: 600,
+                  background: "var(--nexfeed-primary)", color: "white", fontSize: 13, cursor: "pointer", fontWeight: 600,
                 }}
               >
                 Proceed Anyway
@@ -4595,7 +4898,7 @@ export default function OrderTable({
         >
           <div
             style={{
-              background: "white",
+              background: "var(--color-bg-secondary)",
               borderRadius: 10,
               padding: "24px",
               maxWidth: 440,
@@ -4619,7 +4922,7 @@ export default function OrderTable({
                 onClick={() => setMovingPlannedDialog(null)}
                 style={{
                   padding: "8px 16px", borderRadius: 6, border: "1px solid #d1d5db",
-                  background: "white", color: "#374151", fontSize: 13, cursor: "pointer", fontWeight: 500,
+                  background: "var(--color-bg-secondary)", color: "#374151", fontSize: 13, cursor: "pointer", fontWeight: 500,
                 }}
               >
                 Cancel
@@ -4633,7 +4936,7 @@ export default function OrderTable({
                 }}
                 style={{
                   padding: "8px 16px", borderRadius: 6, border: "none",
-                  background: "#fd5108", color: "white", fontSize: 13, cursor: "pointer", fontWeight: 600,
+                  background: "var(--nexfeed-primary)", color: "white", fontSize: 13, cursor: "pointer", fontWeight: 600,
                 }}
               >
                 Proceed
@@ -4645,6 +4948,17 @@ export default function OrderTable({
 
       {lockedStatusWarn && (
         <div
+          onMouseEnter={() => {
+            setLockedWarnHovered(true);
+            clearTimeout(lockedStatusWarnTimerRef.current);
+          }}
+          onMouseLeave={() => {
+            setLockedWarnHovered(false);
+            lockedStatusWarnTimerRef.current = setTimeout(
+              () => setLockedStatusWarn(null),
+              12000,
+            );
+          }}
           style={{
             position: "fixed",
             top: 20,
@@ -4656,11 +4970,19 @@ export default function OrderTable({
             borderLeft: "4px solid #ef4444",
             borderRadius: 8,
             padding: "16px",
+            paddingBottom: "19px",
             boxShadow: "0 4px 16px rgba(0,0,0,0.12)",
             animation: "slideInRight 0.2s ease",
             fontFamily: "inherit",
+            overflow: "hidden",
           }}
         >
+          <style>{`
+            @keyframes lockedStatusProgress {
+              from { width: 100%; }
+              to   { width: 0%; }
+            }
+          `}</style>
           <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
             <span style={{ fontSize: 16, lineHeight: 1.3, flexShrink: 0 }}>🔒</span>
             <div style={{ flex: 1 }}>
@@ -4674,7 +4996,7 @@ export default function OrderTable({
                 which is <em>{lockedStatusWarn.blocker?.status?.replace(/_/g, " ")}</em>.
               </div>
               <div style={{ fontSize: 12, color: "#6b7280", lineHeight: 1.5 }}>
-                💡 Orders with locked statuses (In Production, On-going, Planned) cannot be overtaken by movable orders.
+                💡 Orders with locked statuses (Done, On-going, Planned) cannot be overtaken by movable orders.
               </div>
             </div>
             <button
@@ -4684,6 +5006,19 @@ export default function OrderTable({
               ×
             </button>
           </div>
+          {/* Progress bar */}
+          <div
+            style={{
+              position: "absolute",
+              bottom: 0,
+              left: 0,
+              height: 3,
+              background: "#ef4444",
+              opacity: 0.5,
+              animation: "lockedStatusProgress 12s linear forwards",
+              animationPlayState: lockedWarnHovered ? "paused" : "running",
+            }}
+          />
         </div>
       )}
 
@@ -4737,6 +5072,48 @@ export default function OrderTable({
           </button>
         </div>
       )}
+      {/* Changeover breakdown tooltip — rendered at body level to escape overflow:hidden containers */}
+      {changeoverTooltip && createPortal(
+        <div
+          style={{
+            position: "fixed",
+            top: changeoverTooltip.y,
+            left: changeoverTooltip.x,
+            zIndex: 99999,
+            background: "#1a1a1a",
+            color: "#ffffff",
+            borderRadius: 8,
+            padding: "10px 14px",
+            minWidth: 270,
+            maxWidth: 380,
+            boxShadow: "0 4px 12px rgba(0,0,0,0.25)",
+            pointerEvents: "none",
+          }}
+        >
+          <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Changeover Breakdown</div>
+          <div style={{ height: 1, background: "#374151", margin: "6px 0" }} />
+          {(changeoverTooltip.order.status === "completed" || changeoverTooltip.order.status === "cancel_po") && changeoverTooltip.order._isFrozen && (
+            <div style={{ fontSize: 10, color: "#9ca3af", fontStyle: "italic", marginBottom: 6 }}>
+              Retained from when order was marked Done{changeoverTooltip.order.changeover_frozen_at ? ` on ${new Date(changeoverTooltip.order.changeover_frozen_at).toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}` : ""}
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 4, fontSize: 11, padding: "2px 0", lineHeight: 1.5 }}>
+            <span style={{ color: "#d1d5db" }}>Base:&nbsp;</span>
+            <span style={{ color: "#ffffff", fontWeight: 600 }}>{fmtChangeover(changeoverTooltip.order._changeoverBase ?? changeoverTooltip.order.changeover_time)} hr</span>
+          </div>
+          {changeoverTooltip.order._changeoverBreakdown && changeoverTooltip.order._changeoverBreakdown.length > 0 ? (
+            changeoverTooltip.order._changeoverBreakdown.map((bd, i) => (
+              <div key={i} style={{ display: "flex", flexWrap: "wrap", gap: 4, fontSize: 11, padding: "2px 0", lineHeight: 1.5 }}>
+                <span style={{ color: "#fbbf24" }}>+{bd.value.toFixed(2)} hr — {bd.rule}</span>
+                {bd.reason && <span style={{ color: "#9ca3af", fontSize: 10, fontStyle: "italic" }}>&nbsp;({bd.reason})</span>}
+              </div>
+            ))
+          ) : (
+            <div style={{ color: "#6b7280", fontStyle: "italic", fontSize: 11 }}>No additional rules apply</div>
+          )}
+        </div>,
+        document.body
+      )}
     </TooltipProvider>
   );
 }
@@ -4745,7 +5122,6 @@ function ReadinessWarningDialog({ order, newStatus, onCancel, onProceed }) {
   const items = getReadinessWarningItems(order);
   const effVol = getEffectiveVolume(order);
   const statusLabels = {
-    in_production: "In production",
     ongoing_batching: "On-going batching",
     ongoing_pelleting: "On-going pelleting",
     ongoing_bagging: "On-going bagging",
@@ -4755,7 +5131,7 @@ function ReadinessWarningDialog({ order, newStatus, onCancel, onProceed }) {
   return (
     <div
       style={{
-        background: "#fff",
+        background: "var(--color-bg-secondary)",
         borderRadius: 12,
         padding: "28px 28px 24px",
         maxWidth: 480,
@@ -4772,7 +5148,7 @@ function ReadinessWarningDialog({ order, newStatus, onCancel, onProceed }) {
         }}
       >
         <AlertTriangle
-          style={{ width: 22, height: 22, color: "#fd5108", flexShrink: 0 }}
+          style={{ width: 22, height: 22, color: "var(--nexfeed-primary)", flexShrink: 0 }}
         />
         <span style={{ fontSize: 16, fontWeight: 600, color: "#1a1a1a" }}>
           Order Not Ready
@@ -4859,7 +5235,7 @@ function ReadinessWarningDialog({ order, newStatus, onCancel, onProceed }) {
                 }}
               >
                 <span
-                  style={{ color: "#fd5108", fontWeight: 700, lineHeight: 1 }}
+                  style={{ color: "var(--nexfeed-primary)", fontWeight: 700, lineHeight: 1 }}
                 >
                   •
                 </span>{" "}
@@ -4884,7 +5260,7 @@ function ReadinessWarningDialog({ order, newStatus, onCancel, onProceed }) {
           style={{
             fontSize: 12,
             color: "#374151",
-            background: "white",
+            background: "var(--color-bg-secondary)",
             border: "1px solid #d1d5db",
             borderRadius: 6,
             padding: "8px 16px",
@@ -4900,14 +5276,14 @@ function ReadinessWarningDialog({ order, newStatus, onCancel, onProceed }) {
             fontSize: 12,
             fontWeight: 600,
             color: "white",
-            background: "#fd5108",
+            background: "var(--nexfeed-primary)",
             border: "none",
             borderRadius: 6,
             padding: "8px 16px",
             cursor: "pointer",
           }}
-          onMouseEnter={(e) => (e.currentTarget.style.background = "#e8490b")}
-          onMouseLeave={(e) => (e.currentTarget.style.background = "#fd5108")}
+          onMouseEnter={(e) => (e.currentTarget.style.background = "var(--nexfeed-primary-dark)")}
+          onMouseLeave={(e) => (e.currentTarget.style.background = "var(--nexfeed-primary)")}
           data-testid="button-proceed-anyway"
         >
           Proceed Anyway
@@ -5104,14 +5480,14 @@ function StartDateCell({ order, onUpdate }) {
           min={todayIso()}
           max={availMax}
           onChange={(e) => setDateVal(e.target.value)}
-          className="border border-gray-300 focus:border-[#fd5108] bg-transparent shadow-none rounded px-1 h-6 text-xs focus-visible:ring-0 w-32"
+          className="border border-gray-300 focus:border-[var(--nexfeed-primary)] bg-transparent shadow-none rounded px-1 h-6 text-xs focus-visible:ring-0 w-32"
           data-testid={`input-start-date-${order.id}`}
           autoFocus
         />
         <div className="flex gap-1">
           <Button
             size="sm"
-            className="h-5 text-[10px] bg-[#fd5108] hover:bg-[#fe7c39] px-2"
+            className="h-5 text-[10px] bg-[var(--nexfeed-primary)] hover:bg-[var(--nexfeed-primary-dark)] px-2"
             onClick={() => handleSave(dateVal)}
             data-testid={`button-save-date-${order.id}`}
           >
@@ -5145,7 +5521,6 @@ function StartDateCell({ order, onUpdate }) {
   return (
     <div
       className="relative"
-      style={hasConflict ? { background: "#fef2f2", borderRadius: 4, padding: "2px 4px", margin: "-2px -4px" } : undefined}
       onMouseEnter={handleStartCellEnter}
       onMouseMove={handleStartCellMove}
       onMouseLeave={handleStartCellLeave}
@@ -5154,7 +5529,7 @@ function StartDateCell({ order, onUpdate }) {
       <div className="absolute top-0 right-0 mt-0.5 mr-0.5">
         <button
           onClick={handleOpen}
-          className="text-[#2e343a] hover:text-[#fd5108] transition-colors"
+          className="text-[#2e343a] hover:text-[var(--nexfeed-primary)] transition-colors"
           title="Edit start date"
           data-no-drag="true"
           data-testid={`button-edit-date-${order.id}`}
@@ -5268,7 +5643,7 @@ function StartTimeEditor({ order, onUpdate }) {
             value={hours}
             onChange={handleHoursChange}
             onBlur={handleHoursBlur}
-            className="border border-gray-300 focus:border-[#fd5108] bg-transparent shadow-none rounded px-1 h-6 text-xs focus-visible:ring-0 w-8 text-center"
+            className="border border-gray-300 focus:border-[var(--nexfeed-primary)] bg-transparent shadow-none rounded px-1 h-6 text-xs focus-visible:ring-0 w-8 text-center"
             data-testid={`input-start-time-hours-${order.id}`}
             maxLength={2}
           />
@@ -5278,7 +5653,7 @@ function StartTimeEditor({ order, onUpdate }) {
             value={minutes}
             onChange={handleMinutesChange}
             onBlur={handleMinutesBlur}
-            className="border border-gray-300 focus:border-[#fd5108] bg-transparent shadow-none rounded px-1 h-6 text-xs focus-visible:ring-0 w-8 text-center"
+            className="border border-gray-300 focus:border-[var(--nexfeed-primary)] bg-transparent shadow-none rounded px-1 h-6 text-xs focus-visible:ring-0 w-8 text-center"
             data-testid={`input-start-time-minutes-${order.id}`}
             maxLength={2}
           />
@@ -5288,7 +5663,7 @@ function StartTimeEditor({ order, onUpdate }) {
               className={cn(
                 "px-1.5 py-0.5 text-[9px] font-semibold rounded-l border transition-colors",
                 ampm === "AM"
-                  ? "bg-[#fd5108] text-white border-[#fd5108]"
+                  ? "bg-[var(--nexfeed-primary)] text-white border-[var(--nexfeed-primary)]"
                   : "bg-gray-100 text-gray-500 border-gray-300 hover:bg-gray-200",
               )}
               data-testid={`button-am-${order.id}`}
@@ -5301,7 +5676,7 @@ function StartTimeEditor({ order, onUpdate }) {
               className={cn(
                 "px-1.5 py-0.5 text-[9px] font-semibold rounded-r border-t border-r border-b transition-colors",
                 ampm === "PM"
-                  ? "bg-[#fd5108] text-white border-[#fd5108]"
+                  ? "bg-[var(--nexfeed-primary)] text-white border-[var(--nexfeed-primary)]"
                   : "bg-gray-100 text-gray-500 border-gray-300 hover:bg-gray-200",
               )}
               data-testid={`button-pm-${order.id}`}
@@ -5314,7 +5689,7 @@ function StartTimeEditor({ order, onUpdate }) {
         <div className="flex gap-1">
           <Button
             size="sm"
-            className="h-5 text-[10px] bg-[#fd5108] hover:bg-[#fe7c39] px-2"
+            className="h-5 text-[10px] bg-[var(--nexfeed-primary)] hover:bg-[var(--nexfeed-primary-dark)] px-2"
             onClick={handleSave}
             data-testid={`button-save-time-${order.id}`}
           >
@@ -5350,7 +5725,7 @@ function StartTimeEditor({ order, onUpdate }) {
       <div className="absolute top-0 right-0 mt-0.5 mr-0.5">
         <button
           onClick={handleOpen}
-          className="text-[#2e343a] hover:text-[#fd5108] transition-colors"
+          className="text-[#2e343a] hover:text-[var(--nexfeed-primary)] transition-colors"
           title="Edit start time"
           data-no-drag="true"
           data-testid={`button-edit-time-${order.id}`}
@@ -5455,7 +5830,23 @@ function VolumeCell({
   const handleApply = () => {
     const val = parseFloat(newVolumeStr);
     if (!isNaN(val) && val > 0) {
-      onUpdate(order.id, { volume_override: val });
+      const oldVol = parseFloat(order.volume_override ?? order.total_volume_mt ?? 0) || 0;
+      const ts = new Date().toLocaleString('en-US', {
+        month: '2-digit',
+        day: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true,
+      });
+      const action = `Override volume: ${oldVol} MT → ${val} MT`;
+      const newHistory = [...(order.history || []), { timestamp: ts, action }];
+      console.debug('[Order History Write]', {
+        orderId: order.id,
+        timestamp: ts,
+        action,
+      });
+      onUpdate(order.id, { volume_override: val, history: newHistory });
     }
     setDialogOpen(false);
   };
@@ -5467,8 +5858,8 @@ function VolumeCell({
           <button
             onClick={hasOverride ? () => setRevertOpen(true) : () => setConfirmOpen(true)}
             className={hasOverride
-              ? "text-[#fd5108] hover:text-[#fe7c39] transition-colors"
-              : "text-gray-300 hover:text-[#fd5108] transition-colors"
+              ? "text-[var(--nexfeed-primary)] hover:text-[var(--nexfeed-primary-dark)] transition-colors"
+              : "text-gray-300 hover:text-[var(--nexfeed-primary)] transition-colors"
             }
             title={hasOverride ? "Volume overridden — click to revert" : "Override volume"}
             data-testid={hasOverride ? `button-volume-unlock-${order.id}` : `button-volume-lock-${order.id}`}
@@ -5481,7 +5872,7 @@ function VolumeCell({
 
       <div className="pr-5">
         <div className="flex items-center gap-1">
-          <p className={`text-[13px] font-bold ${hasOverride ? "text-[#fd5108]" : "text-gray-900"}`}>
+          <p className={`text-[13px] font-bold ${hasOverride ? "text-[var(--nexfeed-primary)]" : "text-gray-900"}`}>
             {fmtVolume(effVol)} MT
           </p>
           {isNotMultiple && (
@@ -5521,7 +5912,7 @@ function VolumeCell({
                 Cancel
               </Button>
               <Button
-                className="bg-[#fd5108] hover:bg-[#fe7c39] text-[14px] font-semibold h-10 px-5"
+                className="bg-[var(--nexfeed-primary)] hover:bg-[var(--nexfeed-primary-dark)] text-[14px] font-semibold h-10 px-5"
                 onClick={() => { setConfirmOpen(false); openDialog(); }}
                 data-testid={`button-volume-confirm-${order.id}`}
               >
@@ -5551,8 +5942,24 @@ function VolumeCell({
                 Cancel
               </Button>
               <Button
-                className="bg-[#fd5108] hover:bg-[#fe7c39] text-[14px] font-semibold h-10 px-5"
-                onClick={() => { onUpdate(order.id, { volume_override: null }); setRevertOpen(false); }}
+                className="bg-[var(--nexfeed-primary)] hover:bg-[var(--nexfeed-primary-dark)] text-[14px] font-semibold h-10 px-5"
+                onClick={() => {
+                  const _overrideVal = parseFloat(order.volume_override) || 0;
+                  const _revertToVal = sugVol;
+                  const _ts = new Date().toLocaleString('en-US', {
+                    month: '2-digit', day: '2-digit', year: 'numeric',
+                    hour: '2-digit', minute: '2-digit', hour12: true,
+                  });
+                  const _action = `Override volume: ${_overrideVal} MT → ${_revertToVal} MT`;
+                  const _details = 'Reverted.';
+                  const _newHistory = [...(order.history || []), { timestamp: _ts, action: _action, details: _details }];
+                  console.debug('[Order History Write]', {
+                    orderId: order.id, timestamp: _ts, action: _action,
+                    details: _details, eventType: 'Override volume', isRevert: true,
+                  });
+                  onUpdate(order.id, { volume_override: null, history: _newHistory });
+                  setRevertOpen(false);
+                }}
               >
                 Revert
               </Button>
@@ -5568,7 +5975,7 @@ function VolumeCell({
           onClick={() => setDialogOpen(false)}
         >
           <div
-            style={{ width: 480, background: "#fff", borderRadius: 12, boxShadow: "0 8px 32px rgba(0,0,0,0.22)", overflow: "hidden" }}
+            style={{ width: 480, background: "var(--color-bg-secondary)", borderRadius: 12, boxShadow: "0 8px 32px rgba(0,0,0,0.22)", overflow: "hidden" }}
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
@@ -5577,7 +5984,7 @@ function VolumeCell({
               <button onClick={() => setDialogOpen(false)} style={{ background: "none", border: "none", color: "#9ca3af", fontSize: 18, cursor: "pointer", lineHeight: 1 }}>✕</button>
             </div>
             {/* Order info */}
-            <div style={{ padding: "12px 20px", background: "#f9fafb", borderBottom: "1px solid #e5e7eb" }}>
+            <div style={{ padding: "12px 20px", background: "var(--color-bg-tertiary)", borderBottom: "1px solid #e5e7eb" }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: "#1a1a1a" }}>{order.item_description || "—"}</div>
               <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>
                 FPR: {order.fpr || "—"} · Prio {order.priority_seq || "—"} · {order.feedmill_line || "—"}
@@ -5594,7 +6001,7 @@ function VolumeCell({
                 <div style={{ fontSize: 18, color: "#9ca3af", marginTop: 20 }}>→</div>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 6 }}>New Volume</div>
-                  <div style={{ display: "flex", alignItems: "center", border: "2px solid #fd5108", borderRadius: 8, overflow: "hidden" }}>
+                  <div style={{ display: "flex", alignItems: "center", border: "2px solid var(--nexfeed-primary)", borderRadius: 8, overflow: "hidden" }}>
                     <input
                       type="number"
                       autoFocus
@@ -5606,7 +6013,7 @@ function VolumeCell({
                       style={{ flex: 1, padding: "8px 12px", fontSize: 18, fontWeight: 700, color: "#1a1a1a", border: "none", outline: "none", width: "100%" }}
                       data-testid={`input-volume-dialog-${order.id}`}
                     />
-                    <span style={{ padding: "8px 12px", fontSize: 13, fontWeight: 600, color: "#6b7280", background: "#f9fafb", borderLeft: "1px solid #e5e7eb" }}>MT</span>
+                    <span style={{ padding: "8px 12px", fontSize: 13, fontWeight: 600, color: "#6b7280", background: "var(--color-bg-tertiary)", borderLeft: "1px solid #e5e7eb" }}>MT</span>
                   </div>
                   {runRate > 0 && parsedNew > 0 && (
                     <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 3 }}>Prod. time: {newProdHours.toFixed(2)} hrs</div>
@@ -5632,7 +6039,7 @@ function VolumeCell({
                       <> Try{" "}
                         <button
                           onClick={() => setNewVolumeStr(String(nearestMultiple))}
-                          style={{ color: "#fd5108", fontWeight: 700, background: "none", border: "none", padding: 0, cursor: "pointer", textDecoration: "underline" }}
+                          style={{ color: "var(--nexfeed-primary)", fontWeight: 700, background: "none", border: "none", padding: 0, cursor: "pointer", textDecoration: "underline" }}
                         >
                           {nearestMultiple} MT
                         </button>
@@ -5667,9 +6074,9 @@ function VolumeCell({
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "14px 20px" }}>
               <button
                 onClick={() => setDialogOpen(false)}
-                style={{ padding: "8px 20px", fontSize: 13, fontWeight: 500, color: "#6b7280", background: "#fff", border: "1px solid #d1d5db", borderRadius: 6, cursor: "pointer" }}
+                style={{ padding: "8px 20px", fontSize: 13, fontWeight: 500, color: "#6b7280", background: "var(--color-bg-secondary)", border: "1px solid #d1d5db", borderRadius: 6, cursor: "pointer" }}
                 onMouseEnter={e => e.currentTarget.style.background = "#f9fafb"}
-                onMouseLeave={e => e.currentTarget.style.background = "#fff"}
+                onMouseLeave={e => e.currentTarget.style.background = "var(--color-bg-secondary)"}
               >
                 Cancel
               </button>
@@ -5678,7 +6085,7 @@ function VolumeCell({
                 disabled={!isChanged || parsedNew <= 0 || isAnalyzing || !isValidMultiple}
                 style={{
                   padding: "8px 20px", fontSize: 13, fontWeight: 600, color: "#fff",
-                  background: (!isChanged || parsedNew <= 0 || isAnalyzing || !isValidMultiple) ? "#fca58a" : "#fd5108",
+                  background: (!isChanged || parsedNew <= 0 || isAnalyzing || !isValidMultiple) ? "#fca58a" : "var(--nexfeed-primary)",
                   border: "none", borderRadius: 6,
                   cursor: (!isChanged || parsedNew <= 0 || isAnalyzing || !isValidMultiple) ? "not-allowed" : "pointer",
                 }}
@@ -5709,7 +6116,9 @@ function SmartInsightCell({ order }) {
   useInsightCacheUpdates();
   const { isInsightLoading, isInsightError } = _insightStatus();
   const code = order.material_code || order.material_code_fg || "";
-  const parts = getInsightParts(code);
+  // Per-order insights are keyed as "order:${id}" (non-N10D fallback).
+  // N10D-sourced insights are keyed by material code. Check order ID first.
+  const parts = (order.id ? getInsightParts(`order:${order.id}`) : null) || getInsightParts(code);
 
   const dotsStyle = `@keyframes si-dots{0%{content:''}25%{content:'.'}50%{content:'..'}75%{content:'...'}100%{content:''}}.si-dots::after{content:'';animation:si-dots 1.5s steps(4,end) infinite}`;
 
@@ -5853,7 +6262,16 @@ function AvailDateCell({ order, canEdit, onUpdate, inferredInfo = null }) {
   };
 
   const handleDone = () => {
-    if (editValue) onUpdate(order.id, { target_avail_date: editValue });
+    if (editValue) {
+      const updateData = { target_avail_date: editValue };
+      if (order.date_source === 'n10d') {
+        updateData.has_manual_override = true;
+        updateData.manual_edit_date = editValue;
+        updateData.n10d_update_available = false;
+        updateData.n10d_update_new_date = null;
+      }
+      onUpdate(order.id, updateData);
+    }
     setUnlocked(false);
     setEditValue("");
   };
@@ -5921,31 +6339,38 @@ function AvailDateCell({ order, canEdit, onUpdate, inferredInfo = null }) {
         )
       : null;
 
+  // N10D update warning — shown when new N10D data differs from manually-set date
+  const hasN10DUpdate = order.n10d_update_available === true;
+  const n10dNewDate = order.n10d_update_new_date;
+  const handleAcceptN10DUpdate = () => {
+    if (!n10dNewDate) return;
+    onUpdate(order.id, {
+      target_avail_date: n10dNewDate,
+      has_manual_override: false,
+      manual_edit_date: null,
+      n10d_update_available: false,
+      n10d_update_new_date: null,
+    });
+  };
+  const fmtN10DDate = (d) => {
+    try { return new Date(d + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }); }
+    catch { return d; }
+  };
+  const n10dWarningIcon = hasN10DUpdate ? (
+    <span
+      className="avail-date-warning shrink-0 cursor-pointer"
+      style={{ fontSize: 12, opacity: 0.85, lineHeight: 1 }}
+      title={`New Future Dispatches date available: ${n10dNewDate ? fmtN10DDate(n10dNewDate) : '—'}\nYou manually edited this date. Click to accept the new Future Dispatches date.`}
+      onClick={(e) => { e.stopPropagation(); handleAcceptN10DUpdate(); }}
+      data-no-drag="true"
+    >
+      ⚠️
+    </span>
+  ) : null;
+
   // Tooltip data for the entire cell — icon + text extracted together
   const inferredIconData = (() => {
     if (isAutoSequenced && inferredInfo && (valIsDate || isStockSufficient)) {
-      const newTarget =
-        inferredInfo.status === "Sufficient"
-          ? (inferredInfo.targetDate || "stock_sufficient")
-          : inferredInfo.status === "Critical"
-            ? new Date().toISOString().slice(0, 10)
-            : inferredInfo.targetDate || null;
-      const lastTarget = order.last_target_date || null;
-      const targetChanged = newTarget !== lastTarget
-        && !(!newTarget && !lastTarget)
-        && !(inferredInfo.status === "Sufficient" && lastTarget === "stock_sufficient");
-      if (targetChanged) {
-        const fmtShort = (d) => {
-          if (!d) return "None";
-          if (d === "stock_sufficient") return "Stock sufficient";
-          try { return new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric" }); }
-          catch { return d; }
-        };
-        return {
-          icon: <AlertTriangle style={{ width: 10, height: 10, color: "#f59e0b" }} />,
-          tipText: `Target date changed: ${fmtShort(lastTarget)} → ${fmtShort(newTarget)}. Run Auto-Sequence to update.`,
-        };
-      }
       return null;
     }
     if (valIsDate || !inferredInfo) return null;
@@ -6042,6 +6467,7 @@ function AvailDateCell({ order, canEdit, onUpdate, inferredInfo = null }) {
             {displayDate || "-"}
           </p>
           {inferredIcon}
+          {n10dWarningIcon}
         </div>
         {remarksLine}
         {originalLine}
@@ -6063,7 +6489,7 @@ function AvailDateCell({ order, canEdit, onUpdate, inferredInfo = null }) {
         <div className="absolute top-0 right-0 mt-0.5 mr-0.5">
           <button
             onClick={() => setOverrideOpen(true)}
-            className="text-gray-300 hover:text-[#fd5108] transition-colors"
+            className="text-gray-300 hover:text-[var(--nexfeed-primary)] transition-colors"
             title="Override date"
             data-no-drag="true"
             data-testid={`button-avail-lock-${order.id}`}
@@ -6084,14 +6510,14 @@ function AvailDateCell({ order, canEdit, onUpdate, inferredInfo = null }) {
               onKeyDown={handleEditKeyDown}
               autoFocus
               className={cn(
-                "border-0 border-b border-[#fd5108] bg-transparent shadow-none rounded-none px-0 h-6 text-xs focus-visible:ring-0 focus-visible:ring-offset-0 w-32",
+                "border-0 border-b border-[var(--nexfeed-primary)] bg-transparent shadow-none rounded-none px-0 h-6 text-xs focus-visible:ring-0 focus-visible:ring-offset-0 w-32",
               )}
               data-testid={`input-avail-date-${order.id}`}
             />
             <div className="flex gap-1 mt-1">
               <Button
                 size="sm"
-                className="h-5 text-[10px] bg-[#fd5108] hover:bg-[#fe7c39] px-2"
+                className="h-5 text-[10px] bg-[var(--nexfeed-primary)] hover:bg-[var(--nexfeed-primary-dark)] px-2"
                 onClick={handleDone}
                 disabled={!editValue}
                 data-no-drag="true"
@@ -6130,6 +6556,7 @@ function AvailDateCell({ order, canEdit, onUpdate, inferredInfo = null }) {
                 {displayDate || "-"}
               </p>
               {inferredIcon}
+              {n10dWarningIcon}
             </div>
             {remarksLine}
             {originalLine}
@@ -6162,7 +6589,7 @@ function AvailDateCell({ order, canEdit, onUpdate, inferredInfo = null }) {
                 Cancel
               </Button>
               <Button
-                className="bg-[#fd5108] hover:bg-[#fe7c39] text-[14px] font-semibold h-10 px-5"
+                className="bg-[var(--nexfeed-primary)] hover:bg-[var(--nexfeed-primary-dark)] text-[14px] font-semibold h-10 px-5"
                 onClick={handleProceed}
               >
                 Proceed
@@ -6211,7 +6638,7 @@ function AvailDateCell({ order, canEdit, onUpdate, inferredInfo = null }) {
                 Go Back
               </Button>
               <Button
-                className="bg-[#fd5108] hover:bg-[#fe7c39] text-[14px] font-semibold h-10 px-5"
+                className="bg-[var(--nexfeed-primary)] hover:bg-[var(--nexfeed-primary-dark)] text-[14px] font-semibold h-10 px-5"
                 onClick={handleRevertConfirm}
               >
                 Confirm Revert
@@ -6414,7 +6841,6 @@ function CompletionDateCell({ order, canEdit, onUpdate }) {
   if (!canEdit) {
     return (
       <div
-        style={hasConflict ? { background: "#fef2f2", borderRadius: 4, padding: "2px 4px", margin: "-2px -4px" } : undefined}
         onMouseEnter={handleCompCellEnter}
         onMouseMove={handleCompCellMove}
         onMouseLeave={handleCompCellLeave}
@@ -6445,7 +6871,7 @@ function CompletionDateCell({ order, canEdit, onUpdate }) {
             max={availMax}
             onChange={(e) => setEditDate(e.target.value)}
             className={cn(
-              "border-0 border-b border-[#fd5108] bg-transparent shadow-none rounded-none px-0 h-6 text-xs focus-visible:ring-0 w-32",
+              "border-0 border-b border-[var(--nexfeed-primary)] bg-transparent shadow-none rounded-none px-0 h-6 text-xs focus-visible:ring-0 w-32",
             )}
             data-testid={`input-completion-date-${order.id}`}
           />
@@ -6456,7 +6882,7 @@ function CompletionDateCell({ order, canEdit, onUpdate }) {
             value={editTimeH}
             onChange={(e) => setEditTimeH(e.target.value.replace(/\D/g, "").slice(0, 2))}
             onBlur={() => { let h = parseInt(editTimeH) || 12; if (h === 0) h = 12; if (h > 12) h = 12; setEditTimeH(String(h).padStart(2, "0")); }}
-            className="border border-gray-300 focus:border-[#fd5108] bg-transparent shadow-none rounded px-1 h-6 text-xs focus-visible:ring-0 w-8 text-center"
+            className="border border-gray-300 focus:border-[var(--nexfeed-primary)] bg-transparent shadow-none rounded px-1 h-6 text-xs focus-visible:ring-0 w-8 text-center"
             data-testid={`input-completion-time-hours-${order.id}`}
             maxLength={2}
           />
@@ -6466,19 +6892,19 @@ function CompletionDateCell({ order, canEdit, onUpdate }) {
             value={editTimeM}
             onChange={(e) => setEditTimeM(e.target.value.replace(/\D/g, "").slice(0, 2))}
             onBlur={() => { let m = parseInt(editTimeM) || 0; if (m > 59) m = 59; setEditTimeM(String(m).padStart(2, "0")); }}
-            className="border border-gray-300 focus:border-[#fd5108] bg-transparent shadow-none rounded px-1 h-6 text-xs focus-visible:ring-0 w-8 text-center"
+            className="border border-gray-300 focus:border-[var(--nexfeed-primary)] bg-transparent shadow-none rounded px-1 h-6 text-xs focus-visible:ring-0 w-8 text-center"
             data-testid={`input-completion-time-minutes-${order.id}`}
             maxLength={2}
           />
           <div className="flex ml-1">
-            <button onClick={() => setEditTimeAP("AM")} className={cn("px-1.5 py-0.5 text-[9px] font-semibold rounded-l border transition-colors", editTimeAP === "AM" ? "bg-[#fd5108] text-white border-[#fd5108]" : "bg-gray-100 text-gray-500 border-gray-300 hover:bg-gray-200")} data-no-drag="true">AM</button>
-            <button onClick={() => setEditTimeAP("PM")} className={cn("px-1.5 py-0.5 text-[9px] font-semibold rounded-r border-t border-r border-b transition-colors", editTimeAP === "PM" ? "bg-[#fd5108] text-white border-[#fd5108]" : "bg-gray-100 text-gray-500 border-gray-300 hover:bg-gray-200")} data-no-drag="true">PM</button>
+            <button onClick={() => setEditTimeAP("AM")} className={cn("px-1.5 py-0.5 text-[9px] font-semibold rounded-l border transition-colors", editTimeAP === "AM" ? "bg-[var(--nexfeed-primary)] text-white border-[var(--nexfeed-primary)]" : "bg-gray-100 text-gray-500 border-gray-300 hover:bg-gray-200")} data-no-drag="true">AM</button>
+            <button onClick={() => setEditTimeAP("PM")} className={cn("px-1.5 py-0.5 text-[9px] font-semibold rounded-r border-t border-r border-b transition-colors", editTimeAP === "PM" ? "bg-[var(--nexfeed-primary)] text-white border-[var(--nexfeed-primary)]" : "bg-gray-100 text-gray-500 border-gray-300 hover:bg-gray-200")} data-no-drag="true">PM</button>
           </div>
         </div>
         <div className="flex gap-1 mt-1">
           <Button
             size="sm"
-            className="h-5 text-[10px] bg-[#fd5108] hover:bg-[#fe7c39] px-2"
+            className="h-5 text-[10px] bg-[var(--nexfeed-primary)] hover:bg-[var(--nexfeed-primary-dark)] px-2"
             onClick={handleSaveOverride}
           >
             Save
@@ -6499,7 +6925,6 @@ function CompletionDateCell({ order, canEdit, onUpdate }) {
   return (
     <div
       className="relative"
-      style={hasConflict ? { background: "#fef2f2", borderRadius: 4, padding: "2px 4px", margin: "-2px -4px" } : undefined}
       onMouseEnter={handleCompCellEnter}
       onMouseMove={handleCompCellMove}
       onMouseLeave={handleCompCellLeave}
@@ -6509,7 +6934,7 @@ function CompletionDateCell({ order, canEdit, onUpdate }) {
         {isManual ? (
           <button
             onClick={() => setRevertOpen(true)}
-            className="text-[#fd5108] hover:text-[#fe7c39] transition-colors"
+            className="text-[var(--nexfeed-primary)] hover:text-[var(--nexfeed-primary-dark)] transition-colors"
             title="Completion date overridden — click to revert"
             data-no-drag="true"
             data-testid={`button-completion-unlock-${order.id}`}
@@ -6519,7 +6944,7 @@ function CompletionDateCell({ order, canEdit, onUpdate }) {
         ) : (
           <button
             onClick={() => setOverrideOpen(true)}
-            className="text-gray-300 hover:text-[#fd5108] transition-colors"
+            className="text-gray-300 hover:text-[var(--nexfeed-primary)] transition-colors"
             title="Override completion date"
             data-no-drag="true"
             data-testid={`button-completion-lock-${order.id}`}
@@ -6581,7 +7006,7 @@ function CompletionDateCell({ order, canEdit, onUpdate }) {
                 Cancel
               </Button>
               <Button
-                className="bg-[#fd5108] hover:bg-[#fe7c39] text-[14px] font-semibold h-10 px-5"
+                className="bg-[var(--nexfeed-primary)] hover:bg-[var(--nexfeed-primary-dark)] text-[14px] font-semibold h-10 px-5"
                 onClick={handleProceed}
               >
                 Proceed
@@ -6616,7 +7041,7 @@ function CompletionDateCell({ order, canEdit, onUpdate }) {
                 Cancel
               </Button>
               <Button
-                className="bg-[#fd5108] hover:bg-[#fe7c39] text-[14px] font-semibold h-10 px-5"
+                className="bg-[var(--nexfeed-primary)] hover:bg-[var(--nexfeed-primary-dark)] text-[14px] font-semibold h-10 px-5"
                 onClick={handleRevert}
               >
                 Revert
@@ -6644,7 +7069,7 @@ function EndDateCell({ order, canEditDirect, onUpdate }) {
   const endConflict = conflicts.end_date; // "conflict" | "info" | undefined
   const availForWarn = isRealAvailDate(order.target_avail_date) ? order.target_avail_date : null;
   const startMin = order.start_date || undefined;
-  const endHasWarning = endConflict === "conflict" || endConflict === "info";
+  const endHasWarning = endConflict === "conflict";
 
   const [endCellTooltip, setEndCellTooltip] = useState(false);
   const [endCellTipPos, setEndCellTipPos] = useState({ x: 0, y: 0 });
@@ -6739,12 +7164,7 @@ function EndDateCell({ order, canEditDirect, onUpdate }) {
   }
 
   if (canEditDirect) {
-    const conflictStyle =
-      endConflict === "conflict"
-        ? { background: "#fef2f2", borderRadius: 4, padding: "2px 4px", margin: "-2px -4px" }
-        : endConflict === "info"
-          ? { background: "#fefce8", borderRadius: 4, padding: "2px 4px", margin: "-2px -4px" }
-          : undefined;
+    const conflictStyle = undefined;
     return (
       <div
         className="relative space-y-0.5"
@@ -6758,7 +7178,7 @@ function EndDateCell({ order, canEditDirect, onUpdate }) {
           <div className="absolute top-0 right-0 mt-0.5 mr-0.5">
             <button
               onClick={() => setOverrideOpen(true)}
-              className="text-gray-300 hover:text-[#fd5108]"
+              className="text-gray-300 hover:text-[var(--nexfeed-primary)]"
               title="Override end date"
               data-no-drag="true"
               data-testid={`button-end-lock-${order.id}`}
@@ -6777,7 +7197,7 @@ function EndDateCell({ order, canEditDirect, onUpdate }) {
                 onChange={(e) => setEditDate(e.target.value)}
                 autoFocus
                 className={cn(
-                  "border-0 border-b border-[#fd5108] bg-transparent shadow-none rounded-none px-0 h-6 text-xs focus-visible:ring-0 w-28",
+                  "border-0 border-b border-[var(--nexfeed-primary)] bg-transparent shadow-none rounded-none px-0 h-6 text-xs focus-visible:ring-0 w-28",
                 )}
                 data-testid={`input-end-date-${order.id}`}
               />
@@ -6787,7 +7207,7 @@ function EndDateCell({ order, canEditDirect, onUpdate }) {
                   value={editTimeH}
                   onChange={(e) => setEditTimeH(e.target.value.replace(/\D/g, "").slice(0, 2))}
                   onBlur={() => { let h = parseInt(editTimeH) || 12; if (h === 0) h = 12; if (h > 12) h = 12; setEditTimeH(String(h).padStart(2, "0")); }}
-                  className="border border-gray-300 focus:border-[#fd5108] bg-transparent shadow-none rounded px-1 h-6 text-xs focus-visible:ring-0 w-8 text-center"
+                  className="border border-gray-300 focus:border-[var(--nexfeed-primary)] bg-transparent shadow-none rounded px-1 h-6 text-xs focus-visible:ring-0 w-8 text-center"
                   data-testid={`input-end-time-hours-${order.id}`}
                   maxLength={2}
                 />
@@ -6797,19 +7217,19 @@ function EndDateCell({ order, canEditDirect, onUpdate }) {
                   value={editTimeM}
                   onChange={(e) => setEditTimeM(e.target.value.replace(/\D/g, "").slice(0, 2))}
                   onBlur={() => { let m = parseInt(editTimeM) || 0; if (m > 59) m = 59; setEditTimeM(String(m).padStart(2, "0")); }}
-                  className="border border-gray-300 focus:border-[#fd5108] bg-transparent shadow-none rounded px-1 h-6 text-xs focus-visible:ring-0 w-8 text-center"
+                  className="border border-gray-300 focus:border-[var(--nexfeed-primary)] bg-transparent shadow-none rounded px-1 h-6 text-xs focus-visible:ring-0 w-8 text-center"
                   data-testid={`input-end-time-minutes-${order.id}`}
                   maxLength={2}
                 />
                 <div className="flex ml-1">
-                  <button onClick={() => setEditTimeAP("AM")} className={cn("px-1.5 py-0.5 text-[9px] font-semibold rounded-l border transition-colors", editTimeAP === "AM" ? "bg-[#fd5108] text-white border-[#fd5108]" : "bg-gray-100 text-gray-500 border-gray-300 hover:bg-gray-200")} data-no-drag="true">AM</button>
-                  <button onClick={() => setEditTimeAP("PM")} className={cn("px-1.5 py-0.5 text-[9px] font-semibold rounded-r border-t border-r border-b transition-colors", editTimeAP === "PM" ? "bg-[#fd5108] text-white border-[#fd5108]" : "bg-gray-100 text-gray-500 border-gray-300 hover:bg-gray-200")} data-no-drag="true">PM</button>
+                  <button onClick={() => setEditTimeAP("AM")} className={cn("px-1.5 py-0.5 text-[9px] font-semibold rounded-l border transition-colors", editTimeAP === "AM" ? "bg-[var(--nexfeed-primary)] text-white border-[var(--nexfeed-primary)]" : "bg-gray-100 text-gray-500 border-gray-300 hover:bg-gray-200")} data-no-drag="true">AM</button>
+                  <button onClick={() => setEditTimeAP("PM")} className={cn("px-1.5 py-0.5 text-[9px] font-semibold rounded-r border-t border-r border-b transition-colors", editTimeAP === "PM" ? "bg-[var(--nexfeed-primary)] text-white border-[var(--nexfeed-primary)]" : "bg-gray-100 text-gray-500 border-gray-300 hover:bg-gray-200")} data-no-drag="true">PM</button>
                 </div>
               </div>
               <div className="flex gap-1 mt-1">
                 <Button
                   size="sm"
-                  className="h-5 text-[10px] bg-[#fd5108] hover:bg-[#fe7c39] px-2"
+                  className="h-5 text-[10px] bg-[var(--nexfeed-primary)] hover:bg-[var(--nexfeed-primary-dark)] px-2"
                   onClick={handleOk}
                   disabled={!editDate}
                   data-no-drag="true"
@@ -6844,9 +7264,6 @@ function EndDateCell({ order, canEditDirect, onUpdate }) {
               {endConflict === "conflict" && (
                 <AlertTriangle style={{ width: 11, height: 11, color: "#dc2626", flexShrink: 0 }} />
               )}
-              {endConflict === "info" && (
-                <AlertTriangle style={{ width: 11, height: 11, color: "#ca8a04", flexShrink: 0 }} />
-              )}
             </div>
           )}
         </div>
@@ -6864,13 +7281,13 @@ function EndDateCell({ order, canEditDirect, onUpdate }) {
               <div className="flex justify-end gap-2">
                 <button
                   onClick={() => setEndWarnOpen(false)}
-                  style={{ height: 38, padding: "0 18px", fontSize: 13, fontWeight: 500, background: "white", border: "1px solid #d1d5db", borderRadius: 6, color: "#374151", cursor: "pointer" }}
+                  style={{ height: 38, padding: "0 18px", fontSize: 13, fontWeight: 500, background: "var(--color-bg-secondary)", border: "1px solid #d1d5db", borderRadius: 6, color: "#374151", cursor: "pointer" }}
                 >
                   Cancel
                 </button>
                 <button
                   onClick={doSave}
-                  style={{ height: 38, padding: "0 18px", fontSize: 13, fontWeight: 600, background: "#fd5108", border: "none", borderRadius: 6, color: "white", cursor: "pointer" }}
+                  style={{ height: 38, padding: "0 18px", fontSize: 13, fontWeight: 600, background: "var(--nexfeed-primary)", border: "none", borderRadius: 6, color: "white", cursor: "pointer" }}
                 >
                   Proceed Anyway
                 </button>
@@ -6915,7 +7332,7 @@ function EndDateCell({ order, canEditDirect, onUpdate }) {
                   Cancel
                 </Button>
                 <Button
-                  className="bg-[#fd5108] hover:bg-[#fe7c39] text-[14px] font-semibold h-10 px-5"
+                  className="bg-[var(--nexfeed-primary)] hover:bg-[var(--nexfeed-primary-dark)] text-[14px] font-semibold h-10 px-5"
                   disabled={confirmText.toLowerCase() !== "confirm"}
                   onClick={handleProceed}
                 >
@@ -6929,12 +7346,7 @@ function EndDateCell({ order, canEditDirect, onUpdate }) {
     );
   }
 
-  const roConflictStyle =
-    endConflict === "conflict"
-      ? { background: "#fef2f2", borderRadius: 4, padding: "2px 4px", margin: "-2px -4px" }
-      : endConflict === "info"
-        ? { background: "#fefce8", borderRadius: 4, padding: "2px 4px", margin: "-2px -4px" }
-        : undefined;
+  const roConflictStyle = undefined;
   return (
     <div
       style={roConflictStyle}
@@ -6949,9 +7361,6 @@ function EndDateCell({ order, canEditDirect, onUpdate }) {
         </p>
         {endConflict === "conflict" && (
           <AlertTriangle style={{ width: 11, height: 11, color: "#dc2626", flexShrink: 0 }} />
-        )}
-        {endConflict === "info" && (
-          <AlertTriangle style={{ width: 11, height: 11, color: "#ca8a04", flexShrink: 0 }} />
         )}
       </div>
       {order.end_time && (

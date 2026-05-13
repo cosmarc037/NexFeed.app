@@ -181,7 +181,7 @@ export default function CutOrderDialog({ order, open, onClose, onConfirm, allOrd
                 <Fragment key={label}>
                   <span className="text-[#6b7280]">{label}:</span>
                   <span className={
-                    orange ? 'text-[#fd5108] font-semibold'
+                    orange ? 'text-[var(--nexfeed-primary)] font-semibold'
                     : bold  ? 'font-semibold text-[#1a1a1a]'
                     : 'text-[#1a1a1a]'
                   }>{value}</span>
@@ -293,7 +293,7 @@ export default function CutOrderDialog({ order, open, onClose, onConfirm, allOrd
           <Button
             onClick={() => canConfirm && onConfirm({ portion1: p1, portion2: p2 })}
             disabled={!canConfirm}
-            className="bg-[#fd5108] hover:bg-[#e8490b] text-white disabled:bg-[#fed7aa] disabled:text-gray-400 disabled:cursor-not-allowed text-[14px] font-semibold h-10 px-5"
+            className="bg-[var(--nexfeed-primary)] hover:bg-[var(--nexfeed-primary-dark)] text-white disabled:bg-[#fed7aa] disabled:text-gray-400 disabled:cursor-not-allowed text-[14px] font-semibold h-10 px-5"
             data-testid="button-cut-confirm"
           >
             Confirm Cut

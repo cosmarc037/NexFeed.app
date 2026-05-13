@@ -60,7 +60,7 @@ export default function RestoreOrderDialog({ order, open, onClose, onConfirm, ne
                 <span className="text-[#6b7280]">{label}:</span>
                 <span
                   className={
-                    orange ? 'text-[#fd5108] font-semibold'
+                    orange ? 'text-[var(--nexfeed-primary)] font-semibold'
                     : bold ? 'font-semibold text-[#1a1a1a]'
                     : 'text-[#1a1a1a]'
                   }

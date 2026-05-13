@@ -61,7 +61,7 @@ function OrderRef({ fpr, name, orderId, onScrollToOrder }) {
         textDecoration: 'underline dotted #d1d5db',
         textUnderlineOffset: '2px',
       }}
-      onMouseEnter={e => { e.currentTarget.style.color = '#fd5108'; e.currentTarget.style.textDecoration = 'underline solid #fd5108'; }}
+      onMouseEnter={e => { e.currentTarget.style.color = 'var(--nexfeed-primary)'; e.currentTarget.style.textDecoration = 'underline solid #fd5108'; }}
       onMouseLeave={e => { e.currentTarget.style.color = '#374151'; e.currentTarget.style.textDecoration = 'underline dotted #d1d5db'; }}
       onClick={handleClick}
       data-testid={`link-order-ref-${orderId}`}
@@ -75,11 +75,11 @@ function InsightCard({ emoji, title, children }) {
   return (
     <div
       className="rounded-md"
-      style={{ background: '#ffffff', border: '1px solid #f3f4f6', borderRadius: 6, padding: '10px 12px' }}
+      style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', borderRadius: 6, padding: '10px 12px' }}
       data-testid={`card-insight-${title}`}
     >
-      <p style={{ fontWeight: 500, fontSize: 12, color: '#374151', marginBottom: 4 }}>{emoji} {title}</p>
-      <div style={{ fontSize: 12, color: '#6b7280', lineHeight: 1.5 }}>{children}</div>
+      <p style={{ fontWeight: 500, fontSize: 12, color: 'var(--color-text)', marginBottom: 4 }}>{emoji} {title}</p>
+      <div style={{ fontSize: 12, color: 'var(--color-text-muted)', lineHeight: 1.5 }}>{children}</div>
     </div>
   );
 }
@@ -87,7 +87,7 @@ function InsightCard({ emoji, title, children }) {
 function AlertCard({ emoji, title, children, severity }) {
   const leftBorderColor = {
     critical: '#e53935',
-    urgent: '#fd5108',
+    urgent: 'var(--nexfeed-primary)',
     warning: '#f59e0b',
     info: '#9ca3af',
   };
@@ -96,18 +96,37 @@ function AlertCard({ emoji, title, children, severity }) {
   return (
     <div
       className="rounded-md"
-      style={{ background: '#ffffff', border: '1px solid #f3f4f6', borderLeft: `2px solid ${borderColor}`, borderRadius: 6, padding: '10px 12px' }}
+      style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', borderLeft: `2px solid ${borderColor}`, borderRadius: 6, padding: '10px 12px' }}
       data-testid={`card-alert-${title}`}
     >
-      <p style={{ fontWeight: 500, fontSize: 12, color: '#374151', marginBottom: 4 }}>{emoji} {title}</p>
-      <div style={{ fontSize: 12, color: '#6b7280', lineHeight: 1.5 }}>{children}</div>
+      <p style={{ fontWeight: 500, fontSize: 12, color: 'var(--color-text)', marginBottom: 4 }}>{emoji} {title}</p>
+      <div style={{ fontSize: 12, color: 'var(--color-text-muted)', lineHeight: 1.5 }}>{children}</div>
     </div>
   );
 }
 
 const FM_LABEL_MAP = { FM1: 'Feedmill 1', FM2: 'Feedmill 2', FM3: 'Feedmill 3', PMX: 'Powermix' };
 
-function buildSummaryContext(orders, inferredTargetMap, feedmill, line) {
+const FEEDMILL_LINE_MAP_AI = { FM1: ['Line 1', 'Line 2'], FM2: ['Line 3', 'Line 4'], FM3: ['Line 6', 'Line 7'], PMX: ['Line 5'] };
+const LINE_TO_FM_AI = {};
+Object.entries(FEEDMILL_LINE_MAP_AI).forEach(([fm, ls]) => ls.forEach(l => { LINE_TO_FM_AI[l] = fm; }));
+
+const AI_LINE_RATE_KEYS = {
+  'Line 1': 'line_1_run_rate', 'Line 2': 'line_2_run_rate', 'Line 3': 'line_3_run_rate',
+  'Line 4': 'line_4_run_rate', 'Line 5': 'line_5_run_rate', 'Line 6': 'line_6_run_rate',
+  'Line 7': 'line_7_run_rate',
+};
+
+function findKbForOrder(order, kbRecords) {
+  if (!kbRecords || !kbRecords.length) return null;
+  const matCode = String(order.material_code_fg || order.material_code || '').trim().replace(/^0+/, '');
+  return kbRecords.find(p => {
+    const kbCode = String(p.fg_material_code || p.material_code_fg || p['FG Material Code'] || '').trim().replace(/^0+/, '');
+    return kbCode && matCode && kbCode === matCode;
+  }) || null;
+}
+
+function buildSummaryContext(orders, inferredTargetMap, feedmill, line, lineShutdowns = {}, kbRecords = []) {
   const now = new Date();
   const fmLabel = FM_LABEL_MAP[feedmill] || feedmill || 'All';
   const scope = (!line || line === 'all') ? fmLabel : line;
@@ -148,6 +167,76 @@ function buildSummaryContext(orders, inferredTargetMap, feedmill, line) {
     ...g, totalVolume: g.totalVolume.toFixed(0),
   }));
 
+  // Build enriched shutdown summary for AI
+  const shutdownLines = Object.entries(lineShutdowns)
+    .filter(([, info]) => info?.isShutdown)
+    .map(([lineName, info]) => {
+      const fm = LINE_TO_FM_AI[lineName] || '';
+      const fmLines = FEEDMILL_LINE_MAP_AI[fm] || [];
+      const allFeedmillDown = fmLines.every(l => lineShutdowns[l]?.isShutdown);
+      const partnerLines = fmLines.filter(l => l !== lineName && !lineShutdowns[l]?.isShutdown);
+
+      // Partner line load (count + volume from all active orders)
+      const partnerLineLoad = {};
+      const partnerLineVolume = {};
+      partnerLines.forEach(pl => {
+        const plOrders = active.filter(o => (o.feedmill_line || o.line) === pl);
+        partnerLineLoad[pl] = plOrders.length;
+        partnerLineVolume[pl] = plOrders.reduce((s, o) => s + (parseFloat(o.volume_override ?? o.total_volume_mt) || 0), 0).toFixed(0);
+      });
+
+      const lineOrders = active.filter(o => (o.feedmill_line || o.line) === lineName);
+      const totalVol = lineOrders.reduce((s, o) => s + (parseFloat(o.volume_override ?? o.total_volume_mt) || 0), 0);
+
+      const ordersWithDetail = lineOrders.slice(0, 10).map(o => {
+        const kb = findKbForOrder(o, kbRecords);
+        const inf = inferredTargetMap[o.material_code];
+        const volume = parseFloat(o.volume_override ?? o.total_volume_mt) || 0;
+        const runRate = parseFloat(o.run_rate) || (kb ? parseFloat(kb[AI_LINE_RATE_KEYS[lineName]] || 0) : 0);
+        const productionHours = runRate > 0 ? (volume / runRate).toFixed(1) : null;
+
+        // Outside lines with run rate > 0
+        const outsideLines = kb ? Object.keys(AI_LINE_RATE_KEYS).filter(l => {
+          if (fmLines.includes(l)) return false;
+          if (lineShutdowns[l]?.isShutdown) return false;
+          return parseFloat(kb[AI_LINE_RATE_KEYS[l]] || 0) > 0;
+        }) : [];
+
+        return {
+          name: (o.item_description || '').substring(0, 40),
+          volume: volume.toFixed(0),
+          form: o.form || 'N/A',
+          prio: displayPrio(o.priority_seq),
+          status: o.status,
+          n10dStatus: inf ? inf.status : null,
+          dfl: inf ? (parseFloat(inf.dueForLoading) || null) : null,
+          inventory: inf ? (parseFloat(inf.inventory) || null) : null,
+          availDate: o.target_avail_date || null,
+          completionDate: o.target_completion_date || null,
+          productionHours,
+          canDivertWithin: partnerLines.length > 0,
+          canDivertOutside: outsideLines.length > 0,
+          outsideLines,
+        };
+      });
+
+      return {
+        line: lineName,
+        feedmill: FM_LABEL_MAP[fm] || fm,
+        allFeedmillDown,
+        reason: info.reason || 'Unspecified',
+        since: info.since ? new Date(info.since).toLocaleDateString('en-US', { month: 'long', day: 'numeric' }) : 'Unknown',
+        partnerLines,
+        partnerLineLoad,
+        partnerLineVolume,
+        orderCount: lineOrders.length,
+        totalVolume: totalVol.toFixed(0),
+        divertibleOutsideCount: ordersWithDetail.filter(o => o.canDivertOutside).length,
+        divertibleWithinCount: ordersWithDetail.filter(o => o.canDivertWithin).length,
+        orders: ordersWithDetail,
+      };
+    });
+
   return {
     scope,
     totalOrders: active.length,
@@ -162,6 +251,7 @@ function buildSummaryContext(orders, inferredTargetMap, feedmill, line) {
     criticalProducts,
     urgentProducts,
     combinableGroups,
+    shutdownLines,
     orders: active.slice(0, 25).map(o => ({
       prio: displayPrio(o.priority_seq),
       description: (o.item_description || '').substring(0, 40),
@@ -192,7 +282,7 @@ function formatSummaryContent(text) {
   });
 }
 
-function AISummaryCard({ type, orders, feedmill, line, inferredTargetMap, isOpen }) {
+function AISummaryCard({ type, orders, feedmill, line, inferredTargetMap, isOpen, lineShutdowns = {}, kbRecords = [] }) {
   const [summary, setSummary] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const hasGeneratedRef = useRef(false);
@@ -212,19 +302,20 @@ function AISummaryCard({ type, orders, feedmill, line, inferredTargetMap, isOpen
 
   useEffect(() => {
     if (!isOpen || !orders || orders.length === 0) return;
-    const scopeKey = `${feedmill}|${line}`;
+    const shutdownKey = Object.keys(lineShutdowns).filter(l => lineShutdowns[l]?.isShutdown).join(',');
+    const scopeKey = `${feedmill}|${line}|${shutdownKey}`;
     const scopeChanged = currentScopeRef.current !== scopeKey;
     if (!hasGeneratedRef.current || scopeChanged) {
       currentScopeRef.current = scopeKey;
       hasGeneratedRef.current = true;
-      const ctx = buildSummaryContext(orders, inferredTargetMap, feedmill, line);
+      const ctx = buildSummaryContext(orders, inferredTargetMap, feedmill, line, lineShutdowns, kbRecords);
       generateSummary(ctx);
     }
-  }, [isOpen, feedmill, line]);
+  }, [isOpen, feedmill, line, lineShutdowns]);
 
   function handleRefresh() {
     if (isLoading) return;
-    const ctx = buildSummaryContext(orders, inferredTargetMap, feedmill, line);
+    const ctx = buildSummaryContext(orders, inferredTargetMap, feedmill, line, lineShutdowns, kbRecords);
     generateSummary(ctx);
   }
 
@@ -251,9 +342,9 @@ function AISummaryCard({ type, orders, feedmill, line, inferredTargetMap, isOpen
   })();
 
   return (
-    <div className="rounded-md" style={{ background: '#ffffff', border: '1px solid #f3f4f6', borderRadius: 6, padding: '10px 12px' }}>
+    <div className="rounded-md" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', borderRadius: 6, padding: '10px 12px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-        <p style={{ fontWeight: 500, fontSize: 12, color: '#374151', margin: 0, display: 'flex', alignItems: 'center', gap: 5 }}>
+        <p style={{ fontWeight: 500, fontSize: 12, color: 'var(--color-text)', margin: 0, display: 'flex', alignItems: 'center', gap: 5 }}>
           <Sparkles style={{ width: 13, height: 13, color: '#d97706', flexShrink: 0 }} />
           Smart Summary
         </p>
@@ -457,13 +548,13 @@ function computeInsights(orders, onScrollToOrder, inferredTargetMap = {}, onAuto
         priority: 1,
         render: (
           <InsightCard emoji="📊" title="Stock-Level Sequencing Available">
-            Next 10 Days data shows <strong>{stockTargetedOrders.length}</strong> order{stockTargetedOrders.length !== 1 ? 's' : ''} with inferred target dates.
+            Future Dispatches data shows <strong>{stockTargetedOrders.length}</strong> order{stockTargetedOrders.length !== 1 ? 's' : ''} with inferred target dates.
             {' '}Run Auto-Sequence to optimize the production schedule based on stock demand forecasts.
             {onAutoSequence && (
               <div style={{ marginTop: 6 }}>
                 <button
                   onClick={onAutoSequence}
-                  style={{ background: '#fd5108', color: 'white', border: 'none', borderRadius: 5, padding: '3px 10px', fontSize: 11, cursor: 'pointer', fontWeight: 600 }}
+                  style={{ background: 'var(--nexfeed-primary)', color: 'white', border: 'none', borderRadius: 5, padding: '3px 10px', fontSize: 11, cursor: 'pointer', fontWeight: 600 }}
                   data-testid="button-run-autosequence-from-insight"
                 >
                   Run Auto-Sequence
@@ -502,7 +593,7 @@ function computeInsights(orders, onScrollToOrder, inferredTargetMap = {}, onAuto
               <div style={{ marginTop: 6 }}>
                 <button
                   onClick={onAutoSequence}
-                  style={{ background: '#fd5108', color: 'white', border: 'none', borderRadius: 5, padding: '3px 10px', fontSize: 11, cursor: 'pointer', fontWeight: 600 }}
+                  style={{ background: 'var(--nexfeed-primary)', color: 'white', border: 'none', borderRadius: 5, padding: '3px 10px', fontSize: 11, cursor: 'pointer', fontWeight: 600 }}
                   data-testid="button-deprioritize-autosequence"
                 >
                   Run Auto-Sequence
@@ -626,7 +717,7 @@ function computeAlerts(orders, lastUploadDate, onUpload, onScrollToOrder, inferr
           No production orders have been uploaded yet. Please upload an SAP file to get started.
           {onUpload && (
             <div className="mt-2">
-              <Button size="sm" className="bg-[#fd5108] hover:bg-[#fe7c39] text-white text-xs h-7 px-3" onClick={onUpload} data-testid="button-upload-sap-alert">
+              <Button size="sm" className="bg-[var(--nexfeed-primary)] hover:bg-[var(--nexfeed-primary-dark)] text-white text-xs h-7 px-3" onClick={onUpload} data-testid="button-upload-sap-alert">
                 <Upload className="h-3 w-3 mr-1" /> Upload SAP File
               </Button>
             </div>
@@ -643,7 +734,7 @@ function computeAlerts(orders, lastUploadDate, onUpload, onScrollToOrder, inferr
           Production orders may not reflect the latest SAP data. Please upload as soon as possible.
           {onUpload && (
             <div className="mt-2">
-              <Button size="sm" className="bg-[#fd5108] hover:bg-[#fe7c39] text-white text-xs h-7 px-3" onClick={onUpload} data-testid="button-upload-sap-alert">
+              <Button size="sm" className="bg-[var(--nexfeed-primary)] hover:bg-[var(--nexfeed-primary-dark)] text-white text-xs h-7 px-3" onClick={onUpload} data-testid="button-upload-sap-alert">
                 <Upload className="h-3 w-3 mr-1" /> Upload SAP File
               </Button>
             </div>
@@ -660,7 +751,7 @@ function computeAlerts(orders, lastUploadDate, onUpload, onScrollToOrder, inferr
           Please upload the latest SAP file to keep production orders current.
           {onUpload && (
             <div className="mt-2">
-              <Button size="sm" className="bg-[#fd5108] hover:bg-[#fe7c39] text-white text-xs h-7 px-3" onClick={onUpload} data-testid="button-upload-sap-alert">
+              <Button size="sm" className="bg-[var(--nexfeed-primary)] hover:bg-[var(--nexfeed-primary-dark)] text-white text-xs h-7 px-3" onClick={onUpload} data-testid="button-upload-sap-alert">
                 <Upload className="h-3 w-3 mr-1" /> Upload SAP File
               </Button>
             </div>
@@ -677,7 +768,7 @@ function computeAlerts(orders, lastUploadDate, onUpload, onScrollToOrder, inferr
           Orders may be outdated. Consider uploading today.
           {onUpload && (
             <div className="mt-2">
-              <Button size="sm" className="bg-[#fd5108] hover:bg-[#fe7c39] text-white text-xs h-7 px-3" onClick={onUpload} data-testid="button-upload-sap-alert">
+              <Button size="sm" className="bg-[var(--nexfeed-primary)] hover:bg-[var(--nexfeed-primary-dark)] text-white text-xs h-7 px-3" onClick={onUpload} data-testid="button-upload-sap-alert">
                 <Upload className="h-3 w-3 mr-1" /> Upload SAP File
               </Button>
             </div>
@@ -759,16 +850,16 @@ function computeAlerts(orders, lastUploadDate, onUpload, onScrollToOrder, inferr
     let title, msg, severity, sortOrder;
     if (n10dDaysAgo === null) {
       title = 'Enable Stock-Based Prioritization';
-      msg = 'Upload a Next 10 Days stock level file to help the AI prioritize prio replenish and safety stock orders based on warehouse demand forecasts.';
+      msg = 'Upload a Future Dispatches file to help the AI prioritize prio replenish and safety stock orders based on warehouse demand forecasts.';
       severity = 'info';
       sortOrder = 2.3;
     } else if (n10dDaysAgo >= 2) {
       title = 'Stock Data Outdated';
-      msg = `Next 10 Days data was last uploaded ${n10dDaysAgo} day${n10dDaysAgo !== 1 ? 's' : ''} ago (${fmtDate(lastN10D)}). Production priorities may be inaccurate. Please upload today's file.`;
+      msg = `Future Dispatches data was last uploaded ${n10dDaysAgo} day${n10dDaysAgo !== 1 ? 's' : ''} ago (${fmtDate(lastN10D)}). Production priorities may be inaccurate. Please upload today's file.`;
       severity = 'warning';
       sortOrder = 2.4;
     } else {
-      title = 'Next 10 Days Update';
+      title = 'Future Dispatches Update';
       msg = `Last stock level upload was yesterday (${fmtDate(lastN10D)}). Upload today's file for accurate production prioritization.`;
       severity = 'info';
       sortOrder = 3.0;
@@ -782,10 +873,10 @@ function computeAlerts(orders, lastUploadDate, onUpload, onScrollToOrder, inferr
             <div className="mt-2">
               <button
                 onClick={onNavigateToN10D}
-                style={{ background: 'transparent', border: '1px solid #fd5108', color: '#fd5108', borderRadius: 5, padding: '3px 10px', fontSize: 11, cursor: 'pointer', fontWeight: 500 }}
+                style={{ background: 'transparent', border: '1px solid #fd5108', color: 'var(--nexfeed-primary)', borderRadius: 5, padding: '3px 10px', fontSize: 11, cursor: 'pointer', fontWeight: 500 }}
                 data-testid="button-navigate-n10d-alert"
               >
-                Upload Next 10 Days
+                Upload Future Dispatches
               </button>
             </div>
           )}
@@ -867,7 +958,7 @@ function alertSeverityDot(alerts) {
   return '🔵';
 }
 
-export default function InsightAlertsPanel({ orders, lastUploadDate, lastN10DUploadDate = null, inferredTargetMap = {}, onUpload, onScrollToOrder, onAutoSequence = null, onNavigateToN10D = null, feedmill = null, line = 'all' }) {
+export default function InsightAlertsPanel({ orders, lastUploadDate, lastN10DUploadDate = null, inferredTargetMap = {}, onUpload, onScrollToOrder, onAutoSequence = null, onNavigateToN10D = null, feedmill = null, line = 'all', lineShutdowns = {}, kbRecords = [] }) {
   const [tickState, setTickState] = useState(0);
   const timerRef = useRef(null);
   const [insightsOpen, setInsightsOpen] = useState(false);
@@ -933,7 +1024,7 @@ export default function InsightAlertsPanel({ orders, lastUploadDate, lastN10DUpl
         {/* Panel 1 — Production Insights */}
         <div
           className="flex-1 overflow-hidden"
-          style={{ border: '1px solid #e5e7eb', borderRadius: 8 }}
+          style={{ border: '1px solid var(--color-border)', borderRadius: 8, background: 'var(--color-bg-secondary)' }}
           data-testid="panel-production-insights"
           data-tour="orders-insights"
         >
@@ -942,17 +1033,17 @@ export default function InsightAlertsPanel({ orders, lastUploadDate, lastN10DUpl
             onClick={toggleInsights}
             className="w-full flex items-center justify-between cursor-pointer"
             style={{
-              background: '#fff',
+              background: 'var(--color-bg-secondary)',
               padding: '10px 16px',
-              borderBottom: insightsOpen ? '1px solid #e5e7eb' : 'none',
+              borderBottom: insightsOpen ? '1px solid var(--color-border)' : 'none',
               transition: 'background-color 150ms ease',
             }}
-            onMouseEnter={e => { e.currentTarget.style.background = '#f9fafb'; }}
-            onMouseLeave={e => { e.currentTarget.style.background = '#fff'; }}
+            onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-hover-bg)'; }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'var(--color-bg-secondary)'; }}
             data-testid="button-toggle-insights"
             aria-expanded={insightsOpen}
           >
-            <span style={{ fontWeight: 500, fontSize: 13, color: '#374151' }}>
+            <span style={{ fontWeight: 500, fontSize: 13, color: 'var(--color-text)' }}>
               🧠 Production Insights
               {!insightsOpen && (
                 <span style={{ fontWeight: 400, fontSize: 12, color: '#9ca3af', marginLeft: 6 }}>({insightCountLabel})</span>
@@ -968,7 +1059,7 @@ export default function InsightAlertsPanel({ orders, lastUploadDate, lastN10DUpl
           </button>
           <div className={`panel-body-collapse${insightsOpen ? '' : ' collapsed'}`}>
             <div className="panel-body-inner">
-              <div style={{ background: '#fafafa', padding: 12, display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 400, overflowY: 'auto', borderRadius: '0 0 8px 8px' }}>
+              <div style={{ background: 'var(--color-bg-tertiary)', padding: 12, display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 400, overflowY: 'auto', borderRadius: '0 0 8px 8px' }}>
                 <AISummaryCard
                   type="production_insights"
                   orders={orders}
@@ -976,6 +1067,8 @@ export default function InsightAlertsPanel({ orders, lastUploadDate, lastN10DUpl
                   line={line}
                   inferredTargetMap={inferredTargetMap}
                   isOpen={insightsOpen}
+                  lineShutdowns={lineShutdowns}
+                  kbRecords={kbRecords}
                 />
                 {insightCount === 0 ? (
                   <p style={{ fontSize: 12, color: '#9ca3af', textAlign: 'center', padding: '8px 0' }} data-testid="text-no-insights">
@@ -992,7 +1085,7 @@ export default function InsightAlertsPanel({ orders, lastUploadDate, lastN10DUpl
         {/* Panel 2 — Alerts & Reminders */}
         <div
           className="flex-1 overflow-hidden"
-          style={{ border: '1px solid #e5e7eb', borderRadius: 8 }}
+          style={{ border: '1px solid var(--color-border)', borderRadius: 8, background: 'var(--color-bg-secondary)' }}
           data-testid="panel-alerts-reminders"
           data-tour="orders-alerts"
         >
@@ -1001,17 +1094,17 @@ export default function InsightAlertsPanel({ orders, lastUploadDate, lastN10DUpl
             onClick={toggleAlerts}
             className="w-full flex items-center justify-between cursor-pointer"
             style={{
-              background: '#fff',
+              background: 'var(--color-bg-secondary)',
               padding: '10px 16px',
-              borderBottom: alertsOpen ? '1px solid #e5e7eb' : 'none',
+              borderBottom: alertsOpen ? '1px solid var(--color-border)' : 'none',
               transition: 'background-color 150ms ease',
             }}
-            onMouseEnter={e => { e.currentTarget.style.background = '#f9fafb'; }}
-            onMouseLeave={e => { e.currentTarget.style.background = '#fff'; }}
+            onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-hover-bg)'; }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'var(--color-bg-secondary)'; }}
             data-testid="button-toggle-alerts"
             aria-expanded={alertsOpen}
           >
-            <span style={{ fontWeight: 500, fontSize: 13, color: '#374151' }}>
+            <span style={{ fontWeight: 500, fontSize: 13, color: 'var(--color-text)' }}>
               🔔 Alerts & Reminders
               {!alertsOpen && (
                 <span style={{ fontWeight: 400, fontSize: 12, color: '#9ca3af', marginLeft: 6 }}>
@@ -1029,7 +1122,7 @@ export default function InsightAlertsPanel({ orders, lastUploadDate, lastN10DUpl
           </button>
           <div className={`panel-body-collapse${alertsOpen ? '' : ' collapsed'}`}>
             <div className="panel-body-inner">
-              <div style={{ background: '#fafafa', padding: 12, display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 400, overflowY: 'auto', borderRadius: '0 0 8px 8px' }}>
+              <div style={{ background: 'var(--color-bg-tertiary)', padding: 12, display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 400, overflowY: 'auto', borderRadius: '0 0 8px 8px' }}>
                 <AISummaryCard
                   type="alerts_reminders"
                   orders={orders}
@@ -1037,6 +1130,8 @@ export default function InsightAlertsPanel({ orders, lastUploadDate, lastN10DUpl
                   line={line}
                   inferredTargetMap={inferredTargetMap}
                   isOpen={alertsOpen}
+                  lineShutdowns={lineShutdowns}
+                  kbRecords={kbRecords}
                 />
                 {alertCount === 0 ? (
                   <p style={{ fontSize: 12, color: '#9ca3af', textAlign: 'center', padding: '8px 0' }} data-testid="text-no-alerts">

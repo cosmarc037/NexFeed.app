@@ -551,7 +551,7 @@ function N10DDayCellTooltip({ data, position }) {
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
-export default function Next10DaysManager({ onApplied, sapOrders = [] }) {
+export default function Next10DaysManager({ onApplied, sapOrders = [], onUpdateOrder }) {
   const queryClient = useQueryClient();
   const fileRef = useRef(null);
   const groupHeaderRef = useRef(null);
@@ -679,7 +679,7 @@ export default function Next10DaysManager({ onApplied, sapOrders = [] }) {
 
       if (onApplied) onApplied(records);
 
-      toast.success(`Next 10 Days loaded — ${records.length} products`);
+      toast.success(`Future Dispatches loaded — ${records.length} products`);
 
       // Auto-generate AI insights
       try {
@@ -712,7 +712,7 @@ export default function Next10DaysManager({ onApplied, sapOrders = [] }) {
       if (onApplied) await onApplied(activeRecords);
       // Regenerate per-product template insights after re-apply
       runInsightGeneration(activeRecords, sapOrders);
-      toast.success("Next 10 Days re-applied to existing orders.");
+      toast.success("Future Dispatches re-applied to existing orders.");
     } catch (err) {
       toast.error("Re-apply failed: " + err.message);
     }
@@ -863,7 +863,7 @@ export default function Next10DaysManager({ onApplied, sapOrders = [] }) {
   const subThBase = {
     position: "sticky",
     top: subHeaderTop,
-    background: "#fff",
+    background: "var(--color-bg-secondary)",
     zIndex: 10,
     fontWeight: 500,
     color: "#6b7280",
@@ -893,7 +893,7 @@ export default function Next10DaysManager({ onApplied, sapOrders = [] }) {
   const groupThBase = {
     position: "sticky",
     top: 0,
-    background: "#fff",
+    background: "var(--color-bg-secondary)",
     color: "#374151",
     fontWeight: 600,
     letterSpacing: "0.05em",
@@ -973,23 +973,67 @@ export default function Next10DaysManager({ onApplied, sapOrders = [] }) {
       const ws = XLSX.utils.json_to_sheet(rows);
       ws["!cols"] = Object.values(colWidths).map(w => ({ wch: Math.min(w + 2, 40) }));
       const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, "N10D");
+      XLSX.utils.book_append_sheet(wb, ws, "Future Dispatches");
       const dateStr = format(new Date(), "yyyy-MM-dd");
-      XLSX.writeFile(wb, `N10D_${label}_${dateStr}.xlsx`);
-      toast.success("N10D data exported.");
+      XLSX.writeFile(wb, `Future_Dispatches_${label}_${dateStr}.xlsx`);
+      toast.success("Future Dispatches data exported.");
     } catch (err) { toast.error("Download failed: " + err.message); }
   };
+
+  function generateSampleDailyValues(count, level) {
+    const values = [];
+    for (let i = 0; i < count; i++) {
+      if (level === "high") values.push(parseFloat((Math.random() * 4 + 1).toFixed(2)));
+      else if (level === "medium") values.push(parseFloat((Math.random() * 3).toFixed(2)));
+      else values.push(parseFloat((Math.random() * 1.5).toFixed(2)));
+    }
+    return values;
+  }
+
+  function downloadFutureDispatchesTemplate() {
+    const today = new Date();
+    const dayColumns = [];
+    for (let i = 0; i < 11; i++) {
+      const d = new Date(today);
+      d.setDate(today.getDate() + i);
+      const monthShort = d.toLocaleDateString("en-US", { month: "short" });
+      const day = d.getDate().toString().padStart(2, "0");
+      dayColumns.push(`${monthShort}-${day}`);
+    }
+    const headers = [
+      "Material Code", "Category", "Item Description", "Due for Loading",
+      ...dayColumns, "Inventory", "Bal. to Produce",
+    ];
+    const sampleData = [
+      ["1000000000594", "Gamefowl", "Gall 21 Chicken Layer P (Breeder) 50Kg", 24.00, ...generateSampleDailyValues(11, "high"), 0.70, 23.30],
+      ["1000000000219", "Gamefowl", "Gallimax 3 Maintenance (Natural) P, 50Kg", 46.30, ...generateSampleDailyValues(11, "medium"), 74.90, 0.00],
+      ["1000000000241", "Swine", "Elite XP Startex, Mini-pellet 50kg", 12.50, ...generateSampleDailyValues(11, "low"), 85.20, 0.00],
+      ["1000000000546", "Gamefowl", "Salto Conditioner P 1kg (Bundle)", 8.00, ...generateSampleDailyValues(11, "medium"), 15.30, 0.00],
+      ["1000000000934", "Gamefowl", "Gallimax Pigeon Pellet, 50kg", 5.60, ...generateSampleDailyValues(11, "low"), 42.10, 0.00],
+    ];
+    const wb = XLSX.utils.book_new();
+    const wsData = [headers, ...sampleData];
+    const ws = XLSX.utils.aoa_to_sheet(wsData);
+    ws["!cols"] = [
+      { wch: 18 }, { wch: 12 }, { wch: 42 }, { wch: 14 },
+      ...dayColumns.map(() => ({ wch: 8 })),
+      { wch: 12 }, { wch: 14 },
+    ];
+    XLSX.utils.book_append_sheet(wb, ws, "Future Dispatches");
+    const dateStr = today.toISOString().split("T")[0];
+    XLSX.writeFile(wb, `Future_Dispatches_Template_${dateStr}.xlsx`);
+  }
 
   return (
     <Card className="border-0 shadow-sm">
       <CardHeader className="pb-4">
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div className="flex items-center gap-2">
-            <BarChart2 className="h-8 w-8 text-[#fd5108]" />
+            <BarChart2 className="h-8 w-8 text-[var(--nexfeed-primary)]" />
             <div>
-              <CardTitle className="text-[16px]">Next 10 Days</CardTitle>
+              <CardTitle className="text-[16px]">Future Dispatches</CardTitle>
               <p className="text-[12px] text-gray-500 mt-0.5">
-                Upload daily stock level data for production prioritization
+                Upload dispatch forecast data for production prioritization
               </p>
             </div>
           </div>
@@ -1001,8 +1045,8 @@ export default function Next10DaysManager({ onApplied, sapOrders = [] }) {
                 onClick={handleReapply}
                 disabled={isReapplying || !activeRecords.length}
                 className="n10d-reapply-btn text-[10px]"
-                data-testid="button-reapply-n10d"
-                data-tour="n10d-reapply"
+                data-testid="button-reapply-future-dispatches"
+                data-tour="future-dispatches-reapply"
               >
                 {isReapplying ? (
                   <Loader2 className="h-3 w-3 mr-1 animate-spin" />
@@ -1014,18 +1058,18 @@ export default function Next10DaysManager({ onApplied, sapOrders = [] }) {
             )}
             <Button
               size="sm"
-              className="n10d-upload-btn bg-[#fd5108] hover:bg-[#fe7c39] text-white text-[10px]"
+              className="n10d-upload-btn bg-[var(--nexfeed-primary)] hover:bg-[var(--nexfeed-primary-dark)] text-white text-[10px]"
               onClick={() => fileRef.current?.click()}
               disabled={isUploading}
-              data-testid="button-upload-n10d"
-              data-tour="n10d-upload"
+              data-testid="button-upload-future-dispatches"
+              data-tour="future-dispatches-upload"
             >
               {isUploading ? (
                 <Loader2 className="h-3 w-3 mr-1 animate-spin" />
               ) : (
                 <Upload className="h-3 w-3 mr-1" />
               )}
-              Upload Next 10 Days
+              Upload Future Dispatches
             </Button>
             <input
               ref={fileRef}
@@ -1044,19 +1088,32 @@ export default function Next10DaysManager({ onApplied, sapOrders = [] }) {
       <CardContent className="space-y-5">
         {/* ── SEARCH BAR ── */}
         {activeRecords.length > 0 && (
-          <div className="flex items-center gap-3" data-tour="n10d-search">
-            <div className="relative flex-1 max-w-xs">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
-              <Input
-                placeholder="Search by code, description, or category..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-8 h-8 text-xs focus-visible:ring-[#fd5108] focus-visible:border-[#fd5108]"
-                data-testid="input-search-n10d"
-              />
+          <div className="flex items-center justify-between gap-3" data-tour="future-dispatches-search">
+            <div style={{ display: "flex", alignItems: "center", gap: 12, flex: 1 }}>
+              <div className="relative" style={{ maxWidth: 300, flex: 1 }}>
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
+                <Input
+                  placeholder="Search by code, description, or category..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-8 h-8 text-xs"
+                  data-testid="input-search-n10d"
+                />
+              </div>
+              <span className="text-[10px] text-gray-500 whitespace-nowrap">
+                Showing {displayRecords.length} of {sortedRecords.length} products
+              </span>
             </div>
-            <span className="text-[10px] text-gray-500 whitespace-nowrap">
-              Showing {displayRecords.length} of {sortedRecords.length} products
+            <span
+              className="kb-edit-link kb-edit-mode-btn"
+              onClick={downloadFutureDispatchesTemplate}
+              data-testid="link-fd-download-template"
+              style={{ color: "#4b5563", fontSize: 13, fontWeight: 500, cursor: "pointer", padding: "6px 10px", transition: "color 0.15s", display: "inline-flex", alignItems: "center", gap: 5, fontStyle: "normal", textDecoration: "none" }}
+              onMouseEnter={e => e.currentTarget.style.color = "var(--nexfeed-primary)"}
+              onMouseLeave={e => e.currentTarget.style.color = "#4b5563"}
+            >
+              <Download style={{ width: 13, height: 13 }} />
+              Download Template
             </span>
           </div>
         )}
@@ -1066,7 +1123,7 @@ export default function Next10DaysManager({ onApplied, sapOrders = [] }) {
           <div
             ref={tableScrollRef}
             className="overflow-auto rounded-lg border border-gray-100"
-            data-tour="n10d-table"
+            data-tour="future-dispatches-table"
             style={{ maxHeight: "520px" }}
           >
             <table
@@ -1083,7 +1140,7 @@ export default function Next10DaysManager({ onApplied, sapOrders = [] }) {
                   {/* PRODUCT DETAILS — frozen group header */}
                   <th
                     colSpan={4}
-                    data-tour="n10d-header-product"
+                    data-tour="future-dispatches-header-product"
                     style={{
                       ...groupThBase,
                       position: "sticky",
@@ -1096,18 +1153,18 @@ export default function Next10DaysManager({ onApplied, sapOrders = [] }) {
                   >
                     Product Details
                   </th>
-                  {/* NEXT 10 DAYS */}
+                  {/* DISPATCH FORECAST */}
                   <th
                     colSpan={Math.max(dateColumnsForTable.length, 1)}
-                    data-tour="n10d-header-days"
+                    data-tour="future-dispatches-header-days"
                     style={{ ...groupThBase }}
                   >
-                    Next 10 Days
+                    Dispatch Forecast
                   </th>
                   {/* TRACKING — spans Inventory, Bal.to.Prod, Completion, Avail, Status */}
                   <th
                     colSpan={5}
-                    data-tour="n10d-header-tracking"
+                    data-tour="future-dispatches-header-tracking"
                     style={{ ...groupThBase, borderLeft: "1px solid #e5e7eb" }}
                   >
                     Tracking
@@ -1187,7 +1244,7 @@ export default function Next10DaysManager({ onApplied, sapOrders = [] }) {
                     style={{
                       ...subThBase,
                       textAlign: "center",
-                      background: "#f9fafb",
+                      background: "var(--color-bg-tertiary)",
                       minWidth: 72,
                       borderLeft: "1px solid #e5e7eb",
                     }}
@@ -1263,15 +1320,15 @@ export default function Next10DaysManager({ onApplied, sapOrders = [] }) {
 
                   const redStyle = { background: "#fff5f5", color: "#ef4444" };
                   const frozenTdBase = {
-                    background: "#fff",
+                    background: "var(--color-bg-secondary)",
                     position: "sticky",
                     zIndex: 2,
                   };
                   const isHovered = hoveredIdx === idx;
                   const isHighlighted = highlightedCode && rec.material_code === highlightedCode;
-                  const hoverBg = "#fafafa";
+                  const hoverBg = "var(--color-hover-bg)";
                   const highlightBg = "#fef9c3";
-                  const frozenBg = isHighlighted ? highlightBg : isHovered ? hoverBg : "#fff";
+                  const frozenBg = isHighlighted ? highlightBg : isHovered ? hoverBg : "var(--color-bg-secondary)";
                   const cellPad = "4.5px 4.5px";
 
                   // Product tooltip data — computed once per row
@@ -1451,7 +1508,7 @@ export default function Next10DaysManager({ onApplied, sapOrders = [] }) {
                           textAlign: "center",
                           fontWeight: 700,
                           color: "#1a1a1a",
-                          background: "#f9fafb",
+                          background: "var(--color-bg-tertiary)",
                           minWidth: 68,
                           borderLeft: "1px solid #e5e7eb",
                         }}
@@ -1543,7 +1600,7 @@ export default function Next10DaysManager({ onApplied, sapOrders = [] }) {
         )}
 
         {/* ── AI STOCK INSIGHTS ── */}
-        <div style={{ margin: "12px 0" }} data-testid="section-ai-stock-insights" data-tour="n10d-safety-insights">
+        <div style={{ margin: "12px 0" }} data-testid="section-ai-stock-insights" data-tour="future-dispatches-safety-insights">
           {/* Title row — outside the container */}
           <div
             style={{
@@ -1555,7 +1612,7 @@ export default function Next10DaysManager({ onApplied, sapOrders = [] }) {
           >
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
               <Sparkles
-                style={{ width: 13, height: 13, color: "#fd5108", flexShrink: 0 }}
+                style={{ width: 13, height: 13, color: "var(--nexfeed-primary)", flexShrink: 0 }}
               />
               <span style={{ fontSize: 13, fontWeight: 700, color: "#1a1a1a" }}>
                 Safety Stock Insights
@@ -1572,7 +1629,7 @@ export default function Next10DaysManager({ onApplied, sapOrders = [] }) {
                   background: "none",
                   border: "none",
                   cursor: aiLoading ? "default" : "pointer",
-                  color: "#fd5108",
+                  color: "var(--nexfeed-primary)",
                   fontSize: 11,
                   fontWeight: 500,
                   padding: 0,
@@ -1582,7 +1639,7 @@ export default function Next10DaysManager({ onApplied, sapOrders = [] }) {
                   if (!aiLoading) e.currentTarget.style.color = "#c2410c";
                 }}
                 onMouseLeave={(e) => {
-                  e.currentTarget.style.color = "#fd5108";
+                  e.currentTarget.style.color = "var(--nexfeed-primary)";
                 }}
                 data-testid="button-refresh-ai-insights"
               >
@@ -1600,7 +1657,7 @@ export default function Next10DaysManager({ onApplied, sapOrders = [] }) {
           <div className="safety-stock-insights-container">
             {!activeRecords.length && !aiLoading && !aiSummary && !aiError && (
               <p style={{ fontSize: 12, color: "#9ca3af", fontStyle: "italic", margin: 0, lineHeight: 1.6 }}>
-                Upload a Next 10 Days file to generate stock insights.
+                Upload a Future Dispatches file to generate stock insights.
               </p>
             )}
             {aiLoading && (
@@ -1627,7 +1684,7 @@ export default function Next10DaysManager({ onApplied, sapOrders = [] }) {
         </div>
 
         {/* ── UPLOAD HISTORY ── */}
-        <div style={{ marginTop: 16 }} data-tour="n10d-history">
+        <div style={{ marginTop: 16 }} data-tour="future-dispatches-history">
           <h4
             style={{
               fontSize: 12,
@@ -1702,7 +1759,7 @@ export default function Next10DaysManager({ onApplied, sapOrders = [] }) {
                           color: "#374151",
                         }}
                         onFocus={(e) =>
-                          (e.target.style.borderColor = "#fd5108")
+                          (e.target.style.borderColor = "var(--nexfeed-primary)")
                         }
                         onBlur={(e) => (e.target.style.borderColor = "#d1d5db")}
                       />
@@ -1738,7 +1795,7 @@ export default function Next10DaysManager({ onApplied, sapOrders = [] }) {
                           color: uploadDateFilter ? "#374151" : "#9ca3af",
                         }}
                         onFocus={(e) =>
-                          (e.target.style.borderColor = "#fd5108")
+                          (e.target.style.borderColor = "var(--nexfeed-primary)")
                         }
                         onBlur={(e) => (e.target.style.borderColor = "#d1d5db")}
                       />
@@ -1783,7 +1840,7 @@ export default function Next10DaysManager({ onApplied, sapOrders = [] }) {
                         style={{
                           position: "sticky",
                           top: 0,
-                          background: "#fff",
+                          background: "var(--color-bg-secondary)",
                           zIndex: 1,
                         }}
                       >
@@ -1843,13 +1900,13 @@ export default function Next10DaysManager({ onApplied, sapOrders = [] }) {
                                 key={up.id ?? up.upload_session_id ?? i}
                                 style={{
                                   borderBottom: "1px solid #f3f4f6",
-                                  background: "#fff",
+                                  background: "var(--color-bg-secondary)",
                                 }}
                                 onMouseEnter={(e) =>
                                   (e.currentTarget.style.background = "#fafafa")
                                 }
                                 onMouseLeave={(e) =>
-                                  (e.currentTarget.style.background = "#fff")
+                                  (e.currentTarget.style.background = "var(--color-bg-secondary)")
                                 }
                                 data-testid={`row-n10d-upload-${i}`}
                               >
@@ -1942,7 +1999,7 @@ export default function Next10DaysManager({ onApplied, sapOrders = [] }) {
                                           title={canDownload ? "Download this upload" : "Download not available"}
                                           disabled={!canDownload}
                                           style={{ color: canDownload ? "#9ca3af" : "#d1d5db", background: "none", border: "none", cursor: canDownload ? "pointer" : "default", padding: 0, lineHeight: 1, opacity: canDownload ? 1 : 0.45 }}
-                                          onMouseEnter={e => { if (canDownload) e.currentTarget.style.color = "#fd5108"; }}
+                                          onMouseEnter={e => { if (canDownload) e.currentTarget.style.color = "var(--nexfeed-primary)"; }}
                                           onMouseLeave={e => { e.currentTarget.style.color = canDownload ? "#9ca3af" : "#d1d5db"; }}
                                           data-testid={`button-download-n10d-upload-${i}`}
                                         >

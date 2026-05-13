@@ -52,7 +52,7 @@ export default function UncombineOrderDialog({ open, onClose, onConfirm, leadOrd
       <AlertDialogContent className="max-w-[520px]" data-testid="dialog-uncombine-order">
         <AlertDialogHeader>
           <AlertDialogTitle className="flex items-center gap-2 text-[18px] font-bold">
-            <Unlock className="h-5 w-5 text-[#fd5108]" />
+            <Unlock className="h-5 w-5 text-[var(--nexfeed-primary)]" />
             Uncombine Order
           </AlertDialogTitle>
         </AlertDialogHeader>
@@ -132,7 +132,7 @@ export default function UncombineOrderDialog({ open, onClose, onConfirm, leadOrd
           </AlertDialogCancel>
           <AlertDialogAction
             onClick={onConfirm}
-            className="bg-[#fd5108] hover:bg-[#e04600] text-white text-[14px] font-semibold h-10 px-5"
+            className="bg-[var(--nexfeed-primary)] hover:bg-[var(--nexfeed-primary-dark)] text-white text-[14px] font-semibold h-10 px-5"
             data-testid="button-confirm-uncombine"
           >
             Confirm Uncombine

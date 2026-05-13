@@ -7,7 +7,6 @@ import {
   Plus,
   CheckCircle2,
   ClipboardList,
-  Sparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -38,6 +37,16 @@ function getEffVolume(order) {
   const bs = parseFloat(order.batch_size) || 4;
   if (bs <= 0) return orig;
   return Math.ceil(orig / bs) * bs;
+}
+
+// Combination basis volume per order — user override wins; for all other cases
+// return raw so batch ceiling is applied only to the FINAL combined sum.
+function getCombineBasisVolume(order) {
+  if (order.volume_override != null && order.volume_override !== "") {
+    const ov = parseFloat(order.volume_override);
+    if (!isNaN(ov) && ov > 0) return ov;
+  }
+  return parseFloat(order.total_volume_mt) || 0;
 }
 
 function calcProductionHoursLocal(volume, runRate) {
@@ -97,6 +106,25 @@ function formatProdHours(ph) {
   const mins = Math.round((hours - wholeHours) * 60);
   if (mins === 0) return `${wholeHours} ${wholeHours === 1 ? "hr" : "hrs"}`;
   return `${wholeHours} ${wholeHours === 1 ? "hr" : "hrs"} ${mins} min`;
+}
+
+function formatTimeShift(hours) {
+  const absHours = Math.abs(hours);
+  if (absHours < 0.01) return '0 min';
+  if (absHours >= 24) {
+    const days = Math.floor(absHours / 24);
+    const remainingHours = Math.floor(absHours % 24);
+    const remainingMins = Math.round((absHours % 1) * 60);
+    if (remainingHours > 0 && remainingMins > 0) return `${days} day${days > 1 ? 's' : ''} ${remainingHours} hr${remainingHours > 1 ? 's' : ''} ${remainingMins} min`;
+    if (remainingHours > 0) return `${days} day${days > 1 ? 's' : ''} ${remainingHours} hr${remainingHours > 1 ? 's' : ''}`;
+    if (remainingMins > 0) return `${days} day${days > 1 ? 's' : ''} ${remainingMins} min`;
+    return `${days} day${days > 1 ? 's' : ''}`;
+  }
+  const wholeHours = Math.floor(absHours);
+  const mins = Math.round((absHours - wholeHours) * 60);
+  if (wholeHours === 0) return `${mins} min`;
+  if (mins === 0) return `${wholeHours} hr${wholeHours > 1 ? 's' : ''}`;
+  return `${wholeHours} hr${wholeHours > 1 ? 's' : ''} ${mins} min`;
 }
 
 function parseCompletionStr(str) {
@@ -169,7 +197,9 @@ function simulateConflictsForOrders(group, allLineOrders) {
     (a, b) => (a.priority_seq ?? Infinity) - (b.priority_seq ?? Infinity),
   );
   const groupIds = new Set(group.map((o) => o.id));
-  const combinedVolume = group.reduce((s, o) => s + getEffVolume(o), 0);
+  const combinedBasisVol = group.reduce((s, o) => s + getCombineBasisVolume(o), 0);
+  const batchSizeSim = parseFloat(group[0]?.batch_size) || 4;
+  const combinedVolume = batchSizeSim > 0 ? Math.ceil(combinedBasisVol / batchSizeSim) * batchSizeSim : Number(combinedBasisVol.toFixed(2));
   const runRate = parseFloat(group[0]?.run_rate) || 0;
   const prodHours = calcProductionHoursLocal(combinedVolume, runRate);
 
@@ -413,6 +443,509 @@ function generateStrategies(group, allLineOrders) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+function cleanInsertionResponse(text) {
+  if (!text) return text;
+  let cleaned = text.trim()
+    .replace(/\*\*/g, '')
+    .replace(/#{1,6}\s*/g, '')
+    .replace(/^Insertion Position:\s*/i, '');
+  // If starts with just a number like "11." or "2.", prepend "Priority"
+  if (/^\d+\.\s/.test(cleaned) && !/^priority/i.test(cleaned)) {
+    cleaned = 'Priority ' + cleaned;
+  }
+  // Replace "is correct" phrasing
+  cleaned = cleaned
+    .replace(/is correct because/gi, 'takes this position because')
+    .replace(/is correct since/gi, 'is placed here since')
+    .replace(/is correct as/gi, 'is placed here as')
+    .replace(/\bcorrect position\b/gi, 'position');
+  return cleaned;
+}
+
+function cleanSchedulingNote(text) {
+  if (!text) return [];
+  let cleaned = text.trim()
+    .replace(/\*\*/g, '')
+    .replace(/#{1,6}\s*/g, '')
+    .replace(/\*([^*]+)\*/g, '$1')
+    .replace(/_([^_]+)_/g, '$1');
+  // Strip any section labels the AI might add
+  cleaned = cleaned.replace(/^(INTERSPERSED ORDERS|DOWNSTREAM ORDERS|ANALYSIS|SUMMARY|NOTE)[:\s]*/gim, '');
+  cleaned = cleaned.replace(/^\d+\.\s*/gm, '');
+  // Split by newlines first (AI was told to use one sentence per line)
+  let sentences = cleaned.split('\n').map(s => s.trim()).filter(s => s.length > 0);
+  // If AI wrote a single dense paragraph, split by sentence endings
+  if (sentences.length <= 1 && cleaned.length > 100) {
+    sentences = cleaned.split(/(?<=[.!?])\s+/).map(s => s.trim()).filter(s => s.length > 0);
+  }
+  return sentences.slice(0, 5);
+}
+
+function extractPrioFromText(text) {
+  if (!text) return null;
+  const patterns = [
+    /RECOMMENDED_PRIO:\s*(\d+)/i,
+    /^(\d+)\.\s/m,
+    /[Pp]riority\s+(\d+)/,
+    /[Pp]rio\s+(\d+)/,
+    /inserted?\s+at\s+(?:[Pp]riority\s+)?(\d+)/i,
+    /position\s+(\d+)/i,
+    /(?:recommend|suggest)\w*\s+(?:[Pp]riority\s+)?(\d+)/i,
+    /occupy\s+(?:position\s+)?(?:[Pp]riority\s+)?(\d+)/i,
+    /placed?\s+at\s+(?:[Pp]riority\s+)?(\d+)/i,
+  ];
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match) {
+      const num = parseInt(match[1], 10);
+      if (num > 0 && num <= 100) return num;
+    }
+  }
+  return null;
+}
+
+function parseCombineAnalysisResponse(response) {
+  if (!response) return null;
+  let cleaned = response
+    .replace(/#{1,6}\s*/g, '')
+    .replace(/\*\*/g, '')
+    .replace(/\*([^*]+)\*/g, '$1')
+    .replace(/_([^_]+)_/g, '$1');
+  const result = { insertionPosition: '', recommendedPrio: null, schedulingImpact: '', alerts: '' };
+  const insertionMatch = cleaned.match(/Insertion Position:\s*([\s\S]*?)(?=Scheduling Impact:|$)/i);
+  const impactMatch = cleaned.match(/Scheduling Impact:\s*([\s\S]*?)(?=Alerts?:|$)/i);
+  const alertsMatch = cleaned.match(/Alerts?:\s*([\s\S]*?)$/i);
+  if (insertionMatch) {
+    let insertionText = insertionMatch[1].trim();
+    const prioLineMatch = insertionText.match(/RECOMMENDED_PRIO:\s*(\d+)/i);
+    if (prioLineMatch) {
+      result.recommendedPrio = parseInt(prioLineMatch[1], 10);
+      insertionText = insertionText.replace(/RECOMMENDED_PRIO:\s*\d+\s*/i, '').trim();
+    }
+    if (result.recommendedPrio === null) {
+      result.recommendedPrio = extractPrioFromText(insertionText);
+    }
+    result.insertionPosition = insertionText;
+  }
+  if (impactMatch) result.schedulingImpact = impactMatch[1].trim();
+  if (alertsMatch) result.alerts = alertsMatch[1].trim();
+  if (!result.insertionPosition && !result.schedulingImpact && !result.alerts) {
+    result.insertionPosition = cleaned.trim();
+    result.schedulingImpact = 'See above.';
+    result.alerts = 'Please review manually.';
+  }
+  return result;
+}
+
+function groupOrdersByShift(orders) {
+  if (!orders || orders.length === 0) return [];
+  const groups = {};
+  orders.forEach(order => {
+    const key = (order.shiftHrs || 0).toFixed(2);
+    if (!groups[key]) groups[key] = { shiftHrs: order.shiftHrs, shiftFormatted: order.shiftFormatted, orders: [] };
+    groups[key].orders.push(order);
+  });
+  return Object.values(groups).map(g => {
+    const sorted = g.orders.sort((a, b) => a.prio - b.prio);
+    const prios = sorted.map(o => o.prio);
+    const prioRange = prios.length === 1 ? String(prios[0]) : `${prios[0]}–${prios[prios.length - 1]}`;
+    return { shiftHrs: g.shiftHrs, shiftFormatted: g.shiftFormatted, prioRange, count: sorted.length, orders: sorted };
+  }).sort((a, b) => b.shiftHrs - a.shiftHrs);
+}
+
+function groupOrdersByDelay(deadlineMisses) {
+  if (!deadlineMisses || deadlineMisses.length === 0) return [];
+  const groups = {};
+  deadlineMisses.forEach(order => {
+    const key = order.delayDays;
+    if (!groups[key]) groups[key] = { delayDays: order.delayDays, orders: [] };
+    groups[key].orders.push(order);
+  });
+  return Object.values(groups).map(g => {
+    const sorted = g.orders.sort((a, b) => a.prio - b.prio);
+    const prios = sorted.map(o => o.prio);
+    const prioRange = prios.length === 1 ? String(prios[0]) : `${prios[0]}–${prios[prios.length - 1]}`;
+    return { delayDays: g.delayDays, prioRange, count: sorted.length, orders: sorted };
+  }).sort((a, b) => b.delayDays - a.delayDays);
+}
+
+function pickNotableOrders(orders) {
+  const critical = orders.filter(o => o.n10dStatus === 'Critical');
+  const urgent = orders.filter(o => o.n10dStatus === 'Urgent');
+  const monitor = orders.filter(o => o.n10dStatus === 'Monitor');
+  const notable = [...critical, ...urgent, ...monitor].slice(0, 3);
+  if (notable.length === 0) {
+    const unique = [];
+    const seen = new Set();
+    for (const o of orders) {
+      if (!seen.has(o.name)) { seen.add(o.name); unique.push(o); }
+      if (unique.length >= 2) break;
+    }
+    return unique.map(o => `${o.name} (Prio ${o.prio})`).join(', ');
+  }
+  return notable.map(o => `${o.name} (Prio ${o.prio}) is ${o.n10dStatus}`).join(', ');
+}
+
+function validateAndFixGrouping(parsedResponse, calculatedImpact) {
+  let result = {
+    earlierSection: [...parsedResponse.earlierSection],
+    laterSection: [...parsedResponse.laterSection],
+    deadlineSection: [...parsedResponse.deadlineSection],
+    summary: [...parsedResponse.summary],
+  };
+
+  // STEP 1: Remove literal N10D placeholder text the AI occasionally emits
+  function cleanN10DPlaceholders(lines) {
+    return lines.map(line => {
+      let c = line;
+      c = c.replace(/\[N10D status\]/gi, '');
+      c = c.replace(/\[N10D: —\]/gi, '');
+      c = c.replace(/\[N10D: N\/A\]/gi, '');
+      c = c.replace(/\[N10D:.*?\]/gi, '');
+      c = c.replace(/N10D: —/gi, '');
+      c = c.replace(/\.\s*\./g, '.').replace(/\s+/g, ' ').trim();
+      return c;
+    }).filter(Boolean);
+  }
+  result.earlierSection = cleanN10DPlaceholders(result.earlierSection);
+  result.laterSection = cleanN10DPlaceholders(result.laterSection);
+  result.deadlineSection = cleanN10DPlaceholders(result.deadlineSection);
+  result.summary = cleanN10DPlaceholders(result.summary);
+
+  // STEP 2: Remove non-dated, non-critical entries the AI incorrectly added to deadline section
+  result.deadlineSection = result.deadlineSection.filter(line => {
+    const lower = line.toLowerCase();
+    if (lower.includes('exceeds avail date') && !lower.includes('no date') && !lower.includes('n/a')) return true;
+    if (lower.includes('critical') || lower.includes('urgent')) return true;
+    if (lower.includes('stock depletion') || lower.includes('stockout')) return true;
+    return false;
+  });
+
+  // STEP 3: Force-add deadline section if AI missed it entirely
+  if (calculatedImpact.deadlineMisses.length > 0 && result.deadlineSection.length === 0) {
+    console.warn('[SmartCombine] AI missed deadline section — force-adding from calculated data.');
+    result.deadlineSection = calculatedImpact.deadlineMisses.map(o => {
+      if (o.type === 'dated') {
+        return `⛔ Prio ${o.prio}: ${o.name} — new completion ${o.newCompletionFull || o.newCompletion} exceeds avail date ${o.availDate} by ~${o.delayFormatted || (o.delayDays + ' days')}.${o.n10dStatus && o.n10dStatus !== 'N/A' ? ' ' + o.n10dStatus + '.' : ''}`;
+      }
+      if (o.type === 'n10d_risk') {
+        return `⛔ Prio ${o.prio}: ${o.name} — ${o.n10dStatus} stock status. Delay of ~${o.delayFormatted} may accelerate stock depletion.`;
+      }
+      return '';
+    }).filter(Boolean);
+  }
+
+  // STEP 4: Fix contradicting summary ("safe" when risks exist)
+  if (calculatedImpact.deadlineMisses.length > 0 && result.summary.length > 0) {
+    const summaryText = result.summary.join(' ').toLowerCase();
+    if (summaryText.includes('safe to proceed') || summaryText.includes('no risks') ||
+        summaryText.includes('no delays') || summaryText.includes('no orders at risk')) {
+      console.warn('[SmartCombine] AI summary contradicts deadline data — replacing.');
+      const datedMisses = calculatedImpact.deadlineMisses.filter(d => d.type === 'dated');
+      const n10dMisses = calculatedImpact.deadlineMisses.filter(d => d.type === 'n10d_risk');
+      const summaryLines = [];
+      if (datedMisses.length > 0) {
+        const names = datedMisses.slice(0, 2).map(o => `${o.name} (Prio ${o.prio})`).join(' and ');
+        summaryLines.push(`The combination will push ${datedMisses.length} order${datedMisses.length > 1 ? 's' : ''} past their avail date, including ${names}.`);
+        summaryLines.push(`${datedMisses[0].name} will be delayed by approximately ${datedMisses[0].delayFormatted} past its avail date of ${datedMisses[0].availDate}.`);
+      }
+      if (n10dMisses.length > 0) {
+        const names = n10dMisses.slice(0, 2).map(o => `${o.name} (Prio ${o.prio}, ${o.n10dStatus})`).join(' and ');
+        summaryLines.push(`Additionally, ${n10dMisses.length} order${n10dMisses.length > 1 ? 's' : ''} with critical stock levels will be delayed, including ${names}, which may accelerate stock depletion.`);
+      }
+      summaryLines.push('Proceed with caution — review the at-risk orders before approving this combination.');
+      result.summary = summaryLines;
+    }
+  }
+
+  // STEP 5: Re-group earlier/later if too many bullets (deadline always stays individual)
+  const earlierLaterBullets = result.earlierSection.length + result.laterSection.length;
+  if (earlierLaterBullets > 6) {
+    if (calculatedImpact.earlierOrders.length > 0) {
+      const groups = groupOrdersByShift(calculatedImpact.earlierOrders);
+      result.earlierSection = groups.map(g => {
+        const notables = pickNotableOrders(g.orders);
+        if (g.count === 1) return `✅ Prio ${g.prioRange}: ${g.orders[0].name} — starts ${g.shiftFormatted} earlier.${g.orders[0].n10dStatus && g.orders[0].n10dStatus !== 'N/A' ? ' ' + g.orders[0].n10dStatus + '.' : ''}`;
+        return `✅ Prio ${g.prioRange} (${g.count} orders) — all start ~${g.shiftFormatted} earlier.${notables ? ' Notable: ' + notables + '.' : ''}`;
+      });
+    }
+    if (calculatedImpact.laterOrders.length > 0) {
+      const groups = groupOrdersByShift(calculatedImpact.laterOrders);
+      result.laterSection = groups.map(g => {
+        const notables = pickNotableOrders(g.orders);
+        if (g.count === 1) return `⚠ Prio ${g.prioRange}: ${g.orders[0].name} — starts ${g.shiftFormatted} later.${g.orders[0].n10dStatus && g.orders[0].n10dStatus !== 'N/A' ? ' ' + g.orders[0].n10dStatus + '.' : ''}`;
+        return `⚠ Prio ${g.prioRange} (${g.count} orders) — all start ~${g.shiftFormatted} later.${notables ? ' Notable: ' + notables + '.' : ''}`;
+      });
+    }
+  }
+
+  return result;
+}
+
+function parseSchedulingImpactResponse(response) {
+  if (!response) return null;
+  let cleaned = response.trim()
+    .replace(/\*\*/g, '')
+    .replace(/#{1,6}\s*/g, '')
+    .replace(/\*([^*]+)\*/g, '$1')
+    .replace(/_([^_]+)_/g, '$1');
+
+  const result = { earlierSection: [], laterSection: [], deadlineSection: [], summary: [] };
+
+  // Split on ---SUMMARY--- marker first
+  let bulletsPart = cleaned;
+  let summaryPart = '';
+
+  const markerIdx = cleaned.indexOf('---SUMMARY---');
+  if (markerIdx >= 0) {
+    bulletsPart = cleaned.substring(0, markerIdx).trim();
+    summaryPart = cleaned.substring(markerIdx + '---SUMMARY---'.length).trim();
+  } else {
+    // Fallback: try SUMMARY: or === markers in the latter half
+    for (const marker of ['SUMMARY:', 'Summary:']) {
+      const idx = cleaned.lastIndexOf(marker);
+      if (idx >= 0 && idx > cleaned.length * 0.4) {
+        bulletsPart = cleaned.substring(0, idx).trim();
+        summaryPart = cleaned.substring(idx + marker.length).trim();
+        break;
+      }
+    }
+    // Last-resort fallback: non-icon lines after last icon/header
+    if (!summaryPart) {
+      const allLines = cleaned.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+      let lastContentIdx = -1;
+      allLines.forEach((l, i) => {
+        if (l.startsWith('✅') || l.startsWith('⚠') || l.startsWith('⛔') ||
+            l.toLowerCase().startsWith('orders starting') || l.toLowerCase().startsWith('orders at risk')) {
+          lastContentIdx = i;
+        }
+      });
+      if (lastContentIdx >= 0 && lastContentIdx < allLines.length - 1) {
+        bulletsPart = allLines.slice(0, lastContentIdx + 1).join('\n');
+        summaryPart = allLines.slice(lastContentIdx + 1).join('\n');
+      }
+    }
+  }
+
+  // Parse bullets part — line-by-line state machine
+  const bulletLines = bulletsPart.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+  let currentSection = null;
+
+  bulletLines.forEach(line => {
+    const lower = line.toLowerCase();
+    if (lower.startsWith('orders starting earlier')) { currentSection = 'earlier'; return; }
+    if (lower.startsWith('orders starting later')) { currentSection = 'later'; return; }
+    if (lower.startsWith('orders at risk')) { currentSection = 'deadline'; return; }
+
+    if (line.startsWith('✅')) {
+      result.earlierSection.push(line);
+      if (!currentSection) currentSection = 'earlier';
+      return;
+    }
+    if (line.startsWith('⚠')) {
+      if (currentSection === 'earlier') result.earlierSection.push(line);
+      else if (currentSection === 'deadline') result.deadlineSection.push(line);
+      else result.laterSection.push(line);
+      if (!currentSection) currentSection = 'later';
+      return;
+    }
+    if (line.startsWith('⛔')) {
+      result.deadlineSection.push(line);
+      if (!currentSection) currentSection = 'deadline';
+      return;
+    }
+  });
+
+  // Parse summary
+  if (summaryPart) {
+    result.summary = summaryPart
+      .split('\n')
+      .map(l => l.trim())
+      .filter(l => l.length > 0 && !l.startsWith('---') && !l.startsWith('==='))
+      .slice(0, 5);
+  }
+
+  return result;
+}
+
+function SchedulingImpactLine({ line, type }) {
+  let text = line.trim();
+  let icon = '';
+  if (text.startsWith('✅')) { icon = '✅'; text = text.replace(/^✅\s*/, ''); }
+  else if (text.startsWith('⚠')) { icon = '⚠'; text = text.replace(/^⚠\s*/, ''); }
+  else if (text.startsWith('⛔')) { icon = '⛔'; text = text.replace(/^⛔\s*/, ''); }
+  else {
+    if (type === 'earlier') icon = '✅';
+    else if (type === 'later') icon = '⚠';
+    else icon = '⛔';
+  }
+  const isNoOrders = text.toLowerCase().includes('no orders');
+  if (isNoOrders) {
+    return <p className="text-[10px] text-gray-400 italic">{text}</p>;
+  }
+  const iconColor = type === 'earlier' ? 'text-green-600' : type === 'later' ? 'text-amber-500' : 'text-red-500';
+  const textColor = type === 'earlier' ? 'text-[#2e343a]' : type === 'later' ? 'text-[#2e343a]' : 'text-[#2e343a]';
+  return (
+    <div className="flex items-start gap-1.5">
+      <span className={`text-[10px] shrink-0 mt-0.5 ${iconColor}`}>{icon}</span>
+      <span className={`text-[10px] ${textColor} leading-relaxed`}>{text}</span>
+    </div>
+  );
+}
+
+function SchedulingImpactAIDisplay({ response }) {
+  const hasBullets = response.earlierSection.length > 0 || response.laterSection.length > 0 || response.deadlineSection.length > 0;
+  return (
+    <div className="space-y-2">
+      {response.earlierSection.length > 0 && (
+        <div>
+          <p className="text-[10px] font-bold text-green-700 mb-1">Orders starting earlier:</p>
+          <div className="space-y-1">
+            {response.earlierSection.map((line, i) => (
+              <SchedulingImpactLine key={`earlier-${i}`} line={line} type="earlier" />
+            ))}
+          </div>
+        </div>
+      )}
+      {response.laterSection.length > 0 && (
+        <div>
+          <p className="text-[10px] font-bold text-red-600 mb-1">Orders starting later:</p>
+          <div className="space-y-1">
+            {response.laterSection.map((line, i) => (
+              <SchedulingImpactLine key={`later-${i}`} line={line} type="later" />
+            ))}
+          </div>
+        </div>
+      )}
+      {response.deadlineSection.length > 0 && (
+        <div>
+          <p className="text-[10px] font-bold text-red-700 mb-1">Orders at risk of missing avail date:</p>
+          <div className="space-y-1">
+            {response.deadlineSection.map((line, i) => (
+              <SchedulingImpactLine key={`deadline-${i}`} line={line} type="deadline" />
+            ))}
+          </div>
+        </div>
+      )}
+      {response.summary.length > 0 && (
+        <div className={`scheduling-impact-ai-note${hasBullets ? ' scheduling-impact-ai-note-separated' : ''}`}>
+          {response.summary.map((sentence, i) => (
+            <p key={i} className="scheduling-impact-ai-sentence">{sentence}</p>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SchedulingImpactFallback({ impact }) {
+  return (
+    <div className="space-y-2">
+      <p className="text-[10px] text-gray-400 italic">AI analysis unavailable — showing calculated data.</p>
+      {impact.laterOrders.length > 0 && (
+        <div>
+          <p className="text-[10px] font-bold text-red-600 mb-1">Orders starting later:</p>
+          <div className="space-y-1">
+            {impact.laterOrders.map((o, i) => (
+              <div key={i} className="flex items-start gap-1.5">
+                <span className="text-[10px] text-amber-500 shrink-0 mt-0.5">⚠</span>
+                <span className="text-[10px] text-[#2e343a] leading-relaxed">
+                  Prio {o.prio}: {o.name} — starts <span className="font-semibold text-red-600">{o.shiftFormatted} later</span>
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {impact.earlierOrders.length > 0 && (
+        <div>
+          <p className="text-[10px] font-bold text-green-700 mb-1">Orders starting earlier:</p>
+          <div className="space-y-1">
+            {impact.earlierOrders.map((o, i) => (
+              <div key={i} className="flex items-start gap-1.5">
+                <span className="text-[10px] text-green-600 shrink-0 mt-0.5">✅</span>
+                <span className="text-[10px] text-[#2e343a] leading-relaxed">
+                  Prio {o.prio}: {o.name} — starts <span className="font-semibold text-green-700">{o.shiftFormatted} earlier</span>
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {impact.deadlineMisses.length > 0 && (
+        <div>
+          <p className="text-[10px] font-bold text-red-700 mb-1">Orders at risk of missing avail date:</p>
+          <div className="space-y-1">
+            {impact.deadlineMisses.map((o, i) => (
+              <div key={i} className="flex items-start gap-1.5">
+                <span className="text-[10px] text-red-500 shrink-0 mt-0.5">⛔</span>
+                <span className="text-[10px] text-[#2e343a] leading-relaxed">
+                  Prio {o.prio}: {o.name} — new completion{' '}
+                  <span className="font-semibold text-red-600">{o.newCompletion}</span>
+                  {' '}exceeds avail date{' '}
+                  <span className="font-semibold text-red-600">{o.availDate}</span>
+                  {' '}(~{o.delayDays} day{o.delayDays !== 1 ? 's' : ''} late)
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CombineAnalysisDisplay({ analysis }) {
+  if (!analysis) return null;
+  return (
+    <div className="combine-analysis-content">
+      <div className="combine-analysis-row">
+        <div className="combine-analysis-row-label">
+          <span className="combine-analysis-row-icon">📍</span>
+          Insertion Position
+        </div>
+        <div className="combine-analysis-row-text">{analysis.insertionPosition || '—'}</div>
+      </div>
+      <div className="combine-analysis-row">
+        <div className="combine-analysis-row-label">
+          <span className="combine-analysis-row-icon">📊</span>
+          Scheduling Impact
+        </div>
+        <div className="combine-analysis-row-text">{analysis.schedulingImpact || '—'}</div>
+      </div>
+      <div className="combine-analysis-row combine-analysis-row-alerts">
+        <div className="combine-analysis-row-label">
+          <span className="combine-analysis-row-icon">⚠</span>
+          Alerts
+        </div>
+        <div className="combine-analysis-row-text">{analysis.alerts || '—'}</div>
+      </div>
+    </div>
+  );
+}
+
+function CombineAlertsDisplay({ alerts, hideNoAlerts = false }) {
+  if (!alerts) return hideNoAlerts ? null : <p className="text-[10px] text-green-700 italic">No alerts.</p>;
+  const lines = alerts.split('\n').map(l => l.trim()).filter(Boolean);
+  if (lines.length === 0) return hideNoAlerts ? null : <p className="text-[10px] text-green-700 italic">No alerts — all orders remain on schedule.</p>;
+  const isNoAlerts = lines.length === 1 && lines[0].toLowerCase().includes('no alerts');
+  if (isNoAlerts) return hideNoAlerts ? null : <p className="text-[10px] text-green-700 italic">{lines[0].replace(/^[⚠\s]+/, '').trim()}</p>;
+  return (
+    <div className="space-y-1.5">
+      {lines.map((line, i) => {
+        const cleaned = line.replace(/^[⚠•\-\s]+/, '').trim();
+        if (!cleaned) return null;
+        return (
+          <div key={i} className="flex items-start gap-1.5">
+            <span className="text-[10px] text-amber-500 shrink-0 mt-0.5">⚠</span>
+            <span className="text-[10px] text-[#92400e] leading-relaxed">{cleaned}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function normalizeVal(v) {
   if (v === null || v === undefined || v === "" || v === "-") return "";
   return String(v).trim().toLowerCase();
@@ -430,9 +963,6 @@ function findCombineGroups(orders) {
       String(o.material_code || "").trim(),
       normalizeVal(o.kb_sfg_material_code),
       String(o.feedmill_line || "").trim(),
-      String(o.form || "").trim(),
-      String(o.batch_size || "").trim(),
-      String(o.category || "").trim(),
       normalizeVal(o.formula_version),
     ].join("|||");
     if (!groups[key]) groups[key] = [];
@@ -468,6 +998,7 @@ export default function SmartCombinePanel({
   kbRecords,
   onCombine,
   newFprValues,
+  inferredTargetMap = {},
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const [dismissed, setDismissed] = useState(new Set());
@@ -483,10 +1014,27 @@ export default function SmartCombinePanel({
   const hasNewFprs = newFprValues && newFprValues.size > 0;
   const [aiScheduleInsights, setAiScheduleInsights] = useState({});
   const [aiScheduleLoading, setAiScheduleLoading] = useState({});
+  const [aiSectionLoading, setAiSectionLoading] = useState({});
   const aiTriggeredRef = useRef(new Set());
 
+  // Clear all AI state when the panel closes so stale responses don't bleed
+  // into new group compositions when the panel is reopened
+  useEffect(() => {
+    if (!isOpen) {
+      setAiScheduleInsights({});
+      setAiScheduleLoading({});
+      setAiSectionLoading({});
+      aiTriggeredRef.current = new Set();
+    }
+  }, [isOpen]);
+
   const getGroupKey = useCallback(
-    (group) => group.map((o) => o.fpr || o.id).sort().join("|"),
+    (group) => {
+      const line = group[0]?.feedmill_line || '';
+      const mat = String(group[0]?.material_code || group[0]?.material_code_fg || '');
+      const fprs = group.map((o) => o.fpr || o.id).sort().join('|');
+      return `${line}||${mat}||${fprs}`;
+    },
     [],
   );
 
@@ -596,25 +1144,40 @@ export default function SmartCombinePanel({
     setDismissed((prev) => new Set([...prev, groupIndex]));
   };
 
-  const handleSelectStrategy = (groupIdx, stratId) => {
+  const handleSelectStrategy = (groupIdx, stratId, group) => {
     setSelectedStrategies((prev) => ({ ...prev, [groupIdx]: stratId }));
     setExcluded((prev) => ({ ...prev, [groupIdx]: new Set() }));
+    if (group) {
+      const key = getGroupKey(group);
+      aiTriggeredRef.current.delete(key);
+      setAiScheduleInsights((prev) => { const next = { ...prev }; delete next[key]; return next; });
+    }
   };
 
-  const handleExclude = (groupIdx, orderId) => {
+  const handleExclude = (groupIdx, orderId, group) => {
     setExcluded((prev) => {
       const s = new Set(prev[groupIdx] || []);
       s.add(orderId);
       return { ...prev, [groupIdx]: s };
     });
+    if (group) {
+      const key = getGroupKey(group);
+      aiTriggeredRef.current.delete(key);
+      setAiScheduleInsights((prev) => { const next = { ...prev }; delete next[key]; return next; });
+    }
   };
 
-  const handleReadd = (groupIdx, orderId) => {
+  const handleReadd = (groupIdx, orderId, group) => {
     setExcluded((prev) => {
       const s = new Set(prev[groupIdx] || []);
       s.delete(orderId);
       return { ...prev, [groupIdx]: s };
     });
+    if (group) {
+      const key = getGroupKey(group);
+      aiTriggeredRef.current.delete(key);
+      setAiScheduleInsights((prev) => { const next = { ...prev }; delete next[key]; return next; });
+    }
   };
 
   // Returns [strategies, selectedStratId, activeOrders, stratExcludedOrders, manualExcludedOrders]
@@ -667,37 +1230,12 @@ export default function SmartCombinePanel({
       );
     }
 
-    const forms = new Set(activeOrders.map((o) => String(o.form || "").trim()));
-    if (forms.size > 1) {
-      errors.push(
-        "These orders cannot be combined because they have different Form types. All orders must share the same Form to be eligible for combining.",
-      );
-    }
-
-    const batchSizes = new Set(
-      activeOrders.map((o) => String(o.batch_size || "").trim()),
-    );
-    if (batchSizes.size > 1) {
-      errors.push(
-        "These orders cannot be combined because they have different Batch Sizes. All orders must share the same Batch Size to be eligible for combining.",
-      );
-    }
-
     const lines = new Set(
       activeOrders.map((o) => String(o.feedmill_line || "").trim()),
     );
     if (lines.size > 1) {
       errors.push(
         "These orders cannot be combined because they are assigned to different feedmill lines. All orders must be on the same line to be eligible for combining.",
-      );
-    }
-
-    const categories = new Set(
-      activeOrders.map((o) => String(o.category || "").trim()),
-    );
-    if (categories.size > 1) {
-      errors.push(
-        "These orders cannot be combined because they belong to different Categories. All orders must share the same Category to be eligible for combining.",
       );
     }
 
@@ -788,18 +1326,27 @@ export default function SmartCombinePanel({
       );
     const groupIds = new Set(group.map((o) => o.id));
 
-    const combinedVolume = group.reduce((s, o) => s + getEffVolume(o), 0);
+    const combinedBasisVol = group.reduce((s, o) => s + getCombineBasisVolume(o), 0);
     const runRate = parseFloat(group[0].run_rate) || 0;
     const batchSize = parseFloat(group[0].batch_size) || 4;
+    const combinedVolume = batchSize > 0 ? Math.ceil(combinedBasisVol / batchSize) * batchSize : Number(combinedBasisVol.toFixed(2));
     const prodHours = calcProductionHoursLocal(combinedVolume, runRate);
     const changeover = 0.17;
 
-    const earliestIdx = Math.min(
-      ...group.map((o) => {
-        const idx = allLineOrders.findIndex((lo) => lo.id === o.id);
-        return idx >= 0 ? idx : Infinity;
-      }),
-    );
+    // For dated orders, use the index of the order with the earliest avail date.
+    // For non-dated orders, use the earliest position (lowest priority_seq index).
+    const datedGroupOrders = group.filter((o) => {
+      const av = (o.target_avail_date || '').toLowerCase();
+      return av && !av.includes('prio') && !av.includes('safety') && av !== '—' && !isNaN(Date.parse(o.target_avail_date));
+    });
+    let anchorOrderId;
+    if (datedGroupOrders.length > 0) {
+      const earliest = datedGroupOrders.sort((a, b) => new Date(a.target_avail_date) - new Date(b.target_avail_date))[0];
+      anchorOrderId = earliest.id;
+    }
+    const earliestIdx = anchorOrderId
+      ? (() => { const i = allLineOrders.findIndex((lo) => lo.id === anchorOrderId); return i >= 0 ? i : Math.min(...group.map((o) => { const idx = allLineOrders.findIndex((lo) => lo.id === o.id); return idx >= 0 ? idx : Infinity; })); })()
+      : Math.min(...group.map((o) => { const idx = allLineOrders.findIndex((lo) => lo.id === o.id); return idx >= 0 ? idx : Infinity; }));
 
     const simulatedOrders = allLineOrders.filter((o) => !groupIds.has(o.id));
     const leadPlaceholder = {
@@ -1037,8 +1584,9 @@ export default function SmartCombinePanel({
           gapRecommendation,
         };
 
-      const combinedVol = activeOrders.reduce((s, o) => s + getEffVolume(o), 0);
       const batchSize = parseFloat(activeOrders[0].batch_size) || 4;
+      const combinedBasisVol = activeOrders.reduce((s, o) => s + getCombineBasisVolume(o), 0);
+      const combinedVol = batchSize > 0 ? Math.ceil(combinedBasisVol / batchSize) * batchSize : Number(combinedBasisVol.toFixed(2));
       const runRate = parseFloat(activeOrders[0].run_rate) || 0;
       const form = activeOrders[0].form;
       const line = activeOrders[0].feedmill_line;
@@ -1051,36 +1599,12 @@ export default function SmartCombinePanel({
           text: "Orders have different Material Codes (FG). All orders must share the same Material Code to combine.",
           blocking: true,
         });
-      const forms = new Set(
-        activeOrders.map((o) => String(o.form || "").trim()),
-      );
-      if (forms.size > 1)
-        warnings.push({
-          text: "Orders have different Form types. All orders must share the same Form to combine.",
-          blocking: true,
-        });
-      const batchSizes = new Set(
-        activeOrders.map((o) => String(o.batch_size || "").trim()),
-      );
-      if (batchSizes.size > 1)
-        warnings.push({
-          text: "Orders have different Batch Sizes. All orders must share the same Batch Size to combine.",
-          blocking: true,
-        });
       const lines = new Set(
         activeOrders.map((o) => String(o.feedmill_line || "").trim()),
       );
       if (lines.size > 1)
         warnings.push({
           text: "Orders are assigned to different feedmill lines. All orders must be on the same line to combine.",
-          blocking: true,
-        });
-      const categories = new Set(
-        activeOrders.map((o) => String(o.category || "").trim()),
-      );
-      if (categories.size > 1)
-        warnings.push({
-          text: "Orders belong to different Categories. All orders must share the same Category to combine.",
           blocking: true,
         });
 
@@ -1126,10 +1650,10 @@ export default function SmartCombinePanel({
           blocking: false,
         });
 
-      if (batchSize > 0 && combinedVol % batchSize !== 0) {
-        const rounded = Math.ceil(combinedVol / batchSize) * batchSize;
+      if (batchSize > 0 && Math.abs(combinedBasisVol % batchSize) > 0.001) {
+        const rounded = Math.ceil(combinedBasisVol / batchSize) * batchSize;
         warnings.push({
-          text: `Combined volume of ${fmtVolume(combinedVol)} MT is not a multiple of the Batch Size (${fmtVolume(batchSize)}). The system will round up to ${fmtVolume(rounded)} MT.`,
+          text: `Combined volume of ${fmtVolume(combinedBasisVol)} MT is not a multiple of the Batch Size (${fmtVolume(batchSize)}). The system will round up to ${fmtVolume(rounded)} MT.`,
           blocking: false,
         });
       }
@@ -1446,12 +1970,21 @@ export default function SmartCombinePanel({
                   usedHrs += ndPh;
                 }
               }
-              if (fittingOrders.length > 0) {
+              const fillUtilization = gapHours > 0 ? usedHrs / gapHours : 0;
+              // Only recommend keeping separate if non-dated orders meaningfully fill the gap (≥40%)
+              if (fittingOrders.length > 0 && fillUtilization >= 0.4) {
+                const availDiffMs = lastAvail - firstAvail;
+                const availDiffHours = availDiffMs / 3600000;
+                const availDateDiffLabel = availDiffHours >= 24
+                  ? `${Math.floor(availDiffHours / 24)} day${Math.floor(availDiffHours / 24) !== 1 ? 's' : ''}${Math.round(availDiffHours % 24) > 0 ? ` ${Math.round(availDiffHours % 24)} hrs` : ''}`
+                  : `${Math.round(availDiffHours)} hours`;
+                const fillPct = Math.round(fillUtilization * 100);
                 gapRecommendation = {
                   firstFpr: first.fpr,
                   lastFpr: last.fpr,
                   firstAvailDate: formatLongDate(first.avail),
                   lastAvailDate: formatLongDate(last.avail),
+                  availDateDiffLabel,
                   firstCompletion: first.completion
                     ? formatLongDateTime(first.completion)
                     : "-",
@@ -1460,6 +1993,7 @@ export default function SmartCombinePanel({
                     gapHours >= 24
                       ? `${Math.round(gapHours / 24)} days ${Math.round(gapHours % 24)} hours`
                       : `${Math.round(gapHours)} hours`,
+                  fillPct,
                   fittingOrders,
                   totalFillTime: formatProdHours(usedHrs),
                 };
@@ -1485,26 +2019,233 @@ export default function SmartCombinePanel({
   const triggerAISchedule = useCallback(
     (key, group, originalIdx) => {
       const { activeOrders } = resolveGroupStrategy(group, originalIdx);
-      const si = generateInsights(activeOrders).schedulingImpact;
-      if (!si) return;
+      if (activeOrders.length < 2) return;
       setAiScheduleLoading((prev) => ({ ...prev, [key]: true }));
-      const totalVol = activeOrders.reduce((s, o) => s + getEffVolume(o), 0);
+
+      const line = group[0]?.feedmill_line || '';
+      const combinedBasisVolAI = activeOrders.reduce((s, o) => s + getCombineBasisVolume(o), 0);
+      const batchSizeAI = parseFloat(activeOrders[0]?.batch_size) || 4;
+      const combinedVolume = batchSizeAI > 0 ? Math.ceil(combinedBasisVolAI / batchSizeAI) * batchSizeAI : Number(combinedBasisVolAI.toFixed(2));
+      const runRate = parseFloat(activeOrders[0]?.run_rate) || 0;
+      const combinedProductionHours = runRate > 0 ? (combinedVolume / runRate).toFixed(2) : '0.00';
+
+      const activeIds = new Set(activeOrders.map((o) => o.id));
+      const allGroupLineOrders = lineOrders
+        .filter((o) => o.feedmill_line === line && !['done', 'completed', 'cancel_po', 'cancelled'].includes((o.status || '').toLowerCase()))
+        .sort((a, b) => (a.priority_seq ?? 999) - (b.priority_seq ?? 999));
+
+      // Build a 1-based display rank map matching activeRankMap in OrderTable:
+      // exclude child orders (parent_id set) so ranks match what the user sees in the Prio column
+      const displayRankMap = new Map();
+      let _displayRank = 0;
+      for (const o of allGroupLineOrders) {
+        if (!o.parent_id) { _displayRank++; displayRankMap.set(o.id, _displayRank); }
+      }
+
+      const isISODate = (d) => !!d && /^\d{4}-\d{2}-\d{2}/.test(d) && !isNaN(Date.parse(d));
+
+      const datedOrders = activeOrders.filter((o) => isISODate(o.target_avail_date));
+      let combinedAvailDate = null, availDateType = 'none';
+      let expectedInsertionPrio = null;
+      let insertionOrderId = null;
+      if (datedOrders.length > 0) {
+        // Dated: insertion at earliest avail date order's slot
+        const earliest = [...datedOrders].sort((a, b) => new Date(a.target_avail_date) - new Date(b.target_avail_date))[0];
+        combinedAvailDate = earliest.target_avail_date;
+        expectedInsertionPrio = displayRankMap.get(earliest.id) ?? 1;
+        insertionOrderId = earliest.id;
+        availDateType = 'dated';
+      } else {
+        // Non-dated: insertion at lowest priority_seq (first in sequence) order's slot
+        const lowestSeqOrder = [...activeOrders].sort((a, b) => (a.priority_seq ?? 999) - (b.priority_seq ?? 999))[0];
+        combinedAvailDate = lowestSeqOrder?.target_avail_date || null;
+        expectedInsertionPrio = displayRankMap.get(lowestSeqOrder?.id) ?? 1;
+        insertionOrderId = lowestSeqOrder?.id ?? null;
+        availDateType = 'priority_based';
+      }
+
+      const sortedActiveByRank = [...activeOrders].sort((a, b) => (displayRankMap.get(a.id) ?? 999) - (displayRankMap.get(b.id) ?? 999));
+      // removedPrios = all ranks except the insertion slot
+      const removedPrios = sortedActiveByRank
+        .filter((o) => o.id !== insertionOrderId)
+        .map((o) => displayRankMap.get(o.id) ?? '?');
+
+      // Actual time saving for downstream orders:
+      // The removed orders' production is ABSORBED into the combined order — not eliminated.
+      // Only the changeover slots between the merged orders are freed.
+      const separateProdTotal = activeOrders.reduce((s, o) => {
+        const vol = getEffVolume(o);
+        const rr = parseFloat(o.run_rate) || 0;
+        return s + (rr > 0 ? vol / rr : 0);
+      }, 0);
+      const savedChangeoverHrs = sortedActiveByRank.slice(1).reduce((s, o) => {
+        return s + (parseFloat(o.changeover_time) ?? 0.17);
+      }, 0);
+      const combinedProdFloat = runRate > 0 ? combinedVolume / runRate : 0;
+      const netDownstreamShiftHrs = parseFloat(((separateProdTotal - combinedProdFloat) + savedChangeoverHrs).toFixed(2));
+
+      // Simulate start times before and after combining to find interspersed impact
+      const combineDisplayRanks = sortedActiveByRank.map(o => displayRankMap.get(o.id) ?? 999);
+      const minCombineRank = Math.min(...combineDisplayRanks);
+      const maxCombineRank = Math.max(...combineDisplayRanks);
+      const leadOrder = sortedActiveByRank[0];
+      const leadOutCo = parseFloat(leadOrder?.changeover_time) ?? 0.17;
+
+      let simTBefore = 0;
+      const beforeStart = {};
+      for (const o of allGroupLineOrders) {
+        const vol = getEffVolume(o); const rr = parseFloat(o.run_rate) || 0;
+        beforeStart[o.id] = simTBefore;
+        simTBefore += (rr > 0 ? vol / rr : 0) + (parseFloat(o.changeover_time) ?? 0.17);
+      }
+      let simTAfter = 0;
+      const afterStart = {};
+      let combinedBlockDone = false;
+      for (const o of allGroupLineOrders) {
+        if (activeIds.has(o.id)) {
+          if (!combinedBlockDone) { simTAfter += combinedProdFloat + leadOutCo; combinedBlockDone = true; }
+          continue;
+        }
+        const vol = getEffVolume(o); const rr = parseFloat(o.run_rate) || 0;
+        afterStart[o.id] = simTAfter;
+        simTAfter += (rr > 0 ? vol / rr : 0) + (parseFloat(o.changeover_time) ?? 0.17);
+      }
+      // Expand to ALL non-combine orders after the lead position (not just between members)
+      // Include avail date + deadline miss check using lead order's real start date as reference
+      const leadStartMs = leadOrder?.start_date ? new Date(leadOrder.start_date).getTime() : Date.now();
+      const downstreamImpact = allGroupLineOrders
+        .filter(o => { const rank = displayRankMap.get(o.id) ?? 999; return !activeIds.has(o.id) && rank > minCombineRank; })
+        .map(o => {
+          const shiftHrs = parseFloat(((beforeStart[o.id] ?? 0) - (afterStart[o.id] ?? 0)).toFixed(2));
+          const vol = getEffVolume(o); const rr = parseFloat(o.run_rate) || 0; const prodHrs = rr > 0 ? vol / rr : 0;
+          const availDate = isISODate(o.target_avail_date) ? o.target_avail_date : null;
+          const projCompletionMs = leadStartMs + ((afterStart[o.id] ?? 0) + prodHrs) * 3600000;
+          const willMissDeadline = availDate ? projCompletionMs > new Date(availDate).getTime() : false;
+          const projCompletionDate = new Date(projCompletionMs);
+          const newCompletion = projCompletionDate.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+          const newCompletionFull = `${newCompletion} ${projCompletionDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}`;
+          const delayMs = willMissDeadline && availDate ? projCompletionMs - new Date(availDate).getTime() : 0;
+          const delayDays = willMissDeadline && availDate ? Math.ceil(delayMs / 86400000) : 0;
+          const delayHrs = delayMs / 3600000;
+          const delayFormatted = willMissDeadline ? formatTimeShift(delayHrs) : '';
+          const availDateFmt = availDate ? new Date(availDate).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }) : null;
+          const matCodeO = o.material_code || o.material_code_fg || '';
+          const n10dO = inferredTargetMap[matCodeO] || null;
+          const n10dStatusO = n10dO?.status || 'N/A';
+          return { name: o.item_description || o.fpr || '—', fpr: o.fpr || '—', prio: displayRankMap.get(o.id) ?? '?', shiftHrs, availDate, availDateFmt, willMissDeadline, newCompletion, newCompletionFull, delayHrs, delayDays, delayFormatted, n10dStatus: n10dStatusO, isInterspersed: (displayRankMap.get(o.id) ?? 999) < maxCombineRank };
+        });
+      const interspersedImpact = downstreamImpact; // keep alias for AI prompt compat
+
+      const matCode = activeOrders[0]?.material_code || activeOrders[0]?.material_code_fg || '';
+      const n10dEntry = inferredTargetMap[matCode] || null;
+
+      const lineContext = allGroupLineOrders.map((o, _i) => {
+        const vol = getEffVolume(o);
+        const rr = parseFloat(o.run_rate) || 0;
+        const matC = o.material_code || o.material_code_fg || '';
+        const n10dE = inferredTargetMap[matC] || null;
+        return {
+          prio: displayRankMap.get(o.id) ?? (_i + 1),
+          name: o.item_description || '—',
+          volume: vol.toFixed(0),
+          prodHours: rr > 0 ? (vol / rr).toFixed(2) : '0.00',
+          availDate: o.target_avail_date || null,
+          completionDate: o.target_completion_date || '—',
+          changeover: (parseFloat(o.changeover_time) ?? 0.17).toFixed(2),
+          isBeingCombined: activeIds.has(o.id),
+          n10dStatus: n10dE?.status || '—',
+          color: o.pellet_color || o.color || '—',
+          diameter: o.pellet_diameter || o.diameter || '—',
+          category: o.category || '—',
+        };
+      });
+
+      // Use typed deadline misses for alerts — same source as Scheduling Impact
+      const calculatedAlerts = [];
+      // Will be populated after calcImpact is built below (see after calcImpact definition)
+
+      // Store simulation data immediately so bullet lists show before AI completes
+      setAiScheduleInsights((prev) => ({
+        ...prev,
+        [key]: { ...(prev[key] || {}), downstreamImpact, minCombineRank, maxCombineRank, netDownstreamShiftHrs },
+      }));
+
+      const calcImpact = {
+        laterOrders: downstreamImpact.filter(o => o.shiftHrs < 0).sort((a, b) => Math.abs(b.shiftHrs) - Math.abs(a.shiftHrs)).map(o => ({ prio: o.prio, name: o.name, shiftHrs: Math.abs(o.shiftHrs), shiftFormatted: formatTimeShift(Math.abs(o.shiftHrs)), n10dStatus: o.n10dStatus || 'N/A' })),
+        earlierOrders: downstreamImpact.filter(o => o.shiftHrs > 0.01).sort((a, b) => b.shiftHrs - a.shiftHrs).map(o => ({ prio: o.prio, name: o.name, shiftHrs: o.shiftHrs, shiftFormatted: formatTimeShift(o.shiftHrs), n10dStatus: o.n10dStatus || 'N/A' })),
+        deadlineMisses: [
+          // TYPE 1: dated orders whose projected completion exceeds avail date
+          ...downstreamImpact
+            .filter(o => o.willMissDeadline)
+            .map(o => ({ type: 'dated', prio: o.prio, name: o.name, fpr: o.fpr || '—', availDate: o.availDateFmt, availDateISO: o.availDate, newCompletion: o.newCompletion, newCompletionFull: o.newCompletionFull, delayHrs: o.delayHrs, delayFormatted: o.delayFormatted, delayDays: o.delayDays, n10dStatus: o.n10dStatus || 'N/A', shiftHrs: Math.abs(o.shiftHrs), shiftFormatted: formatTimeShift(Math.abs(o.shiftHrs)) })),
+          // TYPE 2: non-dated Critical/Urgent orders being delayed by the combination
+          ...downstreamImpact
+            .filter(o => !o.availDate && o.shiftHrs < -0.01 && (o.n10dStatus === 'Critical' || o.n10dStatus === 'Urgent'))
+            .map(o => ({ type: 'n10d_risk', prio: o.prio, name: o.name, fpr: o.fpr || '—', availDate: null, availDateISO: null, newCompletion: null, newCompletionFull: null, delayHrs: Math.abs(o.shiftHrs), delayFormatted: formatTimeShift(Math.abs(o.shiftHrs)), delayDays: null, n10dStatus: o.n10dStatus || 'N/A', shiftHrs: Math.abs(o.shiftHrs), shiftFormatted: formatTimeShift(Math.abs(o.shiftHrs)) })),
+        ].sort((a, b) => {
+          const so = { Critical: 0, Urgent: 1 };
+          const aO = so[a.n10dStatus] ?? 2; const bO = so[b.n10dStatus] ?? 2;
+          if (aO !== bO) return aO - bO;
+          return (b.delayHrs || 0) - (a.delayHrs || 0);
+        }),
+      };
+
+      // Populate typed alerts from calcImpact.deadlineMisses
+      calcImpact.deadlineMisses.forEach(dm => {
+        if (dm.type === 'dated') {
+          calculatedAlerts.push({ type: 'deadline', orderName: dm.name, fpr: dm.fpr, prio: dm.prio, availDate: dm.availDateISO || '', newCompletionFull: dm.newCompletionFull, completionDate: dm.newCompletion, delayFormatted: dm.delayFormatted, delayDays: dm.delayDays });
+        } else if (dm.type === 'n10d_risk') {
+          calculatedAlerts.push({ type: 'n10d_risk', orderName: dm.name, fpr: dm.fpr, prio: dm.prio, n10dStatus: dm.n10dStatus, delayFormatted: dm.delayFormatted });
+        }
+      });
+      if (combinedVolume > 200) calculatedAlerts.push({ type: 'volume_ceiling', message: `The combined total of ${combinedVolume.toFixed(0)} MT exceeds the recommended ceiling of 200 MT. Large combined orders may impact scheduling flexibility and downstream production.` });
+
       generateCombineSchedulingImpact({
-        scenario: si.scenario,
-        insertionPrio: si.insertionPrio,
-        delayInfo: si.delayInfo,
-        alternativePosition: si.alternativePosition,
-        newCompletion: si.newCompletion,
-        orders: activeOrders,
-        totalVolume: totalVol,
-        product: group[0]?.item_description,
-        line: group[0]?.feedmill_line,
+        line,
+        combiningOrders: activeOrders.map((o) => ({
+          prio: displayRankMap.get(o.id) ?? '?',
+          name: o.item_description || o.fpr || '—',
+          volume: getEffVolume(o).toFixed(0),
+          availDate: o.target_avail_date || null,
+          form: o.form || '',
+        })),
+        combinedVolume: combinedVolume.toFixed(0),
+        combinedProductionHours,
+        combinedAvailDate,
+        availDateType,
+        expectedInsertionPrio,
+        removedPrios,
+        savedChangeoverHrs: savedChangeoverHrs.toFixed(2),
+        netDownstreamShiftHrs,
+        interspersedImpact,
+        minCombineRank,
+        maxCombineRank,
+        n10dStatus: n10dEntry?.status || null,
+        n10dDfl: n10dEntry?.dueForLoading ?? null,
+        n10dInventory: n10dEntry?.inventory ?? null,
+        lineContext,
+        totalOrdersOnLine: allGroupLineOrders.length,
+        calculatedAlerts,
+        calculatedImpact: calcImpact,
       }).then((text) => {
-        setAiScheduleInsights((prev) => ({ ...prev, [key]: text }));
+        const parsed = parseCombineAnalysisResponse(text);
+        parsed.insertionPosition = cleanInsertionResponse(parsed.insertionPosition);
+        const rawParsed = parseSchedulingImpactResponse(parsed.schedulingImpact);
+        const schedulingImpactParsed = rawParsed ? validateAndFixGrouping(rawParsed, calcImpact) : null;
+        const hasAIParsedContent = schedulingImpactParsed && (
+          schedulingImpactParsed.earlierSection.length > 0 ||
+          schedulingImpactParsed.laterSection.length > 0 ||
+          schedulingImpactParsed.deadlineSection.length > 0 ||
+          schedulingImpactParsed.summary.length > 0
+        );
+        setAiScheduleInsights((prev) => ({
+          ...prev,
+          [key]: { ...parsed, schedulingImpactParsed: hasAIParsedContent ? schedulingImpactParsed : null, downstreamImpact, minCombineRank, maxCombineRank, netDownstreamShiftHrs },
+        }));
         setAiScheduleLoading((prev) => ({ ...prev, [key]: false }));
       });
     },
-    [resolveGroupStrategy, generateInsights],
+    [resolveGroupStrategy, lineOrders, inferredTargetMap],
   );
 
   useEffect(() => {
@@ -1513,12 +2254,11 @@ export default function SmartCombinePanel({
       const key = getGroupKey(group);
       if (aiTriggeredRef.current.has(key)) return;
       const { activeOrders } = resolveGroupStrategy(group, originalIdx);
-      const si = generateInsights(activeOrders).schedulingImpact;
-      if (!si) return;
+      if (activeOrders.length < 2) return;
       aiTriggeredRef.current.add(key);
       triggerAISchedule(key, group, originalIdx);
     });
-  }, [isOpen, visibleGroups, getGroupKey, resolveGroupStrategy, generateInsights, triggerAISchedule]);
+  }, [isOpen, visibleGroups, getGroupKey, resolveGroupStrategy, triggerAISchedule]);
 
   const handleRefreshAISchedule = useCallback(
     (key, group, originalIdx) => {
@@ -1529,6 +2269,184 @@ export default function SmartCombinePanel({
     [triggerAISchedule],
   );
 
+  const handleRefreshSection = useCallback(
+    (key, group, originalIdx, section) => {
+      const sectionKey = `${key}_${section}`;
+      setAiSectionLoading((prev) => ({ ...prev, [sectionKey]: true }));
+
+      const { activeOrders } = resolveGroupStrategy(group, originalIdx);
+      if (activeOrders.length < 2) { setAiSectionLoading((prev) => ({ ...prev, [sectionKey]: false })); return; }
+
+      const line = group[0]?.feedmill_line || '';
+      const combinedBasisVolAIS = activeOrders.reduce((s, o) => s + getCombineBasisVolume(o), 0);
+      const batchSizeAIS = parseFloat(activeOrders[0]?.batch_size) || 4;
+      const combinedVolume = batchSizeAIS > 0 ? Math.ceil(combinedBasisVolAIS / batchSizeAIS) * batchSizeAIS : Number(combinedBasisVolAIS.toFixed(2));
+      const runRate = parseFloat(activeOrders[0]?.run_rate) || 0;
+      const combinedProductionHours = runRate > 0 ? (combinedVolume / runRate).toFixed(2) : '0.00';
+      const activeIds = new Set(activeOrders.map((o) => o.id));
+      const allGroupLineOrders = lineOrders
+        .filter((o) => o.feedmill_line === line && !['done', 'completed', 'cancel_po', 'cancelled'].includes((o.status || '').toLowerCase()))
+        .sort((a, b) => (a.priority_seq ?? 999) - (b.priority_seq ?? 999));
+
+      // Build a 1-based display rank map matching activeRankMap in OrderTable:
+      // exclude child orders (parent_id set) so ranks match what the user sees in the Prio column
+      const displayRankMap = new Map();
+      let _displayRank = 0;
+      for (const o of allGroupLineOrders) {
+        if (!o.parent_id) { _displayRank++; displayRankMap.set(o.id, _displayRank); }
+      }
+
+      const isISODateR = (d) => !!d && /^\d{4}-\d{2}-\d{2}/.test(d) && !isNaN(Date.parse(d));
+
+      const datedOrders = activeOrders.filter((o) => isISODateR(o.target_avail_date));
+      let combinedAvailDate = null, availDateType = 'none';
+      let expectedInsertionPrio = null;
+      let insertionOrderId = null;
+      if (datedOrders.length > 0) {
+        // Dated: insertion at earliest avail date order's slot
+        const earliest = [...datedOrders].sort((a, b) => new Date(a.target_avail_date) - new Date(b.target_avail_date))[0];
+        combinedAvailDate = earliest.target_avail_date;
+        expectedInsertionPrio = displayRankMap.get(earliest.id) ?? 1;
+        insertionOrderId = earliest.id;
+        availDateType = 'dated';
+      } else {
+        // Non-dated: insertion at lowest priority_seq (first in sequence) order's slot
+        const lowestSeqOrder = [...activeOrders].sort((a, b) => (a.priority_seq ?? 999) - (b.priority_seq ?? 999))[0];
+        combinedAvailDate = lowestSeqOrder?.target_avail_date || null;
+        expectedInsertionPrio = displayRankMap.get(lowestSeqOrder?.id) ?? 1;
+        insertionOrderId = lowestSeqOrder?.id ?? null;
+        availDateType = 'priority_based';
+      }
+      const sortedActiveByRank = [...activeOrders].sort((a, b) => (displayRankMap.get(a.id) ?? 999) - (displayRankMap.get(b.id) ?? 999));
+      // removedPrios = all ranks except the insertion slot
+      const removedPrios = sortedActiveByRank
+        .filter((o) => o.id !== insertionOrderId)
+        .map((o) => displayRankMap.get(o.id) ?? '?');
+      const separateProdTotal2 = activeOrders.reduce((s, o) => {
+        const vol = getEffVolume(o); const rr = parseFloat(o.run_rate) || 0;
+        return s + (rr > 0 ? vol / rr : 0);
+      }, 0);
+      const savedChangeoverHrs2 = sortedActiveByRank.slice(1).reduce((s, o) => s + (parseFloat(o.changeover_time) ?? 0.17), 0);
+      const combinedProdFloat2 = runRate > 0 ? combinedVolume / runRate : 0;
+      const netDownstreamShiftHrs2 = parseFloat(((separateProdTotal2 - combinedProdFloat2) + savedChangeoverHrs2).toFixed(2));
+
+      const combineDisplayRanks2 = sortedActiveByRank.map(o => displayRankMap.get(o.id) ?? 999);
+      const minCombineRank2 = Math.min(...combineDisplayRanks2);
+      const maxCombineRank2 = Math.max(...combineDisplayRanks2);
+      const leadOrder2 = sortedActiveByRank[0];
+      const leadOutCo2 = parseFloat(leadOrder2?.changeover_time) ?? 0.17;
+      let simTBefore2 = 0; const beforeStart2 = {};
+      for (const o of allGroupLineOrders) { const vol = getEffVolume(o); const rr = parseFloat(o.run_rate) || 0; beforeStart2[o.id] = simTBefore2; simTBefore2 += (rr > 0 ? vol / rr : 0) + (parseFloat(o.changeover_time) ?? 0.17); }
+      let simTAfter2 = 0; const afterStart2 = {}; let combinedBlockDone2 = false;
+      for (const o of allGroupLineOrders) {
+        if (activeIds.has(o.id)) { if (!combinedBlockDone2) { simTAfter2 += combinedProdFloat2 + leadOutCo2; combinedBlockDone2 = true; } continue; }
+        const vol = getEffVolume(o); const rr = parseFloat(o.run_rate) || 0;
+        afterStart2[o.id] = simTAfter2; simTAfter2 += (rr > 0 ? vol / rr : 0) + (parseFloat(o.changeover_time) ?? 0.17);
+      }
+      const leadStartMs2 = leadOrder2?.start_date ? new Date(leadOrder2.start_date).getTime() : Date.now();
+      const isISODate2 = (d) => !!d && /^\d{4}-\d{2}-\d{2}/.test(d) && !isNaN(Date.parse(d));
+      const downstreamImpact2 = allGroupLineOrders
+        .filter(o => { const rank = displayRankMap.get(o.id) ?? 999; return !activeIds.has(o.id) && rank > minCombineRank2; })
+        .map(o => {
+          const shiftHrs = parseFloat(((beforeStart2[o.id] ?? 0) - (afterStart2[o.id] ?? 0)).toFixed(2));
+          const vol = getEffVolume(o); const rr = parseFloat(o.run_rate) || 0; const prodHrs = rr > 0 ? vol / rr : 0;
+          const availDate = isISODate2(o.target_avail_date) ? o.target_avail_date : null;
+          const projCompletionMs = leadStartMs2 + ((afterStart2[o.id] ?? 0) + prodHrs) * 3600000;
+          const willMissDeadline = availDate ? projCompletionMs > new Date(availDate).getTime() : false;
+          const projCompletionDate = new Date(projCompletionMs);
+          const newCompletion = projCompletionDate.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+          const newCompletionFull = `${newCompletion} ${projCompletionDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}`;
+          const delayMs2 = willMissDeadline && availDate ? projCompletionMs - new Date(availDate).getTime() : 0;
+          const delayDays = willMissDeadline && availDate ? Math.ceil(delayMs2 / 86400000) : 0;
+          const delayHrs2 = delayMs2 / 3600000;
+          const delayFormatted = willMissDeadline ? formatTimeShift(delayHrs2) : '';
+          const availDateFmt = availDate ? new Date(availDate).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }) : null;
+          const matCodeO2 = o.material_code || o.material_code_fg || '';
+          const n10dO2 = inferredTargetMap[matCodeO2] || null;
+          const n10dStatusO2 = n10dO2?.status || 'N/A';
+          return { name: o.item_description || o.fpr || '—', fpr: o.fpr || '—', prio: displayRankMap.get(o.id) ?? '?', shiftHrs, availDate, availDateFmt, willMissDeadline, newCompletion, newCompletionFull, delayHrs: delayHrs2, delayDays, delayFormatted, n10dStatus: n10dStatusO2, isInterspersed: (displayRankMap.get(o.id) ?? 999) < maxCombineRank2 };
+        });
+      const interspersedImpact2 = downstreamImpact2; // keep alias for compat
+
+      const matCode = activeOrders[0]?.material_code || activeOrders[0]?.material_code_fg || '';
+      const n10dEntry = inferredTargetMap[matCode] || null;
+      const lineContext = allGroupLineOrders.map((o, _i) => {
+        const vol = getEffVolume(o); const rr = parseFloat(o.run_rate) || 0;
+        const matC = o.material_code || o.material_code_fg || '';
+        const n10dE = inferredTargetMap[matC] || null;
+        return { prio: displayRankMap.get(o.id) ?? (_i + 1), name: o.item_description || '—', volume: vol.toFixed(0), prodHours: rr > 0 ? (vol / rr).toFixed(2) : '0.00', availDate: o.target_avail_date || null, completionDate: o.target_completion_date || '—', changeover: (parseFloat(o.changeover_time) ?? 0.17).toFixed(2), isBeingCombined: activeIds.has(o.id), n10dStatus: n10dE?.status || '—', color: o.pellet_color || o.color || '—', diameter: o.pellet_diameter || o.diameter || '—', category: o.category || '—' };
+      });
+      // Store simulation data immediately so bullet lists render before AI completes
+      if (section === 'scheduling') {
+        setAiScheduleInsights((prev) => ({
+          ...prev,
+          [key]: { ...(prev[key] || {}), downstreamImpact: downstreamImpact2, minCombineRank: minCombineRank2, maxCombineRank: maxCombineRank2, netDownstreamShiftHrs: netDownstreamShiftHrs2 },
+        }));
+      }
+
+      const calcImpact2 = {
+        laterOrders: downstreamImpact2.filter(o => o.shiftHrs < 0).sort((a, b) => Math.abs(b.shiftHrs) - Math.abs(a.shiftHrs)).map(o => ({ prio: o.prio, name: o.name, shiftHrs: Math.abs(o.shiftHrs), shiftFormatted: formatTimeShift(Math.abs(o.shiftHrs)), n10dStatus: o.n10dStatus || 'N/A' })),
+        earlierOrders: downstreamImpact2.filter(o => o.shiftHrs > 0.01).sort((a, b) => b.shiftHrs - a.shiftHrs).map(o => ({ prio: o.prio, name: o.name, shiftHrs: o.shiftHrs, shiftFormatted: formatTimeShift(o.shiftHrs), n10dStatus: o.n10dStatus || 'N/A' })),
+        deadlineMisses: [
+          ...downstreamImpact2
+            .filter(o => o.willMissDeadline)
+            .map(o => ({ type: 'dated', prio: o.prio, name: o.name, fpr: o.fpr || '—', availDate: o.availDateFmt, availDateISO: o.availDate, newCompletion: o.newCompletion, newCompletionFull: o.newCompletionFull, delayHrs: o.delayHrs, delayFormatted: o.delayFormatted, delayDays: o.delayDays, n10dStatus: o.n10dStatus || 'N/A', shiftHrs: Math.abs(o.shiftHrs), shiftFormatted: formatTimeShift(Math.abs(o.shiftHrs)) })),
+          ...downstreamImpact2
+            .filter(o => !o.availDate && o.shiftHrs < -0.01 && (o.n10dStatus === 'Critical' || o.n10dStatus === 'Urgent'))
+            .map(o => ({ type: 'n10d_risk', prio: o.prio, name: o.name, fpr: o.fpr || '—', availDate: null, availDateISO: null, newCompletion: null, newCompletionFull: null, delayHrs: Math.abs(o.shiftHrs), delayFormatted: formatTimeShift(Math.abs(o.shiftHrs)), delayDays: null, n10dStatus: o.n10dStatus || 'N/A', shiftHrs: Math.abs(o.shiftHrs), shiftFormatted: formatTimeShift(Math.abs(o.shiftHrs)) })),
+        ].sort((a, b) => {
+          const so = { Critical: 0, Urgent: 1 };
+          const aO = so[a.n10dStatus] ?? 2; const bO = so[b.n10dStatus] ?? 2;
+          if (aO !== bO) return aO - bO;
+          return (b.delayHrs || 0) - (a.delayHrs || 0);
+        }),
+      };
+
+      // Populate typed alerts from calcImpact2.deadlineMisses
+      const calculatedAlerts = [];
+      calcImpact2.deadlineMisses.forEach(dm => {
+        if (dm.type === 'dated') {
+          calculatedAlerts.push({ type: 'deadline', orderName: dm.name, fpr: dm.fpr, prio: dm.prio, availDate: dm.availDateISO || '', newCompletionFull: dm.newCompletionFull, completionDate: dm.newCompletion, delayFormatted: dm.delayFormatted, delayDays: dm.delayDays });
+        } else if (dm.type === 'n10d_risk') {
+          calculatedAlerts.push({ type: 'n10d_risk', orderName: dm.name, fpr: dm.fpr, prio: dm.prio, n10dStatus: dm.n10dStatus, delayFormatted: dm.delayFormatted });
+        }
+      });
+      if (combinedVolume > 200) calculatedAlerts.push({ type: 'volume_ceiling', message: `The combined total of ${combinedVolume.toFixed(0)} MT exceeds the recommended ceiling of 200 MT. Large combined orders may impact scheduling flexibility and downstream production.` });
+
+      generateCombineSchedulingImpact({
+        line, combiningOrders: activeOrders.map((o) => ({ prio: displayRankMap.get(o.id) ?? '?', name: o.item_description || o.fpr || '—', volume: getEffVolume(o).toFixed(0), availDate: o.target_avail_date || null, form: o.form || '' })),
+        combinedVolume: combinedVolume.toFixed(0), combinedProductionHours, combinedAvailDate, availDateType, expectedInsertionPrio, removedPrios,
+        savedChangeoverHrs: savedChangeoverHrs2.toFixed(2), netDownstreamShiftHrs: netDownstreamShiftHrs2,
+        interspersedImpact: interspersedImpact2, minCombineRank: minCombineRank2, maxCombineRank: maxCombineRank2,
+        n10dStatus: n10dEntry?.status || null, n10dDfl: n10dEntry?.dueForLoading ?? null, n10dInventory: n10dEntry?.inventory ?? null,
+        lineContext, totalOrdersOnLine: allGroupLineOrders.length, calculatedAlerts,
+        calculatedImpact: calcImpact2,
+      }).then((text) => {
+        const parsed = parseCombineAnalysisResponse(text);
+        let schedulingImpactParsed2 = null;
+        if (section === 'scheduling') {
+          const rawP = parseSchedulingImpactResponse(parsed.schedulingImpact);
+          const validated = rawP ? validateAndFixGrouping(rawP, calcImpact2) : null;
+          const hasContent = validated && (validated.earlierSection.length > 0 || validated.laterSection.length > 0 || validated.deadlineSection.length > 0 || validated.summary.length > 0);
+          schedulingImpactParsed2 = hasContent ? validated : null;
+        }
+        setAiScheduleInsights((prev) => ({
+          ...prev,
+          [key]: {
+            ...(prev[key] || {}),
+            ...(section === 'insertion' ? { insertionPosition: cleanInsertionResponse(parsed.insertionPosition), recommendedPrio: parsed.recommendedPrio } :
+               section === 'scheduling' ? { schedulingImpact: parsed.schedulingImpact, schedulingImpactParsed: schedulingImpactParsed2, downstreamImpact: downstreamImpact2, minCombineRank: minCombineRank2, maxCombineRank: maxCombineRank2, netDownstreamShiftHrs: netDownstreamShiftHrs2 } :
+               { alerts: parsed.alerts }),
+          },
+        }));
+        setAiSectionLoading((prev) => ({ ...prev, [sectionKey]: false }));
+      }).catch(() => {
+        setAiSectionLoading((prev) => ({ ...prev, [sectionKey]: false }));
+      });
+    },
+    [resolveGroupStrategy, lineOrders, inferredTargetMap],
+  );
+
   const renderGroupCard = (group, groupIdx, vIdx) => {
     const {
       strategies,
@@ -1537,18 +2455,33 @@ export default function SmartCombinePanel({
       stratExcluded,
       manualExcluded: manualExcludedOrders,
     } = resolveGroupStrategy(group, groupIdx);
-    const combinedVol = activeOrders.reduce((s, o) => s + getEffVolume(o), 0);
+    const combinedBasisVolUI = activeOrders.reduce((s, o) => s + getCombineBasisVolume(o), 0);
+    const batchSizeUI = parseFloat(activeOrders[0]?.batch_size) || 4;
+    const combinedVol = batchSizeUI > 0 ? Math.ceil(combinedBasisVolUI / batchSizeUI) * batchSizeUI : Number(combinedBasisVolUI.toFixed(2));
     const insights = generateInsights(activeOrders);
     const canApprove = activeOrders.length >= 2 && !insights.hasBlocker;
     const groupKey = getGroupKey(group);
-    const aiSchedText = aiScheduleInsights[groupKey];
+    const aiSchedParsed = aiScheduleInsights[groupKey] || null;
     const aiSchedLoading = !!aiScheduleLoading[groupKey];
+    const insertionLoading = aiSchedLoading || !!aiSectionLoading[`${groupKey}_insertion`];
+    const schedulingLoading = aiSchedLoading || !!aiSectionLoading[`${groupKey}_scheduling`];
+    const alertsLoading = aiSchedLoading || !!aiSectionLoading[`${groupKey}_alerts`];
     const approveTooltip =
       activeOrders.length < 2
         ? "At least 2 orders are required to combine."
         : insights.hasBlocker
           ? "Resolve warnings before combining."
           : null;
+
+    const line = group[0]?.feedmill_line || '';
+    const allGroupLineOrdersForRank = lineOrders
+      .filter((o) => o.feedmill_line === line && !['done', 'completed', 'cancel_po', 'cancelled'].includes((o.status || '').toLowerCase()))
+      .sort((a, b) => (a.priority_seq ?? 999) - (b.priority_seq ?? 999));
+    const displayRankMap = new Map();
+    let _rankIdx = 0;
+    for (const o of allGroupLineOrdersForRank) {
+      if (!o.parent_id) { _rankIdx++; displayRankMap.set(o.id, _rankIdx); }
+    }
 
     return (
       <div
@@ -1604,7 +2537,7 @@ export default function SmartCombinePanel({
                 return (
                   <button
                     key={s.id}
-                    onClick={() => handleSelectStrategy(groupIdx, s.id)}
+                    onClick={() => handleSelectStrategy(groupIdx, s.id, group)}
                     data-testid={`button-strategy-${groupIdx}-${s.id}`}
                     style={{
                       display: "flex",
@@ -1616,7 +2549,7 @@ export default function SmartCombinePanel({
                       border: isSelected
                         ? s.hasConflict
                           ? "1.5px solid #e53935"
-                          : "1.5px solid #fd5108"
+                          : "1.5px solid var(--nexfeed-primary)"
                         : "1.5px solid #e5e7eb",
                       background: isSelected
                         ? s.hasConflict
@@ -1643,7 +2576,7 @@ export default function SmartCombinePanel({
                             color: isSelected
                               ? s.hasConflict
                                 ? "#e53935"
-                                : "#fd5108"
+                                : "var(--nexfeed-primary)"
                               : "#374151",
                           }}
                         >
@@ -1751,20 +2684,6 @@ export default function SmartCombinePanel({
           {[
             ["Material Code (FG)", group[0].material_code || "—"],
             ["Material Code (SFG)", group[0].kb_sfg_material_code || "—"],
-            [
-              "Category",
-              group[0].category
-                ? group[0].category.charAt(0).toUpperCase() +
-                  group[0].category.slice(1).toLowerCase()
-                : "—",
-            ],
-            ["Form", group[0].form || "—"],
-            [
-              "Batch Size",
-              group[0].batch_size
-                ? Number(group[0].batch_size).toFixed(2)
-                : "—",
-            ],
             ["Line", group[0].feedmill_line || "—"],
             ["Formula Version", group[0].formula_version || "—"],
           ].map(([label, val]) => (
@@ -1794,7 +2713,7 @@ export default function SmartCombinePanel({
               No orders selected. Re-add orders to proceed.
             </p>
           ) : (
-            activeOrders.map((o) => {
+            [...activeOrders].sort((a, b) => (displayRankMap.get(a.id) ?? 999) - (displayRankMap.get(b.id) ?? 999)).map((o) => {
               const availDate = o.target_avail_date;
               const isNonDate = availDate && isNaN(Date.parse(availDate));
               const isNewOrder = hasNewFprs && newFprValues.has(o.fpr);
@@ -1817,8 +2736,17 @@ export default function SmartCombinePanel({
                       {isNewOrder ? "NEW ORDER" : "EXISTING ORDER"}
                     </span>
                   )}
+                  <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+                    {/* Prio badge */}
+                    <div style={{ flexShrink: 0, paddingTop: 2 }}>
+                      <span className="combine-order-prio-badge">
+                        {displayRankMap.get(o.id) ?? '?'}
+                      </span>
+                    </div>
                   <div
                     style={{
+                      flex: 1,
+                      minWidth: 0,
                       display: "grid",
                       gridTemplateColumns: "120px 1fr auto",
                       gap: 8,
@@ -1880,9 +2808,10 @@ export default function SmartCombinePanel({
                       </p>
                     </div>
                   </div>
+                  </div>
                   {/* × button — absolute top-right */}
                   <button
-                    onClick={() => handleExclude(groupIdx, o.id)}
+                    onClick={() => handleExclude(groupIdx, o.id, group)}
                     className="absolute top-2.5 right-1.5 p-0.5 rounded hover:bg-red-50 text-[#a1a8b3] hover:text-[#e53935] transition-colors"
                     data-testid={`button-exclude-order-${o.id}`}
                   >
@@ -1894,7 +2823,7 @@ export default function SmartCombinePanel({
           )}
         </div>
         <div className="px-4 py-2.5 bg-[#fff5ed] border-t border-orange-100">
-          <p className="text-xs font-bold text-[#fd5108]">
+          <p className="text-xs font-bold text-[var(--nexfeed-primary)]">
             Combined Volume: {fmtVolume(combinedVol)} MT
           </p>
         </div>
@@ -1906,12 +2835,15 @@ export default function SmartCombinePanel({
               </p>
             </div>
             <div className="px-4 pb-2 space-y-1">
-              {stratExcluded.map((o) => (
+              {[...stratExcluded].sort((a, b) => (displayRankMap.get(a.id) ?? 999) - (displayRankMap.get(b.id) ?? 999)).map((o) => (
                 <div
                   key={o.id}
                   className="flex items-center gap-2 opacity-40"
                   data-testid={`row-strat-excluded-order-${o.id}`}
                 >
+                  <span className="combine-order-prio-badge combine-order-prio-badge-excluded shrink-0">
+                    {displayRankMap.get(o.id) ?? '?'}
+                  </span>
                   <span className="text-[10px] text-gray-400 shrink-0">
                     Strategy
                   </span>
@@ -1920,14 +2852,17 @@ export default function SmartCombinePanel({
                   </span>
                 </div>
               ))}
-              {manualExcludedOrders.map((o) => (
+              {[...manualExcludedOrders].sort((a, b) => (displayRankMap.get(a.id) ?? 999) - (displayRankMap.get(b.id) ?? 999)).map((o) => (
                 <div
                   key={o.id}
                   className="flex items-center gap-2 opacity-50"
                   data-testid={`row-excluded-order-${o.id}`}
                 >
+                  <span className="combine-order-prio-badge combine-order-prio-badge-excluded shrink-0">
+                    {displayRankMap.get(o.id) ?? '?'}
+                  </span>
                   <button
-                    onClick={() => handleReadd(groupIdx, o.id)}
+                    onClick={() => handleReadd(groupIdx, o.id, group)}
                     className="flex items-center gap-0.5 text-[11px] text-blue-500 hover:text-blue-700 font-medium shrink-0 transition-colors"
                     data-testid={`button-readd-order-${o.id}`}
                   >
@@ -2030,191 +2965,163 @@ export default function SmartCombinePanel({
                   )}
                 </div>
               )}
-              {combinedVol > 200 && (
-                <div
-                  className="rounded-md px-3 py-2.5"
-                  style={{ background: "#fffbeb", border: "1px solid #fcd34d" }}
-                >
-                  <p
-                    className="text-[10px] font-bold mb-1"
-                    style={{ color: "#92400e" }}
-                  >
-                    ⚠ Volume Ceiling Warning
-                  </p>
-                  <p
-                    className="text-[10px] leading-relaxed"
-                    style={{ color: "#92400e" }}
-                  >
-                    The combined total of {combinedVol.toLocaleString()} MT
-                    exceeds the recommended ceiling of 200 MT. Large combined
-                    orders may impact scheduling flexibility and downstream
-                    production. Are you sure you want to proceed?
-                  </p>
-                </div>
-              )}
-              {insights.schedulingImpact &&
-                (() => {
-                  const si = insights.schedulingImpact;
-                  const fmtHr = (h) =>
-                    h >= 24
-                      ? `${Math.floor(h / 24)} days ${h % 24} hrs`
-                      : `${h} hours`;
-
-                  const aiBlock = (textColor) => (
-                    <div style={{ borderTop: "1px solid rgba(0,0,0,0.06)", marginTop: 7, paddingTop: 7 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 3 }}>
-                        <Sparkles style={{ width: 10, height: 10, color: textColor, flexShrink: 0 }} />
-                        <span style={{ fontSize: 10, fontWeight: 600, color: textColor }}>Impact Analysis</span>
-                        <button
-                          onClick={() => handleRefreshAISchedule(groupKey, group, groupIdx)}
-                          disabled={aiSchedLoading}
-                          title="Refresh AI analysis"
-                          style={{ marginLeft: "auto", background: "none", border: "none", cursor: aiSchedLoading ? "not-allowed" : "pointer", display: "flex", alignItems: "center", gap: 3, color: textColor, fontSize: 10, opacity: aiSchedLoading ? 0.5 : 0.75, padding: "1px 3px", borderRadius: 3 }}
-                        >
-                          <RefreshCw style={{ width: 9, height: 9, animation: aiSchedLoading ? "spin 1s linear infinite" : "none" }} />
-                          Refresh
-                        </button>
-                      </div>
-                      {aiSchedLoading ? (
-                        <p style={{ fontSize: 10, color: textColor, fontStyle: "italic", margin: 0, opacity: 0.8 }}>
-                          Generating AI analysis…
-                        </p>
-                      ) : aiSchedText ? (
-                        <p style={{ fontSize: 10, color: textColor, lineHeight: 1.55, margin: 0 }}>
-                          {aiSchedText}
-                        </p>
-                      ) : null}
+              {activeOrders.length >= 2 && (
+                <>
+                  {/* Card: Insertion Position — mint green tint */}
+                  <div className="rounded-md bg-[#f0fdf4] px-3 py-2.5">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <p className="text-[10px] font-bold text-[#2e343a]">📍 Insertion Position</p>
+                      <button
+                        onClick={() => handleRefreshSection(groupKey, group, groupIdx, 'insertion')}
+                        disabled={insertionLoading}
+                        data-testid={`button-refresh-insertion-${groupIdx}`}
+                        className="text-[10px] text-gray-400 hover:text-[#2e343a] disabled:opacity-40 disabled:cursor-not-allowed transition-colors bg-transparent border-0 cursor-pointer p-0"
+                      >↻ Refresh</button>
                     </div>
-                  );
-
-                  if (si.scenario === "no_dates")
-                    return (
-                      <div className="rounded-md bg-[#eff6ff] border border-[#bfdbfe] px-3 py-2.5">
-                        <p className="text-[10px] font-bold text-[#1e40af] mb-1.5">
-                          📍 Scheduling Impact
-                        </p>
-                        <p className="text-[10px] text-[#1e40af] leading-relaxed">
-                          ℹ No start dates set — lead order placed at Priority{" "}
-                          {si.insertionPrio} (highest child priority).
-                        </p>
-                        {aiBlock("#1e40af")}
-                      </div>
-                    );
-                  if (si.scenario === "no_delay")
-                    return (
-                      <div className="rounded-md bg-[#f0fdf4] border border-[#bbf7d0] px-3 py-2.5">
-                        <p className="text-[10px] font-bold text-[#166534] mb-1.5">
-                          📍 Scheduling Impact
-                        </p>
-                        <p className="text-[10px] text-[#166534] leading-relaxed">
-                          ✅ Insertion at Priority {si.insertionPrio} — no
-                          downstream delays detected.
-                        </p>
-                        {aiBlock("#166534")}
-                      </div>
-                    );
-                  if (si.scenario === "delay_alt") {
-                    const di = si.delayInfo;
-                    const delayLabel = fmtHr(di.delayHrs);
-                    return (
-                      <div className="rounded-md bg-[#fffbeb] border border-[#fcd34d] px-3 py-2.5">
-                        <p className="text-[10px] font-bold text-[#92400e] mb-1.5">
-                          📍 Scheduling Impact
-                        </p>
-                        <p className="text-[10px] text-[#92400e] leading-relaxed">
-                          ⚠ Priority {si.insertionPrio} delays{" "}
-                          <strong>
-                            {di.order.item_description || di.order.fpr}
-                          </strong>{" "}
-                          by ~{delayLabel}. Alternative: Priority{" "}
-                          {si.alternativePosition} is conflict-free.
-                        </p>
-                        {aiBlock("#92400e")}
-                      </div>
-                    );
-                  }
-                  if (si.scenario === "delay_no_alt") {
-                    const di = si.delayInfo;
-                    const delayLabel = fmtHr(di.delayHrs);
-                    return (
-                      <div className="rounded-md bg-[#fffbeb] border border-[#fcd34d] px-3 py-2.5">
-                        <p className="text-[10px] font-bold text-[#92400e] mb-1.5">
-                          📍 Scheduling Impact
-                        </p>
-                        <p className="text-[10px] text-[#92400e] leading-relaxed">
-                          ⚠ Priority {si.insertionPrio} delays{" "}
-                          <strong>
-                            {di.order.item_description || di.order.fpr}
-                          </strong>{" "}
-                          by ~{delayLabel}. No conflict-free alternative found.
-                        </p>
-                        {aiBlock("#92400e")}
-                      </div>
-                    );
-                  }
-                  return null;
-                })()}
-              {insights.gapRecommendation &&
-                (() => {
-                  const gr = insights.gapRecommendation;
-                  return (
-                    <div className="rounded-md bg-[#fffde7] border border-amber-200 px-3 py-2.5">
-                      <p className="text-[10px] font-bold text-[#2e343a] mb-1.5">
-                        💡 Recommendation: Consider NOT combining
-                      </p>
-                      <p className="text-[10px] text-[#2e343a] leading-relaxed mb-1.5">
-                        FPR {gr.lastFpr}'s Avail Date ({gr.lastAvailDate}) is
-                        after FPR {gr.firstFpr}'s Avail Date (
-                        {gr.firstAvailDate}).
-                      </p>
-                      <p className="text-[10px] text-gray-600 mb-0.5">
-                        If kept separate:
-                      </p>
-                      <ul className="text-[10px] text-gray-600 pl-3 space-y-0.5 mb-1.5">
-                        <li>
-                          • FPR {gr.firstFpr} completes: {gr.firstCompletion}
-                        </li>
-                        <li>
-                          • FPR {gr.lastFpr} needs to start by:{" "}
-                          {gr.lastReqStart}
-                        </li>
-                        <li>• Available gap: ~{gr.gapLabel}</li>
-                      </ul>
-                      <p className="text-[10px] text-gray-600 mb-0.5">
-                        Pending non-dated orders that could fill this gap:
-                      </p>
-                      <ul className="text-[10px] text-gray-600 pl-3 space-y-0.5 mb-1.5">
-                        {gr.fittingOrders.map((fo, fi) => (
-                          <li key={fi}>
-                            • {fo.item} ({fo.avail}) — {fo.hours}
-                          </li>
-                        ))}
-                        <li className="font-semibold">
-                          Total: {gr.totalFillTime}
-                        </li>
-                      </ul>
+                    {insertionLoading && !aiSchedParsed?.insertionPosition ? (
+                      <p className="text-[10px] text-gray-400 italic">Analyzing optimal position...</p>
+                    ) : insertionLoading ? (
+                      <p className="text-[10px] text-gray-400 italic">Updating...</p>
+                    ) : (
                       <p className="text-[10px] text-[#2e343a] leading-relaxed">
-                        Keeping orders separate allows you to insert these{" "}
-                        {gr.fittingOrders.length} non-dated order(s) in the gap,
-                        maximizing plant utilization.
+                        {aiSchedParsed?.insertionPosition || 'Click Refresh to generate.'}
                       </p>
+                    )}
+                  </div>
+
+                  {/* Card: Scheduling Impact — soft lavender tint */}
+                  <div className="rounded-md bg-[#f5f3ff] px-3 py-2.5">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <p className="text-[10px] font-bold text-[#2e343a]">📊 Scheduling Impact</p>
+                      <button
+                        onClick={() => handleRefreshSection(groupKey, group, groupIdx, 'scheduling')}
+                        disabled={schedulingLoading}
+                        data-testid={`button-refresh-scheduling-${groupIdx}`}
+                        className="text-[10px] text-gray-400 hover:text-[#2e343a] disabled:opacity-40 disabled:cursor-not-allowed transition-colors bg-transparent border-0 cursor-pointer p-0"
+                      >↻ Refresh</button>
                     </div>
-                  );
-                })()}
-              {insights.warnings.length > 0 && (
-                <div className="space-y-1.5">
-                  {insights.warnings.map((w, wi) => (
-                    <div
-                      key={`w-${wi}`}
-                      className="flex items-start gap-2 rounded-md bg-[#fff9c4] px-2.5 py-2"
-                    >
-                      <AlertTriangle className="h-3.5 w-3.5 text-amber-600 mt-0.5 shrink-0" />
-                      <p className="text-[11px] text-[#2e343a] leading-relaxed whitespace-pre-line">
-                        {w.text}
-                      </p>
+                    {!aiSchedParsed?.downstreamImpact ? (
+                      <p className="text-[10px] text-gray-400 italic">Calculating...</p>
+                    ) : (
+                      (() => {
+                        const di = aiSchedParsed.downstreamImpact || [];
+                        const calcLater = di.filter(o => o.shiftHrs < 0).sort((a, b) => Math.abs(b.shiftHrs) - Math.abs(a.shiftHrs)).map(o => ({ prio: o.prio, name: o.name, shiftFormatted: formatTimeShift(Math.abs(o.shiftHrs)) }));
+                        const calcEarlier = di.filter(o => o.shiftHrs > 0.01).sort((a, b) => b.shiftHrs - a.shiftHrs).map(o => ({ prio: o.prio, name: o.name, shiftFormatted: formatTimeShift(o.shiftHrs) }));
+                        const calcDeadlines = di.filter(o => o.willMissDeadline).sort((a, b) => b.delayDays - a.delayDays).map(o => ({ prio: o.prio, name: o.name, newCompletion: o.newCompletion, availDate: o.availDateFmt, delayDays: o.delayDays }));
+                        const calcImpactForDisplay = { laterOrders: calcLater, earlierOrders: calcEarlier, deadlineMisses: calcDeadlines };
+                        const hasCalcImpact = calcLater.length > 0 || calcEarlier.length > 0 || calcDeadlines.length > 0;
+                        const parsedAI = aiSchedParsed.schedulingImpactParsed;
+                        const hasParsedAI = parsedAI && (parsedAI.earlierSection.length > 0 || parsedAI.laterSection.length > 0 || parsedAI.deadlineSection.length > 0 || parsedAI.summary.length > 0);
+                        return (
+                          <div>
+                            {schedulingLoading && (
+                              <p className="text-[10px] text-gray-400 italic mb-2">Analyzing impact...</p>
+                            )}
+                            {!hasCalcImpact && !hasParsedAI && !schedulingLoading && (
+                              <p className="text-[10px] text-green-700 italic">No scheduling impact — all orders remain on their current schedule.</p>
+                            )}
+                            {hasParsedAI ? (
+                              <SchedulingImpactAIDisplay response={parsedAI} />
+                            ) : hasCalcImpact ? (
+                              <SchedulingImpactFallback impact={calcImpactForDisplay} />
+                            ) : null}
+                          </div>
+                        );
+                      })()
+                    )}
+                    {/* Gap recommendation embedded inside Scheduling Impact */}
+                    {insights.gapRecommendation && (() => {
+                      const gr = insights.gapRecommendation;
+                      return (
+                        <div className="mt-2.5 pt-2.5 border-t border-[#ddd6fe]">
+                          <p className="text-[10px] font-bold text-[#2e343a] mb-1.5">
+                            💡 Recommendation: Consider NOT combining
+                          </p>
+                          <p className="text-[10px] text-[#2e343a] leading-relaxed mb-2">
+                            FPR {gr.lastFpr}'s Avail Date ({gr.lastAvailDate}) is after FPR {gr.firstFpr}'s Avail Date ({gr.firstAvailDate}). When combined, the lead order uses the <span className="font-semibold">earliest date ({gr.firstAvailDate})</span> — so FPR {gr.lastFpr} is produced <span className="font-semibold">{gr.availDateDiffLabel} earlier</span> than needed, consuming capacity that could run other orders first.
+                          </p>
+
+                          <p className="text-[10px] font-semibold text-[#2e343a] mb-1">If kept separate:</p>
+                          <ul className="text-[10px] text-[#2e343a] pl-2 space-y-0.5 mb-2">
+                            <li>• FPR {gr.firstFpr} completes by: <span className="font-semibold">{gr.firstCompletion}</span></li>
+                            <li>• FPR {gr.lastFpr} must start by: <span className="font-semibold">{gr.lastReqStart}</span></li>
+                            <li>• Free production gap: <span className="font-semibold">~{gr.gapLabel}</span></li>
+                          </ul>
+
+                          <p className="text-[10px] font-semibold text-[#2e343a] mb-1">
+                            Non-dated orders that can fill this gap ({gr.fittingOrders.length}):
+                          </p>
+                          <ul className="text-[10px] text-[#2e343a] pl-2 space-y-0.5 mb-1.5">
+                            {gr.fittingOrders.map((fo, fi) => (
+                              <li key={fi}>• {fo.item} ({fo.avail}) — <span className="font-semibold">{fo.hours}</span></li>
+                            ))}
+                            <li className="font-semibold mt-0.5">Total fill time: {gr.totalFillTime} <span className="font-normal text-gray-500">({gr.fillPct}% of gap)</span></li>
+                          </ul>
+
+                          <p className="text-[10px] text-[#2e343a] leading-relaxed">
+                            Keeping them separate lets you produce {gr.fittingOrders.length} non-dated order{gr.fittingOrders.length !== 1 ? 's' : ''} in the gap while still meeting both avail dates.
+                          </p>
+                        </div>
+                      );
+                    })()}
+                  </div>
+
+                  {/* Card: Alerts — warm amber bg; includes calculated warnings + AI alerts */}
+                  <div className="rounded-md bg-[#fffbeb] px-3 py-2.5">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <p className="text-[10px] font-bold text-[#92400e]">⚠ Alerts</p>
+                      <button
+                        onClick={() => handleRefreshSection(groupKey, group, groupIdx, 'alerts')}
+                        disabled={alertsLoading}
+                        data-testid={`button-refresh-alerts-${groupIdx}`}
+                        className="text-[10px] text-gray-400 hover:text-[#92400e] disabled:opacity-40 disabled:cursor-not-allowed transition-colors bg-transparent border-0 cursor-pointer p-0"
+                      >↻ Refresh</button>
                     </div>
-                  ))}
-                </div>
+                    {/* Calculated blocking warnings from insights engine */}
+                    {insights.warnings.length > 0 && (
+                      <div className="space-y-1.5 mb-1.5">
+                        {insights.warnings.map((w, wi) => (
+                          <div key={`cw-${wi}`} className="flex items-start gap-1.5">
+                            <span className="text-[10px] text-amber-500 shrink-0 mt-0.5">⚠</span>
+                            <span className="text-[10px] text-[#92400e] leading-relaxed whitespace-pre-line">{w.text}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {/* Calculated deadline + N10D risk alerts — deterministic, not from AI */}
+                    {(() => {
+                      const di = aiSchedParsed?.downstreamImpact || [];
+                      const typedAlerts = [];
+                      di.filter(o => o.willMissDeadline).forEach(o => {
+                        typedAlerts.push({ type: 'deadline', text: `Combining will push downstream order FPR: ${o.fpr} (${o.name}) past its Avail Date by ${o.delayFormatted}. New Completion: ${o.newCompletionFull} → Avail Date: ${o.availDateFmt || o.availDate}` });
+                      });
+                      di.filter(o => !o.availDate && o.shiftHrs < -0.01 && (o.n10dStatus === 'Critical' || o.n10dStatus === 'Urgent')).forEach(o => {
+                        typedAlerts.push({ type: 'n10d_risk', text: `${o.name} (Prio ${o.prio}) has ${o.n10dStatus} stock status. The ~${formatTimeShift(Math.abs(o.shiftHrs))} delay from combining may accelerate stock depletion.` });
+                      });
+                      const combinedVolNow = activeOrders.reduce((s, o) => s + (parseFloat(o.volume) || 0), 0);
+                      if (combinedVolNow > 200) typedAlerts.push({ type: 'volume_ceiling', text: `The combined total of ${combinedVolNow.toFixed(0)} MT exceeds the recommended ceiling of 200 MT. Large combined orders may impact scheduling flexibility.` });
+                      if (typedAlerts.length === 0) return null;
+                      return (
+                        <div className="space-y-1.5 mb-1.5">
+                          {typedAlerts.map((a, ai) => (
+                            <div key={`ta-${ai}`} className="flex items-start gap-1.5">
+                              <span className="text-[10px] text-amber-500 shrink-0 mt-0.5">⚠</span>
+                              <span className="text-[10px] text-[#92400e] leading-relaxed">{a.text}</span>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })()}
+                    {/* AI-generated alerts */}
+                    {alertsLoading && !aiSchedParsed?.alerts ? (
+                      <p className="text-[10px] text-gray-400 italic">Checking for alerts...</p>
+                    ) : alertsLoading ? (
+                      <p className="text-[10px] text-gray-400 italic">Updating...</p>
+                    ) : (
+                      <CombineAlertsDisplay alerts={aiSchedParsed?.alerts} hideNoAlerts={insights.warnings.length > 0 || (aiSchedParsed?.downstreamImpact || []).some(o => o.willMissDeadline || (!o.availDate && o.shiftHrs < -0.01 && (o.n10dStatus === 'Critical' || o.n10dStatus === 'Urgent')))} />
+                    )}
+                  </div>
+                </>
               )}
               {!insights.productionSummary &&
                 !insights.schedulingImpact &&
@@ -2236,8 +3143,8 @@ export default function SmartCombinePanel({
               className={cn(
                 "w-full text-[12px] h-8 disabled:opacity-50 disabled:cursor-not-allowed",
                 insights.gapRecommendation
-                  ? "bg-white border border-[#fd5108] text-[#fd5108] hover:bg-orange-50"
-                  : "bg-[#fd5108] hover:bg-[#fe7c39] text-white",
+                  ? "bg-white border border-[var(--nexfeed-primary)] text-[var(--nexfeed-primary)] hover:bg-orange-50"
+                  : "bg-[var(--nexfeed-primary)] hover:bg-[var(--nexfeed-primary-dark)] text-white",
               )}
               onClick={() => handleApprove(group, groupIdx)}
               disabled={!canApprove}
@@ -2280,7 +3187,7 @@ export default function SmartCombinePanel({
       >
         {groups.length > 0 && (
           <span
-            className="absolute -top-8 left-1/2 -translate-x-1/2 flex items-center justify-center min-w-[20px] h-[20px] rounded-full bg-white text-[#fd5108] border border-[#fd5108] text-[10px] font-bold shadow-sm px-1 cursor-pointer"
+            className="absolute -top-8 left-1/2 -translate-x-1/2 flex items-center justify-center min-w-[20px] h-[20px] rounded-full bg-white text-[var(--nexfeed-primary)] border border-[var(--nexfeed-primary)] text-[10px] font-bold shadow-sm px-1 cursor-pointer"
             onClick={() => setIsOpen(!isOpen)}
             data-testid="badge-smart-combine-count"
           >
@@ -2292,7 +3199,7 @@ export default function SmartCombinePanel({
           onClick={() => setIsOpen(!isOpen)}
           className={cn(
             "flex items-center gap-1.5 px-2 py-3",
-            "bg-[#fd5108] hover:bg-[#fe7c39] text-white",
+            "bg-[var(--nexfeed-primary)] hover:bg-[var(--nexfeed-primary-dark)] text-white",
             "rounded-l-lg shadow-lg transition-all",
             "writing-mode-vertical",
           )}
@@ -2325,7 +3232,7 @@ export default function SmartCombinePanel({
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-[#f9fafb]">
           <div>
             <h2 className="text-sm font-bold text-gray-900 flex items-center gap-2">
-              <Merge className="h-4 w-4 text-[#fd5108]" />
+              <Merge className="h-4 w-4 text-[var(--nexfeed-primary)]" />
               Smart Combine
             </h2>
             <p className="text-[13px] text-gray-500 mt-0.5">
@@ -2399,7 +3306,7 @@ export default function SmartCombinePanel({
                   className={cn(
                     "rounded-full text-[13px] font-medium px-3 py-1 transition-colors",
                     combineFilter === tab.key
-                      ? "bg-[#fd5108] text-white"
+                      ? "bg-[var(--nexfeed-primary)] text-white"
                       : "bg-gray-100 text-gray-600 hover:bg-gray-200",
                   )}
                   data-testid={`button-filter-${tab.key}`}
@@ -2465,7 +3372,7 @@ export default function SmartCombinePanel({
                   ? "No combine recommendations found for new orders with existing orders."
                   : combineFilter === "new_only"
                     ? "No combine recommendations found for new orders."
-                    : "No orders available for combining in this view. Orders must share the same Material Code, Line, Form, Batch Size, and Category to be eligible."}
+                    : "No orders available for combining in this view. Orders must share the same Material Code (FG), Material Code (SFG), Line, and Formula Version (SCADA) to be eligible."}
               </p>
             </div>
           ) : isAllTab && lineFilter === "all" ? (
@@ -2697,7 +3604,7 @@ export default function SmartCombinePanel({
                   </Button>
                   <Button
                     size="sm"
-                    className="bg-[#fd5108] hover:bg-[#fe7c39] text-white disabled:opacity-60 disabled:cursor-not-allowed"
+                    className="bg-[var(--nexfeed-primary)] hover:bg-[var(--nexfeed-primary-dark)] text-white disabled:opacity-60 disabled:cursor-not-allowed"
                     onClick={handleConfirmCombine}
                     disabled={isCombining}
                     data-testid="button-confirm-combine"

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { base44 } from "@/api/base44Client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
@@ -6,6 +6,7 @@ import * as XLSX from "xlsx";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/notifications";
 
+import { LINE_TO_FM, calculateAdditionalChangeover } from "@/utils/changeoverCalc";
 import Header from "../components/layout/Header";
 import Sidebar, { FEEDMILL_LINES } from "../components/layout/Sidebar";
 import TourGuide from "../components/tour/TourGuide";
@@ -28,8 +29,12 @@ import { DivertOrderDialog, RevertOrderDialog } from "../components/orders/Diver
 import OrderTable from "../components/orders/OrderTable";
 import UncombineOrderDialog from "../components/orders/UncombineOrderDialog";
 import AutoSequenceModal from "../components/orders/AutoSequenceModal";
+import PlantAutoSequenceModal, { applyPreviewChangeovers } from "../components/orders/PlantAutoSequenceModal";
+import LineAutoSequenceModal from "../components/orders/LineAutoSequenceModal";
+import FeedmillAutoSequenceModal from "../components/orders/FeedmillAutoSequenceModal";
 import KnowledgeBaseManager from "../components/orders/KnowledgeBaseManager";
 import Next10DaysManager from "../components/orders/Next10DaysManager";
+import ChangeoverRulesPage, { getDefaultChangeoverRules } from "./ChangeoverRulesPage";
 import CancelOrderDialog from "../components/orders/CancelOrderDialog";
 import AddOrderDialog from "../components/orders/AddOrderDialog";
 import RestoreOrderDialog from "../components/orders/RestoreOrderDialog";
@@ -50,9 +55,15 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { getMinMT } from "@/components/utils/orderUtils";
-import { autoSequenceOrders, buildInsightTemplates } from "@/services/azureAI";
+import { autoSequenceOrders, preSortOrders, buildInsightTemplates, callPlantActionsAI, buildPlantActionsPrompt, parsePlantActionsResponse, enrichStrategiesWithRowInsights } from "@/services/azureAI";
+import { generateSequenceStrategies } from "@/services/aiSequenceStrategies";
 import { setTemplateInsights, hasInsights, getInsight } from "@/utils/insightCache";
 import { getProductStatus } from "@/utils/statusUtils";
+
+// ─── Feature flags — set to true to re-enable ───────────────────────────────
+const SHOW_SMART_COMBINE_PANEL = false;
+// ────────────────────────────────────────────────────────────────────────────
+
 // Utility functions inlined to avoid module resolution issues
 const parseTargetDate = (remarks, fpr) => {
   if (!remarks) return null;
@@ -102,7 +113,7 @@ const parseTargetDate = (remarks, fpr) => {
 };
 
 const filterByFeedmillTab = (orders, tab) => {
-  if (tab === "all") return orders;
+  if (tab === "all" || tab === "ALL_FM") return orders;
   const lineMap = {
     FM1: ["Line 1", "Line 2"],
     FM2: ["Line 3", "Line 4"],
@@ -272,6 +283,329 @@ const parseCompletionDateStr = (str) => {
 
 const { Order, KnowledgeBase: KBEntity } = base44.entities;
 
+// ── Changeover calculation utilities ──────────────────────────────────────
+// LINE_TO_FM and calculateAdditionalChangeover live in @/utils/changeoverCalc
+// (imported at top of file) so the AI sequencing engine can share them.
+
+function applyChangeoverEnrichment(orders, rules) {
+  if (!orders || !orders.length) return orders;
+
+  // Group by line, sort by priority_seq within each line
+  const byLine = {};
+  for (const o of orders) {
+    const line = o.feedmill_line || "unknown";
+    if (!byLine[line]) byLine[line] = [];
+    byLine[line].push(o);
+  }
+  for (const line in byLine) {
+    byLine[line].sort((a, b) => (a.priority_seq ?? 9999) - (b.priority_seq ?? 9999));
+  }
+
+  const enriched = [];
+  for (const o of orders) {
+    const st = (o.status || '').toLowerCase();
+
+    // Done/Cancel orders: use frozen value if properly captured, otherwise compute from line context
+    if (st === 'completed' || st === 'cancel_po') {
+      const isFrozen = o.frozen_changeover != null;
+      if (isFrozen) {
+        // Properly frozen: use stored total + restore breakdown for tooltip
+        const frozen = parseFloat(o.frozen_changeover);
+        const base = parseFloat(o.changeover_time ?? 0.17);
+        let storedBreakdown = [];
+        try { storedBreakdown = JSON.parse(o.frozen_changeover_breakdown || '[]'); } catch (_) {}
+        // If breakdown wasn't stored (order predates this feature) but frozen total > base,
+        // try to compute breakdown dynamically from the next order on the same line
+        if (storedBreakdown.length === 0 && frozen > base + 0.001) {
+          const lineGroup2 = byLine[o.feedmill_line || 'unknown'] || [];
+          const idx2 = lineGroup2.findIndex((x) => x.id === o.id);
+          const nextAny = idx2 >= 0 ? (lineGroup2[idx2 + 1] || null) : null;
+          if (nextAny) {
+            const dynamicInfo = calculateAdditionalChangeover(o, nextAny, rules);
+            storedBreakdown = dynamicInfo.breakdown;
+          }
+        }
+        enriched.push({
+          ...o,
+          _changeoverBase: base,
+          _changeoverAdditional: parseFloat((frozen - base).toFixed(3)),
+          _changeoverTotal: frozen,
+          _isLastOnLine: false,
+          _changeoverBreakdown: storedBreakdown,
+          _changeoverCalculated: true,
+          _isFrozen: true,
+        });
+      } else {
+        // No frozen value (pre-dates this feature): compute from next order on same line
+        const lineGroup2 = byLine[o.feedmill_line || 'unknown'] || [];
+        const idx2 = lineGroup2.findIndex((x) => x.id === o.id);
+        const nextAny = idx2 >= 0 ? (lineGroup2[idx2 + 1] || null) : null;
+        let addInfo = { total: 0, breakdown: [] };
+        if (nextAny) addInfo = calculateAdditionalChangeover(o, nextAny, rules);
+        const base = parseFloat(o.changeover_time ?? 0.17);
+        const total = nextAny ? parseFloat((base + addInfo.total).toFixed(3)) : 0;
+        enriched.push({
+          ...o,
+          _changeoverBase: base,
+          _changeoverAdditional: addInfo.total,
+          _changeoverTotal: total,
+          _isLastOnLine: !nextAny,
+          _changeoverBreakdown: addInfo.breakdown,
+          _changeoverCalculated: true,
+          _isFrozen: false,
+        });
+      }
+      continue;
+    }
+
+    const line = o.feedmill_line || "unknown";
+    const lineGroup = byLine[line] || [];
+    const idx = lineGroup.findIndex((x) => x.id === o.id);
+    // Skip completed/cancelled when finding the next order — same logic as preview changeovers.
+    // This ensures the last *active* order gets zero changeover even if done orders follow it.
+    const next = idx >= 0 ? (() => {
+      for (let j = idx + 1; j < lineGroup.length; j++) {
+        const s = (lineGroup[j].status || '').toLowerCase();
+        if (s !== 'completed' && s !== 'cancel_po') return lineGroup[j];
+      }
+      return null;
+    })() : null;
+
+    let additionalInfo = { total: 0, breakdown: [] };
+    if (next) {
+      additionalInfo = calculateAdditionalChangeover(o, next, rules);
+    }
+
+    const baseChangeover = parseFloat(o.changeover_time ?? 0.17);
+    // Last active order (no following active order): zero changeover — there is no next order to transition into.
+    // Non-last order: base + additional rules derived from the following order.
+    const changeoverTotal = next
+      ? parseFloat((baseChangeover + additionalInfo.total).toFixed(3))
+      : 0;
+
+    enriched.push({
+      ...o,
+      _changeoverBase: baseChangeover,
+      _changeoverAdditional: additionalInfo.total,
+      _changeoverTotal: changeoverTotal,
+      _isLastOnLine: !next,
+      _changeoverBreakdown: additionalInfo.breakdown,
+      _changeoverCalculated: true,
+    });
+  }
+  // Debug: verify last-row CO is zero for the final order per line
+  const enrichedById = Object.fromEntries(enriched.map(e => [String(e.id), e]));
+  Object.entries(byLine).forEach(([line, lineOrders]) => {
+    console.debug('[Last Row Changeover]', {
+      line,
+      rows: (lineOrders || []).map((order, index, arr) => ({
+        orderId: order.id,
+        index,
+        isLast: index === arr.length - 1,
+        nextOrderId: arr[index + 1]?.id ?? null,
+        displayedCO: parseFloat(enrichedById[String(order.id)]?._changeoverTotal ?? 0),
+      })),
+    });
+  });
+
+  return enriched;
+}
+// ──────────────────────────────────────────────────────────────────────────
+// Display-only cascade: applies correct formula after changeover enrichment.
+// Formula: OrderN.start = OrderN-1.completion + OrderN-1._changeoverTotal
+//          OrderN.completion = OrderN.start + (volume / run_rate)
+// This runs AFTER applyChangeoverEnrichment so _changeoverTotal is available.
+function applyDisplayCascade(orders) {
+  if (!orders || !orders.length) return orders;
+
+  const byLine = {};
+  for (const o of orders) {
+    const line = o.feedmill_line || "unknown";
+    if (!byLine[line]) byLine[line] = [];
+    byLine[line].push(o);
+  }
+  for (const line in byLine) {
+    byLine[line].sort((a, b) => (a.priority_seq ?? 9999) - (b.priority_seq ?? 9999));
+  }
+
+  const computedMap = {}; // orderId → { target_completion_date, _computedStartDate?, _computedStartTime? }
+
+  for (const line in byLine) {
+    const lineOrders = byLine[line];
+    let prevCompletion = null;   // Date object
+    let prevChangeover = 0;      // hours (PREVIOUS order's _changeoverTotal)
+
+    for (let i = 0; i < lineOrders.length; i++) {
+      const o = lineOrders[i];
+
+      if (o.status === "completed" || o.status === "cancel_po") {
+        if (o.target_completion_date) {
+          const d = parseCompletionDateStr(o.target_completion_date);
+          if (d) prevCompletion = d;
+        }
+        prevChangeover = parseFloat(o._changeoverTotal ?? o.changeover_time ?? 0.17);
+        continue;
+      }
+
+      if (o.target_completion_manual && o.target_completion_date) {
+        const d = parseCompletionDateStr(o.target_completion_date);
+        if (d) prevCompletion = d;
+        prevChangeover = parseFloat(o._changeoverTotal ?? o.changeover_time ?? 0.17);
+        continue;
+      }
+
+      // Determine this order's start
+      let startDate;
+      let isInferred = false;
+
+      if (o.start_date) {
+        // Manually set start date — parse it directly
+        const t = o.start_time || "08:00";
+        const [hh, mm] = t.split(":").map(Number);
+        const d = new Date(o.start_date + "T00:00:00");
+        d.setHours(hh, mm, 0, 0);
+        startDate = d;
+      } else if (prevCompletion) {
+        // Auto-cascade: start = prevCompletion + prevChangeover (gap between orders)
+        startDate = new Date(prevCompletion.getTime() + prevChangeover * 3600000);
+        isInferred = true;
+      } else {
+        // No anchor — cannot compute
+        prevChangeover = parseFloat(o._changeoverTotal ?? o.changeover_time ?? 0.17);
+        continue;
+      }
+
+      // Production hours = volume / run_rate ONLY (no changeover).
+      // Use shared calcProductionHours which handles volume_override / total_volume_mt.
+      const ph = calcProductionHours(o) ?? 0;
+
+      // Completion = start + production hours
+      const completionDate = new Date(startDate.getTime() + ph * 3600000);
+
+      // Always compute cascade date (stored value may be stale from old formula).
+      // Only exception: target_completion_manual = true (user has locked it explicitly).
+      const completionStr = formatCompletionDate(completionDate);
+      computedMap[o.id] = { target_completion_date: completionStr };
+      if (isInferred) {
+        const yyyy = startDate.getFullYear();
+        const mo = String(startDate.getMonth() + 1).padStart(2, "0");
+        const dy = String(startDate.getDate()).padStart(2, "0");
+        const hStr = String(startDate.getHours()).padStart(2, "0");
+        const minStr = String(startDate.getMinutes()).padStart(2, "0");
+        computedMap[o.id]._inferredStartDate = `${yyyy}-${mo}-${dy}`;
+        computedMap[o.id]._inferredStartTime = `${hStr}:${minStr}`;
+      }
+
+      // Always use the freshly-computed completion as anchor for the NEXT order.
+      // Never use the stale stored value here — that's what caused wrong cascades.
+      prevCompletion = completionDate;
+      prevChangeover = parseFloat(o._changeoverTotal ?? o.changeover_time ?? 0.17);
+    }
+  }
+
+  return orders.map((o) => {
+    const computed = computedMap[o.id];
+    if (!computed) return o;
+    return { ...o, ...computed };
+  });
+}
+// ──────────────────────────────────────────────────────────────────────────
+const FEEDMILL_STATUS_DEFAULTS = {
+  FM1: { isShutdown: false, shutdownDate: null, reason: '', notes: '', affectedLines: [] },
+  FM2: { isShutdown: false, shutdownDate: null, reason: '', notes: '', affectedLines: [] },
+  FM3: { isShutdown: false, shutdownDate: null, reason: '', notes: '', affectedLines: [] },
+  PMX: { isShutdown: false, shutdownDate: null, reason: '', notes: '', affectedLines: [] },
+};
+
+const AS_PHASES = [
+  { key: 'scanning',    label: 'Scanning orders across all lines',         icon: '🔍' },
+  { key: 'combining',   label: 'Finding and combining matching orders',     icon: '🔗' },
+  { key: 'calculating', label: 'Calculating queue times per line',          icon: '⏱️' },
+  { key: 'placing',     label: 'Placing orders on optimal lines',           icon: '📍' },
+  { key: 'n10d',        label: 'Applying Future Dispatches target dates',  icon: '📅' },
+  { key: 'sequencing',  label: 'Sequencing orders per line',                icon: '📊' },
+  { key: 'changeovers', label: 'Calculating changeovers',                   icon: '⚙️' },
+  { key: 'strategies',  label: 'Generating strategy options per line (AI-powered)', icon: '🤖' },
+  { key: 'done',        label: 'Complete',                                  icon: '✅' },
+];
+
+function AutoSequenceProcessingOverlay({ currentPhase, processedCount, totalCount, combinedCount, movedCount, label, onCancel }) {
+  const currentPhaseIndex = AS_PHASES.findIndex(p => p.key === currentPhase);
+  const isDone = currentPhase === 'done';
+  const progress = Math.round(((currentPhaseIndex + 1) / AS_PHASES.length) * 100);
+
+  return (
+    <div className="as-processing-overlay">
+      <div className="as-processing-card">
+        <div className="as-processing-header">
+          <h2 className="as-processing-title">{label || 'Plant-Level Auto-Sequence'}</h2>
+          <p className="as-processing-subtitle">Analyzing and optimizing orders</p>
+        </div>
+
+        <div className="as-processing-progress-bar">
+          <div className="as-processing-progress-fill" style={{ width: `${progress}%` }} />
+        </div>
+
+        <div className="as-processing-phases">
+          {AS_PHASES.map((phase, index) => {
+            const isComplete = index < currentPhaseIndex;
+            const isCurrent  = index === currentPhaseIndex;
+            const isPending  = index > currentPhaseIndex;
+            return (
+              <div
+                key={phase.key}
+                className={`as-processing-phase${isComplete ? ' complete' : ''}${isCurrent ? ' current' : ''}${isPending ? ' pending' : ''}`}
+              >
+                <span className="as-processing-phase-icon">
+                  {isComplete ? '✅' : isCurrent ? phase.icon : '○'}
+                </span>
+                <span className="as-processing-phase-label">{phase.label}</span>
+                {isCurrent && <span className="as-processing-phase-spinner" />}
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="as-processing-stats">
+          {totalCount > 0 && (
+            <div className="as-processing-stat">
+              <span className="as-processing-stat-value">{processedCount > 0 ? processedCount : totalCount}</span>
+              <span className="as-processing-stat-label">{processedCount > 0 ? `of ${totalCount} orders` : 'orders'}</span>
+            </div>
+          )}
+          {combinedCount > 0 && (
+            <div className="as-processing-stat">
+              <span className="as-processing-stat-value">{combinedCount}</span>
+              <span className="as-processing-stat-label">combined groups</span>
+            </div>
+          )}
+          {movedCount > 0 && (
+            <div className="as-processing-stat">
+              <span className="as-processing-stat-value">{movedCount}</span>
+              <span className="as-processing-stat-label">orders moved</span>
+            </div>
+          )}
+        </div>
+
+        {onCancel && !isDone && (
+          <div className="as-processing-cancel-text-wrap">
+            <span
+              className="as-processing-cancel-text"
+              onClick={onCancel}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => e.key === 'Enter' && onCancel()}
+            >
+              Cancel auto-sequence
+            </span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
 export default function Dashboard() {
   const queryClient = useQueryClient();
 
@@ -279,7 +613,8 @@ export default function Dashboard() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [activeSection, setActiveSection] = useState("orders");
   const [activeSubSection, setActiveSubSection] = useState("all");
-  const [activeFeedmill, setActiveFeedmill] = useState("FM1");
+  const [activeFeedmill, setActiveFeedmill] = useState("ALL_FM");
+  const [changeoverRules, setChangeoverRules] = useState(() => getDefaultChangeoverRules());
   const [tourMenuOpen, setTourMenuOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [filters, setFilters] = useState({
@@ -295,6 +630,28 @@ export default function Dashboard() {
   const [autoSeqOpen, setAutoSeqOpen] = useState(false);
   const [autoSeqLoading, setAutoSeqLoading] = useState(false);
   const [autoSeqResult, setAutoSeqResult] = useState(null);
+  const [plantSeqOpen, setPlantSeqOpen] = useState(false);
+  const [plantSeqLoading, setPlantSeqLoading] = useState(false);
+  const [showLineAutoSequencePreview, setShowLineAutoSequencePreview] = useState(false);
+  const [lineAutoSequenceData, setLineAutoSequenceData] = useState(null);
+  const [lineSeqLoading, setLineSeqLoading] = useState(false);
+  const [plantSeqPreloadedAI, setPlantSeqPreloadedAI] = useState(null);
+  const [plantSeqPreloadedStrategies, setPlantSeqPreloadedStrategies] = useState(null);
+  const [plantSeqOrderCount, setPlantSeqOrderCount] = useState(0);
+  const [plantSeqResults, setPlantSeqResults] = useState({});
+  const [plantSeqSummary, setPlantSeqSummary] = useState(null);
+  const [plantSeqLog, setPlantSeqLog] = useState([]);
+  const [plantSeqSnapshot, setPlantSeqSnapshot] = useState({});
+  const [showProcessingOverlay, setShowProcessingOverlay] = useState(false);
+  const [processingPhase, setProcessingPhase] = useState(null);
+  const [processingStats, setProcessingStats] = useState({ processed: 0, total: 0, combined: 0, moved: 0 });
+  const [processingLabel, setProcessingLabel] = useState('');
+  const plantSeqCancelledRef = useRef(false);
+  const plantSeqAbortRef = useRef(null);
+  const plantSeqRunIdRef = useRef(0);
+  // Feedmill-level auto-sequence state
+  const [showFeedmillSeqPreview, setShowFeedmillSeqPreview] = useState(false);
+  const [feedmillSeqData, setFeedmillSeqData] = useState(null);
   const [addOrderOpen, setAddOrderOpen] = useState(false);
   const [addOrderLine, setAddOrderLine] = useState(null);
   const [addOrderPrefill, setAddOrderPrefill] = useState(null);
@@ -323,13 +680,35 @@ export default function Dashboard() {
   const [cutDialogOrder, setCutDialogOrder] = useState(null);
   const [mergeBackDialog, setMergeBackDialog] = useState(null); // { portion1, portion2 }
 
-  // Feedmill shutdown / order diversion state (in-memory, no DB persistence)
-  const [feedmillStatus, setFeedmillStatus] = useState({
-    FM1: { isShutdown: false, shutdownDate: null, reason: '', notes: '', affectedLines: [] },
-    FM2: { isShutdown: false, shutdownDate: null, reason: '', notes: '', affectedLines: [] },
-    FM3: { isShutdown: false, shutdownDate: null, reason: '', notes: '', affectedLines: [] },
-    PMX: { isShutdown: false, shutdownDate: null, reason: '', notes: '', affectedLines: [] },
+  // Feedmill shutdown / order diversion state — persisted to localStorage
+  const [feedmillStatus, setFeedmillStatus] = useState(() => {
+    try {
+      const saved = localStorage.getItem('nexfeed_feedmill_status');
+      return saved ? { ...FEEDMILL_STATUS_DEFAULTS, ...JSON.parse(saved) } : FEEDMILL_STATUS_DEFAULTS;
+    } catch { return FEEDMILL_STATUS_DEFAULTS; }
   });
+  // Per-line shutdown state: { 'Line 1': { isShutdown, reason, notes, since, feedmill } }
+  const [lineShutdowns, setLineShutdowns] = useState(() => {
+    try {
+      const saved = localStorage.getItem('nexfeed_line_shutdowns');
+      return saved ? JSON.parse(saved) : {};
+    } catch { return {}; }
+  });
+
+  useEffect(() => {
+    try { localStorage.setItem('nexfeed_line_shutdowns', JSON.stringify(lineShutdowns)); } catch { /* ignore */ }
+  }, [lineShutdowns]);
+
+  useEffect(() => {
+    try { localStorage.setItem('nexfeed_feedmill_status', JSON.stringify(feedmillStatus)); } catch { /* ignore */ }
+  }, [feedmillStatus]);
+
+  const FEEDMILL_LINE_MAP = {
+    FM1: ['Line 1', 'Line 2'],
+    FM2: ['Line 3', 'Line 4'],
+    FM3: ['Line 6', 'Line 7'],
+    PMX: ['Line 5'],
+  };
   const [divertDialog, setDivertDialog] = useState(null); // { order }
   const [revertDialog, setRevertDialog] = useState(null); // { order }
   const [inProdConflictDialog, setInProdConflictDialog] = useState(null); // { order, newStatus, existing }
@@ -431,6 +810,7 @@ export default function Dashboard() {
     autoSeqOpen ||
     addOrderOpen ||
     isUploadModalOpen ||
+    showLineAutoSequencePreview ||
     showBulkConfirm ||
     reasonDialog ||
     cancelDialogOrder ||
@@ -457,6 +837,7 @@ export default function Dashboard() {
     mutationFn: (data) => Order.bulkCreate(data),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["orders"] }),
   });
+
 
   // KB lookup: map feedmill_line → KB batch_size column and run_rate column
   // This covers ALL feedmill tabs (FM1, FM2, FM3, PMX) — req 130
@@ -517,6 +898,9 @@ export default function Dashboard() {
           sacks: entry.sacks_item_description || order.sacks || "",
           tags: entry.tags_item_description || order.tags || "",
           markings: markings || order.markings || "",
+          category: order.category || entry.category || "",
+          color: order.color || entry.color || "",
+          diameter: order.diameter || entry.diameter || null,
         };
       });
     }
@@ -528,7 +912,11 @@ export default function Dashboard() {
       lineGroups[o.feedmill_line].push(o);
     }
 
-    // Identify first active (non-completed/cancel_po) order per line for default start values
+    // Build today string once
+    const _todayD = new Date();
+    const _todayStr = `${_todayD.getFullYear()}-${String(_todayD.getMonth() + 1).padStart(2, "0")}-${String(_todayD.getDate()).padStart(2, "0")}`;
+
+    // Identify first active order per line for default start values
     const firstInLineStartDefaults = {};
     for (const line in lineGroups) {
       const sorted = [...lineGroups[line]].sort(
@@ -537,10 +925,10 @@ export default function Dashboard() {
       const firstActive = sorted.find(
         (o) => o.status !== "completed" && o.status !== "cancel_po",
       );
-      if (firstActive && !firstActive.start_date && isAvailDateValidMemo(firstActive.target_avail_date)) {
+      if (firstActive && !firstActive.start_date) {
         firstInLineStartDefaults[firstActive.id] = {
-          start_date: firstActive.target_avail_date,
-          start_time: firstActive.start_time || "08:00",
+          start_date: _todayStr,
+          start_time: "08:00",
         };
       }
     }
@@ -607,19 +995,36 @@ export default function Dashboard() {
     });
   }, [orders, kbRecords]);
 
+  const changeoverEnrichedOrders = useMemo(
+    () => applyChangeoverEnrichment(enrichedOrders, changeoverRules),
+    [enrichedOrders, changeoverRules]
+  );
+
+  // Final scheduled orders: apply display cascade with correct formula
+  // (OrderN.start = OrderN-1.completion + OrderN-1.changeover_total)
+  const scheduledOrders = useMemo(
+    () => applyDisplayCascade(changeoverEnrichedOrders),
+    [changeoverEnrichedOrders]
+  );
+
+  // Fingerprint of each order's scheduled dates — changes whenever any avail/completion
+  // date changes, even when the order count stays the same (e.g. after auto-sequence).
+  const insightDateFingerprint = useMemo(
+    () =>
+      enrichedOrders
+        .map((o) => `${o.id}:${o.target_avail_date || ""}:${o.target_completion_date || ""}:${o.end_date || ""}`)
+        .join("|"),
+    [enrichedOrders],
+  );
+
   // Auto-populate template insights whenever N10D records or orders change —
   // no need to visit the N10D tab first.
+  // Uses insightDateFingerprint so stale insights are rebuilt after rescheduling.
   useEffect(() => {
     if (activeN10DRecords.length === 0 || enrichedOrders.length === 0) return;
-    const uncached = enrichedOrders.filter((o) => {
-      const code = String(o.material_code_fg || o.material_code || "");
-      return code && !getInsight(code);
-    });
-    if (uncached.length > 0 || !hasInsights()) {
-      const templateMap = buildInsightTemplates(activeN10DRecords, enrichedOrders);
-      setTemplateInsights(templateMap);
-    }
-  }, [activeN10DRecords.length, enrichedOrders.length]);
+    const templateMap = buildInsightTemplates(activeN10DRecords, enrichedOrders);
+    setTemplateInsights(templateMap);
+  }, [activeN10DRecords.length, insightDateFingerprint]);
 
   // filteredOrders is only used for the Production section now
   // Planned section handles its own filtering via PlannedOrdersContent
@@ -636,7 +1041,13 @@ export default function Dashboard() {
         (o) =>
           (o.item_description || "").toLowerCase().includes(term) ||
           (o.material_code || "").toLowerCase().includes(term) ||
-          (o.fpr || "").toLowerCase().includes(term),
+          (o.fpr || "").toLowerCase().includes(term) ||
+          (o.fg || "").toLowerCase().includes(term) ||
+          (o.sfg || "").toLowerCase().includes(term) ||
+          (o.pmx || "").toLowerCase().includes(term) ||
+          (o.fg1 || "").toLowerCase().includes(term) ||
+          (o.sfg1 || "").toLowerCase().includes(term) ||
+          (o.sfgpmx || "").toLowerCase().includes(term),
       );
     }
     if (filters.form && filters.form !== "all")
@@ -683,6 +1094,9 @@ export default function Dashboard() {
         isActiveStatus(o.status),
       ).length;
     });
+    counts["fm_active_ALL_FM"] = orders.filter((o) =>
+      isActiveStatus(o.status),
+    ).length;
     return counts;
   }, [orders]);
 
@@ -693,14 +1107,18 @@ export default function Dashboard() {
 
     const extraData = {};
 
-    // Ordering check: In Production / On-going can only be set when all orders
-    // above on the same line are Done / In Production / On-going / Planned.
+    // Ordering check: On-going* can only be set when all orders above on the
+    // same line are Done / On-going / Cancelled. Plotted/Planned/Hold/Cut
+    // (not-yet-started) above this order block the change — earlier orders
+    // must move into production first.
     const ONGOING_STATUSES = ["ongoing_batching", "ongoing_pelleting", "ongoing_bagging"];
-    if (newStatus === "in_production" || ONGOING_STATUSES.includes(newStatus)) {
+    if (ONGOING_STATUSES.includes(newStatus)) {
       const ALLOWED_ABOVE = [
-        "completed", "in_production",
+        "completed",
         "ongoing_batching", "ongoing_pelleting", "ongoing_bagging",
-        "planned", "cancel_po",
+        "cancel_po",
+        // legacy data may still carry "in_production" — treat as on-going
+        "in_production",
       ];
       const lineOrders = orders
         .filter((o) => o.feedmill_line === order.feedmill_line)
@@ -714,6 +1132,13 @@ export default function Dashboard() {
         }
       }
       if (blockers.length > 0) {
+        console.debug('[Status Flow Check]', {
+          targetOrderId: order.id,
+          targetStatus: newStatus,
+          blocked: true,
+          reason: 'prior_order_not_started',
+          blockerCount: blockers.length,
+        });
         setInProdOrderingDialog({ order, newStatus, blockers });
         return;
       }
@@ -733,21 +1158,30 @@ export default function Dashboard() {
       }
     }
 
-    // Setting to Done: store previous prio + precise timestamp for FIFO rotation
+    // Setting to Done: store previous prio + precise timestamp + freeze current changeover
     if (newStatus === "completed") {
       const now = new Date();
       extraData.end_date = now.toISOString().split("T")[0];
       extraData.end_time = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
       extraData.previous_prio = order.priority_seq ?? null;
       extraData.done_timestamp = now.toISOString();
+      // Freeze the current computed changeover so it's preserved regardless of future reorders
+      const currentCO = order._changeoverTotal ?? order.changeover_time ?? 0.17;
+      extraData.frozen_changeover = parseFloat(currentCO) || 0.17;
+      extraData.changeover_frozen_at = now.toISOString();
+      // Also freeze the breakdown for tooltip display in history
+      extraData.frozen_changeover_breakdown = JSON.stringify(order._changeoverBreakdown || []);
     }
 
-    // Reverting from Done to active: restore previous prio position
+    // Reverting from Done to active: restore previous prio position + unfreeze changeover
     if (oldStatus === "completed" && newStatus !== "completed") {
       extraData.end_date = null;
       extraData.end_time = null;
       extraData.previous_prio = null;
       extraData.done_timestamp = null;
+      extraData.frozen_changeover = null;
+      extraData.changeover_frozen_at = null;
+      extraData.frozen_changeover_breakdown = null;
 
       const prevPrio = order.previous_prio;
       const lineActiveOrders = orders
@@ -898,6 +1332,7 @@ export default function Dashboard() {
         status: "cancel_po",
         cancel_note: cancelNoteText,
         history: newHistory,
+        cancelled_at: now.toISOString(),
         cancelled_date: cancelDate,
         cancelled_time: cancelTime,
         cancel_reason: reason,
@@ -970,6 +1405,7 @@ export default function Dashboard() {
         status: newStatus,
         cancel_note: null,
         history: newHistory,
+        cancelled_at: null,
         cancelled_date: null,
         cancelled_time: null,
         cancel_reason: null,
@@ -1179,6 +1615,7 @@ export default function Dashboard() {
       material_code: order.material_code,
       item_description: order.item_description,
       category: order.category,
+      color: order.color,
       feedmill_line: order.feedmill_line,
       total_volume_mt: portion2,
       volume_override: null,
@@ -1188,6 +1625,7 @@ export default function Dashboard() {
       prod_remarks: cutRemark,
       status: "cut",
       form: order.form,
+      diameter: order.diameter,
       batch_size: order.batch_size,
       run_rate: order.run_rate,
       changeover_time: order.changeover_time,
@@ -1379,12 +1817,21 @@ export default function Dashboard() {
   const applyKBFields = (order, entry) => {
     if (!entry) return {};
     const updates = {};
+    // Category
+    if (entry.category) updates.category = entry.category;
+    // Color
+    if (entry.color) updates.color = entry.color;
     // Form — preserve exact value, normalize lowercase
     if (entry.form)
       updates.form =
         String(entry.form).toUpperCase() === entry.form
           ? entry.form
           : entry.form.charAt(0).toUpperCase() + entry.form.slice(1);
+    // Diameter
+    if (entry.diameter != null && entry.diameter !== "") updates.diameter = parseFloat(entry.diameter);
+    // Changeover time from KB (falls back to 0.17 when null)
+    const co = parseFloat(entry.changeover);
+    updates.changeover_time = isNaN(co) ? 0.17 : co;
     // SFG Material Code from KB Column C
     if (entry.sfg1_material_code)
       updates.kb_sfg_material_code = String(entry.sfg1_material_code);
@@ -1412,9 +1859,15 @@ export default function Dashboard() {
   };
 
   // Reapply KB to ALL existing orders across ALL feedmill tabs
+  const NON_UPDATABLE_STATUSES = new Set([
+    "completed", "cancel_po", "in_production",
+    "ongoing_batching", "ongoing_pelleting", "ongoing_bagging",
+  ]);
+
   const handleReapplyKB = async (activeKBRecords) => {
     const kbMap = buildLocalKBMap(activeKBRecords);
-    const toUpdate = orders.filter((o) => o.status !== "completed");
+    const toUpdate = orders.filter((o) => !NON_UPDATABLE_STATUSES.has(o.status));
+    const skipped = orders.filter((o) => NON_UPDATABLE_STATUSES.has(o.status));
     await Promise.all(
       toUpdate.map((order) => {
         const entry = kbMap[String(order.material_code || "").trim()];
@@ -1423,6 +1876,17 @@ export default function Dashboard() {
         return updateOrderMutation.mutateAsync({ id: order.id, data: updates });
       }),
     );
+    const doneCount = skipped.filter((o) => o.status === "completed").length;
+    const cancelCount = skipped.filter((o) => o.status === "cancel_po").length;
+    const inProgressCount = skipped.filter(
+      (o) => o.status === "in_production" || o.status.startsWith("ongoing"),
+    ).length;
+    const parts = [];
+    if (doneCount > 0) parts.push(`${doneCount} completed`);
+    if (cancelCount > 0) parts.push(`${cancelCount} cancelled`);
+    if (inProgressCount > 0) parts.push(`${inProgressCount} in-progress`);
+    const skipNote = parts.length > 0 ? ` ${parts.join(", ")} order(s) were not updated.` : "";
+    toast.success(`Master data applied to ${toUpdate.length} active order(s).${skipNote}`);
   };
 
   const FEEDMILL_LABELS = {
@@ -1489,6 +1953,12 @@ export default function Dashboard() {
     PMX: ["Line 5"],
   };
 
+  // Short names and lines used by feedmill auto-sequence
+  const FM_SHORT_NAMES = { FM1: "FM1", FM2: "FM2", FM3: "FM3", PMX: "PMX" };
+  const FM_FULL_NAMES = { FM1: "Feedmill 1", FM2: "Feedmill 2", FM3: "Feedmill 3", PMX: "Powermix" };
+  const getFMFullName = (key) => FM_FULL_NAMES[key] || key;
+  const FEEDMILL_SEQ_LINES = FM_LINE_MAP_LOCAL; // same structure
+
   // Reverse map: line name → feedmill key
   const LINE_TO_FM_KEY = {
     'Line 1': 'FM1', 'Line 2': 'FM1',
@@ -1496,6 +1966,2140 @@ export default function Dashboard() {
     'Line 5': 'PMX',
     'Line 6': 'FM3', 'Line 7': 'FM3',
   };
+
+  // ─── Plant-Level Auto-Sequence Constants & Helpers ─────────────────────────
+  const PLANT_ALL_LINES = ["Line 1", "Line 2", "Line 3", "Line 4", "Line 5", "Line 6", "Line 7"];
+  const PLANT_LINE_TO_FM_LABEL = {
+    "Line 1": "Feedmill 1", "Line 2": "Feedmill 1",
+    "Line 3": "Feedmill 2", "Line 4": "Feedmill 2",
+    "Line 5": "Powermix",
+    "Line 6": "Feedmill 3", "Line 7": "Feedmill 3",
+  };
+  const PLANT_RUN_RATE_COL = {
+    "Line 1": "line_1_run_rate", "Line 2": "line_2_run_rate",
+    "Line 3": "line_3_run_rate", "Line 4": "line_4_run_rate",
+    "Line 5": "line_5_run_rate",
+    "Line 6": "line_6_run_rate", "Line 7": "line_7_run_rate",
+  };
+  const PLANT_MAX_COMBINE_MT = 180;
+
+  const LINE_RUN_RATES = {
+    "Line 1": 20, "Line 2": 20,
+    "Line 3": 10, "Line 4": 10,
+    "Line 5": 10,
+    "Line 6": 10, "Line 7": 10,
+  };
+  const getLineRunRate = (line) => LINE_RUN_RATES[line] || 10;
+
+  const normalizeLine = (line) => {
+    if (!line) return "";
+    const s = String(line).trim();
+    const lineMatch = s.match(/^line\s*(\d+)$/i);
+    if (lineMatch) return `Line ${lineMatch[1]}`;
+    const shortMatch = s.match(/^l(\d+)$/i);
+    if (shortMatch) return `Line ${shortMatch[1]}`;
+    return s;
+  };
+
+  const plantCanProduceOnLine = (order, line, kbList) => {
+    const normalizedLine = normalizeLine(line);
+    const rrKey = PLANT_RUN_RATE_COL[normalizedLine];
+    if (!rrKey) return false;
+    const materialCode = String(order.material_code || "").trim();
+    if (!materialCode) return false;
+    const entry = kbList.find(
+      (r) => String(r.fg_material_code || "").trim() === materialCode
+    );
+    if (!entry) {
+      console.log(`plantCanProduceOnLine: No KB entry for material_code="${materialCode}" on line "${normalizedLine}"`);
+    }
+    return !!(entry && parseFloat(entry[rrKey] || 0) > 0);
+  };
+
+  const getOrderVolumeMT = (order) => {
+    const candidates = [
+      order.volume_override,
+      order.volume,
+      order.total_volume_mt,
+      order.volume_mt,
+    ];
+    for (const val of candidates) {
+      const parsed = parseFloat(val);
+      if (!Number.isNaN(parsed) && parsed > 0) return parsed;
+    }
+    return 0;
+  };
+
+  const calculateLineTotalMT = (lineOrders) =>
+    Number(
+      ((lineOrders || []).reduce((sum, o) => sum + getOrderVolumeMT(o), 0)).toFixed(2)
+    );
+
+  // Mirror getEffectiveVolume() from OrderTable exactly so summary matches table display:
+  // volume_override → ceil(total_volume_mt / batch_size) * batch_size → raw
+  const getEffectiveDisplayVolumeMT = (order) => {
+    if (order.volume_override != null && order.volume_override !== "") {
+      const ov = parseFloat(order.volume_override);
+      if (!Number.isNaN(ov)) return Number(ov.toFixed(2));
+    }
+    const rawVol = parseFloat(order.total_volume_mt ?? 0) || 0;
+    const batchSize = parseFloat(order.batch_size ?? 0) || 0;
+    if (batchSize > 0) return Number((Math.ceil(rawVol / batchSize) * batchSize).toFixed(2));
+    return Number(rawVol.toFixed(2));
+  };
+
+  const calculateEffectiveLineTotalMT = (lineOrders) =>
+    Number(((lineOrders || []).reduce((sum, o) => sum + getEffectiveDisplayVolumeMT(o), 0)).toFixed(2));
+
+  // Sum actual row-level hours (production + changeover) — same fields shown in the order rows
+  const calculateLineHoursBreakdown = (orders) => {
+    const prod = Number(((orders || []).reduce((s, o) => s + (parseFloat(o.production_hours) || 0), 0)).toFixed(2));
+    const co   = Number(((orders || []).reduce((s, o) => s + (parseFloat(o._changeoverTotal ?? o.changeover_time ?? 0) || 0), 0)).toFixed(2));
+    return { productionHours: prod, changeoverHours: co, totalHours: Number((prod + co).toFixed(2)) };
+  };
+
+  const calculateQueueTimeHours = (totalMT, runRate) => {
+    const mt = parseFloat(totalMT) || 0;
+    const rr = parseFloat(runRate) || 0;
+    if (rr <= 0) return 0;
+    return Number((mt / rr).toFixed(2));
+  };
+
+  const plantCalcQueueHrs = (lineOrders, line) => {
+    const totalMT = calculateEffectiveLineTotalMT(lineOrders);
+    const runRate = getLineRunRate(line);
+    return runRate > 0 ? totalMT / runRate : Infinity;
+  };
+
+  // Returns the correct MT basis for one order before combining:
+  //   • user override  → use the override value
+  //   • raw not divisible by batch size (app-adjusted) → use raw so the ceiling
+  //     is applied only to the final combined sum, not per-order
+  //   • already divisible or no batch size → use raw
+  const getCombinationBasisVolume = (order) => {
+    const rawVolume = parseFloat(order.total_volume_mt ?? order.volume ?? 0) || 0;
+    const batchSize = parseFloat(order.batch_size ?? 0) || 0;
+    const overrideVolume = parseFloat(order.volume_override);
+    if (!Number.isNaN(overrideVolume) && overrideVolume > 0) {
+      return { basisVolume: overrideVolume, basisType: 'user_override', rawVolume, batchSize };
+    }
+    if (batchSize > 0) {
+      const isDivisible = Math.abs(rawVolume % batchSize) < 0.001;
+      if (!isDivisible) {
+        return { basisVolume: rawVolume, basisType: 'app_adjusted_use_raw', rawVolume, batchSize };
+      }
+    }
+    return { basisVolume: rawVolume, basisType: 'raw_divisible', rawVolume, batchSize };
+  };
+
+  // Round a combined basis sum up to the nearest batch multiple
+  const adjustVolumeToBatchCeiling = (volume, batchSize) => {
+    const v = parseFloat(volume || 0) || 0;
+    const b = parseFloat(batchSize || 0) || 0;
+    if (b <= 0) return Number(v.toFixed(2));
+    return Number((Math.ceil(v / b) * b).toFixed(2));
+  };
+
+  const plantLocalSequence = (lineOrders) => {
+    // ALL orders (including Planned) sort chronologically — no planned-first pinning.
+    // Tiers: 0=Critical-no-date, 1=any-effective-date (merged), 2=no-date.
+    // Dates from hard avail and N10D inferred are treated equally (same tier).
+    const _isRealISO = (v) => !!v && /^\d{4}-\d{2}-\d{2}/.test(v) && !isNaN(Date.parse(v));
+    const enriched = lineOrders.map(o => {
+      const inf = inferredTargetMap?.[o.material_code] || inferredTargetMap?.[o.material_code_fg];
+      // Dates from auto-sequence or N10D are never hard deadlines — they must be
+      // recalculated from the latest N10D data on each auto-sequence run.
+      const _plIsN10DSourced = o.avail_date_source === 'auto_sequence' || o.date_source === 'n10d';
+      const isHardDeadline = _isRealISO(o.target_avail_date) && !_plIsN10DSourced;
+      let sortTier = 2;
+      let effectiveDate = null;
+      let dflToInvRatio = 0;
+      if (inf?.status === 'Critical' && !isHardDeadline) {
+        sortTier = 0;
+        const dfl = parseFloat(inf.dueForLoading) || 0;
+        const inv = parseFloat(inf.inventory) || 0;
+        dflToInvRatio = inv > 0 ? dfl / inv : Infinity;
+      } else {
+        if (isHardDeadline) effectiveDate = new Date(o.target_avail_date);
+        else if (inf?.targetDate && _isRealISO(inf.targetDate)) effectiveDate = new Date(inf.targetDate);
+        sortTier = effectiveDate ? 1 : 2;
+      }
+      return { ...o, _sortTier: sortTier, _effectiveDate: effectiveDate, _dflToInvRatio: dflToInvRatio };
+    });
+    enriched.sort((a, b) => {
+      if (a._sortTier !== b._sortTier) return a._sortTier - b._sortTier;
+      if (a._sortTier === 0) return (b._dflToInvRatio ?? 0) - (a._dflToInvRatio ?? 0);
+      if (a._effectiveDate && b._effectiveDate) return a._effectiveDate - b._effectiveDate;
+      if (a._effectiveDate) return -1;
+      if (b._effectiveDate) return 1;
+      return 0;
+    });
+    return enriched;
+  };
+
+  const plantLevelCombineAndPlace = (activeOrders, kbList, coRules) => {
+    // ─── helpers ───────────────────────────────────────────────────────────────
+    const EXCLUDED_STATUSES = new Set([
+      "Done", "Cancel PO", "In Production", "On-going",
+      "completed", "cancel_po",
+      "in_production", "ongoing_batching", "ongoing_pelleting", "ongoing_bagging",
+    ]);
+
+    const canProduceOnLine = (order, line) => plantCanProduceOnLine(order, line, kbList);
+
+    const getProductRunRateOnLine = (order, line) => {
+      const materialCode = String(order.material_code_fg || order.material_code || "").trim();
+      const rrKey = PLANT_RUN_RATE_COL[line];
+      if (!rrKey || !materialCode) return 0;
+      const entry = kbList.find(r => String(r.fg_material_code || "").trim() === materialCode);
+      return parseFloat(entry?.[rrKey] || 0) || 0;
+    };
+
+    // ─── sort result within each line — reuse the same preSortOrders from azureAI ──
+    // This gives us identical N10D categorization + Critical-first logic as per-line
+    // auto-sequence, and enriches each order with _effectiveDate / _n10dStatus metadata.
+
+    // ─── build eligible + originalByLine snapshot ──────────────────────────────
+    const eligible = activeOrders
+      .filter(o => !EXCLUDED_STATUSES.has(o.status) && o.feedmill_line)
+      .map(o => ({ ...o, feedmill_line: normalizeLine(o.feedmill_line) }));
+
+    const originalByLine = {};
+    PLANT_ALL_LINES.forEach(line => {
+      originalByLine[line] = eligible
+        .filter(o => o.feedmill_line === line)
+        .filter(o => !o.parent_id) // top-level only: leads + standalones (same scope as After table)
+        .sort((a, b) => (a.priority_seq || 9999) - (b.priority_seq || 9999));
+    });
+
+    // ─── working state ─────────────────────────────────────────────────────────
+    const lineOrdersMap = {};
+    PLANT_ALL_LINES.forEach(line => {
+      lineOrdersMap[line] = eligible
+        .filter(o => o.feedmill_line === line)
+        .sort((a, b) => (a.priority_seq || 9999) - (b.priority_seq || 9999))
+        .map(o => ({
+          ...o,
+          _originalLine: o.feedmill_line,
+          _isPlanned: o.status === "Planned" || o.status === "planned",
+          _processed: false,
+        }));
+    });
+
+    const lineTotalMT = {};
+    PLANT_ALL_LINES.forEach(line => {
+      lineTotalMT[line] = calculateEffectiveLineTotalMT(lineOrdersMap[line]);
+    });
+
+    console.log("=== PLANT AUTO-SEQUENCE (ORDER-BY-ORDER) ===");
+    PLANT_ALL_LINES.forEach(line => {
+      const rr = getLineRunRate(line);
+      console.log(`  ${line}: ${lineTotalMT[line].toFixed(1)} MT ÷ ${rr} MT/hr = ${rr > 0 ? (lineTotalMT[line] / rr).toFixed(2) : "∞"} hrs`);
+    });
+
+    const placementLog = [];
+    const processedIds = new Set();
+    const baseChangeover = 0.17;
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // MAIN LOOP — Line 1 Prio 1 → Line 7 last prio, order by order
+    // ═══════════════════════════════════════════════════════════════════════════
+    for (const line of PLANT_ALL_LINES) {
+      const lineOrders = [...(lineOrdersMap[line] || [])]; // snapshot before mutations
+
+      for (const order of lineOrders) {
+        if (order._processed || processedIds.has(order.id)) continue;
+        if (order.parent_id) continue; // skip children of existing combined orders — handled via their lead
+
+        // Detect if the base order is itself an existing combined lead
+        const baseIsExistingLead = Array.isArray(order.original_order_ids) && order.original_order_ids.length > 0;
+        const baseChildren = baseIsExistingLead
+          ? eligible.filter(c => String(c.parent_id) === String(order.id))
+          : [];
+        const orderVolume = baseIsExistingLead && baseChildren.length > 0
+          ? baseChildren.reduce((s, c) => s + getOrderVolumeMT(c), 0)
+          : getOrderVolumeMT(order);
+        const orderMaterialCode = String(order.material_code_fg || order.material_code || "").trim();
+        const orderFormulaVersion = String(order.formula_version || "").trim();
+
+        if (!orderMaterialCode) {
+          order._processed = true;
+          processedIds.add(order.id);
+          continue;
+        }
+
+        // ── PHASE 1: Find matchable orders across ALL lines ──────────────────
+        const matches = [];
+        for (const scanLine of PLANT_ALL_LINES) {
+          for (const candidate of (lineOrdersMap[scanLine] || [])) {
+            if (candidate.id === order.id) continue;
+            if (candidate._processed || processedIds.has(candidate.id)) continue;
+            if (EXCLUDED_STATUSES.has(candidate.status)) continue;
+            if (candidate.parent_id) continue; // skip children — only match leads or single orders
+            const cMat = String(candidate.material_code_fg || candidate.material_code || "").trim();
+            const cFv = String(candidate.formula_version || "").trim();
+            if (cMat !== orderMaterialCode) continue;
+            if (cFv !== orderFormulaVersion) continue;
+            const cLine = normalizeLine(candidate.feedmill_line || candidate._originalLine);
+            // Detect existing combined lead — use real children's volume sum
+            const cIsExistingLead = Array.isArray(candidate.original_order_ids) && candidate.original_order_ids.length > 0;
+            let cVol;
+            if (cIsExistingLead) {
+              const cChildren = eligible.filter(c => String(c.parent_id) === String(candidate.id));
+              cVol = cChildren.length > 0
+                ? cChildren.reduce((s, c) => s + getOrderVolumeMT(c), 0)
+                : getOrderVolumeMT(candidate);
+            } else {
+              cVol = getOrderVolumeMT(candidate);
+            }
+            matches.push({
+              order: candidate,
+              volume: cVol,
+              line: cLine,
+              isPlanned: candidate._isPlanned,
+              runRate: getProductRunRateOnLine(candidate, cLine),
+              isExistingLead: cIsExistingLead,
+            });
+          }
+        }
+        // Sort: lower MT first; same MT → higher run rate wins
+        matches.sort((a, b) => {
+          const vd = a.volume - b.volume;
+          if (Math.abs(vd) > 0.01) return vd;
+          return (b.runRate || 0) - (a.runRate || 0);
+        });
+
+        // ── PHASE 2: Greedy combine up to 180 MT cap ────────────────────────
+        const combinedMatches = [];
+        let totalVolume = orderVolume;
+        for (const m of matches) {
+          if (totalVolume + m.volume <= PLANT_MAX_COMBINE_MT) {
+            combinedMatches.push(m);
+            totalVolume += m.volume;
+          }
+        }
+
+        if (combinedMatches.length > 0) {
+          // ── PHASE 3: Place combined order ──────────────────────────────────
+          // Expand any existing combined leads (base or matched) to their real children
+          const oldLeadIdsToDelete = [];
+
+          const _expandToRealSubs = (matchEntry, isBase) => {
+            const src = isBase ? order : matchEntry.order;
+            const srcVol = isBase ? orderVolume : matchEntry.volume;
+            const srcLine = isBase
+              ? normalizeLine(order.feedmill_line || order._originalLine)
+              : matchEntry.line;
+            const isLead = isBase ? baseIsExistingLead : matchEntry.isExistingLead;
+            if (isLead) {
+              oldLeadIdsToDelete.push(src.id);
+              const kids = eligible.filter(c => String(c.parent_id) === String(src.id));
+              if (kids.length > 0) {
+                return kids.map(k => ({
+                  order: k,
+                  volume: getOrderVolumeMT(k), // consistent with lineTotalMT init
+                  line: normalizeLine(k.feedmill_line || k._originalLine || srcLine),
+                }));
+              }
+              // No children found — fall back to treating the lead as a single order
+              return [{ order: src, volume: srcVol, line: srcLine }];
+            }
+            return [{ order: src, volume: srcVol, line: srcLine }];
+          };
+
+          const allSubOrders = [
+            ..._expandToRealSubs(null, true),
+            ...combinedMatches.flatMap(m => _expandToRealSubs(m, false)),
+          ];
+          // Compute combination basis: override for user-adjusted, raw for all others.
+          // Batch ceiling is applied only ONCE to the final combined sum.
+          const batchSzCombine = parseFloat(order.batch_size) || 1;
+          const combinedBasisVolume = Number(
+            allSubOrders.reduce((sum, sub) => {
+              const { basisVolume } = getCombinationBasisVolume(sub.order);
+              return sum + basisVolume;
+            }, 0).toFixed(2)
+          );
+          const finalCombinedVolume = adjustVolumeToBatchCeiling(combinedBasisVolume, batchSzCombine);
+
+          // Remove old leads from lineOrdersMap so they don't get processed as regular orders
+          for (const oldLeadId of oldLeadIdsToDelete) {
+            for (const sl of PLANT_ALL_LINES) {
+              lineOrdersMap[sl] = (lineOrdersMap[sl] || []).filter(o => o.id !== oldLeadId);
+            }
+            processedIds.add(oldLeadId);
+          }
+
+          // Lock to Planned order's line if any sub-order is Planned
+          const plannedSub = allSubOrders.find(s => s.order._isPlanned);
+          let destinationLine = plannedSub ? plannedSub.line : null;
+          const wasLockedByPlanned = !!plannedSub;
+
+          // Snapshot the true pre-combine MT for all lines BEFORE removing sub-orders.
+          // lineScores (used for destination selection) will be computed from the
+          // post-removal state, which is correct for choosing the best destination.
+          // But the AI prompt needs the pre-removal state to accurately describe
+          // what was on each line before the combination happened.
+          const preCombineMTSnapshot = {};
+          for (const sl of PLANT_ALL_LINES) {
+            preCombineMTSnapshot[sl] = lineTotalMT[sl] || 0;
+          }
+
+          // Remove ALL sub-orders from their lines
+          allSubOrders.forEach(sub => {
+            lineTotalMT[sub.line] = (lineTotalMT[sub.line] || 0) - sub.volume;
+            lineOrdersMap[sub.line] = (lineOrdersMap[sub.line] || []).filter(o => o.id !== sub.order.id);
+            sub.order._processed = true;
+            processedIds.add(sub.order.id);
+          });
+
+          // Queue-time placement if not locked
+          let lineScores = [];
+          if (!wasLockedByPlanned) {
+            const eligibleLines = PLANT_ALL_LINES.filter(l => canProduceOnLine(order, l));
+            if (eligibleLines.length === 0) {
+              destinationLine = normalizeLine(order.feedmill_line || order._originalLine);
+            } else {
+              lineScores = eligibleLines.map(l => {
+                const curMT = lineTotalMT[l] || 0;
+                const rr = getLineRunRate(l);
+                const ln = parseInt(l.match(/\d+/)?.[0] || "99");
+                return {
+                  line: l,
+                  feedmill: PLANT_LINE_TO_FM_LABEL[l] || l,
+                  runRate: rr,
+                  totalMTBefore: parseFloat(curMT.toFixed(1)),
+                  queueTimeBefore: rr > 0 ? curMT / rr : Infinity,
+                  lineNumber: ln,
+                };
+              });
+              lineScores.sort((a, b) => {
+                const d = a.queueTimeBefore - b.queueTimeBefore;
+                if (Math.abs(d) > 0.001) return d;
+                return a.lineNumber - b.lineNumber;
+              });
+              destinationLine = lineScores[0].line;
+            }
+          }
+
+          // Build combined order object
+          const baseOrder = { ...JSON.parse(JSON.stringify(order)) };
+          const combinedRunRate = getLineRunRate(destinationLine);
+          baseOrder.volume_override = null; // never inherit stale per-order override
+          baseOrder.total_volume_mt = combinedBasisVolume.toFixed(1);
+          baseOrder.volume = finalCombinedVolume;
+          baseOrder.production_hours = combinedRunRate > 0
+            ? (finalCombinedVolume / combinedRunRate).toFixed(2)
+            : '0.00';
+          baseOrder.feedmill_line = destinationLine;
+          baseOrder.line = destinationLine;
+          baseOrder._isCombined = true;
+          baseOrder._oldLeadIdsToDelete = oldLeadIdsToDelete;
+          baseOrder._combined_basis_volume = combinedBasisVolume;
+          baseOrder._combined_effective_volume = finalCombinedVolume;
+          baseOrder._combine_basis_breakdown = allSubOrders.map(sub => {
+            const result = getCombinationBasisVolume(sub.order);
+            return {
+              order_id: sub.order.id,
+              basisType: result.basisType,
+              rawVolume: result.rawVolume,
+              batchSize: result.batchSize,
+              usedVolume: result.basisVolume,
+            };
+          });
+          baseOrder._combinedFrom = allSubOrders.map(s => ({
+            id: s.order.id,
+            line: s.line,
+            fpr: s.order.fpr,
+            volume: s.volume,
+            total_volume_mt: s.volume,
+            volume_override: s.order.volume_override ?? null,
+            item_description: s.order.item_description,
+            form: s.order.form,
+            material_code_fg: s.order.material_code_fg || s.order.material_code,
+            material_code: s.order.material_code || s.order.material_code_fg,
+            fg: s.order.fg,
+            sfg: s.order.sfg,
+            batch_size: s.order.batch_size,
+            batches: s.order.batch_size && parseFloat(s.order.batch_size) > 0
+              ? Math.ceil(s.volume / parseFloat(s.order.batch_size))
+              : null,
+            production_time: s.order.production_hours,
+            target_avail_date: s.order.target_avail_date,
+            category: s.order.category,
+          }));
+          baseOrder._combinedFromLines = [...new Set(allSubOrders.map(s => s.line))];
+          baseOrder._originalLine = normalizeLine(order.feedmill_line || order._originalLine);
+          baseOrder._plantMovement = baseOrder._originalLine === destinationLine ? "same" : "new_to_line";
+          baseOrder._movedFromLine = baseOrder._originalLine !== destinationLine ? baseOrder._originalLine : null;
+          baseOrder.batches = batchSzCombine > 0 ? Math.ceil(finalCombinedVolume / batchSzCombine) : 0;
+
+          console.debug('[Combine Basis]', {
+            combineOrderIds: allSubOrders.map(o => o.order.id),
+            breakdown: baseOrder._combine_basis_breakdown,
+            combinedBasisVolume,
+            batchSize: batchSzCombine,
+            finalCombinedVolume,
+          });
+
+          // Place on destination line
+          lineTotalMT[destinationLine] = (lineTotalMT[destinationLine] || 0) + finalCombinedVolume;
+          if (!lineOrdersMap[destinationLine]) lineOrdersMap[destinationLine] = [];
+          lineOrdersMap[destinationLine].push(baseOrder);
+
+          // Enrich scores with after-placement values
+          const enrichedScores = lineScores.map(ls => ({
+            ...ls,
+            totalMTAfter: parseFloat((lineTotalMT[ls.line] || 0).toFixed(1)),
+            queueTimeAfter: parseFloat((ls.runRate > 0 ? (lineTotalMT[ls.line] || 0) / ls.runRate : 0).toFixed(2)),
+          }));
+          const bestScore = enrichedScores.find(ls => ls.line === destinationLine) || enrichedScores[0];
+          const changeoversSaved = allSubOrders.length - 1;
+          const fromLines = [...new Set(allSubOrders.map(s => s.line))];
+
+          console.log(`  [Combined] ${order.item_description} (${allSubOrders.length} orders, basis ${combinedBasisVolume.toFixed(1)} MT → effective ${finalCombinedVolume.toFixed(1)} MT) → ${destinationLine}${wasLockedByPlanned ? " [Planned lock]" : ""}`);
+
+          // Compute eligibility for the combined product (use the lead order's master-data eligibility).
+          // When wasLockedByPlanned is true, destination was forced by a Planned order, NOT chosen
+          // for master-data eligibility — so suppress onlyTargetEligible to avoid misleading insights.
+          const combinedEligibleLines = PLANT_ALL_LINES.filter(l => canProduceOnLine(order, l));
+          const combinedOnlyTargetEligible =
+            !wasLockedByPlanned &&
+            combinedEligibleLines.length === 1 &&
+            combinedEligibleLines[0] === destinationLine;
+
+          placementLog.push({
+            type: "combined",
+            eligibleLines: combinedEligibleLines,
+            onlyTargetEligible: combinedOnlyTargetEligible,
+            product: order.item_description || order.material_code,
+            materialCode: order.material_code_fg || order.material_code,
+            ordersCount: allSubOrders.length,
+            fromLines,
+            toLine: destinationLine,
+            totalVolume: finalCombinedVolume,
+            wasLockedByPlanned,
+            individualVolumes: allSubOrders.map(s => ({
+              id: s.order.id,
+              name: s.order.item_description,
+              volume: s.volume,
+              fromLine: s.line,
+              fpr: s.order.fpr,
+            })),
+            lineScores: enrichedScores,
+            bestLineReason: bestScore ? {
+              line: destinationLine,
+              feedmill: PLANT_LINE_TO_FM_LABEL[destinationLine] || destinationLine,
+              runRate: bestScore.runRate || 0,
+              queueTime: parseFloat((bestScore.queueTimeBefore || 0).toFixed(2)),
+              totalMTBefore: bestScore.totalMTBefore || 0,
+              totalMTAfter: bestScore.totalMTAfter || 0,
+              queueTimeAfter: parseFloat((bestScore.queueTimeAfter || 0).toFixed(2)),
+            } : {
+              line: destinationLine,
+              feedmill: PLANT_LINE_TO_FM_LABEL[destinationLine] || destinationLine,
+              runRate: getLineRunRate(destinationLine),
+              queueTime: 0,
+              totalMTBefore: 0,
+              totalMTAfter: totalVolume,
+              queueTimeAfter: parseFloat((totalVolume / getLineRunRate(destinationLine)).toFixed(2)),
+            },
+            changeoversSaved,
+            baseChangeover,
+            timeSaved: parseFloat((changeoversSaved * baseChangeover).toFixed(2)),
+            // True pre-combine line loads — used by the AI prompt for accurate "before" reporting.
+            // lineScores.totalMTBefore is computed post-removal (needed for destination selection)
+            // so it shows 0 for combine-in-place. preCombineMTByLine holds the real pre-action state.
+            preCombineMTByLine: preCombineMTSnapshot,
+          });
+
+          continue; // next order
+        }
+
+        // ── No match — evaluate single order placement ──────────────────────
+
+        // If the base order is an existing combined lead with no new combine partners,
+        // remove its children from lineOrdersMap so they don't appear as standalone rows.
+        // Restore _isCombined/_combinedFrom so the After table renders it as a combined group.
+        if (baseIsExistingLead && baseChildren.length > 0) {
+          for (const child of baseChildren) {
+            const childLine = normalizeLine(child.feedmill_line || line);
+            lineOrdersMap[childLine] = (lineOrdersMap[childLine] || []).filter(o => o.id !== child.id);
+            processedIds.add(child.id);
+          }
+          order._isCombined = true;
+          order._combinedFrom = baseChildren.map(c => ({
+            id: c.id,
+            fpr: c.fpr,
+            volume: getOrderVolumeMT(c),
+            total_volume_mt: getOrderVolumeMT(c),
+            volume_override: c.volume_override ?? null,
+            line: normalizeLine(c.feedmill_line || line),
+            item_description: c.item_description,
+            material_code_fg: c.material_code_fg,
+            material_code: c.material_code,
+            form: c.form,
+            category: c.category,
+            fg: c.fg,
+            sfg: c.sfg,
+            production_time: c.production_hours,
+            batch_size: c.batch_size,
+            batches: c.batches,
+            status: c.status,
+            target_avail_date: c.target_avail_date,
+          }));
+        }
+
+        // Planned orders stay on their line — never move them solo
+        if (order._isPlanned) {
+          order._processed = true;
+          processedIds.add(order.id);
+          continue;
+        }
+
+        const currentLine = normalizeLine(order.feedmill_line || order._originalLine);
+        const eligibleLines = PLANT_ALL_LINES.filter(l => canProduceOnLine(order, l));
+
+        if (eligibleLines.length === 0) {
+          order._processed = true;
+          processedIds.add(order.id);
+          continue;
+        }
+
+        // Capture source line state BEFORE removing the order — this is the true "before move" load
+        const sourceRunRate = getLineRunRate(currentLine);
+        const sourceBeforeMT = parseFloat(((lineTotalMT[currentLine] || 0)).toFixed(2));
+        const sourceAfterMT = parseFloat((Math.max(0, sourceBeforeMT - orderVolume)).toFixed(2));
+        const sourceBeforeQueue = calculateQueueTimeHours(sourceBeforeMT, sourceRunRate);
+        const sourceAfterQueue = calculateQueueTimeHours(sourceAfterMT, sourceRunRate);
+
+        // Remove from current line
+        lineTotalMT[currentLine] = (lineTotalMT[currentLine] || 0) - orderVolume;
+        lineOrdersMap[currentLine] = (lineOrdersMap[currentLine] || []).filter(o => o.id !== order.id);
+
+        // Build candidate scores from the post-removal state of each line
+        // (correct for all destination lines; source line not included as its own destination)
+        const singleScores = eligibleLines.map(l => {
+          const curMT = lineTotalMT[l] || 0;
+          const rr = getLineRunRate(l);
+          const ln = parseInt(l.match(/\d+/)?.[0] || "99");
+          return {
+            line: l,
+            feedmill: PLANT_LINE_TO_FM_LABEL[l] || l,
+            runRate: rr,
+            totalMTBefore: parseFloat(curMT.toFixed(1)),
+            queueTimeBefore: rr > 0 ? curMT / rr : Infinity,
+            lineNumber: ln,
+          };
+        });
+        singleScores.sort((a, b) => {
+          const d = a.queueTimeBefore - b.queueTimeBefore;
+          if (Math.abs(d) > 0.001) return d;
+          return a.lineNumber - b.lineNumber;
+        });
+        const bestLine = singleScores[0].line;
+
+        order.feedmill_line = bestLine;
+        order.line = bestLine;
+        order._plantMovement = currentLine === bestLine ? "same" : "new_to_line";
+        order._movedFromLine = currentLine !== bestLine ? currentLine : null;
+        order._processed = true;
+        processedIds.add(order.id);
+
+        lineTotalMT[bestLine] = (lineTotalMT[bestLine] || 0) + orderVolume;
+        if (!lineOrdersMap[bestLine]) lineOrdersMap[bestLine] = [];
+        lineOrdersMap[bestLine].push(order);
+
+        if (bestLine !== currentLine) {
+          const enrichedSingle = singleScores.map(ls => ({
+            ...ls,
+            totalMTAfter: parseFloat((lineTotalMT[ls.line] || 0).toFixed(1)),
+            queueTimeAfter: parseFloat((ls.runRate > 0 ? (lineTotalMT[ls.line] || 0) / ls.runRate : 0).toFixed(2)),
+          }));
+          const movedBest = enrichedSingle.find(ls => ls.line === bestLine) || enrichedSingle[0];
+
+          console.log(`  [Moved] ${order.item_description} (${orderVolume} MT) ${currentLine} → ${bestLine}`);
+
+          console.debug('[Queue Time Calculation]', {
+            sourceLine: currentLine,
+            destinationLine: bestLine,
+            movedOrderId: order.id,
+            movedMT: orderVolume,
+            sourceBeforeMT,
+            sourceAfterMT,
+            destinationBeforeMT: movedBest?.totalMTBefore || 0,
+            destinationAfterMT: movedBest?.totalMTAfter || 0,
+            sourceRunRate,
+            destinationRunRate: getLineRunRate(bestLine),
+            sourceBeforeQueue,
+            sourceAfterQueue,
+            destinationBeforeQueue: parseFloat((movedBest?.queueTimeBefore || 0).toFixed(2)),
+            destinationAfterQueue: parseFloat((movedBest?.queueTimeAfter || 0).toFixed(2)),
+            sourceOrderCount: (lineOrdersMap[currentLine] || []).length,
+            destinationOrderCount: (lineOrdersMap[bestLine] || []).length,
+          });
+
+          const onlyTargetEligible =
+            eligibleLines.length === 1 && eligibleLines[0] === bestLine;
+          const sourceEligible = eligibleLines.includes(currentLine);
+
+          placementLog.push({
+            type: "moved",
+            order: order.item_description || order.material_code,
+            product: order.item_description || order.material_code,
+            volume: orderVolume,
+            fromLine: currentLine,
+            toLine: bestLine,
+            fpr: order.fpr,
+            lineScores: enrichedSingle,
+            eligibleLines,
+            onlyTargetEligible,
+            sourceEligible,
+            bestLineReason: {
+              line: bestLine,
+              feedmill: PLANT_LINE_TO_FM_LABEL[bestLine] || bestLine,
+              runRate: movedBest?.runRate || 0,
+              queueTime: parseFloat((movedBest?.queueTimeBefore || 0).toFixed(2)),
+              totalMTBefore: movedBest?.totalMTBefore || 0,
+              totalMTAfter: movedBest?.totalMTAfter || 0,
+              queueTimeAfter: parseFloat((movedBest?.queueTimeAfter || 0).toFixed(2)),
+            },
+            fromLineReason: {
+              line: currentLine,
+              runRate: sourceRunRate,
+              totalMTBefore: sourceBeforeMT,
+              totalMTAfter: sourceAfterMT,
+              queueTime: sourceBeforeQueue,
+              queueTimeAfter: sourceAfterQueue,
+            },
+          });
+        }
+      }
+    }
+
+    // ── Sort each line's final orders chronologically — ALL orders, no planned-lock ──
+    // Planned orders participate in the same date-based sort; they are NOT pinned to top.
+    // Sort tiers:
+    //   0 — Critical (no avail date, N10D=Critical) — top, by DFL/Inv ratio desc
+    //   1 — Any order with an effective date (hard avail OR inferred) — sorted by date asc
+    //   2 — No date signal at all — bottom
+    // Dates from any source (target_avail_date or N10D inferred) are treated equally —
+    // Apr 19 from N10D always sorts before Apr 20 from hard avail date.
+    const _pcIsRealISO = (v) => !!v && /^\d{4}-\d{2}-\d{2}/.test(v) && !isNaN(Date.parse(v));
+    const plantChronologicalSort = (lineOrders) => {
+      const enriched = lineOrders.map(o => {
+        const inf = inferredTargetMap?.[o.material_code] || inferredTargetMap?.[o.material_code_fg];
+        // Dates from auto-sequence or N10D are re-evaluated from latest N10D data — not hard deadlines
+        const _pcIsN10DSourced = o.avail_date_source === 'auto_sequence' || o.date_source === 'n10d';
+        const isHardDeadline = _pcIsRealISO(o.target_avail_date) && !_pcIsN10DSourced;
+        let sortTier = 2; // no date
+        let effectiveDate = null;
+        let dflToInvRatio = 0;
+        let n10dStatus = inf?.status || null;
+
+        if (inf?.status === 'Critical' && !isHardDeadline) {
+          // Critical with no hard avail date → absolute top
+          sortTier = 0;
+          effectiveDate = null;
+          const dfl = parseFloat(inf.dueForLoading) || 0;
+          const inv = parseFloat(inf.inventory) || 0;
+          dflToInvRatio = inv > 0 ? dfl / inv : Infinity;
+        } else {
+          // All other orders: prefer fresh N10D date; fall back to hard avail date
+          if (inf?.targetDate && _pcIsRealISO(inf.targetDate)) {
+            effectiveDate = new Date(inf.targetDate);
+          } else if (isHardDeadline) {
+            effectiveDate = new Date(o.target_avail_date);
+          }
+          sortTier = effectiveDate ? 1 : 2;
+        }
+
+        return { ...o, _sortTier: sortTier, _effectiveDate: effectiveDate, _n10dStatus: n10dStatus, _dflToInvRatio: dflToInvRatio };
+      });
+
+      enriched.sort((a, b) => {
+        if (a._sortTier !== b._sortTier) return a._sortTier - b._sortTier;
+        // Tier 0 — Critical: highest DFL/Inv ratio first
+        if (a._sortTier === 0) return (b._dflToInvRatio ?? 0) - (a._dflToInvRatio ?? 0);
+        // Tier 1 — all dated orders: strictly chronological regardless of date source
+        if (a._effectiveDate && b._effectiveDate) return a._effectiveDate - b._effectiveDate;
+        if (a._effectiveDate) return -1;
+        if (b._effectiveDate) return 1;
+        return 0;
+      });
+
+      enriched.forEach((o, i) => {
+        o.prio = i + 1;
+        o.priority_seq = i + 1;
+      });
+      return enriched;
+    };
+
+    const sequencedByLine = {};
+    PLANT_ALL_LINES.forEach(line => {
+      sequencedByLine[line] = plantChronologicalSort(lineOrdersMap[line] || []);
+    });
+
+    // ── Greedy conflict resolver + annotation ─────────────────────────────────
+    // 1. Runs cascade simulation on each line's sorted sequence.
+    // 2. When a deadline conflict is found, moves the "blocking" order (no
+    //    deadline or later deadline than the conflicting order) to after the
+    //    conflicting order, then re-simulates — up to 30 passes.
+    // 3. Annotates the final sequence with _simEstCompletion / _scheduleConflict
+    //    so the After table can still warn about genuinely unsolvable conflicts.
+    const _simIsRealISO = (v) => !!v && /^\d{4}-\d{2}-\d{2}/.test(v) && !isNaN(Date.parse(v));
+    // PHT = UTC+8: midnight UTC of a date = 8 AM PHT of that date.
+    const _PHT_MS = 8 * 3600_000;
+    const _toPHTDateStr = (d) => new Date(d.getTime() + _PHT_MS).toISOString().substring(0, 10);
+    const _parseSimDate = (dateStr, timeStr) => {
+      if (!dateStr) return null;
+      const dateOnly = String(dateStr).substring(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(dateOnly)) return null;
+      const tp = String(timeStr || '08:00').match(/(\d+):(\d+)\s*(am|pm)?/i);
+      if (!tp) return null;
+      let h = parseInt(tp[1]), m = parseInt(tp[2]);
+      if (tp[3]?.toLowerCase() === 'pm' && h < 12) h += 12;
+      if (tp[3]?.toLowerCase() === 'am' && h === 12) h = 0;
+      // PHT 8 AM = UTC midnight; PHT h:m = UTC midnight + (h-8)h + m min
+      const base = new Date(`${dateOnly}T00:00:00.000Z`);
+      return new Date(base.getTime() + (h - 8) * 3600_000 + m * 60_000);
+    };
+
+    // PHT 8:00 AM today
+    const _todayPHT = _toPHTDateStr(new Date());
+    const todaySimStart = new Date(`${_todayPHT}T00:00:00.000Z`);
+
+    // Runs a forward simulation on a sequence; returns annotated copy of results.
+    const runLineSim = (seq) => {
+      let rolling = null;
+      return seq.map(order => {
+        if (order.status === 'In Production' || order.status === 'On-going') {
+          if (order.target_completion_date) {
+            const parts = order.target_completion_date.split(' ');
+            const ex = _parseSimDate(parts[0], parts[1]);
+            if (ex) rolling = ex;
+          }
+          return { order, simEnd: rolling, conflict: false };
+        }
+        const ph = calcProductionHours(order) ?? 0;
+        const co = parseFloat(order._changeoverTotal ?? order.changeover_time ?? 0.17);
+        let simStart;
+        if (order.start_date && order.start_time) {
+          simStart = _parseSimDate(order.start_date, order.start_time);
+        } else if (rolling) {
+          simStart = new Date(rolling.getTime() + co * 3600000);
+        } else {
+          simStart = new Date(todaySimStart);
+        }
+        const simEnd = simStart ? new Date(simStart.getTime() + ph * 3600000) : null;
+        let conflict = false;
+        if (simEnd && _simIsRealISO(order.target_avail_date)) {
+          // PHT 23:59:59 = UTC 15:59:59 of the same date (UTC+8 − 8h = UTC, 23:59−8h = 15:59)
+          const dl = new Date(`${String(order.target_avail_date).substring(0, 10)}T15:59:59.999Z`);
+          conflict = simEnd > dl;
+        }
+        if (simEnd) rolling = simEnd;
+        return { order, simEnd, conflict };
+      });
+    };
+
+    // Greedy optimizer: tries to move blocking orders after conflicting ones.
+    const resolveLineConflicts = (lineSeq) => {
+      const isLocked = (o) => o.status === 'In Production' || o.status === 'On-going';
+      const locked = lineSeq.filter(isLocked);
+      let mutable = lineSeq.filter(o => !isLocked(o));
+      const MAX_PASSES = 30;
+
+      for (let pass = 0; pass < MAX_PASSES; pass++) {
+        const simResults = runLineSim([...locked, ...mutable]);
+        // First conflict in the full sequence
+        const firstConflictIdx = simResults.findIndex(r => r.conflict);
+        if (firstConflictIdx === -1) break; // All clear
+
+        const conflictOrder = simResults[firstConflictIdx].order;
+        const conflictDL = new Date(conflictOrder.target_avail_date);
+        conflictDL.setHours(23, 59, 59, 999);
+
+        // Find the conflicting order's position inside mutable
+        const mutIdx = mutable.indexOf(conflictOrder);
+        if (mutIdx <= 0) break; // Nothing before it that we can move
+
+        // Find the closest moveable order before it:
+        // moveable = no deadline OR deadline strictly later than the conflicting order's deadline
+        let moveIdx = -1;
+        for (let j = mutIdx - 1; j >= 0; j--) {
+          const o = mutable[j];
+          if (isLocked(o)) continue;
+          const hasDeadline = _simIsRealISO(o.target_avail_date);
+          if (!hasDeadline) { moveIdx = j; break; }
+          const oDL = new Date(o.target_avail_date);
+          if (oDL > conflictDL) { moveIdx = j; break; }
+        }
+        if (moveIdx === -1) break; // Nothing moveable — genuine capacity issue
+
+        // Move mutable[moveIdx] to just after mutIdx
+        // After splice(moveIdx,1) the array shrinks by 1, so mutIdx becomes mutIdx-1,
+        // and inserting at mutIdx places the element directly after the conflict order.
+        const [moved] = mutable.splice(moveIdx, 1);
+        mutable.splice(mutIdx, 0, moved);
+      }
+
+      return [...locked, ...mutable];
+    };
+
+    // Apply optimizer then annotate the final sequence
+    PLANT_ALL_LINES.forEach(line => {
+      const optimized = resolveLineConflicts(sequencedByLine[line] || []);
+      sequencedByLine[line] = optimized;
+
+      // Annotation pass: mark remaining conflicts (genuinely unsolvable by re-order)
+      const simResults = runLineSim(optimized);
+      simResults.forEach(({ order, simEnd, conflict }) => {
+        order._simEstCompletion = simEnd;
+        order._scheduleConflict = conflict;
+      });
+    });
+
+    // ── Apply preview-style changeovers to both before/after arrays ───────────
+    // originalByLine orders come from enrichedOrders (KB-enriched only, no
+    // _changeoverTotal). sequencedByLine orders also carry no correct sequence-
+    // aware changeover. applyPreviewChangeovers sets _changeoverTotal on each
+    // row based on the actual next-order in that line's sorted list — exactly
+    // matching what PlantLineTab shows in its table rows.
+    PLANT_ALL_LINES.forEach(line => {
+      const before = originalByLine[line];
+      const after = sequencedByLine[line];
+      if (before?.length) applyPreviewChangeovers(before, coRules);
+      if (after?.length)  applyPreviewChangeovers(after, coRules);
+      console.debug('[Preview Changeover Check]', {
+        line,
+        before: (before || []).map(o => ({ orderId: o.id, displayedChangeover: parseFloat(o._changeoverTotal ?? 0) })),
+        beforeTotalChangeover: parseFloat(((before || []).reduce((s, o) => s + (parseFloat(o._changeoverTotal ?? 0) || 0), 0)).toFixed(2)),
+        after: (after || []).map(o => ({ orderId: o.id, displayedChangeover: parseFloat(o._changeoverTotal ?? 0) })),
+        afterTotalChangeover: parseFloat(((after || []).reduce((s, o) => s + (parseFloat(o._changeoverTotal ?? 0) || 0), 0)).toFixed(2)),
+      });
+    });
+
+    // ── Summary stats ──────────────────────────────────────────────────────────
+    const perLineSummary = PLANT_ALL_LINES.map(line => {
+      const before = originalByLine[line] || [];
+      const after = sequencedByLine[line] || [];
+      const beforeMT = calculateEffectiveLineTotalMT(before);
+      const afterMT = calculateEffectiveLineTotalMT(after);
+      const runRate = getLineRunRate(line);
+      const beforeHours = calculateLineHoursBreakdown(before);
+      const afterHours = calculateLineHoursBreakdown(after);
+      const newOrders = after.filter(o => o._plantMovement === "new_to_line").length;
+      const removedOrders = before.filter(o =>
+        !after.some(a => a.id === o.id && !a._isCombined) &&
+        !after.some(a => a._isCombined && a._combinedFrom?.some(c => c.id === o.id))
+      ).length;
+      return {
+        line,
+        feedmill: PLANT_LINE_TO_FM_LABEL[line] || line,
+        runRate,
+        beforeCount: before.length,
+        afterCount: after.length,
+        beforeMT: beforeMT.toFixed(1),
+        afterMT: afterMT.toFixed(1),
+        beforeHours,
+        afterHours,
+        hoursDiff: Number((afterHours.totalHours - beforeHours.totalHours).toFixed(2)),
+        newOrders,
+        removedOrders,
+      };
+    });
+
+    const totalOrdersBefore = PLANT_ALL_LINES.reduce((s, l) => s + (originalByLine[l] || []).length, 0);
+    const totalOrdersAfter = PLANT_ALL_LINES.reduce((s, l) => s + (sequencedByLine[l] || []).length, 0);
+    const ordersCombined = PLANT_ALL_LINES.reduce((s, l) => s + (sequencedByLine[l] || []).filter(o => o._isCombined).length, 0);
+    const ordersMovedBetweenLines = PLANT_ALL_LINES.reduce(
+      (s, l) => s + (sequencedByLine[l] || []).filter(o => o._plantMovement === "new_to_line").length, 0
+    );
+
+    const linesAffectedSet = new Set();
+    placementLog.forEach(entry => {
+      const isCrossLine = entry.type === "combined"
+        ? (entry.fromLines || []).some(l => l !== entry.toLine)
+        : entry.fromLine && entry.fromLine !== entry.toLine;
+      if (isCrossLine) {
+        if (entry.type === "combined") {
+          (entry.fromLines || []).forEach(l => linesAffectedSet.add(l));
+        } else {
+          linesAffectedSet.add(entry.fromLine);
+        }
+        linesAffectedSet.add(entry.toLine);
+      }
+    });
+
+    return {
+      originalByLine,
+      sequencedByLine,
+      placementLog,
+      summaryStats: {
+        totalOrdersBefore,
+        totalOrdersAfter,
+        ordersCombined,
+        ordersMovedBetweenLines,
+        linesAffected: linesAffectedSet.size,
+        perLineSummary,
+      },
+    };
+  };
+
+  // ── Plant Auto-Sequence completion sound ─────────────────────────────────
+  // Uses Web Audio API to synthesize a soft two-tone chime (C5 → E5).
+  // No binary asset required. Fails silently if audio context is unavailable
+  // or if the browser blocks autoplay.
+  const playAutoSequenceCompleteSound = () => {
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const notes = [523.25, 659.25]; // C5 → E5
+      const now = ctx.currentTime;
+      notes.forEach((freq, i) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.type = 'sine';
+        osc.frequency.value = freq;
+        const startAt = now + i * 0.2;
+        const duration = 0.5;
+        gain.gain.setValueAtTime(0, startAt);
+        gain.gain.linearRampToValueAtTime(0.22, startAt + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.001, startAt + duration);
+        osc.start(startAt);
+        osc.stop(startAt + duration);
+      });
+      setTimeout(() => ctx.close().catch(() => {}), 1500);
+    } catch {
+      // fail silently — never break the auto-sequence flow
+    }
+  };
+
+  // Shared helper — same chime used for auto-sequence-complete AND apply-to-schedule success.
+  // Call this at every confirmed-success exit point so the user gets consistent audio feedback.
+  const playSuccessNotificationSound = () => {
+    playAutoSequenceCompleteSound();
+    console.debug('[Apply To Schedule Success Sound]', { applied: true, soundPlayed: true });
+  };
+
+  const handleCancelPlantSeq = () => {
+    plantSeqCancelledRef.current = true;
+    plantSeqAbortRef.current?.abort();
+    setShowProcessingOverlay(false);
+    toast('Auto-sequence cancelled.', { icon: 'ℹ️' });
+  };
+
+  const handlePlantLevelAutoSequence = async () => {
+    const PLANT_EXCLUDED = new Set([
+      "completed", "cancel_po",
+      "in_production", "ongoing_batching", "ongoing_pelleting", "ongoing_bagging",
+    ]);
+    const allActive = enrichedOrders.filter((o) => !PLANT_EXCLUDED.has(o.status) && o.feedmill_line);
+    if (allActive.length < 2) {
+      toast.error("At least 2 active orders across all lines are needed for plant-level auto-sequencing.");
+      return;
+    }
+
+    // Reset cancellation state and assign a unique run ID for this run.
+    // The run ID lets us detect and discard stale async results from a
+    // previously-cancelled run that may still be settling.
+    plantSeqCancelledRef.current = false;
+    plantSeqRunIdRef.current += 1;
+    const runId = plantSeqRunIdRef.current;
+    const abortCtrl = new AbortController();
+    plantSeqAbortRef.current = abortCtrl;
+
+    console.debug('[AutoSequence Run State]', {
+      runId,
+      cancelled: false,
+      abortSignalAborted: abortCtrl.signal.aborted,
+    });
+
+    // Show processing overlay — close modal first if re-analyzing
+    setPlantSeqLoading(false);
+    setPlantSeqOrderCount(allActive.length);
+    setPlantSeqPreloadedAI(null);
+    setPlantSeqPreloadedStrategies(null);
+    setProcessingStats({ processed: 0, total: allActive.length, combined: 0, moved: 0 });
+    setProcessingLabel('Plant-Level Auto-Sequence');
+    setProcessingPhase('scanning');
+    setShowProcessingOverlay(true);
+
+    const delay = (ms) => new Promise((r) => setTimeout(r, ms));
+    const checkCancelled = () => {
+      if (plantSeqCancelledRef.current) throw new Error('AUTO_SEQUENCE_CANCELLED');
+    };
+
+    try {
+      await delay(80); // let overlay mount + paint
+      checkCancelled();
+
+      // ── Phase: scanning ──────────────────────────────────────────────────
+      setProcessingPhase('scanning');
+      await delay(320);
+      checkCancelled();
+
+      // ── Phase: combining ─────────────────────────────────────────────────
+      setProcessingPhase('combining');
+      await delay(180);
+      checkCancelled();
+
+      // ── Phase: calculating ───────────────────────────────────────────────
+      setProcessingPhase('calculating');
+      await delay(120);
+      checkCancelled();
+
+      // ── Phase: placing — run the synchronous algorithm ───────────────────
+      setProcessingPhase('placing');
+      await delay(60);
+      checkCancelled();
+
+      const result = plantLevelCombineAndPlace(enrichedOrders, kbRecords, changeoverRules);
+
+      // ── Enrich After-table with fresh N10D dates ──────────────────────────
+      // plantLevelCombineAndPlace sorts by _effectiveDate (from inferredTargetMap),
+      // but the orders still carry their stale DB target_avail_date strings.
+      // Overwrite target_avail_date / inferred fields so the preview shows the
+      // date the user will actually see written to the DB on approval.
+      const _freshISO = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+      const _todayFreshISO = () => _freshISO(new Date());
+      for (const [line, lineOrders] of Object.entries(result.sequencedByLine || {})) {
+        result.sequencedByLine[line] = lineOrders.map(order => {
+          const inf = inferredTargetMap?.[order.material_code] || inferredTargetMap?.[order.material_code_fg];
+          const isN10DSourced = order.avail_date_source === 'auto_sequence' || order.date_source === 'n10d';
+          if (!inf || !isN10DSourced) return order;
+          if (inf.targetDate && /^\d{4}-\d{2}-\d{2}/.test(inf.targetDate)) {
+            return { ...order, target_avail_date: inf.targetDate, inferred_target_date: inf.targetDate, inferred_target_label: inf.status || null };
+          }
+          if (inf.status === 'Critical') {
+            return { ...order, target_avail_date: _todayFreshISO(), inferred_target_label: 'Critical' };
+          }
+          if (inf.status === 'Sufficient') {
+            return { ...order, target_avail_date: 'stock_sufficient', inferred_target_label: 'Sufficient' };
+          }
+          return order;
+        });
+      }
+
+      // Update live stats from algorithm output
+      const combinedCount = result.summaryStats?.ordersCombined || 0;
+      const movedCount    = result.summaryStats?.ordersMovedBetweenLines || 0;
+      setProcessingStats({ processed: allActive.length, total: allActive.length, combined: combinedCount, moved: movedCount });
+
+      // ── Phase: n10d ──────────────────────────────────────────────────────
+      setProcessingPhase('n10d');
+      await delay(220);
+      checkCancelled();
+
+      // ── Phase: sequencing ────────────────────────────────────────────────
+      setProcessingPhase('sequencing');
+      await delay(220);
+      checkCancelled();
+
+      // ── Phase: changeovers ───────────────────────────────────────────────
+      setProcessingPhase('changeovers');
+      await delay(220);
+      checkCancelled();
+
+      // ── Phase: AI strategy options — insights + strategies run in parallel ─
+      setProcessingPhase('strategies');
+      let explanations = null;
+      let useFallback  = false;
+      let strategies   = null;
+      console.debug('[AI Strategy Generation]', { runId, status: 'starting' });
+      await Promise.allSettled([
+        (async () => {
+          try {
+            const { systemPrompt, userPrompt, precomputedInsights } = buildPlantActionsPrompt(result.placementLog);
+            const response = await callPlantActionsAI(systemPrompt, userPrompt, 1400, abortCtrl.signal);
+            // Discard if this run was cancelled or superseded
+            if (plantSeqCancelledRef.current || runId !== plantSeqRunIdRef.current) return;
+            const parsed   = parsePlantActionsResponse(response, result.placementLog, precomputedInsights);
+            if (Object.keys(parsed).length >= Math.max(1, result.placementLog.length * 0.5)) {
+              explanations = parsed;
+            } else {
+              useFallback = true;
+            }
+          } catch {
+            useFallback = true;
+          }
+        })(),
+        (async () => {
+          try {
+            const strats = await generateSequenceStrategies(result.sequencedByLine, kbRecords, inferredTargetMap, changeoverRules, abortCtrl.signal);
+            console.debug('[AI Strategy Result]', { runId, currentRunId: plantSeqRunIdRef.current, stale: runId !== plantSeqRunIdRef.current });
+            // Discard if this run was cancelled or superseded by a newer run
+            if (!plantSeqCancelledRef.current && runId === plantSeqRunIdRef.current) strategies = strats;
+          } catch (stratErr) {
+            if (stratErr?.name !== 'AbortError') {
+              console.error("[Dashboard] strategy generation failed:", stratErr);
+            }
+          }
+        })(),
+      ]);
+
+      // Final guard: discard everything if cancelled or a newer run has started
+      if (plantSeqCancelledRef.current || runId !== plantSeqRunIdRef.current) return;
+
+      // ── Pre-build per-row insights (part of the strategies phase, not a separate UI step) ──
+      // Runs in parallel for all lines × strategies so the modal opens with
+      // insights already attached.  Uses best-effort (Promise.allSettled inside)
+      // so a single AI failure never prevents the preview from opening.
+      // The progress overlay stays on 'strategies' so the user sees one unified AI step.
+      if (strategies) {
+        await enrichStrategiesWithRowInsights(strategies);
+        // Guard again — user may have cancelled during insight generation.
+        if (plantSeqCancelledRef.current || runId !== plantSeqRunIdRef.current) return;
+      }
+
+      // ── Phase: done ──────────────────────────────────────────────────────
+      setProcessingPhase('done');
+      await delay(500);
+
+      // Commit results only if still not cancelled
+      setPlantSeqSnapshot(result.originalByLine);
+      setPlantSeqResults(result.sequencedByLine);
+      setPlantSeqSummary(result.summaryStats);
+      setPlantSeqLog(result.placementLog);
+      setPlantSeqPreloadedAI({ explanations, useFallback });
+      setPlantSeqPreloadedStrategies(strategies);
+
+      // Close overlay → open modal (or leave modal open if re-analyzing)
+      setShowProcessingOverlay(false);
+      setPlantSeqOpen(true);
+
+      // 🔔 Notify user: auto-sequence completed and preview is ready
+      console.debug('[AutoSequence Completion Sound]', {
+        completed: true,
+        cancelled: plantSeqCancelledRef.current,
+        previewReady: true,
+      });
+      playAutoSequenceCompleteSound();
+      toast.success('Plant-Level Auto-Sequence complete. Preview is ready.');
+
+    } catch (err) {
+      // If the user cancelled (overlay already closed + toast already shown), silently exit
+      if (
+        plantSeqCancelledRef.current ||
+        err?.name === 'AbortError' ||
+        err?.message === 'AUTO_SEQUENCE_CANCELLED'
+      ) {
+        setShowProcessingOverlay(false);
+        return;
+      }
+      console.error("Plant-level auto-sequence error:", err);
+      setShowProcessingOverlay(false);
+      toast.error("Failed to run plant-level auto-sequence. Please try again.");
+    }
+  };
+
+  // ── Shared: apply sequenced results to DB for all three Auto-Sequence flows ──
+  const applySequencedResultsToDB = async (sequencedResults, options = {}) => {
+    const { label = 'Auto-Sequence', inferredTargetMap: itm = {}, strategyNameByLine = {} } = options;
+    const _isOptimizeFlow = /optimization/i.test(label);
+    const _historyEventLabel = _isOptimizeFlow ? 'Optimize order' : 'Auto-sequence';
+    const _historyTs = formatTimestamp();
+
+    const _isRealISO = (v) => !!v && /^\d{4}-\d{2}-\d{2}/.test(v) && !isNaN(Date.parse(v));
+    const _todayISO = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; };
+    const _resolveAvail = (order) => {
+      // AI strategy has explicitly suggested a date for this order.
+      // This is what the preview shows — applying must write the same date.
+      // Checked first, before any hard-date guard, so the AI sequence is honored.
+      if (_isRealISO(order._aiSuggestedDate)) {
+        return String(order._aiSuggestedDate).substring(0, 10);
+      }
+      // For orders whose date was written by a previous auto-sequence run, allow
+      // overwriting with the fresh N10D date from the latest upload.
+      // SAP/manual hard dates are kept intact.
+      const _rvN10DSourced = order.avail_date_source === 'auto_sequence' || order.date_source === 'n10d';
+      if (_isRealISO(order.target_avail_date) && !_rvN10DSourced) return null;
+      if (order._effectiveDate instanceof Date && !isNaN(order._effectiveDate)) {
+        const _ed = order._effectiveDate;
+        return `${_ed.getFullYear()}-${String(_ed.getMonth()+1).padStart(2,'0')}-${String(_ed.getDate()).padStart(2,'0')}`;
+      }
+      const inf = itm?.[order.material_code] || itm?.[order.material_code_fg];
+      if (inf?.targetDate && _isRealISO(inf.targetDate)) return inf.targetDate;
+      if (inf?.status === 'Critical') return _todayISO();
+      return null;
+    };
+
+    // ── Snapshot current DB state ONCE ─────────────────────────────────────────
+    const currentDbOrders = queryClient.getQueryData(['orders']) || [];
+    const dbOrderIds = new Set(currentDbOrders.map(o => String(o.id)));
+
+    console.log(`=== ${label} ===`);
+    console.log(`  DB has ${currentDbOrders.length} orders`);
+
+    const combinedLeadMap = {};   // previewLeadId → real new lead ID
+    const oldLeadsToDelete = new Set(); // lead IDs to delete after all operations
+    const pendingIdMap = {};      // tempId → real DB id (for pending orders)
+
+    // ── Pass 1: Separate regular vs combined orders; assign priority counters ─
+    const regularUpdates = [];   // { id, data } — batched in parallel below
+    const pendingCreates = [];   // { order, data } — created sequentially
+    const combinedGroups = [];   // processed sequentially (create lead → update children)
+
+    for (const [line, lineOrders] of Object.entries(sequencedResults)) {
+      if (!lineOrders || lineOrders.length === 0) continue;
+
+      const inProdCount = currentDbOrders.filter(o =>
+        normalizeLine(o.feedmill_line) === line &&
+        (o.status === 'In Production' || o.status === 'On-going')
+      ).length;
+      let prioCounter = inProdCount + 1;
+
+      for (const order of lineOrders) {
+        if (order.status === 'In Production' || order.status === 'On-going' || order.status === 'completed' || order.status === 'cancel_po') continue;
+        const orderIdStr = String(order.id);
+
+        if (order._isCombined && order._combinedFrom && order._combinedFrom.length > 1) {
+          // Track old lead IDs declared by the preview model
+          if (order._oldLeadIdsToDelete) {
+            order._oldLeadIdsToDelete.forEach(id => oldLeadsToDelete.add(String(id)));
+          }
+          combinedGroups.push({ order, orderIdStr, line, prio: prioCounter });
+          prioCounter++;
+        } else {
+          if (oldLeadsToDelete.has(orderIdStr)) { continue; }
+          if (orderIdStr.startsWith('__combined_')) { continue; }
+
+          if (order._isPending === true) {
+            pendingCreates.push({ order, line, prio: prioCounter });
+          } else if (dbOrderIds.has(orderIdStr)) {
+            const resolvedAvail = _resolveAvail(order);
+            const inf = itm?.[order.material_code] || itm?.[order.material_code_fg];
+            const n10dDateSource = order._isHardDeadline ? 'hard_date' : inf ? 'n10d' : (order.date_source || 'none');
+            const n10dInferredDate = inf?.targetDate || null;
+            const n10dInferredLabel = inf?.status || order._n10dStatus || null;
+
+            // Compute effective (batch-ceiling) volume — mirrors the orange preview display.
+            // volume_override is being cleared, so the ceiling is applied to total_volume_mt.
+            const _rawVol  = parseFloat(order.total_volume_mt ?? 0) || 0;
+            const _batchSz = parseFloat(order.batch_size ?? 0) || 0;
+            const _effVol  = _batchSz > 0 ? Math.ceil(_rawVol / _batchSz) * _batchSz : _rawVol;
+            const _volChanged = Math.abs(_effVol - _rawVol) > 0.001;
+
+            // Recalculate production_hours from effective volume (unless manually pinned).
+            const _ph = (!order.production_hours_manual && order.form !== 'M')
+              ? calcProductionHours({ ...order, volume_override: null, total_volume_mt: _effVol })
+              : null;
+
+            console.debug('[Apply To Schedule Volume Check]', {
+              orderId: order.id,
+              item: order.item_description,
+              originalVolume: _rawVol,
+              previewDisplayedVolume: _effVol,
+              batchSize: _batchSz,
+              batches: _batchSz > 0 ? Math.ceil(_effVol / _batchSz) : null,
+              productionHours: _ph,
+            });
+
+            // Build history entry for Auto-sequence / Optimize order
+            // Use ONLY the persisted DB snapshot for old-state — never preview metadata —
+            // so the history line reflects the real committed transition.
+            const _dbOrder = currentDbOrders.find(o => String(o.id) === orderIdStr);
+            const _oldLine = _dbOrder?.feedmill_line || null;
+            const _oldPrio = _dbOrder?.priority_seq ?? null;
+            const _newLine = line;
+            const _newPrio = prioCounter;
+            const _lineChanged = !!_oldLine && _oldLine !== _newLine;
+            const _prioChanged = _oldPrio != null && _oldPrio !== _newPrio;
+            let _histAction = null;
+            let _histDetails = null;
+            if (_dbOrder && _lineChanged) {
+              // Cross-line: action = "Event: Line X → Line Y", details carry prio + strategy name
+              _histAction = `${_historyEventLabel}: ${_oldLine} → ${_newLine}`;
+              if (_isOptimizeFlow) {
+                _histDetails = `Moved from Prio ${_oldPrio ?? '?'} → ${_newPrio}`;
+              } else {
+                const _stratName = strategyNameByLine[_newLine] || strategyNameByLine[_oldLine] || null;
+                _histDetails = _stratName
+                  ? `${_stratName}. Moved from Prio ${_oldPrio ?? '?'} → ${_newPrio}`
+                  : `Moved from Prio ${_oldPrio ?? '?'} → ${_newPrio}`;
+              }
+            } else if (_dbOrder && !_isOptimizeFlow && _prioChanged) {
+              // Same-line prio change: only for Auto-sequence (Optimize is cross-line only per spec)
+              _histAction = `${_historyEventLabel}: Prio ${_oldPrio} → ${_newPrio}`;
+              const _stratName = strategyNameByLine[_newLine] || null;
+              if (_stratName) _histDetails = _stratName;
+            }
+            let _historyPatch = {};
+            if (_histAction) {
+              const _existingHist = _dbOrder?.history || [];
+              const _entry = { timestamp: _historyTs, action: _histAction };
+              if (_histDetails) _entry.details = _histDetails;
+              const _newHist = [..._existingHist, _entry];
+              _historyPatch = { history: _newHist };
+              console.debug('[Order History Write]', {
+                orderId: order.id,
+                timestamp: _historyTs,
+                action: _histAction,
+                details: _histDetails,
+                eventType: _historyEventLabel,
+              });
+            }
+
+            console.debug('[Apply AI Suggested Dates]', {
+              orderId: order.id,
+              item: order.item_description,
+              originalFutureDispatchDate: order.target_avail_date || null,
+              previewSuggestedDate: order._aiSuggestedDate || null,
+              appliedScheduleDate: resolvedAvail || order.target_avail_date || null,
+            });
+
+            regularUpdates.push({
+              id: order.id,
+              data: {
+                feedmill_line: line,
+                priority_seq: prioCounter,
+                parent_id: null,
+                volume_override: null,
+                original_order_ids: null,
+                status: 'planned',
+                ...(_ph != null ? { production_hours: _ph } : {}),
+                ...(resolvedAvail ? { target_avail_date: resolvedAvail, avail_date_source: 'auto_sequence' } : {}),
+                date_source: n10dDateSource,
+                inferred_target_date: n10dInferredDate,
+                inferred_target_label: n10dInferredLabel,
+                last_n10d_update: inf ? new Date().toISOString() : (order.last_n10d_update || null),
+                has_manual_override: false,
+                manual_edit_date: null,
+                ..._historyPatch,
+              },
+            });
+          } else {
+            console.warn(`    [Skip] ${orderIdStr} not in DB`);
+          }
+          prioCounter++;
+        }
+      }
+    }
+
+    console.log(`  Regular updates: ${regularUpdates.length}, Pending creates: ${pendingCreates.length}, Combined groups: ${combinedGroups.length}`);
+
+    // ── Pass 2: Batch-update all regular orders in parallel (chunks of 15) ──
+    const BATCH = 15;
+    for (let i = 0; i < regularUpdates.length; i += BATCH) {
+      const chunk = regularUpdates.slice(i, i + BATCH);
+      await Promise.all(chunk.map(u =>
+        updateOrderMutation.mutateAsync(u).catch(err =>
+          console.error(`    [Error] Update ${u.id}:`, err?.message || err)
+        )
+      ));
+    }
+
+    // ── Pass 3: Create pending orders ───────────────────────────────────────
+    for (const { order, line, prio } of pendingCreates) {
+      const orderIdStr = String(order.id);
+      const cleanOrder = _cleanPendingForDB({
+        ...order,
+        feedmill_line: line,
+        priority_seq: prio,
+        parent_id: null,
+        volume_override: null,
+        original_order_ids: null,
+        status: 'planned',
+      });
+      try {
+        const created = await createOrderMutation.mutateAsync(cleanOrder);
+        pendingIdMap[orderIdStr] = created.id;
+        console.log(`    [Create pending] ${orderIdStr} → ${created.id}`);
+      } catch (err) {
+        console.error(`    [Error] Create pending ${orderIdStr}:`, err?.message || err);
+      }
+    }
+
+    // ── Pass 4: Process combined groups sequentially ─────────────────────────
+    for (const { order, orderIdStr, line, prio } of combinedGroups) {
+      // Validate + resolve every child entry against the DB
+      const validChildren = [];
+
+      for (const sub of order._combinedFrom) {
+        const subIdStr = String(sub.id);
+
+        // Pending sub — use already-created real ID if available
+        if (sub._isPending === true) {
+          const realId = pendingIdMap[subIdStr];
+          if (realId) {
+            validChildren.push({ ...sub, id: realId });
+          } else {
+            const cleanSub = _cleanPendingForDB({ ...sub, feedmill_line: line, priority_seq: null });
+            try {
+              const created = await createOrderMutation.mutateAsync(cleanSub);
+              pendingIdMap[subIdStr] = created.id;
+              validChildren.push({ ...sub, id: created.id });
+              console.log(`    [Create pending sub] ${subIdStr} → ${created.id}`);
+            } catch (err) {
+              console.error(`    [Skip pending sub] ${subIdStr}:`, err?.message || err);
+            }
+          }
+          continue;
+        }
+
+        // Not in DB — skip
+        if (!dbOrderIds.has(subIdStr)) {
+          console.warn(`    [Invalid child] ${subIdStr} NOT in DB — skipping`);
+          continue;
+        }
+
+        const dbOrder = currentDbOrders.find(o => String(o.id) === subIdStr);
+
+        // Child is itself a generated lead → resolve to its real children
+        if (dbOrder && Array.isArray(dbOrder.original_order_ids) && dbOrder.original_order_ids.length > 0 && !dbOrder.parent_id) {
+          console.warn(`    [Lead detected] ${subIdStr} is a lead — resolving to its children`);
+          const leadChildren = currentDbOrders.filter(o => String(o.parent_id) === subIdStr);
+          if (leadChildren.length > 0) {
+            leadChildren.forEach(child => validChildren.push({
+              id: child.id,
+              fpr: child.fpr,
+              volume: parseFloat(child.volume) || parseFloat(child.total_volume_mt) || 0,
+              total_volume_mt: child.total_volume_mt,
+              item_description: child.item_description,
+              form: child.form,
+              material_code: child.material_code,
+              material_code_fg: child.material_code_fg,
+              material_code_sfg: child.material_code_sfg,
+              batch_size: child.batch_size,
+              target_avail_date: child.target_avail_date,
+              category: child.category,
+              status: child.status,
+              feedmill_line: child.feedmill_line,
+              priority_seq: child.priority_seq,
+            }));
+            oldLeadsToDelete.add(subIdStr);
+          } else {
+            console.warn(`    [Lead no children] ${subIdStr} — treating as regular`);
+            validChildren.push(sub);
+          }
+          continue;
+        }
+
+        // Regular valid child
+        validChildren.push(sub);
+      }
+
+      console.log(`    [Combined] Valid: ${validChildren.length} / ${order._combinedFrom.length}`);
+
+      // Not enough valid children → place individually as Planned
+      if (validChildren.length < 2) {
+        console.warn(`    [Skip combine] Only ${validChildren.length} valid — placing individually`);
+        for (const child of validChildren) {
+          if (!dbOrderIds.has(String(child.id))) continue;
+          try {
+            await updateOrderMutation.mutateAsync({
+              id: child.id,
+              data: { feedmill_line: line, priority_seq: prio, parent_id: null, volume_override: null, original_order_ids: null, status: 'planned' },
+            });
+          } catch (err) {
+            console.error(`    [Error] Standalone ${child.id}:`, err?.message || err);
+          }
+        }
+        continue;
+      }
+
+      // Earliest avail date from valid children — AI-suggested dates take priority,
+      // then fresh N10D dates, then stored dates.
+      const _leadAiDate = _isRealISO(order._aiSuggestedDate) ? String(order._aiSuggestedDate).substring(0, 10) : null;
+      const childDates = validChildren.map(s => {
+        // AI suggested date wins over everything else
+        if (_isRealISO(s._aiSuggestedDate)) return String(s._aiSuggestedDate).substring(0, 10);
+        const _cIsN10D = s.avail_date_source === 'auto_sequence' || s.date_source === 'n10d';
+        if (_isRealISO(s.target_avail_date) && !_cIsN10D) return s.target_avail_date;
+        const inf = itm?.[s.material_code] || itm?.[s.material_code_fg];
+        if (inf?.targetDate && _isRealISO(inf.targetDate)) return inf.targetDate;
+        // Fallback: use stored date even if N10D-sourced (no fresh N10D data available)
+        if (_isRealISO(s.target_avail_date)) return s.target_avail_date;
+        return null;
+      }).filter(Boolean).sort();
+      const earliestDate = _leadAiDate || childDates[0] || (() => {
+        const leadInf = itm?.[order.material_code] || itm?.[order.material_code_fg];
+        return leadInf?.targetDate && _isRealISO(leadInf.targetDate) ? leadInf.targetDate : null;
+      })() || null;
+
+      // Combined volume from valid children
+      const combinedVolume = validChildren.reduce(
+        (sum, s) => sum + (parseFloat(s.volume) || parseFloat(s.total_volume_mt) || 0), 0
+      );
+
+      // Mark overlapping old leads for deletion
+      const validChildIdSet = new Set(validChildren.map(s => String(s.id)));
+      currentDbOrders
+        .filter(o => !o.parent_id && Array.isArray(o.original_order_ids) && o.original_order_ids.length > 0 &&
+          o.original_order_ids.some(id => validChildIdSet.has(String(id))))
+        .forEach(o => oldLeadsToDelete.add(String(o.id)));
+
+      // Create new lead
+      const firstChildDb = currentDbOrders.find(o => String(o.id) === String(validChildren[0].id)) || validChildren[0];
+
+      // Apply batch ceiling so the lead's volume_override matches what the preview showed (orange).
+      // Without this the OrderTable reads volume_override directly (no ceiling) and shows the raw sum.
+      const _combBatchSz = parseFloat(firstChildDb?.batch_size ?? 0) || 0;
+      const adjustedCombinedVolume = (_combBatchSz > 0 && combinedVolume > 0)
+        ? Math.ceil(combinedVolume / _combBatchSz) * _combBatchSz
+        : combinedVolume;
+      const volumeOverride = adjustedCombinedVolume > 0 ? adjustedCombinedVolume : null;
+
+      // Pre-compute production_hours for the lead from the adjusted volume.
+      const _combPh = (firstChildDb?.form !== 'M' && firstChildDb?.run_rate && adjustedCombinedVolume > 0)
+        ? parseFloat((adjustedCombinedVolume / parseFloat(firstChildDb.run_rate)).toFixed(2))
+        : null;
+
+      console.debug('[Apply To Schedule Combined Volume Check]', {
+        childCount: validChildren.length,
+        rawCombinedVolume: combinedVolume,
+        adjustedCombinedVolume,
+        batchSize: _combBatchSz,
+        batches: _combBatchSz > 0 ? Math.ceil(adjustedCombinedVolume / _combBatchSz) : null,
+        productionHours: _combPh,
+      });
+      const validChildIds = validChildren.map(s => s.id);
+
+      let newLeadId;
+      try {
+        const newLead = await createOrderMutation.mutateAsync({
+          fpr: firstChildDb.fpr,
+          feedmill_line: line,
+          priority_seq: prio,
+          material_code: firstChildDb.material_code || firstChildDb.material_code_fg,
+          material_code_fg: firstChildDb.material_code_fg || firstChildDb.material_code,
+          material_code_sfg: firstChildDb.material_code_sfg,
+          fg: firstChildDb.fg,
+          sfg: firstChildDb.sfg,
+          item_description: firstChildDb.item_description,
+          form: firstChildDb.form,
+          batch_size: firstChildDb.batch_size,
+          run_rate: firstChildDb.run_rate,
+          category: firstChildDb.category,
+          color: firstChildDb.color,
+          diameter: firstChildDb.diameter,
+          changeover_time: firstChildDb.changeover_time,
+          target_avail_date: earliestDate,
+          status: 'planned',
+          volume_override: null,
+          total_volume_mt: combinedVolume > 0 ? combinedVolume : null,
+          original_order_ids: validChildIds,
+          parent_id: null,
+          ...(_combPh != null ? { production_hours: _combPh } : {}),
+        });
+        newLeadId = newLead.id;
+        combinedLeadMap[orderIdStr] = newLeadId;
+        console.log(`    [New lead] ${newLeadId} (${validChildIds.length} children, ${adjustedCombinedVolume} MT, raw ${combinedVolume} MT)`);
+      } catch (err) {
+        console.error(`    [Error] Create lead:`, err?.message || err);
+        // Fallback: place children as individual Planned orders
+        for (const child of validChildren) {
+          try {
+            await updateOrderMutation.mutateAsync({
+              id: child.id,
+              data: { feedmill_line: line, priority_seq: prio, parent_id: null, status: 'planned' },
+            });
+          } catch (innerErr) {
+            console.error(`      [Fallback] ${child.id}:`, innerErr?.message || innerErr);
+          }
+        }
+        continue;
+      }
+
+      // Update all valid children in parallel
+      const freshDb = queryClient.getQueryData(['orders']) || currentDbOrders;
+      await Promise.all(validChildren.map(child => {
+        const childDb = freshDb.find(o => String(o.id) === String(child.id));
+        const preCombineStatus = childDb?.status || child.status || 'Plotted';
+        const preCombineLine = childDb?.feedmill_line || child.feedmill_line || line;
+        const preCombinePrio = childDb?.priority_seq ?? null;
+        const preCombineOrigVol = parseFloat(childDb?.total_volume_mt || child.volume || 0) || null;
+        const subResolvedAvail = _resolveAvail(child);
+        return updateOrderMutation.mutateAsync({
+          id: child.id,
+          data: {
+            parent_id: newLeadId,
+            feedmill_line: line,
+            priority_seq: null,
+            volume_override: null,
+            original_order_ids: null,
+            status: 'Combined with other PO',
+            pre_combine_status: preCombineStatus,
+            pre_combine_line: preCombineLine,
+            pre_combine_prio: preCombinePrio,
+            pre_combine_partner_id: null,
+            pre_combine_original_volume: preCombineOrigVol,
+            ...(subResolvedAvail ? { target_avail_date: subResolvedAvail, avail_date_source: 'auto_sequence' } : {}),
+          },
+        }).then(() => console.log(`      [Child] ${child.id} → parent ${newLeadId}`))
+          .catch(err => console.error(`      [Error] Child ${child.id}:`, err?.message || err));
+      }));
+    }
+
+    // ── Delete old leads (after all creates/updates) ────────────────────────
+    console.log(`  [Deleting] ${oldLeadsToDelete.size} old leads`);
+    for (const oldLeadId of oldLeadsToDelete) {
+      try {
+        await Order.delete(oldLeadId);
+        console.log(`    [Deleted] ${oldLeadId}`);
+      } catch (err) {
+        console.warn(`    [Warn] Delete ${oldLeadId}:`, err?.message || err);
+      }
+    }
+
+    // ── Refetch before cascade ──────────────────────────────────────────────
+    await queryClient.invalidateQueries({ queryKey: ['orders'] });
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    // ── Cascade schedule ────────────────────────────────────────────────────
+    for (const [line, lineOrders] of Object.entries(sequencedResults)) {
+      if (!lineOrders || lineOrders.length === 0) continue;
+      const topLevel = lineOrders
+        .filter(o => {
+          if (o.status === 'In Production' || o.status === 'On-going') return false;
+          if (oldLeadsToDelete.has(String(o.id))) return false;
+          if (String(o.id).startsWith('__combined_')) return !!combinedLeadMap[String(o.id)];
+          return true;
+        })
+        .map((o, i) => {
+          const realId = combinedLeadMap[String(o.id)] ||
+            (o._isPending === true ? (pendingIdMap[String(o.id)] || o.id) : o.id);
+          return { ...o, id: realId, priority_seq: i + 1, feedmill_line: line };
+        });
+      console.log(`  [Cascade] ${line}: ${topLevel.length} orders`);
+      try {
+        await cascadeSchedule(topLevel, 0);
+      } catch (stepErr) {
+        console.error(`  [Cascade ERROR] ${line}:`, stepErr);
+      }
+    }
+
+    // ── Final refetch ───────────────────────────────────────────────────────
+    await queryClient.invalidateQueries({ queryKey: ['orders'] });
+
+    const totalOrders = Object.values(sequencedResults).reduce((s, lo) => s + lo.length, 0);
+    const combinedCount = Object.keys(combinedLeadMap).length;
+    const linesUsed = Object.keys(sequencedResults).filter(
+      (l) => (sequencedResults[l] || []).length > 0
+    ).length;
+    return { totalOrders, combinedCount, linesUsed };
+  };
+
+  const handlePlantApply = async (sequencedResults, _originalSnapshot, { strategyNameByLine = {} } = {}) => {
+    // Collect lines that lose orders due to cross-line moves
+    const movedAwayFromLines = new Set();
+    for (const [line, lineOrders] of Object.entries(sequencedResults)) {
+      for (const order of lineOrders || []) {
+        if (order._isCombined && order._combinedFrom) {
+          order._combinedFrom
+            .filter((s) => s.id !== order.id && s.line && normalizeLine(s.line) !== line)
+            .forEach((s) => movedAwayFromLines.add(normalizeLine(s.line)));
+        }
+        if (order._movedFromLine && normalizeLine(order._movedFromLine) !== line) {
+          movedAwayFromLines.add(normalizeLine(order._movedFromLine));
+        }
+      }
+    }
+
+    try {
+      const stats = await applySequencedResultsToDB(sequencedResults, { label: 'Plant-Level Auto-Sequence', inferredTargetMap, strategyNameByLine });
+
+      // Cascade source lines that lost orders — use fresh DB data post-apply
+      const freshOrdersForCascade = queryClient.getQueryData(['orders']) || [];
+      const freshOrderIds = new Set(freshOrdersForCascade.map(o => String(o.id)));
+      for (const srcLine of movedAwayFromLines) {
+        const srcOrders = freshOrdersForCascade
+          .filter((o) => normalizeLine(o.feedmill_line) === srcLine &&
+            freshOrderIds.has(String(o.id)) &&
+            !['completed','cancel_po','in_production','ongoing_batching','ongoing_pelleting','ongoing_bagging'].includes(o.status))
+          .sort((a, b) => (a.priority_seq || 0) - (b.priority_seq || 0));
+        if (srcOrders.length > 0) {
+          try { await cascadeSchedule(srcOrders, 0); }
+          catch (cascErr) { console.warn(`  [Cascade warn] ${srcLine}:`, cascErr?.message || cascErr); }
+        }
+      }
+
+      setPlantSeqOpen(false);
+      setPlantSeqResults({});
+      setPlantSeqSummary(null);
+      setPlantSeqLog([]);
+      setPlantSeqSnapshot({});
+
+      toast.success(
+        `Plant-level sequence applied: ${stats.totalOrders} order groups across ${stats.linesUsed} line${stats.linesUsed !== 1 ? 's' : ''}.` +
+        (stats.combinedCount > 0 ? ` ${stats.combinedCount} combined group${stats.combinedCount !== 1 ? 's' : ''} created.` : '')
+      );
+      playSuccessNotificationSound();
+    } catch (err) {
+      console.error('Plant apply error:', err);
+      toast.error(`Apply failed: ${err.message || 'Unknown error'}`, { duration: 8000 });
+    }
+  };
+  // ─── End Plant-Level Auto-Sequence ─────────────────────────────────────────
+
+  // ─── Feedmill-Level Auto-Sequence ───────────────────────────────────────────
+  const handleFeedmillAutoSequence = async (feedmillKey) => {
+    const fmLines = FEEDMILL_SEQ_LINES[feedmillKey] || [];
+    if (fmLines.length === 0) {
+      toast.error(`No lines configured for ${feedmillKey}.`);
+      return;
+    }
+    const shortName = FM_SHORT_NAMES[feedmillKey] || feedmillKey;
+
+    const EXCLUDED = new Set(["completed", "cancel_po"]);
+    const allActiveOrders = enrichedOrders.filter((o) => !EXCLUDED.has(o.status));
+
+    // Snapshot ALL lines (same as per-line handler)
+    const originalSnapshot = {};
+    PLANT_ALL_LINES.forEach((line) => {
+      originalSnapshot[line] = allActiveOrders
+        .filter((o) => normalizeLine(o.feedmill_line) === line && !o.parent_id)
+        .sort((a, b) => (a.priority_seq || 0) - (b.priority_seq || 0))
+        .map((o) => ({ ...o }));
+    });
+
+    // Build MT totals per line
+    const lineTotalMT = {};
+    PLANT_ALL_LINES.forEach((line) => {
+      lineTotalMT[line] = (originalSnapshot[line] || []).reduce(
+        (s, o) => s + getEffectiveDisplayVolumeMT(o), 0
+      );
+    });
+
+    const normalizedFMLines = fmLines.map((l) => normalizeLine(l));
+
+    // For each feedmill line, find candidates from OTHER (non-feedmill) lines
+    // Mirror of per-line logic but for each target line in the feedmill
+    const allCandidates = [];
+    const seenOrderIds = new Set(); // each order is a candidate for at most one feedmill line
+
+    for (const fmLine of normalizedFMLines) {
+      const fmRR = getLineRunRate(fmLine);
+      const runningFMLineMT = { ...lineTotalMT }; // greedy running totals
+
+      // Gather orders from non-feedmill lines that can produce on this feedmill line
+      const potentials = [];
+      PLANT_ALL_LINES.forEach((srcLine) => {
+        if (normalizedFMLines.includes(srcLine)) return; // skip same feedmill
+        (originalSnapshot[srcLine] || []).forEach((order) => {
+          if (seenOrderIds.has(order.id)) return; // already assigned to another FM line
+          if (!plantCanProduceOnLine(order, fmLine, kbRecords)) return;
+          const orderVolume = getEffectiveDisplayVolumeMT(order);
+          const srcRR = getLineRunRate(srcLine);
+          const srcQueueBefore = srcRR > 0 ? (runningFMLineMT[srcLine] || 0) / srcRR : Infinity;
+          const fmQueueAfter  = fmRR > 0 ? ((runningFMLineMT[fmLine] || 0) + orderVolume) / fmRR : Infinity;
+          const isWorthMoving = fmQueueAfter < srcQueueBefore;
+          potentials.push({
+            ...order,
+            _targetLine: fmLine,
+            _sourceLineNormalized: srcLine,
+            _sourceLine: srcLine,
+            _sourceRunRate: srcRR,
+            _targetRunRate: fmRR,
+            _sourceMTBefore: runningFMLineMT[srcLine] || 0,
+            _sourceMTAfter: Math.max(0, (runningFMLineMT[srcLine] || 0) - orderVolume),
+            _sourceQueueBefore: srcQueueBefore,
+            _sourceQueueAfter: srcRR > 0 ? Math.max(0, (runningFMLineMT[srcLine] || 0) - orderVolume) / srcRR : 0,
+            _targetMTBefore: runningFMLineMT[fmLine] || 0,
+            _targetMTAfter: (runningFMLineMT[fmLine] || 0) + orderVolume,
+            _targetQueueBefore: fmRR > 0 ? (runningFMLineMT[fmLine] || 0) / fmRR : 0,
+            _targetQueueAfter: fmQueueAfter,
+            _queueImprovement: srcQueueBefore - fmQueueAfter,
+            _isWorthMoving: isWorthMoving,
+          });
+        });
+      });
+
+      // Greedy: add worth-moving, best improvement first, updating running totals
+      const worthMoving = potentials
+        .filter((c) => c._isWorthMoving)
+        .sort((a, b) => b._queueImprovement - a._queueImprovement);
+
+      worthMoving.forEach((candidate) => {
+        if (seenOrderIds.has(candidate.id)) return;
+        const orderVolume = parseFloat(candidate.total_volume_mt) || 0;
+        const srcLine = candidate._sourceLineNormalized;
+        const srcQB = getLineRunRate(srcLine) > 0 ? (runningFMLineMT[srcLine] || 0) / getLineRunRate(srcLine) : Infinity;
+        const fmQA = fmRR > 0 ? ((runningFMLineMT[fmLine] || 0) + orderVolume) / fmRR : Infinity;
+        if (fmQA < srcQB) {
+          seenOrderIds.add(candidate.id);
+          allCandidates.push({
+            ...candidate,
+            _sourceMTBefore: runningFMLineMT[srcLine] || 0,
+            _sourceMTAfter: Math.max(0, (runningFMLineMT[srcLine] || 0) - orderVolume),
+            _sourceQueueBefore: srcQB,
+            _sourceQueueAfter: getLineRunRate(srcLine) > 0 ? Math.max(0, (runningFMLineMT[srcLine] || 0) - orderVolume) / getLineRunRate(srcLine) : 0,
+            _targetMTBefore: runningFMLineMT[fmLine] || 0,
+            _targetMTAfter: (runningFMLineMT[fmLine] || 0) + orderVolume,
+            _targetQueueBefore: fmRR > 0 ? (runningFMLineMT[fmLine] || 0) / fmRR : 0,
+            _targetQueueAfter: fmQA,
+            _queueImprovement: srcQB - fmQA,
+          });
+          runningFMLineMT[fmLine] = (runningFMLineMT[fmLine] || 0) + orderVolume;
+          runningFMLineMT[srcLine] = Math.max(0, (runningFMLineMT[srcLine] || 0) - orderVolume);
+        }
+      });
+    }
+
+    // Sort all candidates by improvement
+    allCandidates.sort((a, b) => b._queueImprovement - a._queueImprovement);
+
+    // Open preview modal — no processing overlay needed (same as per-line)
+    setFeedmillSeqData({
+      feedmillKey,
+      feedmillShortName: shortName,
+      feedmillLines: normalizedFMLines,
+      originalSnapshot,
+      selectedToMove: allCandidates,
+      lineTotalMT,
+    });
+    setShowFeedmillSeqPreview(true);
+  };
+
+  const handleFeedmillApply = async ({ feedmillLines, sequencedByLine, affectedSourceLines }) => {
+    try {
+      const label = `${FM_SHORT_NAMES[feedmillSeqData?.feedmillKey] || feedmillSeqData?.feedmillKey || 'Feedmill'} Optimization`;
+      const stats = await applySequencedResultsToDB(sequencedByLine, { label, inferredTargetMap });
+
+      // Cascade source lines that lost orders
+      for (const srcLine of (affectedSourceLines || [])) {
+        const srcOrders = enrichedOrders
+          .filter((o) => normalizeLine(o.feedmill_line) === srcLine &&
+            o.status !== 'completed' && o.status !== 'cancel_po')
+          .sort((a, b) => (a.priority_seq || 0) - (b.priority_seq || 0));
+        if (srcOrders.length > 0) await cascadeSchedule(srcOrders, 0);
+      }
+
+      await queryClient.invalidateQueries({ queryKey: ['orders'] });
+      setShowFeedmillSeqPreview(false);
+      setFeedmillSeqData(null);
+
+      const linesLabel = (feedmillLines || []).map(l => { const m = l.match(/\d+/); return m ? `L${m[0]}` : l; }).join(' & ');
+      const srcCount = (affectedSourceLines || []).length;
+      toast.success(
+        `${getFMFullName(feedmillSeqData?.feedmillKey)} optimization applied: ${stats.totalOrders} order${stats.totalOrders !== 1 ? 's' : ''}.` +
+        (stats.combinedCount > 0 ? ` ${stats.combinedCount} combined.` : '') +
+        (srcCount > 0 ? ` ${srcCount} source line${srcCount !== 1 ? 's' : ''} updated.` : '')
+      );
+      playSuccessNotificationSound();
+    } catch (err) {
+      console.error('Feedmill apply error:', err);
+      toast.error(`Failed to apply: ${err.message || 'Please try again.'}`);
+    }
+  };
+  // ─── End Feedmill-Level Auto-Sequence ───────────────────────────────────────
+
+  // ─── Per-Line Auto-Sequence (cross-line candidate scan) ─────────────────────
+  const handleLineAutoSequence = async () => {
+    const targetLine = normalizeLine(activeSubSection);
+    if (!targetLine || targetLine === "all") {
+      toast.error("Select a specific line tab first.");
+      return;
+    }
+
+    const EXCLUDED = new Set(["completed", "cancel_po"]);
+    const allActiveOrders = enrichedOrders.filter((o) => !EXCLUDED.has(o.status));
+
+    // Open modal immediately in loading state
+    setLineSeqLoading(true);
+    setLineAutoSequenceData(null);
+    setShowLineAutoSequencePreview(true);
+
+    try {
+      await new Promise((r) => setTimeout(r, 40));
+
+      // Snapshot all lines
+      const originalSnapshot = {};
+      PLANT_ALL_LINES.forEach((line) => {
+        originalSnapshot[line] = allActiveOrders
+          .filter((o) => normalizeLine(o.feedmill_line) === line)
+          .filter((o) => !o.parent_id) // top-level only: leads + standalones (same scope as After table)
+          .sort((a, b) => (a.priority_seq || 0) - (b.priority_seq || 0))
+          .map((o) => ({ ...o }));
+      });
+
+      const targetLineOrders = originalSnapshot[targetLine] || [];
+
+      // Build running MT totals per line
+      const lineTotalMT = {};
+      PLANT_ALL_LINES.forEach((line) => {
+        lineTotalMT[line] = (originalSnapshot[line] || []).reduce(
+          (s, o) => s + getEffectiveDisplayVolumeMT(o), 0
+        );
+      });
+
+      const targetRR = getLineRunRate(targetLine);
+
+      // Find all orders from OTHER lines that CAN run on target line
+      const candidates = [];
+      PLANT_ALL_LINES.forEach((line) => {
+        if (line === targetLine) return;
+        const lineOrders = originalSnapshot[line] || [];
+        lineOrders.forEach((order) => {
+          if (!plantCanProduceOnLine(order, targetLine, kbRecords)) return;
+          const orderVolume = getEffectiveDisplayVolumeMT(order);
+          const sourceMTBefore = lineTotalMT[line] || 0;
+          const sourceMTAfter = sourceMTBefore - orderVolume;
+          const sourceRR = getLineRunRate(line);
+          const sourceQueueBefore = sourceRR > 0 ? sourceMTBefore / sourceRR : Infinity;
+          const sourceQueueAfter = sourceRR > 0 ? sourceMTAfter / sourceRR : Infinity;
+          const targetMTBefore = lineTotalMT[targetLine] || 0;
+          const targetMTAfter = targetMTBefore + orderVolume;
+          const targetQueueBefore = targetRR > 0 ? targetMTBefore / targetRR : Infinity;
+          const targetQueueAfter = targetRR > 0 ? targetMTAfter / targetRR : Infinity;
+
+          const isWorthMoving = targetQueueAfter < sourceQueueBefore;
+          candidates.push({
+            ...order,
+            _sourceLineNormalized: line,
+            _sourceLine: line,
+            _sourceRunRate: sourceRR,
+            _targetRunRate: targetRR,
+            _sourceMTBefore: sourceMTBefore,
+            _sourceMTAfter: sourceMTAfter,
+            _sourceQueueBefore: sourceQueueBefore,
+            _sourceQueueAfter: sourceQueueAfter,
+            _targetMTBefore: targetMTBefore,
+            _targetMTAfter: targetMTAfter,
+            _targetQueueBefore: targetQueueBefore,
+            _targetQueueAfter: targetQueueAfter,
+            _queueImprovement: sourceQueueBefore - targetQueueAfter,
+            _isWorthMoving: isWorthMoving,
+          });
+        });
+      });
+
+      // Greedy: select worth-moving, best improvement first
+      const worthMoving = candidates
+        .filter((o) => o._isWorthMoving)
+        .sort((a, b) => b._queueImprovement - a._queueImprovement);
+
+      const selectedToMove = [];
+      let runningTargetMT = lineTotalMT[targetLine] || 0;
+      const runningSourceMT = { ...lineTotalMT };
+
+      worthMoving.forEach((candidate) => {
+        const orderVolume = parseFloat(candidate.total_volume_mt) || 0;
+        const sourceLine = candidate._sourceLineNormalized;
+        const sourceQueueBefore = (runningSourceMT[sourceLine] || 0) / getLineRunRate(sourceLine);
+        const targetQueueAfter = (runningTargetMT + orderVolume) / targetRR;
+
+        if (targetQueueAfter < sourceQueueBefore) {
+          selectedToMove.push({
+            ...candidate,
+            _sourceMTBefore: runningSourceMT[sourceLine] || 0,
+            _sourceMTAfter: (runningSourceMT[sourceLine] || 0) - orderVolume,
+            _sourceQueueBefore: sourceQueueBefore,
+            _sourceQueueAfter: ((runningSourceMT[sourceLine] || 0) - orderVolume) / getLineRunRate(sourceLine),
+            _targetMTBefore: runningTargetMT,
+            _targetMTAfter: runningTargetMT + orderVolume,
+            _targetQueueBefore: runningTargetMT / targetRR,
+            _targetQueueAfter: targetQueueAfter,
+          });
+          runningTargetMT += orderVolume;
+          runningSourceMT[sourceLine] = (runningSourceMT[sourceLine] || 0) - orderVolume;
+        }
+      });
+
+      // Build the placement log for AI
+      const placementLog = selectedToMove.map((order) => ({
+        type: "moved",
+        product: order.item_description,
+        materialCode: order.material_code_fg || order.material_code,
+        fromLine: order._sourceLineNormalized,
+        toLine: targetLine,
+        volume: getEffectiveDisplayVolumeMT(order),
+        fpr: order.fpr,
+        lineScores: [
+          { line: order._sourceLineNormalized, runRate: order._sourceRunRate || 10, totalMTBefore: order._sourceMTBefore || 0, queueTimeBefore: order._sourceQueueBefore || 0, totalMTAfter: order._sourceMTAfter || 0, queueTimeAfter: order._sourceQueueAfter || 0 },
+          { line: targetLine, runRate: order._targetRunRate || 10, totalMTBefore: order._targetMTBefore || 0, queueTimeBefore: order._targetQueueBefore || 0, totalMTAfter: order._targetMTAfter || 0, queueTimeAfter: order._targetQueueAfter || 0 },
+        ],
+        bestLineReason: { line: targetLine, runRate: order._targetRunRate || 10, queueTime: order._targetQueueBefore || 0, totalMTBefore: order._targetMTBefore || 0, totalMTAfter: order._targetMTAfter || 0, queueTimeAfter: order._targetQueueAfter || 0 },
+        fromLineReason: { line: order._sourceLineNormalized, queueTime: order._sourceQueueBefore || 0, runRate: order._sourceRunRate || 10 },
+      }));
+
+      // Pre-load AI
+      let preloadedAI = null;
+      if (placementLog.length > 0) {
+        try {
+          const { systemPrompt, userPrompt, precomputedInsights } = buildPlantActionsPrompt(placementLog);
+          const response = await callPlantActionsAI(systemPrompt, userPrompt, 1400);
+          const parsed = parsePlantActionsResponse(response, placementLog, precomputedInsights);
+          if (Object.keys(parsed).length >= Math.max(1, placementLog.length * 0.5)) {
+            preloadedAI = { explanations: parsed, useFallback: false };
+          } else {
+            preloadedAI = { explanations: null, useFallback: true };
+          }
+        } catch {
+          preloadedAI = { explanations: null, useFallback: true };
+        }
+      }
+
+      setLineAutoSequenceData({
+        targetLine,
+        targetLineLabel: targetLine,
+        originalSnapshot,
+        targetLineOrders,
+        selectedToMove,
+        lineTotalMT: { ...lineTotalMT },
+        placementLog,
+        preloadedAI,
+      });
+    } catch (err) {
+      console.error("Line auto-sequence error:", err);
+      toast.error("Failed to run optimization. Please try again.");
+      setShowLineAutoSequencePreview(false);
+    } finally {
+      setLineSeqLoading(false);
+    }
+  };
+
+  const handleLineApply = async ({ targetLine, sequencedOrders, affectedSourceLines }) => {
+    try {
+      const stats = await applySequencedResultsToDB(
+        { [targetLine]: sequencedOrders },
+        { label: `Line Optimization (${targetLine})`, inferredTargetMap }
+      );
+
+      // Cascade source lines that lost orders to this line
+      for (const srcLine of (affectedSourceLines || [])) {
+        const srcOrders = enrichedOrders
+          .filter((o) => normalizeLine(o.feedmill_line) === srcLine &&
+            o.status !== 'completed' && o.status !== 'cancel_po')
+          .sort((a, b) => (a.priority_seq || 0) - (b.priority_seq || 0));
+        if (srcOrders.length > 0) await cascadeSchedule(srcOrders, 0);
+      }
+
+      await queryClient.invalidateQueries({ queryKey: ['orders'] });
+      setShowLineAutoSequencePreview(false);
+      setLineAutoSequenceData(null);
+
+      const srcCount = (affectedSourceLines || []).length;
+      toast.success(
+        `${targetLine} optimization applied: ${stats.totalOrders} order${stats.totalOrders !== 1 ? 's' : ''}.` +
+        (stats.combinedCount > 0 ? ` ${stats.combinedCount} combined.` : '') +
+        (srcCount > 0 ? ` ${srcCount} source line${srcCount !== 1 ? 's' : ''} updated.` : '')
+      );
+      playSuccessNotificationSound();
+    } catch (err) {
+      console.error('Line auto-sequence apply error:', err);
+      toast.error(`Failed to apply: ${err.message || 'Please try again.'}`);
+    }
+  };
+  // ─── End Per-Line Auto-Sequence ──────────────────────────────────────────────
+
+  // ─── Upload commit helpers ───────────────────────────────────────────────────
+  // Strip preview-only fields from a pending order before saving to DB
+  const _cleanPendingForDB = (order) => {
+    const clean = { ...order };
+    [
+      "id", "_isPending", "_isNew", "_isNewUpload", "_isCombined", "_combinedFrom", "_combinedFromLines",
+      "_plantMovement", "_movement", "_movementDelta", "_movedFromLine", "_originalLine",
+      "_tmpKey", "_isNewNonDated", "prio",
+    ].forEach((f) => delete clean[f]);
+    return clean;
+  };
+
+  // ─── End Per-Line Auto-Sequence helpers ──────────────────────────────────────
 
   const handleSwitchLine = (targetLine, prefilledData) => {
     setAddOrderOpen(false);
@@ -1685,35 +4289,15 @@ export default function Dashboard() {
       toast.warning(
         `${changedOrders.length} order${changedOrders.length !== 1 ? 's' : ''} have updated target dates`,
         {
-          description: bulletLines + moreText + '\n\nRun Auto-Sequence to apply updated positions.',
+          description: bulletLines + moreText + '\n\nRun Optimize to apply updated positions.',
           duration: 60000,
         }
       );
     }
 
-    // Fix any auto-sequenced orders that still have the old 'stock_sufficient' sentinel
-    // value — write the actual N10D window-end date now that we have real data
-    const stockSentinelOrders = activeOrders.filter(
-      (o) => o.avail_date_source === 'auto_sequence' && o.target_avail_date === 'stock_sufficient',
-    );
-    if (stockSentinelOrders.length > 0) {
-      await Promise.all(
-        stockSentinelOrders.map((o) => {
-          const inf = freshMap[o.material_code];
-          if (!inf?.targetDate) return Promise.resolve();
-          return updateOrderMutation.mutateAsync({
-            id: o.id,
-            data: {
-              target_avail_date: inf.targetDate,
-              last_target_date: inf.targetDate,
-            },
-          });
-        }),
-      );
-    }
-
     // N10D data saved — inferredTargetMap will update reactively.
-    // Auto-sorting is intentionally disabled here; use Auto-Sequence to sort by target dates.
+    // Avail dates are intentionally NOT updated here; they only change when the
+    // user runs Auto-Sequence and approves the result.
   };
 
   const handleApplySequence = async (proposedSequence) => {
@@ -1822,6 +4406,7 @@ export default function Dashboard() {
     await cascadeSchedule(orderedForCascade, 0);
 
     toast.success("Auto-sequence applied successfully.");
+    playSuccessNotificationSound();
   };
 
   // Handle navigation — now also accepts feedmill
@@ -1835,6 +4420,16 @@ export default function Dashboard() {
 
   // Handle file upload
   const handleUpload = async (file) => {
+    const _UPLOAD_EXCLUDED_STATUSES = new Set([
+      "completed", "cancel_po",
+      "in_production", "ongoing_batching", "ongoing_pelleting", "ongoing_bagging",
+    ]);
+    const _activeBeforeUpload = (enrichedOrders || []).filter(
+      (o) => !_UPLOAD_EXCLUDED_STATUSES.has(o.status) && o.feedmill_line
+    );
+    const _allLinesWereBlank = _activeBeforeUpload.length === 0;
+    const _hasN10D = (activeN10DRecords || []).length > 0;
+
     setIsUploading(true);
     try {
       console.log(
@@ -2038,6 +4633,7 @@ export default function Dashboard() {
               hour12: true,
             });
             merged.cancel_note = `Cancelled: Cancelled from SAP Planned Order — ${uploadDateStr}`;
+            merged.cancelled_at = new Date().toISOString();
             merged.cancelled_date = new Date().toISOString().split("T")[0];
             merged.cancelled_time = `${String(new Date().getHours()).padStart(2, "0")}:${String(new Date().getMinutes()).padStart(2, "0")}`;
             merged.cancel_reason = "SAP Planned Order Cancelled";
@@ -2242,60 +4838,29 @@ export default function Dashboard() {
           }
         });
 
-        // Only save new orders (byLine arrays now contain only new orders after splice)
+        // Save all new orders in a single bulk request
         const ordersToCreate = Object.values(byLine).flat();
-        console.log(
-          "[Upload] Step 5: Saving",
-          ordersToCreate.length,
-          "new orders to database...",
-        );
-        if (ordersToCreate.length > 0)
-          console.log(
-            "[Upload] Sample order to save:",
-            JSON.stringify(ordersToCreate[0]),
-          );
-        await bulkCreateMutation.mutateAsync(ordersToCreate);
-
-        // Re-sequence existing orders displaced by new dated order insertions
-        if (existingReseqUpdates.length > 0) {
-          console.log(
-            "[Upload] Resequencing",
-            existingReseqUpdates.length,
-            "existing orders...",
-          );
-          await Promise.all(
-            existingReseqUpdates.map(({ id, priority_seq }) =>
-              updateOrderMutation.mutateAsync({ id, data: { priority_seq } }),
-            ),
-          );
+        console.log(`[Upload] Step 5: Bulk-saving ${ordersToCreate.length} new orders to DB...`);
+        if (ordersToCreate.length > 0) {
+          await bulkCreateMutation.mutateAsync(ordersToCreate);
         }
+        await queryClient.invalidateQueries({ queryKey: ["orders"] });
 
-        // Persist NEW badge FPRs (non-dated appended orders) to localStorage
+        // Show success toast
         if (newNonDatedBadgeFprs.length > 0) {
-          const existing = JSON.parse(
-            localStorage.getItem("nexfeed_new_non_dated_fprs") || "[]",
-          );
+          const existing = JSON.parse(localStorage.getItem("nexfeed_new_non_dated_fprs") || "[]");
           const updated = [
             ...existing.filter((b) => Date.now() - b.ts < 24 * 60 * 60 * 1000),
             ...newNonDatedBadgeFprs.map((fpr) => ({ fpr, ts: Date.now() })),
           ];
-          localStorage.setItem(
-            "nexfeed_new_non_dated_fprs",
-            JSON.stringify(updated),
-          );
+          localStorage.setItem("nexfeed_new_non_dated_fprs", JSON.stringify(updated));
         }
-
-        console.log("[Upload] Step 6: Success!");
-
-        // Build per-line summary toast
         const statsLines = Object.entries(lineUploadStats);
         if (statsLines.length > 0) {
           const bulletLines = statsLines.map(([line, s]) => {
             const parts = [];
-            if (s.newDated > 0)
-              parts.push(`${s.newDated} dated order${s.newDated !== 1 ? "s" : ""} merged`);
-            if (s.newNonDated > 0)
-              parts.push(`${s.newNonDated} non-dated order${s.newNonDated !== 1 ? "s" : ""} added to bottom`);
+            if (s.newDated > 0) parts.push(`${s.newDated} dated order${s.newDated !== 1 ? "s" : ""} merged`);
+            if (s.newNonDated > 0) parts.push(`${s.newNonDated} non-dated order${s.newNonDated !== 1 ? "s" : ""} added to bottom`);
             if (parts.length === 0) parts.push("no new orders added");
             return { line, text: parts.join(", ") };
           });
@@ -2314,9 +4879,7 @@ export default function Dashboard() {
             ),
           });
         } else {
-          toast.success(
-            `Successfully imported ${ordersToCreate.length} orders`,
-          );
+          toast.success(`Successfully imported ${ordersToCreate.length} order${ordersToCreate.length !== 1 ? "s" : ""}`);
         }
       }
     } catch (error) {
@@ -2775,6 +5338,7 @@ export default function Dashboard() {
   const cascadeSchedule = async (orderedList, startFromIndex = 0) => {
     const updates = [];
     let prevCompletion = null;
+    let prevChangeover = 0; // PREVIOUS order's changeover (used as gap to next order's start)
 
     for (let i = 0; i < orderedList.length; i++) {
       const order = orderedList[i];
@@ -2782,6 +5346,7 @@ export default function Dashboard() {
       if (order.status === "completed" || order.status === "cancel_po") {
         const d = parseCompletionDateStr(order.target_completion_date);
         if (d) prevCompletion = d;
+        prevChangeover = parseFloat(order.changeover_time ?? 0.17);
         continue;
       }
 
@@ -2789,6 +5354,7 @@ export default function Dashboard() {
         const stored = parseCompletionDateStr(order.target_completion_date);
         if (stored) prevCompletion = stored;
         else prevCompletion = null;
+        prevChangeover = parseFloat(order.changeover_time ?? 0.17);
         continue;
       }
 
@@ -2802,6 +5368,7 @@ export default function Dashboard() {
         prevCompletion = parseCompletionDateStr(
           updatedOrder.target_completion_date,
         );
+        prevChangeover = parseFloat(updatedOrder.changeover_time ?? 0.17);
         const changed =
           updatedOrder.production_hours !== order.production_hours;
         if (changed) {
@@ -2815,57 +5382,42 @@ export default function Dashboard() {
 
       let newCompletion = null;
 
-      // Effective start: apply fallback rules
-      // – Date only (no time) → use 8:00 AM for any order
-      // – Time only (no date) → use date from prevCompletion
-      // – First order with no date/time → try avail_date + 08:00 AM
-      let effectiveStartDate =
-        updatedOrder.start_date ||
-        (i === 0 && isAvailDateValidMemo(updatedOrder.target_avail_date)
-          ? updatedOrder.target_avail_date
-          : null);
+      // Effective start:
+      // – First order with manual start_date → use it
+      // – First order with no start_date → today + 08:00 AM
+      // – Subsequent orders → prevCompletion + prevChangeover (previous order's CO)
+      let effectiveStartDate = updatedOrder.start_date;
       let effectiveStartTime = updatedOrder.start_time;
 
       if (effectiveStartDate && !effectiveStartTime) {
-        // Date only → default to 8:00 AM
         effectiveStartTime = "08:00";
-      } else if (!effectiveStartDate && effectiveStartTime && prevCompletion) {
-        // Time only → use previous completion's date
-        const y = prevCompletion.getFullYear();
-        const mo = String(prevCompletion.getMonth() + 1).padStart(2, "0");
-        const dy = String(prevCompletion.getDate()).padStart(2, "0");
-        effectiveStartDate = `${y}-${mo}-${dy}`;
       }
 
       if (effectiveStartDate && effectiveStartTime) {
-        const ph =
-          updatedOrder.production_hours != null
-            ? parseFloat(updatedOrder.production_hours)
-            : 0;
-        newCompletion = calcCompletionDate(
-          effectiveStartDate,
-          effectiveStartTime,
-          ph,
-          0,
-        );
+        // Manual start: completion = start + production hours (no CO in completion)
+        const ph = updatedOrder.production_hours != null
+          ? parseFloat(updatedOrder.production_hours) : 0;
+        newCompletion = calcCompletionDate(effectiveStartDate, effectiveStartTime, ph, 0);
       } else if (prevCompletion) {
-        const ph =
-          updatedOrder.production_hours != null
-            ? parseFloat(updatedOrder.production_hours)
-            : 0;
-        const co =
-          updatedOrder.changeover_time != null
-            ? parseFloat(updatedOrder.changeover_time)
-            : 0.17;
-        newCompletion = new Date(
-          prevCompletion.getTime() + (ph + co) * 3600000,
-        );
+        // Auto-cascade: start = prevCompletion + PREVIOUS order's changeover
+        const ph = updatedOrder.production_hours != null
+          ? parseFloat(updatedOrder.production_hours) : 0;
+        const startMs = prevCompletion.getTime() + prevChangeover * 3600000;
+        newCompletion = new Date(startMs + ph * 3600000);
+      } else if (i === 0) {
+        // First order, no start_date set → anchor to today 08:00
+        const t = new Date();
+        const todayStr = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}`;
+        const ph = updatedOrder.production_hours != null
+          ? parseFloat(updatedOrder.production_hours) : 0;
+        newCompletion = calcCompletionDate(todayStr, "08:00", ph, 0);
       }
 
       const newCompletionStr = newCompletion
         ? formatCompletionDate(newCompletion)
         : null;
       prevCompletion = newCompletion;
+      prevChangeover = parseFloat(updatedOrder.changeover_time ?? 0.17);
 
       const changed =
         updatedOrder.production_hours !== order.production_hours ||
@@ -2904,12 +5456,7 @@ export default function Dashboard() {
       const firstActive = sorted.find(
         (o) => o.status !== "completed" && o.status !== "cancel_po",
       );
-      if (
-        firstActive &&
-        !firstActive.start_date &&
-        isAvailDateValid(firstActive.target_avail_date) &&
-        !firstActive.target_completion_date
-      ) {
+      if (firstActive && !firstActive.target_completion_date) {
         linesToCascade.push(sorted);
       }
     }
@@ -2937,15 +5484,24 @@ export default function Dashboard() {
         JSON.stringify(reordered.map((o, i) => ({ id: o.id, seq: i }))),
       );
     } catch {}
+    const _reorderTs = formatTimestamp();
     await Promise.all(
-      reordered.map((o, i) =>
-        o && o.priority_seq !== i
-          ? updateOrderMutation.mutateAsync({
-              id: o.id,
-              data: { priority_seq: i },
-            })
-          : Promise.resolve(),
-      ),
+      reordered.map((o, i) => {
+        if (!o || o.priority_seq === i) return Promise.resolve();
+        const oldPrio = o.priority_seq;
+        const newPrio = i;
+        const action = `Manually reordered: Prio ${oldPrio ?? '?'} → ${newPrio}`;
+        const newHistory = [...(o.history || []), { timestamp: _reorderTs, action }];
+        console.debug('[Order History Write]', {
+          orderId: o.id,
+          timestamp: _reorderTs,
+          action,
+        });
+        return updateOrderMutation.mutateAsync({
+          id: o.id,
+          data: { priority_seq: newPrio, history: newHistory },
+        });
+      }),
     );
     if (reordered[0]) {
       await cascadeSchedule(reordered, 0);
@@ -3072,9 +5628,73 @@ export default function Dashboard() {
     setFeedmillStatus(prev => ({ ...prev, [fm]: { ...prev[fm], ...updates } }));
   };
 
+  // Per-line shutdown handlers
+  const handleShutdownLine = (line, fm, shutdownData) => {
+    const since = shutdownData.timestamp || new Date().toISOString();
+    setLineShutdowns(prev => ({
+      ...prev,
+      [line]: { isShutdown: true, reason: shutdownData.reason, notes: shutdownData.notes || '', since, feedmill: fm },
+    }));
+    toast.success(`${line} has been shut down. Reason: ${shutdownData.reason}.`);
+  };
+
+  const handleResumeLine = (line, fm) => {
+    setLineShutdowns(prev => {
+      const updated = { ...prev };
+      delete updated[line];
+      // If all lines of this feedmill are now active, also clear feedmill-level status
+      if (fm) {
+        const fmLines = FEEDMILL_LINE_MAP[fm] || [];
+        const stillShutdown = fmLines.filter(l => l !== line && updated[l]?.isShutdown);
+        if (stillShutdown.length === 0) {
+          setFeedmillStatus(fp => ({
+            ...fp,
+            [fm]: { isShutdown: false, shutdownDate: null, reason: '', notes: '', affectedLines: [] },
+          }));
+        }
+      }
+      return updated;
+    });
+    toast.success(`${line} has been resumed.`);
+  };
+
+  const handleResumeFeedmill = (fm) => {
+    const fmLines = FEEDMILL_LINE_MAP[fm] || [];
+    setLineShutdowns(prev => {
+      const updated = { ...prev };
+      fmLines.forEach(l => delete updated[l]);
+      return updated;
+    });
+    setFeedmillStatus(prev => ({
+      ...prev,
+      [fm]: { isShutdown: false, shutdownDate: null, reason: '', notes: '', affectedLines: [] },
+    }));
+    const fmName = { FM1: 'Feedmill 1', FM2: 'Feedmill 2', FM3: 'Feedmill 3', PMX: 'Powermix' }[fm] || fm;
+    toast.success(`${fmName} has been resumed.`);
+  };
+
+  const handleShutdownFeedmill = (fm, lines, shutdownData) => {
+    const since = shutdownData.timestamp || new Date().toISOString();
+    const fmLines = lines || FEEDMILL_LINE_MAP[fm] || [];
+    setLineShutdowns(prev => {
+      const updated = { ...prev };
+      fmLines.forEach(line => {
+        updated[line] = { isShutdown: true, reason: shutdownData.reason, notes: shutdownData.notes || '', since, feedmill: fm, isFeedmillShutdown: true };
+      });
+      return updated;
+    });
+    setFeedmillStatus(prev => ({
+      ...prev,
+      [fm]: { isShutdown: true, shutdownDate: since.slice(0, 10), reason: shutdownData.reason, notes: shutdownData.notes || '', affectedLines: fmLines },
+    }));
+    const fmName = { FM1: 'Feedmill 1', FM2: 'Feedmill 2', FM3: 'Feedmill 3', PMX: 'Powermix' }[fm] || fm;
+    toast.success(`${fmName} has been shut down. All lines marked as shutdown.`);
+  };
+
   const handleDivertOrderConfirm = async (order, selectedLine, calcs, aiText) => {
     const diversionData = {
       originalLine: order.feedmill_line || order.line || '',
+      originalPrio: order.priority_seq ?? null,
       originalFeedmill: Object.entries(feedmillStatus).find(([, s]) => s.isShutdown) ? Object.entries(feedmillStatus).filter(([, s]) => s.isShutdown).map(([fm]) => fm).join(', ') : '',
       currentLine: selectedLine.line,
       divertedAt: new Date().toISOString(),
@@ -3082,9 +5702,46 @@ export default function Dashboard() {
       aiAnalysis: aiText,
       calculatedProductionTime: calcs?.newProductionTime,
     };
+
+    // ── History: Line shutdown vs Feedmill shutdown divert ────────────────────
+    const oldLine = order.feedmill_line || order.line || '';
+    const oldPrio = order.priority_seq ?? null;
+    const newLine = selectedLine.line;
+    // Compute new prio: append to bottom of target line's active queue
+    const targetActiveCount = orders.filter(
+      (o) =>
+        o.feedmill_line === newLine &&
+        o.id !== order.id &&
+        o.status !== 'completed' &&
+        o.status !== 'cancel_po',
+    ).length;
+    const newPrio = targetActiveCount + 1;
+    const isFeedmillShutdown = !!diversionData.originalFeedmill;
+    const eventLabel = isFeedmillShutdown ? 'Feedmill shutdown' : 'Line shutdown';
+    const histAction = `${eventLabel}: ${oldLine} → ${newLine}`;
+    // Pull the actual selected shutdown reason from state
+    const _shutdownReason = isFeedmillShutdown
+      ? (Object.entries(feedmillStatus)
+          .filter(([, s]) => s.isShutdown)
+          .map(([, s]) => s.reason)
+          .find(Boolean) || 'Shutdown')
+      : (lineShutdowns[oldLine]?.reason || 'Shutdown');
+    const histDetails = `${_shutdownReason}. Moved from Prio ${oldPrio ?? '?'} → ${newPrio}`;
+    const histTs = formatTimestamp();
+    const newHistory = [...(order.history || []), { timestamp: histTs, action: histAction, details: histDetails }];
+    console.debug('[Order History Write]', {
+      orderId: order.id,
+      timestamp: histTs,
+      action: histAction,
+      details: histDetails,
+      eventType: eventLabel,
+    });
+
     await handleUpdateOrder(order.id, {
       feedmill_line: selectedLine.line,
+      priority_seq: newPrio,
       diversion_data: diversionData,
+      history: newHistory,
     });
     setDivertDialog(null);
   };
@@ -3096,9 +5753,57 @@ export default function Dashboard() {
       setRevertDialog(null);
       return;
     }
+    // ── Eligibility guard: block revert if original line/feedmill still shutdown ──
+    const _revertCurrentLine = order.feedmill_line || dd.currentLine || '';
+    const _revertOriginalLine = originalLine;
+    const _revertIsFeedmill = !!dd.originalFeedmill;
+    const _origLineStillDown = !!(lineShutdowns[_revertOriginalLine]?.isShutdown);
+    const _origFMKey = _revertIsFeedmill
+      ? (dd.originalFeedmill?.split(',')?.[0]?.trim() || null)
+      : null;
+    const _origFMStillDown = _origFMKey ? !!(feedmillStatus[_origFMKey]?.isShutdown) : false;
+    const _revertBlocked = _origLineStillDown || _origFMStillDown;
+    const _revertCurrentPrio = order.priority_seq ?? null;
+    const _revertOriginalPrio = dd.originalPrio ?? null;
+    const _revertEventLabel = _revertIsFeedmill ? 'Feedmill shutdown' : 'Line shutdown';
+
+    console.debug('[Shutdown Revert Check]', {
+      orderId: order.id,
+      eventType: _revertEventLabel,
+      originalLine: _revertOriginalLine,
+      currentLine: _revertCurrentLine,
+      originalPriority: _revertOriginalPrio,
+      currentPriority: _revertCurrentPrio,
+      originalSourceActive: !_revertBlocked,
+      revertAllowed: !_revertBlocked,
+    });
+
+    if (_revertBlocked) {
+      const _blockMsg = _revertIsFeedmill
+        ? 'Cannot revert order until the feedmill is back in operation.'
+        : 'Cannot revert order while the original line is still in shutdown.';
+      toast.error(_blockMsg);
+      setRevertDialog(null);
+      return;
+    }
+
+    // ── History: revert line/feedmill shutdown ────────────────────────────────
+    const _revertAction = `${_revertEventLabel}: ${_revertCurrentLine} → ${_revertOriginalLine}`;
+    const _revertDetails = `Reverted. Moved from Prio ${_revertCurrentPrio ?? '?'} → ${_revertOriginalPrio ?? '?'}`;
+    const _revertTs = formatTimestamp();
+    const _revertHistory = [...(order.history || []), { timestamp: _revertTs, action: _revertAction, details: _revertDetails }];
+    console.debug('[Order History Write]', {
+      orderId: order.id,
+      timestamp: _revertTs,
+      action: _revertAction,
+      details: _revertDetails,
+      eventType: _revertEventLabel,
+      isRevert: true,
+    });
     await handleUpdateOrder(order.id, {
       feedmill_line: originalLine,
       diversion_data: null,
+      history: _revertHistory,
     });
     setRevertDialog(null);
   };
@@ -3357,10 +6062,12 @@ export default function Dashboard() {
       );
 
       // Determine where the lead lands among top-level orders.
-      // Mirrors the app's standard insertion rule:
+      // Insertion rules (mirrors what the AI is told):
       //   - Dated lead  → insert before the first non-dated order OR the first
       //                    order whose avail date is strictly later.
-      //   - Non-dated   → insert after all dated orders, before other non-dated ones.
+      //   - Non-dated   → insert at the slot of the lowest-priority_seq order in the group
+      //                    (i.e. before the first nonGroupTopLevel order that had a higher
+      //                    priority_seq than the earliest group member).
       let insertIdx;
       if (isValidISODate(leadOrder.target_avail_date)) {
         const leadDate = new Date(leadOrder.target_avail_date);
@@ -3377,14 +6084,16 @@ export default function Dashboard() {
           }
         }
       } else {
-        // No valid date → insert after all dated top-level orders, before other non-dated ones
-        insertIdx = nonGroupTopLevel.length; // default: very end of top-level
+        // Non-dated: combined order takes the slot of the lowest priority_seq group member.
+        const lowestGroupSeq = Math.min(...originalGroup.map((o) => o.priority_seq ?? Infinity));
+        insertIdx = nonGroupTopLevel.length; // default: very end
         for (let j = 0; j < nonGroupTopLevel.length; j++) {
-          if (!isValidISODate(nonGroupTopLevel[j].target_avail_date)) {
-            insertIdx = j; // first non-dated top-level slot → lead goes here
+          if ((nonGroupTopLevel[j].priority_seq ?? Infinity) > lowestGroupSeq) {
+            insertIdx = j;
             break;
           }
         }
+        console.log(`[SmartCombine] Non-dated — lowestGroupSeq=${lowestGroupSeq} → insertIdx ${insertIdx} of ${nonGroupTopLevel.length}`);
       }
 
       // Build lead→children map for OTHER existing groups
@@ -3506,6 +6215,13 @@ export default function Dashboard() {
           onReapplyKB={handleReapplyKB}
           feedmillStatus={feedmillStatus}
           onFeedmillStatusChange={handleFeedmillStatusChange}
+          lineShutdowns={lineShutdowns}
+          onShutdownLine={handleShutdownLine}
+          onResumeLine={handleResumeLine}
+          onResumeFeedmill={handleResumeFeedmill}
+          onShutdownFeedmill={handleShutdownFeedmill}
+          kbRecords={kbRecords}
+          inferredTargetMap={inferredTargetMap}
         />
       );
     }
@@ -3518,12 +6234,12 @@ export default function Dashboard() {
       if (isLoading)
         return (
           <div className="flex items-center justify-center h-64">
-            <Loader2 className="h-8 w-8 animate-spin text-[#fd5108]" />
+            <Loader2 className="h-8 w-8 animate-spin text-[var(--nexfeed-primary)]" />
           </div>
         );
       return (
         <PlannedOrdersContent
-          orders={enrichedOrders}
+          orders={scheduledOrders}
           activeFeedmill={activeFeedmill}
           activeSubSection={activeSubSection}
           onSubSectionChange={(sub) => {
@@ -3541,7 +6257,9 @@ export default function Dashboard() {
           isUploading={isUploading}
           sortConfig={sortConfig}
           onSort={handleSort}
-          onAutoSequence={handleAutoSequence}
+          onAutoSequence={handleLineAutoSequence}
+          onPlantAutoSequence={handlePlantLevelAutoSequence}
+          onFeedmillAutoSequence={handleFeedmillAutoSequence}
           lastUploadDate={lastUploadDate}
           inferredTargetMap={inferredTargetMap}
           lastN10DUploadDate={lastN10DUploadDate}
@@ -3551,6 +6269,7 @@ export default function Dashboard() {
           }}
           onAddOrder={handleOpenAddOrder}
           feedmillStatus={feedmillStatus}
+          lineShutdowns={lineShutdowns}
           kbRecords={kbRecords}
           n10dRecords={activeN10DRecords}
           onDivertOrder={(order) => setDivertDialog({ order })}
@@ -3562,12 +6281,12 @@ export default function Dashboard() {
       if (isLoading)
         return (
           <div className="flex items-center justify-center h-64">
-            <Loader2 className="h-8 w-8 animate-spin text-[#fd5108]" />
+            <Loader2 className="h-8 w-8 animate-spin text-[var(--nexfeed-primary)]" />
           </div>
         );
       return (
         <PlannedOrdersContent
-          orders={enrichedOrders}
+          orders={scheduledOrders}
           activeFeedmill={activeFeedmill}
           activeSubSection={activeSubSection}
           onSubSectionChange={(sub) => {
@@ -3585,7 +6304,9 @@ export default function Dashboard() {
           isUploading={isUploading}
           sortConfig={sortConfig}
           onSort={handleSort}
-          onAutoSequence={handleAutoSequence}
+          onAutoSequence={handleLineAutoSequence}
+          onPlantAutoSequence={handlePlantLevelAutoSequence}
+          onFeedmillAutoSequence={handleFeedmillAutoSequence}
           lastUploadDate={lastUploadDate}
           inferredTargetMap={inferredTargetMap}
           lastN10DUploadDate={lastN10DUploadDate}
@@ -3595,6 +6316,7 @@ export default function Dashboard() {
           }}
           onAddOrder={handleOpenAddOrder}
           feedmillStatus={feedmillStatus}
+          lineShutdowns={lineShutdowns}
           kbRecords={kbRecords}
           n10dRecords={activeN10DRecords}
           onDivertOrder={(order) => setDivertDialog({ order })}
@@ -3618,18 +6340,27 @@ export default function Dashboard() {
           <Next10DaysManager
             onApplied={handleN10DApplied}
             sapOrders={enrichedOrders}
+            onUpdateOrder={(id, data) => updateOrderMutation.mutateAsync({ id, data })}
           />
         );
       }
-      // Order History (default)
-      const completedOrders = enrichedOrders
+      if (activeSubSection === "changeover_rules") {
+        return (
+          <ChangeoverRulesPage
+            key="changeover-rules"
+            onSave={(savedRules) => setChangeoverRules(savedRules)}
+          />
+        );
+      }
+      // Order History (default) — use changeover-enriched orders so CO values are correct
+      const completedOrders = changeoverEnrichedOrders
         .filter((o) => o.status === "completed")
         .sort((a, b) => {
-          const aDate = a.end_date || a.updated_date || "";
-          const bDate = b.end_date || b.updated_date || "";
+          const aDate = a.changeover_frozen_at || a.end_date || a.updated_date || "";
+          const bDate = b.changeover_frozen_at || b.end_date || b.updated_date || "";
           return bDate > aDate ? 1 : bDate < aDate ? -1 : 0;
         });
-      const cancelledOrders = enrichedOrders
+      const cancelledOrders = changeoverEnrichedOrders
         .filter((o) => o.status === "cancel_po")
         .sort((a, b) => {
           const aDate = a.cancelled_date || a.updated_date || "";
@@ -3659,7 +6390,7 @@ export default function Dashboard() {
               onClick={() => setHistoryTab("completed")}
               className={`pb-2 px-1 text-[12px] font-medium transition-colors ${
                 historyTab === "completed"
-                  ? "text-[#fd5108] border-b-2 border-[#fd5108]"
+                  ? "text-[var(--nexfeed-primary)] border-b-2 border-[var(--nexfeed-primary)]"
                   : "text-gray-500 hover:text-gray-700"
               }`}
               data-testid="tab-history-completed"
@@ -3674,7 +6405,7 @@ export default function Dashboard() {
               onClick={() => setHistoryTab("cancelled")}
               className={`pb-2 px-1 text-[12px] font-medium transition-colors ${
                 historyTab === "cancelled"
-                  ? "text-[#fd5108] border-b-2 border-[#fd5108]"
+                  ? "text-[var(--nexfeed-primary)] border-b-2 border-[var(--nexfeed-primary)]"
                   : "text-gray-500 hover:text-gray-700"
               }`}
               data-testid="tab-history-cancelled"
@@ -3704,7 +6435,7 @@ export default function Dashboard() {
                   onClick={() => setHistoryLineFilter(line)}
                   className={`px-3 py-1.5 rounded-full text-[11px] font-medium transition-colors ${
                     isActive
-                      ? "bg-[#fd5108] text-white"
+                      ? "bg-[var(--nexfeed-primary)] text-white"
                       : "bg-gray-100 text-gray-600 hover:bg-gray-200"
                   }`}
                   data-testid={`button-history-filter-${line.replace(/\s/g, "-").toLowerCase()}`}
@@ -3899,7 +6630,7 @@ export default function Dashboard() {
       {dragWarning && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div className="absolute inset-0 bg-black/40" onClick={() => setDragWarning(null)} />
-          <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-md mx-4 p-5 space-y-4">
+          <div className="relative rounded-xl shadow-2xl w-full max-w-md mx-4 p-5 space-y-4" style={{ background: 'var(--color-bg-secondary)' }}>
             <div className="flex items-start gap-3">
               <div className="shrink-0 w-9 h-9 rounded-full bg-amber-100 flex items-center justify-center">
                 <svg className="w-5 h-5 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" /></svg>
@@ -3972,6 +6703,7 @@ export default function Dashboard() {
           allOrders={enrichedOrders}
           kbRecords={kbRecords}
           feedmillStatus={feedmillStatus}
+          lineShutdowns={lineShutdowns}
           onConfirm={handleDivertOrderConfirm}
           onClose={() => setDivertDialog(null)}
         />
@@ -3981,6 +6713,7 @@ export default function Dashboard() {
         <RevertOrderDialog
           order={revertDialog.order}
           feedmillStatus={feedmillStatus}
+          lineShutdowns={lineShutdowns}
           onConfirm={handleRevertOrderConfirm}
           onClose={() => setRevertDialog(null)}
         />
@@ -4052,19 +6785,13 @@ export default function Dashboard() {
         <AlertDialogContent className="max-w-[460px]">
           <AlertDialogHeader>
             <AlertDialogTitle className="text-[16px] font-bold">
-              {inProdOrderingDialog?.newStatus === "in_production"
-                ? "Cannot Set In Production"
-                : "Cannot Set On-going"}
+              Cannot Set On-going
             </AlertDialogTitle>
             <AlertDialogDescription asChild>
               <div className="text-[13px] leading-relaxed text-gray-700">
                 <p>
-                  There are orders at earlier priorities that have not been
-                  produced or completed yet. Consider producing or completing
-                  those orders first before{" "}
-                  {inProdOrderingDialog?.newStatus === "in_production"
-                    ? "starting this one."
-                    : "marking this order as on-going."}
+                  A prior order is not yet being produced. Consider processing
+                  the earlier order first before marking this order as on-going.
                 </p>
                 {inProdOrderingDialog?.blockers?.length > 0 && (
                   <div className="mt-3">
@@ -4087,7 +6814,7 @@ export default function Dashboard() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogAction
-              style={{ background: "#fd5108", color: "#ffffff", border: "none" }}
+              style={{ background: "var(--nexfeed-primary)", color: "#ffffff", border: "none" }}
               className="text-[13px] font-semibold h-9 px-5 hover:opacity-90"
               onClick={() => setInProdOrderingDialog(null)}
             >
@@ -4211,7 +6938,81 @@ export default function Dashboard() {
         feedmillName={FEEDMILL_LABELS[activeFeedmill] || activeFeedmill}
         lineName={activeSubSection === "all" ? "All Lines" : activeSubSection}
         inferredTargetMap={inferredTargetMap}
+        changeoverRules={changeoverRules}
       />
+
+      {showProcessingOverlay && (
+        <AutoSequenceProcessingOverlay
+          currentPhase={processingPhase}
+          processedCount={processingStats.processed}
+          totalCount={processingStats.total}
+          combinedCount={processingStats.combined}
+          movedCount={processingStats.moved}
+          label={processingLabel}
+          onCancel={handleCancelPlantSeq}
+        />
+      )}
+
+      <PlantAutoSequenceModal
+        isOpen={plantSeqOpen}
+        onClose={() => {
+          setPlantSeqOpen(false);
+          setPlantSeqResults({});
+          setPlantSeqSummary(null);
+          setPlantSeqLog([]);
+          setPlantSeqSnapshot({});
+        }}
+        onApply={handlePlantApply}
+        onReanalyze={handlePlantLevelAutoSequence}
+        onResetToOriginal={() => {
+          setPlantSeqResults({ ...plantSeqSnapshot });
+          setPlantSeqSummary(null);
+          setPlantSeqLog([]);
+        }}
+        originalSnapshot={plantSeqSnapshot}
+        sequencedResults={plantSeqResults}
+        summaryStats={plantSeqSummary}
+        placementLog={plantSeqLog}
+        isLoading={plantSeqLoading}
+        totalOrderCount={plantSeqOrderCount}
+        preloadedAI={plantSeqPreloadedAI}
+        preloadedStrategies={plantSeqPreloadedStrategies}
+        changeoverRules={changeoverRules}
+        inferredTargetMap={inferredTargetMap}
+        masterData={kbRecords}
+      />
+
+      {/* Feedmill-level auto-sequence modal */}
+      {showFeedmillSeqPreview && feedmillSeqData && (
+        <FeedmillAutoSequenceModal
+          data={feedmillSeqData}
+          isLoading={false}
+          changeoverRules={changeoverRules}
+          onApply={handleFeedmillApply}
+          onCancel={() => {
+            setShowFeedmillSeqPreview(false);
+            setFeedmillSeqData(null);
+          }}
+        />
+      )}
+
+      {showLineAutoSequencePreview && (
+        <LineAutoSequenceModal
+          data={lineAutoSequenceData}
+          isLoading={lineSeqLoading}
+          inferredTargetMap={inferredTargetMap}
+          changeoverRules={changeoverRules}
+          onApply={async (args) => {
+            await handleLineApply(args);
+          }}
+          onCancel={() => {
+            setShowLineAutoSequencePreview(false);
+            setLineAutoSequenceData(null);
+            setLineSeqLoading(false);
+          }}
+        />
+      )}
+
 
       <AddOrderDialog
         isOpen={addOrderOpen}
@@ -4225,7 +7026,7 @@ export default function Dashboard() {
         prefillData={addOrderPrefill}
       />
 
-      {(activeSection === "orders" || activeSection === "planned") && (
+      {SHOW_SMART_COMBINE_PANEL && (activeSection === "orders" || activeSection === "planned") && (
         <SmartCombinePanel
           orders={enrichedOrders}
           allOrders={enrichedOrders}
@@ -4234,6 +7035,7 @@ export default function Dashboard() {
           kbRecords={kbRecords}
           onCombine={handleSmartCombine}
           newFprValues={newFprValues}
+          inferredTargetMap={inferredTargetMap}
         />
       )}
 

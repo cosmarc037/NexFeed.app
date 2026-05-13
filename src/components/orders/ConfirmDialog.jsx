@@ -31,7 +31,7 @@ export default function ConfirmDialog({
           <AlertDialogCancel onClick={onClose} className="text-[14px] font-semibold h-10 px-5">{cancelText}</AlertDialogCancel>
           <AlertDialogAction 
             onClick={onConfirm}
-            className={`text-[14px] font-semibold h-10 px-5 ${variant === "destructive" ? "bg-red-600 hover:bg-red-700" : "bg-[#fd5108] hover:bg-[#fe7c39]"}`}
+            className={`text-[14px] font-semibold h-10 px-5 ${variant === "destructive" ? "bg-red-600 hover:bg-red-700" : "bg-[var(--nexfeed-primary)] hover:bg-[var(--nexfeed-primary-dark)]"}`}
           >
             {confirmText}
           </AlertDialogAction>

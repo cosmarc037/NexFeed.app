@@ -94,7 +94,7 @@ export default function CancelOrderDialog({ order, open, onClose, onConfirm }) {
                 <span
                   className={
                     grey ? 'text-[#a1a8b3]'
-                    : orange ? 'text-[#fd5108] font-semibold'
+                    : orange ? 'text-[var(--nexfeed-primary)] font-semibold'
                     : bold ? 'font-semibold text-[#1a1a1a]'
                     : 'text-[#1a1a1a]'
                   }

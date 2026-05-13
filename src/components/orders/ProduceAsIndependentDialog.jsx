@@ -67,7 +67,7 @@ export default function ProduceAsIndependentDialog({ isOpen, onClose, order, onC
           <Button
             onClick={handleConfirm}
             disabled={confirmText !== 'Confirm'}
-            className="bg-[#fd5108] hover:bg-[#fe7c39] text-[14px] font-semibold h-10 px-5"
+            className="bg-[var(--nexfeed-primary)] hover:bg-[var(--nexfeed-primary-dark)] text-[14px] font-semibold h-10 px-5"
           >
             Proceed
           </Button>

@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { generateReportInsight } from '@/services/azureAI';
+import { generateReportInsight, generateShutdownAnalysis } from '@/services/azureAI';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
@@ -82,8 +82,19 @@ function getOrderDate(order) {
   return null;
 }
 
+// Mirrors getEffectiveVolume() from OrderTable.jsx so overview totals always
+// match the bold volume displayed in the order table:
+//   1. volume_override (user-set) takes priority
+//   2. ceil(total_volume_mt / batch_size) * batch_size  (app-suggested ceiling)
+//   3. raw total_volume_mt / volume as final fallback
 function getVolume(order) {
-  return parseFloat(order.volume || order.total_volume_mt || 0);
+  if (order.volume_override != null && order.volume_override !== "") {
+    const ov = parseFloat(order.volume_override);
+    if (!isNaN(ov)) return ov;
+  }
+  const raw = parseFloat(order.total_volume_mt || order.volume || 0) || 0;
+  const bs = parseFloat(order.batch_size || 0) || 0;
+  return bs > 0 ? Math.ceil(raw / bs) * bs : raw;
 }
 
 // ─── Rolling 12-month list ────────────────────────────────────────────────────
@@ -120,6 +131,23 @@ function calculateBreakdown(orders, month, year) {
   const CATS = STATUS_SEGMENTS.map(s => s.key);
   const result = {};
 
+  // Helper: build a StackedBar-compatible breakdown object from an order list
+  const buildBreakdown = (orderList) => {
+    const bd = Object.fromEntries(CATS.map(c => [c, 0]));
+    bd.grandTotal = 0;
+    orderList.forEach(o => {
+      const cat = getStatusCategory(o.status);
+      const vol = getVolume(o);
+      bd[cat] += vol;
+      bd.grandTotal += vol;
+    });
+    CATS.forEach(c => {
+      bd[`${c}_pct`] = bd.grandTotal > 0
+        ? Math.round((bd[c] / bd.grandTotal) * 100) : 0;
+    });
+    return bd;
+  };
+
   Object.entries(FEEDMILL_LINES).forEach(([fm, lines]) => {
     // Month-scoped orders — used for bar chart proportions only
     const fmMonthOrders = monthOrders.filter(o => lines.includes(o.feedmill_line || o.line));
@@ -129,43 +157,24 @@ function calculateBreakdown(orders, month, year) {
       lines.includes(o.feedmill_line || o.line) && !isInactiveOrder(o)
     );
 
-    const fmData = Object.fromEntries(CATS.map(c => [c, 0]));
-    fmData.grandTotal = 0; // monthly volume — drives bar % widths
-
-    fmMonthOrders.forEach(o => {
-      const cat = getStatusCategory(o.status);
-      const vol = getVolume(o);
-      fmData[cat] += vol;
-      fmData.grandTotal += vol;
-    });
-    CATS.forEach(c => {
-      fmData[`${c}_pct`] = fmData.grandTotal > 0
-        ? Math.round((fmData[c] / fmData.grandTotal) * 100) : 0;
-    });
+    const fmData = buildBreakdown(fmMonthOrders);
 
     // Active total = all active orders regardless of date
     fmData.total = fmAllActive.reduce((sum, o) => sum + getVolume(o), 0);
+
+    // Fallback breakdown from all-active orders (shown when grandTotal === 0)
+    fmData.activeBreakdown = buildBreakdown(fmAllActive);
 
     const lineBreakdowns = {};
     lines.forEach(line => {
       const lineMonthOrders = fmMonthOrders.filter(o => (o.feedmill_line || o.line) === line);
       const lineAllActive   = fmAllActive.filter(o => (o.feedmill_line || o.line) === line);
 
-      const ld = Object.fromEntries(CATS.map(c => [c, 0]));
-      ld.grandTotal = 0;
-
-      lineMonthOrders.forEach(o => {
-        const cat = getStatusCategory(o.status);
-        const vol = getVolume(o);
-        ld[cat] += vol;
-        ld.grandTotal += vol;
-      });
-      CATS.forEach(c => {
-        ld[`${c}_pct`] = ld.grandTotal > 0
-          ? Math.round((ld[c] / ld.grandTotal) * 100) : 0;
-      });
-
+      const ld = buildBreakdown(lineMonthOrders);
       ld.total = lineAllActive.reduce((sum, o) => sum + getVolume(o), 0);
+
+      // Fallback breakdown from all-active orders (shown when grandTotal === 0)
+      ld.activeBreakdown = buildBreakdown(lineAllActive);
 
       lineBreakdowns[line] = ld;
     });
@@ -248,7 +257,81 @@ function InsightText({ text }) {
   return <>{blocks}</>;
 }
 
-// ─── Shutdown Dialog ──────────────────────────────────────────────────────────
+// ─── Shutdown Dialog helpers ───────────────────────────────────────────────────
+const SD_LINE_RATE_KEYS = {
+  'Line 1': 'line_1_run_rate', 'Line 2': 'line_2_run_rate', 'Line 3': 'line_3_run_rate',
+  'Line 4': 'line_4_run_rate', 'Line 5': 'line_5_run_rate', 'Line 6': 'line_6_run_rate',
+  'Line 7': 'line_7_run_rate',
+};
+const SD_LINE_TO_FM = {};
+Object.entries(FEEDMILL_LINES).forEach(([fm, ls]) => ls.forEach(l => { SD_LINE_TO_FM[l] = fm; }));
+
+function sdFindKb(order, kbRecords) {
+  if (!kbRecords || !kbRecords.length) return null;
+  const code = String(order.material_code_fg || order.material_code || '').trim().replace(/^0+/, '');
+  return kbRecords.find(p => {
+    const kc = String(p.fg_material_code || p.material_code_fg || '').trim().replace(/^0+/, '');
+    return kc && code && kc === code;
+  }) || null;
+}
+
+function ShutdownAnalysisDisplay({ analysis }) {
+  if (!analysis) return null;
+  const lines = analysis.split('\n').filter(l => l.trim());
+  return (
+    <div className="shutdown-analysis-content">
+      {lines.map((line, index) => {
+        const trimmed = line.trim();
+
+        if (trimmed.startsWith('•') || trimmed.startsWith('-')) {
+          const text = trimmed.replace(/^[•\-]\s*/, '');
+          const dashSplit = text.split('—');
+          if (dashSplit.length >= 2) {
+            const productName = dashSplit[0].trim();
+            const details = dashSplit.slice(1).join('—').trim();
+            const dl = details.toLowerCase();
+            let statusClass = '';
+            if (dl.includes('critical')) statusClass = 'shutdown-order-critical';
+            else if (dl.includes('urgent')) statusClass = 'shutdown-order-urgent';
+            else if (dl.includes('monitor')) statusClass = 'shutdown-order-monitor';
+            else if (dl.includes('sufficient')) statusClass = 'shutdown-order-sufficient';
+            return (
+              <div key={index} className={`shutdown-order-card ${statusClass}`}>
+                <div className="shutdown-order-name">{productName}</div>
+                <div className="shutdown-order-details">{details}</div>
+              </div>
+            );
+          }
+          return (
+            <div key={index} className="shutdown-analysis-bullet">
+              <span className="shutdown-bullet-dot">•</span>
+              <span className="shutdown-bullet-text">{text}</span>
+            </div>
+          );
+        }
+
+        const lc = trimmed.toLowerCase();
+        if (lc.startsWith('capacity note') || lc.startsWith('partner line capacity') || lc.startsWith('total impact')) {
+          return (
+            <div key={index} className="shutdown-analysis-note">{trimmed}</div>
+          );
+        }
+
+        if (trimmed.endsWith(':') && trimmed.length < 60) {
+          return (
+            <div key={index} className="shutdown-analysis-subheader">{trimmed}</div>
+          );
+        }
+
+        return (
+          <p key={index} className="shutdown-analysis-paragraph">{trimmed}</p>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── Shutdown Dialog (AI-powered) ─────────────────────────────────────────────
 const SHUTDOWN_REASONS = [
   'Scheduled maintenance',
   'Equipment breakdown',
@@ -261,96 +344,239 @@ const SHUTDOWN_REASONS = [
   'Other',
 ];
 
-const FIELD_LABEL = { display: 'block', fontSize: '11px', fontWeight: 600, color: '#6b7280', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.05em' };
-const FIELD_INPUT = { width: '100%', border: '1px solid #d1d5db', borderRadius: '6px', padding: '8px 12px', fontSize: '12px', color: '#1a1a1a', outline: 'none', boxSizing: 'border-box' };
+const FM_DISPLAY_MAP = { FM1: 'Feedmill 1', FM2: 'Feedmill 2', FM3: 'Feedmill 3', PMX: 'Powermix' };
 
-function ShutdownDialog({ fm, fmStatus, onSave, onClose }) {
+function ShutdownDialogAI({ target, targetType, feedmill, fmLines = [], orders = [], lineShutdowns = {}, kbRecords = [], inferredTargetMap = {}, onConfirm, onClose }) {
   const [reason, setReason] = useState('');
-  const [notes, setNotes] = useState(fmStatus?.notes || '');
-  const [shutdownDate, setShutdownDate] = useState(fmStatus?.shutdownDate || new Date().toISOString().slice(0, 10));
-  const isShutdown = fmStatus?.isShutdown;
-  const isOther = reason === 'Other';
-  const canSubmit = reason !== '' && (!isOther || notes.trim() !== '');
+  const [notes, setNotes] = useState('');
+  const [analysis, setAnalysis] = useState(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(true);
+  const [refreshCount, setRefreshCount] = useState(0);
+
+  const affectedLines = targetType === 'feedmill' ? fmLines : [target];
+  const allShutdownLines = [
+    ...affectedLines,
+    ...Object.entries(lineShutdowns).filter(([, info]) => info.isShutdown).map(([l]) => l),
+  ];
+  const uniqueShutdownLines = [...new Set(allShutdownLines)];
+  const partnerLines = fmLines.filter(l => !affectedLines.includes(l) && !uniqueShutdownLines.includes(l));
+  const allLineKeys = Object.keys(SD_LINE_TO_FM);
+  const outsideAvailableLines = allLineKeys.filter(l => !fmLines.includes(l) && !uniqueShutdownLines.includes(l));
+
+  const affectedOrders = orders.filter(o => {
+    const ol = o.feedmill_line || o.line || '';
+    return affectedLines.includes(ol) && !['done', 'completed', 'cancel_po', 'cancelled'].includes((o.status || '').toLowerCase());
+  });
+  const totalVolume = affectedOrders.reduce((s, o) => s + getVolume(o), 0);
+
+  useEffect(() => {
+    async function runAnalysis() {
+      setIsAnalyzing(true);
+      try {
+        // Build partner line load
+        const partnerLineLoad = {};
+        const partnerLineVolume = {};
+        partnerLines.forEach(pl => {
+          const plOrders = orders.filter(o => (o.feedmill_line || o.line) === pl && !['done', 'completed', 'cancel_po', 'cancelled'].includes((o.status || '').toLowerCase()));
+          partnerLineLoad[pl] = plOrders.length;
+          partnerLineVolume[pl] = plOrders.reduce((s, o) => s + getVolume(o), 0).toFixed(0);
+        });
+
+        // Build outside line load
+        const outsideLineLoad = {};
+        const outsideLineVolume = {};
+        outsideAvailableLines.forEach(ol => {
+          const olOrders = orders.filter(o => (o.feedmill_line || o.line) === ol && !['done', 'completed', 'cancel_po', 'cancelled'].includes((o.status || '').toLowerCase()));
+          outsideLineLoad[ol] = olOrders.length;
+          outsideLineVolume[ol] = olOrders.reduce((s, o) => s + getVolume(o), 0).toFixed(0);
+        });
+
+        // Enrich affected orders
+        const enrichedOrders = affectedOrders.map(o => {
+          const kb = sdFindKb(o, kbRecords);
+          const lineRateMap = {};
+          if (kb) {
+            Object.entries(SD_LINE_RATE_KEYS).forEach(([line, key]) => {
+              lineRateMap[line] = parseFloat(kb[key]) || 0;
+            });
+          }
+          const outsideLines = outsideAvailableLines.filter(l => lineRateMap[l] > 0).map(l => `${l} (rate: ${lineRateMap[l]} MT/hr)`);
+          const canDivertOutside = outsideLines.length > 0;
+          const canDivertWithin = partnerLines.length > 0;
+
+          const inf = inferredTargetMap[o.material_code_fg || o.material_code] || null;
+          const volume = getVolume(o);
+          const runRate = parseFloat(o.run_rate) || (kb ? parseFloat(kb[SD_LINE_RATE_KEYS[o.feedmill_line || o.line]] || 0) : 0);
+          const productionHours = runRate > 0 ? (volume / runRate).toFixed(2) : '0.00';
+
+          return {
+            prio: o.priority_seq || o.prio || '—',
+            name: o.item_description || o.item || '—',
+            fpr: o.fpr || null,
+            volume,
+            form: o.form || '',
+            status: o.status || '',
+            availDate: o.target_avail_date || o.avail_date || null,
+            n10dStatus: inf ? inf.status : null,
+            dfl: inf ? inf.dueForLoading : null,
+            inventory: inf ? inf.inventory : null,
+            runRate,
+            productionHours,
+            canDivertWithin,
+            canDivertOutside,
+            partnerLines,
+            outsideLines,
+          };
+        });
+
+        // Sort: Critical → Urgent → Monitor → Sufficient → null
+        const statusOrder = { Critical: 0, Urgent: 1, Monitor: 2, Sufficient: 3 };
+        enrichedOrders.sort((a, b) => {
+          const ao = statusOrder[a.n10dStatus] ?? 4;
+          const bo = statusOrder[b.n10dStatus] ?? 4;
+          return ao !== bo ? ao - bo : (a.prio || 999) - (b.prio || 999);
+        });
+
+        const totalProductionHours = enrichedOrders.reduce((s, o) => s + (parseFloat(o.productionHours) || 0), 0).toFixed(1);
+
+        const result = await generateShutdownAnalysis({
+          target, feedmill,
+          affectedOrders: enrichedOrders,
+          totalVolume: totalVolume.toFixed(0),
+          totalProductionHours,
+          partnerLines,
+          partnerLineLoad,
+          partnerLineVolume,
+          outsideAvailableLines,
+          outsideLineLoad,
+          outsideLineVolume,
+        });
+        setAnalysis(result.analysis);
+      } catch {
+        setAnalysis('Unable to generate analysis. You can still proceed with the shutdown.');
+      } finally {
+        setIsAnalyzing(false);
+      }
+    }
+    runAnalysis();
+  }, [refreshCount]);
+
+  const canSubmit = reason !== '' && !isAnalyzing;
 
   return createPortal(
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}>
-      <div style={{ background: '#fff', borderRadius: '12px', width: '100%', maxWidth: '440px', padding: '24px 28px', boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }}>
-        {/* Title */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ fontSize: '18px' }}>{isShutdown ? '✅' : '🚫'}</span>
-            <span style={{ fontSize: '16px', fontWeight: 700, color: '#1a1a1a' }}>
-              {isShutdown ? `Resume ${fm}` : `Mark ${fm} Shutdown`}
-            </span>
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 10001, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}>
+      <div style={{ background: 'var(--color-bg-secondary)', borderRadius: '12px', width: '560px', maxWidth: '100%', maxHeight: '85vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 8px 30px rgba(0,0,0,0.22)' }}>
+
+        {/* Header — fixed */}
+        <div style={{ flexShrink: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px', borderBottom: '1px solid var(--color-border)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '16px', fontWeight: 700, color: '#dc2626' }}>
+            <span style={{ fontSize: '20px' }}>⏻</span>
+            <span>Shutdown {target}</span>
           </div>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: '18px', color: '#9ca3af', cursor: 'pointer', lineHeight: 1 }}>✕</button>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: '18px', color: '#9ca3af', cursor: 'pointer' }}>✕</button>
         </div>
 
-        {!isShutdown ? (
-          <>
-            {/* Shutdown Date */}
-            <div style={{ marginBottom: '16px' }}>
-              <label style={FIELD_LABEL}>Shutdown Date</label>
-              <input
-                type="date"
-                value={shutdownDate}
-                onChange={e => setShutdownDate(e.target.value)}
-                style={FIELD_INPUT}
-              />
+        {/* Summary — fixed */}
+        <div style={{ flexShrink: 0, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', padding: '16px 20px', background: 'var(--color-bg-tertiary)', borderBottom: '1px solid var(--color-border)' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+            <span style={{ fontSize: '10px', fontWeight: 600, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.3px' }}>Affected Lines</span>
+            <span style={{ fontSize: '14px', fontWeight: 700, color: '#1a1a1a' }}>{affectedLines.join(', ')}</span>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+            <span style={{ fontSize: '10px', fontWeight: 600, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.3px' }}>Active Orders</span>
+            <span style={{ fontSize: '14px', fontWeight: 700, color: '#1a1a1a' }}>{affectedOrders.length}</span>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+            <span style={{ fontSize: '10px', fontWeight: 600, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.3px' }}>Total Volume</span>
+            <span style={{ fontSize: '14px', fontWeight: 700, color: '#1a1a1a' }}>{totalVolume.toFixed(0)} MT</span>
+          </div>
+          {partnerLines.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+              <span style={{ fontSize: '10px', fontWeight: 600, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.3px' }}>Available Lines</span>
+              <span style={{ fontSize: '14px', fontWeight: 700, color: '#16a34a' }}>{partnerLines.join(', ')}</span>
             </div>
+          )}
+        </div>
 
-            {/* Reason dropdown */}
-            <div style={{ marginBottom: '16px' }}>
-              <label style={FIELD_LABEL}>Reason *</label>
-              <select
-                value={reason}
-                onChange={e => setReason(e.target.value)}
-                style={{ ...FIELD_INPUT, appearance: 'auto', background: '#fff', cursor: 'pointer', color: reason === '' ? '#9ca3af' : '#1a1a1a' }}
-              >
-                <option value="" disabled>Select a reason...</option>
-                {SHUTDOWN_REASONS.map(r => (
-                  <option key={r} value={r}>{r}</option>
-                ))}
-              </select>
-            </div>
-
-            {/* Notes textarea */}
-            <div style={{ marginBottom: '20px' }}>
-              <label style={FIELD_LABEL}>Notes {isOther ? '*' : '(Optional)'}</label>
-              <textarea
-                value={notes}
-                onChange={e => setNotes(e.target.value)}
-                placeholder={isOther ? 'Please specify the reason...' : 'Any additional details...'}
-                style={{ ...FIELD_INPUT, height: '80px', resize: 'vertical', fontFamily: 'inherit' }}
-              />
-            </div>
-
-            {/* Buttons */}
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
-              <button onClick={onClose} style={{ padding: '8px 18px', fontSize: '13px', color: '#374151', background: '#fff', border: '1px solid #d1d5db', borderRadius: '6px', cursor: 'pointer' }}>Cancel</button>
+        {/* AI Analysis — header fixed, body scrollable */}
+        <div style={{ flexShrink: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 20px', background: '#fff7ed', borderBottom: '1px solid #fed7aa', fontSize: '12px', fontWeight: 600, color: '#92400e' }}>
+          <span>✨ Impact Analysis</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {isAnalyzing ? (
+              <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 400, color: '#c2410c' }}>
+                <Loader2 size={11} className="animate-spin" /> Analyzing...
+              </span>
+            ) : (
               <button
-                onClick={() => canSubmit && onSave({ isShutdown: true, shutdownDate, reason, notes })}
-                disabled={!canSubmit}
-                style={{ padding: '8px 18px', fontSize: '13px', fontWeight: 600, color: canSubmit ? '#fff' : '#d1d5db', background: canSubmit ? '#e53935' : '#f3f4f6', border: 'none', borderRadius: '6px', cursor: canSubmit ? 'pointer' : 'not-allowed' }}
-              >Mark Shutdown</button>
-            </div>
-          </>
-        ) : (
-          <>
-            <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '8px', padding: '12px 16px', marginBottom: '20px', fontSize: '12px', color: '#7f1d1d' }}>
-              <div><strong>Date:</strong> {fmStatus.shutdownDate}</div>
-              <div style={{ marginTop: '4px' }}><strong>Reason:</strong> {fmStatus.reason || '—'}</div>
-              {fmStatus.notes && <div style={{ marginTop: '4px' }}><strong>Notes:</strong> {fmStatus.notes}</div>}
-            </div>
-            <p style={{ fontSize: '12px', color: '#4b5563', lineHeight: 1.6, marginBottom: '20px' }}>
-              Resuming <strong>{fm}</strong> will remove the shutdown flag. Orders already diverted will remain on their new lines until manually reverted.
-            </p>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
-              <button onClick={onClose} style={{ padding: '8px 18px', fontSize: '13px', color: '#374151', background: '#fff', border: '1px solid #d1d5db', borderRadius: '6px', cursor: 'pointer' }}>Cancel</button>
-              <button onClick={() => onSave({ isShutdown: false, shutdownDate: null, reason: '', notes: '' })} style={{ padding: '8px 18px', fontSize: '13px', fontWeight: 600, color: '#fff', background: '#16a34a', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>Resume {fm}</button>
-            </div>
-          </>
+                onClick={() => setRefreshCount(c => c + 1)}
+                data-testid="button-refresh-shutdown-analysis"
+                style={{ fontSize: '12px', fontWeight: 400, color: '#92400e', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', padding: '2px 4px', borderRadius: '4px' }}
+                onMouseEnter={e => { e.currentTarget.style.color = '#78350f'; }}
+                onMouseLeave={e => { e.currentTarget.style.color = '#92400e'; }}
+              >
+                ↻ Refresh
+              </button>
+            )}
+          </div>
+        </div>
+        <div className="shutdown-analysis-scroll">
+          {isAnalyzing && !analysis ? (
+            <span style={{ fontSize: '12px', color: '#9ca3af', fontStyle: 'italic' }}>
+              Analyzing impact on orders and identifying diversion opportunities...
+            </span>
+          ) : analysis ? (
+            <ShutdownAnalysisDisplay analysis={analysis} />
+          ) : null}
+        </div>
+
+        {/* No partner lines notice — fixed */}
+        {!isAnalyzing && partnerLines.length === 0 && (
+          <div style={{ flexShrink: 0, padding: '10px 20px', fontSize: '12px', color: '#6b7280', background: 'var(--color-bg-tertiary)', borderBottom: '1px solid var(--color-border)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span>ℹ</span>
+            No other lines available in {FM_DISPLAY_MAP[feedmill] || feedmill} for diversion. Orders will remain on the shutdown line until resumed.
+          </div>
         )}
+
+        {/* Form — fixed */}
+        <div style={{ flexShrink: 0, padding: '16px 20px', borderBottom: '1px solid var(--color-border)' }}>
+          <div style={{ marginBottom: '12px' }}>
+            <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#374151', marginBottom: '6px' }}>
+              Reason for Shutdown <span style={{ color: '#dc2626' }}>*</span>
+            </label>
+            <select
+              value={reason}
+              onChange={e => setReason(e.target.value)}
+              style={{ width: '100%', padding: '8px 12px', fontSize: '13px', border: '1px solid #d1d5db', borderRadius: '6px', outline: 'none', background: 'var(--color-bg-secondary)', boxSizing: 'border-box' }}
+            >
+              <option value="">Select reason...</option>
+              {SHUTDOWN_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#374151', marginBottom: '6px' }}>Notes (optional)</label>
+            <textarea
+              value={notes}
+              onChange={e => setNotes(e.target.value)}
+              placeholder="Add any additional details about this shutdown..."
+              rows={3}
+              style={{ width: '100%', padding: '8px 12px', fontSize: '13px', border: '1px solid #d1d5db', borderRadius: '6px', outline: 'none', resize: 'vertical', fontFamily: 'inherit', boxSizing: 'border-box' }}
+            />
+          </div>
+        </div>
+
+        {/* Footer — fixed */}
+        <div style={{ flexShrink: 0, display: 'flex', justifyContent: 'flex-end', gap: '8px', padding: '14px 20px' }}>
+          <button onClick={onClose} style={{ padding: '8px 20px', fontSize: '13px', fontWeight: 500, color: '#6b7280', background: 'var(--color-bg-secondary)', border: '1px solid #d1d5db', borderRadius: '6px', cursor: 'pointer' }}>
+            Cancel
+          </button>
+          <button
+            onClick={() => canSubmit && onConfirm({ reason, notes, timestamp: new Date().toISOString() })}
+            disabled={!canSubmit}
+            style={{ padding: '8px 20px', fontSize: '13px', fontWeight: 600, color: canSubmit ? '#fff' : '#d1d5db', background: canSubmit ? '#dc2626' : '#f3f4f6', border: 'none', borderRadius: '6px', cursor: canSubmit ? 'pointer' : 'not-allowed' }}
+          >
+            Confirm Shutdown
+          </button>
+        </div>
       </div>
     </div>,
     document.body
@@ -358,51 +584,59 @@ function ShutdownDialog({ fm, fmStatus, onSave, onClose }) {
 }
 
 // ─── FeedmillCard ─────────────────────────────────────────────────────────────
-function FeedmillCard({ fm, lines, data, fmStatus = {}, onStatusChange }) {
+function FeedmillCard({ fm, lines, data, fmStatus = {}, onStatusChange, lineShutdowns = {}, onShutdownLine, onResumeLine, onShutdownFeedmill, onResumeFeedmill, orders = [], kbRecords = [], inferredTargetMap = {} }) {
   const [expanded, setExpanded] = useState(false);
-  const [showShutdownDialog, setShowShutdownDialog] = useState(false);
+  const [activeShutdown, setActiveShutdown] = useState(null); // { target, targetType }
+  const [resumeConfirm, setResumeConfirm] = useState(null); // { type: 'line'|'feedmill', line?, displayName }
   const fmData = data[fm];
   const hasData = fmData && fmData.total > 0;
   const maxCat = hasData ? Math.max(...STATUS_SEGMENTS.map(s => fmData[s.key] || 0)) : 0;
-  const isShutdown = fmStatus.isShutdown;
+  const isFeedmillShutdown = lines.every(l => lineShutdowns[l]?.isShutdown);
 
-  const FM_DISPLAY = { FM1: 'Feedmill 1', FM2: 'Feedmill 2', FM3: 'Feedmill 3', PMX: 'Powermix' };
+  const FM_DISPLAY = FM_DISPLAY_MAP;
 
   return (
     <>
-      <div style={{ background: '#ffffff', border: `1px solid ${isShutdown ? '#fca5a5' : '#e5e7eb'}`, borderRadius: '8px', overflow: 'hidden', boxShadow: isShutdown ? '0 0 0 2px rgba(220,38,38,0.1)' : 'none' }}>
-        {/* Shutdown banner */}
-        {isShutdown && (
+      <div style={{ background: 'var(--color-bg-secondary)', border: `1px solid ${isFeedmillShutdown ? '#fca5a5' : '#e5e7eb'}`, borderRadius: '8px', overflow: 'hidden', boxShadow: isFeedmillShutdown ? '0 0 0 2px rgba(220,38,38,0.1)' : 'none' }}>
+        {/* Feedmill-level shutdown banner */}
+        {isFeedmillShutdown && (
           <div style={{ background: '#fef2f2', borderBottom: '1px solid #fca5a5', padding: '6px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
               <span style={{ fontSize: '11px' }}>⛔</span>
               <span style={{ fontSize: '11px', fontWeight: 600, color: '#b91c1c' }}>SHUTDOWN</span>
-              {fmStatus.shutdownDate && <span style={{ fontSize: '10px', color: '#ef4444' }}>since {fmStatus.shutdownDate}</span>}
+              {lines[0] && lineShutdowns[lines[0]]?.since && (
+                <span style={{ fontSize: '10px', color: '#ef4444' }}>
+                  since {new Date(lineShutdowns[lines[0]].since).toLocaleDateString()}
+                </span>
+              )}
             </div>
             <button
-              onClick={() => setShowShutdownDialog(true)}
+              onClick={() => setResumeConfirm({ type: 'feedmill', displayName: FM_DISPLAY[fm] || fm })}
               style={{ fontSize: '10px', color: '#16a34a', fontWeight: 600, background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '4px', padding: '2px 8px', cursor: 'pointer' }}
-            >Resume</button>
+              data-testid={`button-resume-all-${fm.toLowerCase()}`}
+            >▶ Resume All</button>
           </div>
         )}
+
         <div
-          style={{ background: '#ffffff', padding: '12px 16px', borderBottom: '1px solid #f3f4f6', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', userSelect: 'none' }}
+          style={{ background: 'var(--color-bg-secondary)', padding: '12px 16px', borderBottom: '1px solid #f3f4f6', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', userSelect: 'none' }}
           onClick={() => setExpanded(e => !e)}
           data-testid={`card-fm-${fm.toLowerCase()}`}
         >
-          <span style={{ fontSize: '13px', fontWeight: 700, color: isShutdown ? '#b91c1c' : '#1a1a1a' }}>{FM_DISPLAY[fm] || fm}</span>
+          <span style={{ fontSize: '13px', fontWeight: 700, color: isFeedmillShutdown ? '#b91c1c' : '#1a1a1a' }}>{FM_DISPLAY[fm] || fm}</span>
           <span style={{ fontSize: '10px', color: '#6b7280' }}>{expanded ? '▼' : '▶'}</span>
         </div>
+
         <div style={{ padding: '12px 16px' }}>
           {!hasData ? (
             <>
               <p style={{ fontSize: '11px', color: '#9ca3af', fontStyle: 'italic', textAlign: 'center', padding: '16px 0' }}>
                 No active orders.
               </p>
-              {expanded && !isShutdown && (
+              {expanded && !isFeedmillShutdown && (
                 <div style={{ borderTop: '1px dashed #e5e7eb', marginTop: '4px', paddingTop: '8px', textAlign: 'center' }}>
                   <button
-                    onClick={() => setShowShutdownDialog(true)}
+                    onClick={() => setActiveShutdown({ target: FM_DISPLAY[fm] || fm, targetType: 'feedmill' })}
                     style={{ fontSize: '11px', fontWeight: 500, color: '#e53935', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
                     onMouseEnter={e => { e.currentTarget.style.color = '#c62828'; e.currentTarget.style.textDecoration = 'underline'; }}
                     onMouseLeave={e => { e.currentTarget.style.color = '#e53935'; e.currentTarget.style.textDecoration = 'none'; }}
@@ -416,7 +650,9 @@ function FeedmillCard({ fm, lines, data, fmStatus = {}, onStatusChange }) {
             <>
               {fmData.grandTotal > 0
                 ? <StackedBar data={fmData} height={24} borderRadius={6} />
-                : <div style={{ height: '24px', borderRadius: '6px', backgroundColor: '#e5e7eb', width: '100%' }} title="No orders in selected month — showing all-time active backlog" />
+                : fmData.activeBreakdown?.grandTotal > 0
+                  ? <StackedBar data={fmData.activeBreakdown} height={24} borderRadius={6} />
+                  : <div style={{ height: '24px', borderRadius: '6px', backgroundColor: 'var(--color-border)', width: '100%' }} title="No active orders" />
               }
               <div style={{ fontSize: '11px', fontWeight: 500, marginTop: '6px' }}>
                 <span style={{ color: '#6b7280' }}>{fmData.total.toLocaleString(undefined, { maximumFractionDigits: 1 })} MT total</span>
@@ -428,14 +664,42 @@ function FeedmillCard({ fm, lines, data, fmStatus = {}, onStatusChange }) {
                   <div style={{ borderTop: '1px dashed #e5e7eb', margin: '12px 0' }} />
                   {lines.map(line => {
                     const ld = fmData.lines[line];
+                    const isLineDown = lineShutdowns[line]?.isShutdown;
                     return (
-                      <div key={line} style={{ marginBottom: '10px' }}>
-                        <div style={{ fontSize: '11px', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>{line}</div>
+                      <div key={line} style={{ marginBottom: '12px' }}>
+                        {/* Per-line header with shutdown/resume button */}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <span style={{ fontSize: '11px', fontWeight: 600, color: isLineDown ? '#b91c1c' : '#374151' }}>{line}</span>
+                            {isLineDown && (
+                              <span style={{ fontSize: '9px', fontWeight: 700, color: '#dc2626', background: '#fef2f2', padding: '1px 5px', borderRadius: '3px', letterSpacing: '0.02em' }}>🔴 SHUTDOWN</span>
+                            )}
+                          </div>
+                          {isLineDown ? (
+                            <button
+                              onClick={() => setResumeConfirm({ type: 'line', line, displayName: line })}
+                              style={{ display: 'flex', alignItems: 'center', gap: '3px', background: '#f0fdf4', border: '1px solid #bbf7d0', color: '#16a34a', fontSize: '10px', fontWeight: 600, cursor: 'pointer', padding: '3px 8px', borderRadius: '4px' }}
+                              data-testid={`button-resume-line-${line.replace(' ', '-').toLowerCase()}`}
+                            >▶ Resume</button>
+                          ) : (
+                            <button
+                              onClick={() => setActiveShutdown({ target: line, targetType: 'line' })}
+                              style={{ display: 'flex', alignItems: 'center', gap: '3px', background: 'none', border: 'none', color: '#9ca3af', fontSize: '10px', fontWeight: 500, cursor: 'pointer', padding: '3px 6px', borderRadius: '4px', transition: 'all 0.15s' }}
+                              onMouseEnter={e => { e.currentTarget.style.color = '#dc2626'; e.currentTarget.style.background = '#fef2f2'; }}
+                              onMouseLeave={e => { e.currentTarget.style.color = '#9ca3af'; e.currentTarget.style.background = 'none'; }}
+                              data-testid={`button-shutdown-line-${line.replace(' ', '-').toLowerCase()}`}
+                              title={`Shutdown ${line}`}
+                            >⏻ Shutdown</button>
+                          )}
+                        </div>
+
                         {ld && ld.total > 0 ? (
                           <>
                             {ld.grandTotal > 0
                               ? <StackedBar data={ld} height={20} borderRadius={4} />
-                              : <div style={{ height: '20px', borderRadius: '4px', backgroundColor: '#e5e7eb', width: '100%' }} title="No orders in selected month — showing all-time active backlog" />
+                              : ld.activeBreakdown?.grandTotal > 0
+                                ? <StackedBar data={ld.activeBreakdown} height={20} borderRadius={4} />
+                                : <div style={{ height: '20px', borderRadius: '4px', backgroundColor: isLineDown ? '#fecaca' : 'var(--color-border)', width: '100%' }} title={isLineDown ? 'Line is shutdown' : 'No active orders'} />
                             }
                             <div style={{ fontSize: '11px', fontWeight: 500, marginTop: '4px' }}>
                               <span style={{ color: '#6b7280' }}>{ld.total.toLocaleString(undefined, { maximumFractionDigits: 1 })} MT</span>
@@ -471,20 +735,20 @@ function FeedmillCard({ fm, lines, data, fmStatus = {}, onStatusChange }) {
                       </div>
                     );
                   })}
-                  <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid #e5e7eb', paddingTop: '8px', marginTop: '8px', fontSize: '11px', fontWeight: 700, color: '#1a1a1a' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid var(--color-border)', paddingTop: '8px', marginTop: '8px', fontSize: '11px', fontWeight: 700, color: '#1a1a1a' }}>
                     <span>Total</span>
                     <span>{fmData.total.toLocaleString(undefined, { maximumFractionDigits: 1 })} MT</span>
                   </div>
 
-                  {!isShutdown && (
+                  {!isFeedmillShutdown && (
                     <div style={{ borderTop: '1px dashed #e5e7eb', marginTop: '8px', paddingTop: '8px', textAlign: 'center' }}>
                       <button
-                        onClick={() => setShowShutdownDialog(true)}
+                        onClick={() => setActiveShutdown({ target: FM_DISPLAY[fm] || fm, targetType: 'feedmill' })}
                         style={{ fontSize: '11px', fontWeight: 500, color: '#e53935', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
                         onMouseEnter={e => { e.currentTarget.style.color = '#c62828'; e.currentTarget.style.textDecoration = 'underline'; }}
                         onMouseLeave={e => { e.currentTarget.style.color = '#e53935'; e.currentTarget.style.textDecoration = 'none'; }}
                         data-testid={`button-shutdown-${fm.toLowerCase()}`}
-                      >⏻ Shutdown</button>
+                      >⏻ Shutdown {FM_DISPLAY[fm] || fm}</button>
                     </div>
                   )}
                 </>
@@ -493,16 +757,81 @@ function FeedmillCard({ fm, lines, data, fmStatus = {}, onStatusChange }) {
           )}
         </div>
       </div>
-      {showShutdownDialog && (
-        <ShutdownDialog
-          fm={FM_DISPLAY[fm] || fm}
-          fmStatus={fmStatus}
-          onSave={(updates) => {
-            onStatusChange && onStatusChange(fm, updates);
-            setShowShutdownDialog(false);
+
+      {/* AI Shutdown Dialog */}
+      {activeShutdown && (
+        <ShutdownDialogAI
+          target={activeShutdown.target}
+          targetType={activeShutdown.targetType}
+          feedmill={fm}
+          fmLines={lines}
+          orders={orders}
+          lineShutdowns={lineShutdowns}
+          kbRecords={kbRecords}
+          inferredTargetMap={inferredTargetMap}
+          onConfirm={(shutdownData) => {
+            if (activeShutdown.targetType === 'line') {
+              onShutdownLine && onShutdownLine(activeShutdown.target, fm, shutdownData);
+            } else {
+              onShutdownFeedmill && onShutdownFeedmill(fm, lines, shutdownData);
+            }
+            setActiveShutdown(null);
           }}
-          onClose={() => setShowShutdownDialog(false)}
+          onClose={() => setActiveShutdown(null)}
         />
+      )}
+
+      {/* Resume Confirmation Dialog */}
+      {resumeConfirm && createPortal(
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 10002, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}>
+          <div style={{ background: 'var(--color-bg-secondary)', borderRadius: '12px', width: '420px', maxWidth: '100%', boxShadow: '0 8px 30px rgba(0,0,0,0.22)', overflow: 'hidden' }}>
+            {/* Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px', borderBottom: '1px solid var(--color-border)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '15px', fontWeight: 700, color: '#15803d' }}>
+                <span style={{ fontSize: '18px' }}>▶</span>
+                <span>Resume {resumeConfirm.displayName}</span>
+              </div>
+              <button onClick={() => setResumeConfirm(null)} style={{ background: 'none', border: 'none', fontSize: '18px', color: '#9ca3af', cursor: 'pointer' }}>✕</button>
+            </div>
+            {/* Body */}
+            <div style={{ padding: '20px', fontSize: '13px', color: '#374151', lineHeight: '1.6' }}>
+              <p>
+                Are you sure you want to resume{' '}
+                <strong>{resumeConfirm.displayName}</strong>?
+              </p>
+              {resumeConfirm.type === 'feedmill' && (
+                <p style={{ marginTop: '8px', fontSize: '12px', color: '#6b7280' }}>
+                  This will mark all lines in {resumeConfirm.displayName} as active and clear their shutdown status.
+                </p>
+              )}
+            </div>
+            {/* Footer */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', padding: '14px 20px', borderTop: '1px solid var(--color-border)' }}>
+              <button
+                onClick={() => setResumeConfirm(null)}
+                data-testid="button-resume-cancel"
+                style={{ padding: '8px 20px', fontSize: '13px', fontWeight: 500, color: '#6b7280', background: 'var(--color-bg-secondary)', border: '1px solid #d1d5db', borderRadius: '6px', cursor: 'pointer' }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  if (resumeConfirm.type === 'line') {
+                    onResumeLine && onResumeLine(resumeConfirm.line, fm);
+                  } else {
+                    onResumeFeedmill ? onResumeFeedmill(fm) : lines.forEach(l => onResumeLine && onResumeLine(l, fm));
+                  }
+                  setResumeConfirm(null);
+                }}
+                data-testid="button-resume-confirm"
+                style={{ padding: '8px 20px', fontSize: '13px', fontWeight: 600, color: '#fff', background: '#16a34a', border: 'none', borderRadius: '6px', cursor: 'pointer' }}
+              >
+                Confirm Resume
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
       )}
     </>
   );
@@ -804,7 +1133,7 @@ async function generatePDF(breakdown, monthOrders, monthLabel, aiInsight) {
 }
 
 // ─── ProductionStatusMonitoring ───────────────────────────────────────────────
-function ProductionStatusMonitoring({ breakdown, monthOrders, monthLabel, rollingMonths, selectedIdx, setSelectedIdx, onExport, exporting, feedmillStatus = {}, onFeedmillStatusChange }) {
+function ProductionStatusMonitoring({ breakdown, monthOrders, monthLabel, rollingMonths, selectedIdx, setSelectedIdx, onExport, exporting, feedmillStatus = {}, onFeedmillStatusChange, lineShutdowns = {}, onShutdownLine, onResumeLine, onShutdownFeedmill, orders = [], kbRecords = [], inferredTargetMap = {} }) {
   return (
     <div>
       {/* Title */}
@@ -824,7 +1153,7 @@ function ProductionStatusMonitoring({ breakdown, monthOrders, monthLabel, rollin
           value={selectedIdx}
           onChange={e => setSelectedIdx(Number(e.target.value))}
           data-testid="select-production-month"
-          style={{ width: '160px', border: '1px solid #d1d5db', borderRadius: '6px', padding: '0 10px', fontSize: '12px', height: '36px', cursor: 'pointer', background: '#fff' }}
+          style={{ width: '160px', border: '1px solid #d1d5db', borderRadius: '6px', padding: '0 10px', fontSize: '12px', height: '36px', cursor: 'pointer', background: 'var(--color-bg-secondary)' }}
         >
           {rollingMonths.map((m, i) => (
             <option key={i} value={i}>{m.label}</option>
@@ -836,7 +1165,7 @@ function ProductionStatusMonitoring({ breakdown, monthOrders, monthLabel, rollin
           disabled={exporting}
           data-testid="button-export-production-report"
           size="sm"
-          className="bg-[#fd5108] hover:bg-[#e8490b] text-white h-9 text-[12px] font-normal gap-1.5"
+          className="bg-[var(--nexfeed-primary)] hover:bg-[var(--nexfeed-primary-dark)] text-white h-9 text-[12px] font-normal gap-1.5"
         >
           <FileText size={14} />
           {exporting ? 'Generating…' : 'Export Report'}
@@ -853,6 +1182,13 @@ function ProductionStatusMonitoring({ breakdown, monthOrders, monthLabel, rollin
             data={breakdown}
             fmStatus={feedmillStatus[fm] || {}}
             onStatusChange={onFeedmillStatusChange}
+            lineShutdowns={lineShutdowns}
+            onShutdownLine={onShutdownLine}
+            onResumeLine={onResumeLine}
+            onShutdownFeedmill={onShutdownFeedmill}
+            orders={orders}
+            kbRecords={kbRecords}
+            inferredTargetMap={inferredTargetMap}
           />
         ))}
       </div>
@@ -871,7 +1207,7 @@ function ProductionStatusMonitoring({ breakdown, monthOrders, monthLabel, rollin
 }
 
 // ─── Main OverviewDashboard ───────────────────────────────────────────────────
-export default function OverviewDashboard({ orders, feedmillStatus = {}, onFeedmillStatusChange }) {
+export default function OverviewDashboard({ orders, feedmillStatus = {}, onFeedmillStatusChange, lineShutdowns = {}, onShutdownLine, onResumeLine, onShutdownFeedmill, kbRecords = [], inferredTargetMap = {} }) {
   // ── Month selection (lifted from ProductionStatusMonitoring) ──
   const rollingMonths = useMemo(() => getRollingMonths(), []);
   const [selectedIdx, setSelectedIdx] = useState(0);
@@ -953,11 +1289,23 @@ export default function OverviewDashboard({ orders, feedmillStatus = {}, onFeedm
 
   const now = new Date();
   const twoDaysLater = new Date(now.getTime() + 2 * 24 * 60 * 60 * 1000);
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const INACTIVE_STATUSES = ['completed', 'done', 'cancel_po', 'cancel po'];
   const urgentOrders = orders.filter(order => {
-    if (!order.target_avail_date) return false;
+    // Skip completed/cancelled orders
+    if (INACTIVE_STATUSES.includes((order.status || '').toLowerCase())) return false;
+    // 1. Safety stock Critical or Urgent status always counts
+    const inf = inferredTargetMap[order.material_code] || inferredTargetMap[order.material_code_fg];
+    if (inf?.status === 'Critical' || inf?.status === 'Urgent') return true;
+    // 2. target_avail_date within the next 2 days (from start of today)
+    const raw = order.target_avail_date;
+    if (!raw) return false;
     try {
-      const d = new Date(order.target_avail_date);
-      return !isNaN(d) && d <= twoDaysLater && d >= now;
+      // Parse date-only strings (YYYY-MM-DD) in local time to avoid UTC-offset mismatches
+      const d = /^\d{4}-\d{2}-\d{2}$/.test(raw)
+        ? new Date(raw + 'T00:00:00')
+        : new Date(raw);
+      return !isNaN(d) && d <= twoDaysLater && d >= startOfToday;
     } catch { return false; }
   }).length;
 
@@ -985,7 +1333,7 @@ export default function OverviewDashboard({ orders, feedmillStatus = {}, onFeedm
           style={{
             display: 'flex', justifyContent: 'space-between', alignItems: 'center',
             padding: '12px 16px', cursor: 'pointer', userSelect: 'none',
-            background: '#f9fafb', border: '1px solid #e5e7eb',
+            background: 'var(--color-bg-tertiary)', border: '1px solid var(--color-border)',
             borderRadius: insightExpanded ? '8px 8px 0 0' : '8px',
           }}
         >
@@ -998,9 +1346,9 @@ export default function OverviewDashboard({ orders, feedmillStatus = {}, onFeedm
             onClick={handleRefreshInsight}
             disabled={isLoadingInsight}
             data-testid="button-refresh-smart-insight"
-            style={{ fontSize: '12px', color: '#fd5108', background: 'none', border: 'none', cursor: isLoadingInsight ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: '4px', opacity: isLoadingInsight ? 0.5 : 1, padding: '2px 4px', borderRadius: '4px' }}
+            style={{ fontSize: '12px', color: 'var(--nexfeed-primary)', background: 'none', border: 'none', cursor: isLoadingInsight ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: '4px', opacity: isLoadingInsight ? 0.5 : 1, padding: '2px 4px', borderRadius: '4px' }}
             onMouseEnter={e => { if (!isLoadingInsight) e.currentTarget.style.color = '#c2410c'; }}
-            onMouseLeave={e => { e.currentTarget.style.color = '#fd5108'; }}
+            onMouseLeave={e => { e.currentTarget.style.color = 'var(--nexfeed-primary)'; }}
           >
             {isLoadingInsight ? <Loader2 size={12} className="animate-spin" /> : '↻'} Refresh
           </button>
@@ -1011,7 +1359,7 @@ export default function OverviewDashboard({ orders, feedmillStatus = {}, onFeedm
           <div
             className="smart-insight-content"
             style={{
-              background: '#f9fafb', border: '1px solid #e5e7eb', borderTop: 'none',
+              background: 'var(--color-bg-tertiary)', border: '1px solid var(--color-border)', borderTop: 'none',
               borderRadius: '0 0 8px 8px', padding: '16px 20px',
               maxHeight: '400px', overflowY: 'auto',
             }}
@@ -1068,6 +1416,13 @@ export default function OverviewDashboard({ orders, feedmillStatus = {}, onFeedm
             exporting={exporting}
             feedmillStatus={feedmillStatus}
             onFeedmillStatusChange={onFeedmillStatusChange}
+            lineShutdowns={lineShutdowns}
+            onShutdownLine={onShutdownLine}
+            onResumeLine={onResumeLine}
+            onShutdownFeedmill={onShutdownFeedmill}
+            orders={orders}
+            kbRecords={kbRecords}
+            inferredTargetMap={inferredTargetMap}
           />
         </CardContent>
       </Card>

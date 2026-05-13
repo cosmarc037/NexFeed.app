@@ -71,7 +71,7 @@ export default function OrderContextMenu({
         top,
         zIndex: 10000,
         width: menuW,
-        background: "#fff",
+        background: "var(--color-bg-secondary)",
         border: "1px solid #e5e7eb",
         borderRadius: 8,
         boxShadow: "0 8px 24px rgba(0,0,0,0.13)",

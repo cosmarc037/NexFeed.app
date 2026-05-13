@@ -56,10 +56,10 @@ export default function SmartRecommendations({ orders, activeSection, activeSubS
     return (
       <div className="bg-[#fff5ed] border border-[#ffcda8] rounded-lg px-5 py-4">
         <div className="flex items-center gap-2 mb-1">
-          <div className="p-1.5 rounded bg-[#fd5108]/10">
-            <Sparkles className="h-4 w-4 text-[#fd5108]" />
+          <div className="p-1.5 rounded bg-[var(--nexfeed-primary)]/10">
+            <Sparkles className="h-4 w-4 text-[var(--nexfeed-primary)]" />
           </div>
-          <span className="text-sm font-semibold text-[#fd5108]">Smart Recommendations</span>
+          <span className="text-sm font-semibold text-[var(--nexfeed-primary)]">Smart Recommendations</span>
         </div>
         <p className="text-sm text-gray-500 mt-1" data-testid="text-recommendations-empty">
           No orders available. Upload SAP planned orders to receive smart recommendations.
@@ -74,10 +74,10 @@ export default function SmartRecommendations({ orders, activeSection, activeSubS
     <div className="bg-[#fff5ed] border border-[#ffcda8] rounded-lg px-5 py-4" data-testid="section-smart-recommendations">
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
-          <div className="p-1.5 rounded bg-[#fd5108]/10">
-            <Sparkles className="h-4 w-4 text-[#fd5108]" />
+          <div className="p-1.5 rounded bg-[var(--nexfeed-primary)]/10">
+            <Sparkles className="h-4 w-4 text-[var(--nexfeed-primary)]" />
           </div>
-          <span className="text-sm font-semibold text-[#fd5108]">Smart Recommendations</span>
+          <span className="text-sm font-semibold text-[var(--nexfeed-primary)]">Smart Recommendations</span>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -85,7 +85,7 @@ export default function SmartRecommendations({ orders, activeSection, activeSubS
             disabled={isLoading}
             title="Refresh Smart Recommendations"
             data-testid="button-refresh-recommendations"
-            className="flex items-center gap-1 text-xs text-[#fd5108] hover:text-[#fe7c39] disabled:opacity-40"
+            className="flex items-center gap-1 text-xs text-[var(--nexfeed-primary)] hover:text-[var(--nexfeed-primary-dark)] disabled:opacity-40"
           >
             <RefreshCw className={`h-3.5 w-3.5 ${isLoading ? 'animate-spin' : ''}`} />
             Refresh

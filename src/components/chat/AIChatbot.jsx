@@ -69,8 +69,8 @@ function ActionCard({ actionType, params, orders, onDone }) {
   const meta = LABELS[actionType] ?? { title: 'Action', icon: '⚡' };
 
   return (
-    <div style={{ background:'#fff', border:'1px solid #e5e7eb', borderRadius:8, overflow:'hidden', margin:'4px 0', fontSize:12 }}>
-      <div style={{ display:'flex', alignItems:'center', gap:6, padding:'8px 12px', background:'#f9fafb', borderBottom:'1px solid #e5e7eb', fontWeight:600, color:'#374151' }}>
+    <div style={{ background:'var(--color-bg-secondary)', border:'1px solid #e5e7eb', borderRadius:8, overflow:'hidden', margin:'4px 0', fontSize:12 }}>
+      <div style={{ display:'flex', alignItems:'center', gap:6, padding:'8px 12px', background:'var(--color-bg-tertiary)', borderBottom:'1px solid #e5e7eb', fontWeight:600, color:'#374151' }}>
         <span style={{ fontSize:14 }}>{meta.icon}</span>
         <span>{meta.title}</span>
       </div>
@@ -81,11 +81,11 @@ function ActionCard({ actionType, params, orders, onDone }) {
         <div style={{ display:'flex', justifyContent:'flex-end', gap:8, padding:'8px 12px', borderTop:'1px solid #f3f4f6' }}>
           <button
             onClick={() => onDone('Action cancelled.')}
-            style={{ padding:'6px 14px', fontSize:12, fontWeight:500, color:'#6b7280', background:'#fff', border:'1px solid #d1d5db', borderRadius:6, cursor:'pointer' }}
+            style={{ padding:'6px 14px', fontSize:12, fontWeight:500, color:'#6b7280', background:'var(--color-bg-secondary)', border:'1px solid #d1d5db', borderRadius:6, cursor:'pointer' }}
           >Cancel</button>
           <button
             onClick={handleConfirm}
-            style={{ padding:'6px 14px', fontSize:12, fontWeight:600, color:'#fff', background:'#fd5108', border:'none', borderRadius:6, cursor:'pointer' }}
+            style={{ padding:'6px 14px', fontSize:12, fontWeight:600, color:'#fff', background:'var(--nexfeed-primary)', border:'none', borderRadius:6, cursor:'pointer' }}
           >Confirm</button>
         </div>
       )}
@@ -354,7 +354,7 @@ const WELCOME = {
   kind: 'text',
   role: 'assistant',
   id: 0,
-  content: "Hi! I'm your NexFeed production planning assistant. I have full access to your orders, N10D stock data, and master data. Ask me anything about schedules, stock levels, line loads, or combine opportunities.",
+  content: "Hi! I'm your NexFeed production planning assistant. I have full access to your orders, Future Dispatches stock data, and master data. Ask me anything about schedules, stock levels, line loads, or combine opportunities.",
 };
 
 /* ─── Main component ─────────────────────────────────────────────────────── */
@@ -428,7 +428,7 @@ export default function AIChatbot({ orders = [], n10dRecords = [], kbRecords = [
             data-testid="button-smart-assistant"
             initial={{ scale: 0 }} animate={{ scale: 1 }} exit={{ scale: 0 }}
             onClick={() => setIsOpen(true)}
-            className="chat-bubble fixed bottom-6 right-6 w-14 h-14 rounded-full bg-[#fd5108] text-white shadow-lg hover:bg-[#fe7c39] transition-colors flex items-center justify-center z-50"
+            className="chat-bubble fixed bottom-6 right-6 w-14 h-14 rounded-full bg-[var(--nexfeed-primary)] text-white shadow-lg hover:bg-[var(--nexfeed-primary-dark)] transition-colors flex items-center justify-center z-50"
             data-tour="chat-bubble"
           >
             <MessageCircle className="h-6 w-6" />
@@ -447,7 +447,7 @@ export default function AIChatbot({ orders = [], n10dRecords = [], kbRecords = [
             data-testid="panel-smart-assistant"
           >
             {/* Header */}
-            <div className="flex items-center justify-between px-4 py-3 bg-gradient-to-r from-[#fd5108] to-[#fe7c39] flex-shrink-0">
+            <div className="flex items-center justify-between px-4 py-3 bg-gradient-to-r from-[var(--nexfeed-primary)] to-[var(--nexfeed-primary-dark)] flex-shrink-0">
               <div className="flex items-center gap-2 text-white">
                 <Sparkles className="h-4 w-4" />
                 <div>
@@ -535,13 +535,13 @@ export default function AIChatbot({ orders = [], n10dRecords = [], kbRecords = [
                 onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
                 placeholder="Ask about orders, stock, lines…"
                 disabled={isLoading}
-                className="flex-1 text-[12px] px-3 py-2 rounded-full border border-gray-200 bg-white outline-none focus:border-[#fd5108] placeholder-gray-400"
+                className="flex-1 text-[12px] px-3 py-2 rounded-full border border-gray-200 bg-white outline-none focus:border-[var(--nexfeed-primary)] placeholder-gray-400"
               />
               <button
                 data-testid="button-send-message"
                 onClick={() => handleSend()}
                 disabled={!input.trim() || isLoading}
-                className="w-8 h-8 rounded-full bg-[#fd5108] text-white flex items-center justify-center hover:bg-[#e8490b] transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0"
+                className="w-8 h-8 rounded-full bg-[var(--nexfeed-primary)] text-white flex items-center justify-center hover:bg-[var(--nexfeed-primary-dark)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0"
               >
                 <Send className="h-3.5 w-3.5" />
               </button>

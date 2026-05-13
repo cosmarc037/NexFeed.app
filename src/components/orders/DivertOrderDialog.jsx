@@ -49,19 +49,38 @@ function ImpactText({ text }) {
 }
 
 // ─── DIVERT ORDER DIALOG ──────────────────────────────────────────────────────
-export function DivertOrderDialog({ order, allOrders, kbRecords, feedmillStatus, onConfirm, onClose }) {
-  const shutdownLines = Object.entries(feedmillStatus || {})
-    .filter(([, s]) => s.isShutdown)
-    .flatMap(([fm]) => FEEDMILL_LINES[fm] || []);
+export function DivertOrderDialog({ order, allOrders, kbRecords, feedmillStatus, lineShutdowns = {}, onConfirm, onClose }) {
+  const allShutdownLines = [...new Set([
+    ...Object.entries(feedmillStatus || {})
+      .filter(([, s]) => s && s.isShutdown)
+      .flatMap(([fm]) => FEEDMILL_LINES[fm] || []),
+    ...Object.keys(lineShutdowns).filter(l => lineShutdowns[l]?.isShutdown),
+  ])];
+
+  const currentLine = order.feedmill_line || order.line || '';
+  const currentFM = LINE_FEEDMILL[currentLine];
+  const currentFMLines = FEEDMILL_LINES[currentFM] || [];
 
   // Find KB entry for this order
-  const kbEntry = kbRecords.find(r => String(r.fg_material_code || '').trim() === String(order.material_code || '').trim());
+  const matCode = String(order.material_code_fg || order.material_code || '').trim();
+  const kbEntry = kbRecords.find(r => {
+    const kbCode = String(r.fg_material_code || r.material_code_fg || '').trim();
+    return kbCode && matCode && (kbCode === matCode || kbCode.replace(/^0+/, '') === matCode.replace(/^0+/, ''));
+  });
 
-  // Build available lines: has rate > 0 AND not in shutdown
-  const availableLines = Object.entries(LINE_RATE_KEY)
-    .map(([line, key]) => ({ line, rate: parseFloat(kbEntry?.[key] || 0) }))
-    .filter(({ line, rate }) => rate > 0 && !shutdownLines.includes(line))
+  // Partner lines: same feedmill, not shutdown, not this line, any rate
+  const partnerLineObjects = currentFMLines
+    .filter(l => l !== currentLine && !allShutdownLines.includes(l))
+    .map(l => ({ line: l, rate: parseFloat(kbEntry?.[LINE_RATE_KEY[l]] || 0), isPartner: true }));
+
+  // Outside lines: different feedmill, not shutdown, has rate > 0
+  const outsideLineObjects = Object.entries(LINE_RATE_KEY)
+    .map(([line, key]) => ({ line, rate: parseFloat(kbEntry?.[key] || 0), isPartner: false }))
+    .filter(({ line, rate }) => !currentFMLines.includes(line) && !allShutdownLines.includes(line) && rate > 0)
     .sort((a, b) => b.rate - a.rate);
+
+  // Show partner lines first, then outside lines
+  const availableLines = [...partnerLineObjects, ...outsideLineObjects];
 
   const [selectedLine, setSelectedLine] = useState(availableLines[0] || null);
   const [aiText, setAiText] = useState('');
@@ -116,11 +135,10 @@ export function DivertOrderDialog({ order, allOrders, kbRecords, feedmillStatus,
   };
 
   const calcs = buildCalcs(selectedLine);
-  const currentLine = order.feedmill_line || order.line || '';
 
   return createPortal(
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}>
-      <div style={{ background: '#fff', borderRadius: '12px', width: '100%', maxWidth: '600px', maxHeight: '80vh', overflowY: 'auto', padding: '24px 28px', boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }}>
+      <div style={{ background: 'var(--color-bg-secondary)', borderRadius: '12px', width: '100%', maxWidth: '600px', maxHeight: '80vh', overflowY: 'auto', padding: '24px 28px', boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }}>
         {/* Title */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -131,7 +149,7 @@ export function DivertOrderDialog({ order, allOrders, kbRecords, feedmillStatus,
         </div>
 
         {/* Order Summary */}
-        <div style={{ background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '14px 18px', marginBottom: '16px' }}>
+        <div style={{ background: 'var(--color-bg-tertiary)', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '14px 18px', marginBottom: '16px' }}>
           <div style={{ fontSize: '11px', fontWeight: 600, color: '#6b7280', marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Order Summary</div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 16px' }}>
             {[
@@ -167,9 +185,11 @@ export function DivertOrderDialog({ order, allOrders, kbRecords, feedmillStatus,
           ) : (
             availableLines.map((lineObj, idx) => {
               const isSelected = selectedLine?.line === lineObj.line;
-              const isRecommended = idx === 0;
+              const isPartner = lineObj.isPartner;
               const fm = LINE_FEEDMILL[lineObj.line] || '';
               const fmLabel = fm === 'PMX' ? 'Powermix' : fm ? `Feedmill ${fm.replace('FM', '')}` : '';
+              const accentColor = isPartner ? '#f59e0b' : '#10b981';
+              const selectedBg = isPartner ? '#fffbeb' : '#f0fdf4';
               return (
                 <div key={lineObj.line}>
                   {idx > 0 && <div style={{ borderTop: '1px solid #f3f4f6' }} />}
@@ -177,25 +197,28 @@ export function DivertOrderDialog({ order, allOrders, kbRecords, feedmillStatus,
                     onClick={() => handleSelectLine(lineObj)}
                     style={{
                       display: 'flex', alignItems: 'flex-start', gap: '10px', padding: '12px 18px', cursor: 'pointer',
-                      borderLeft: `3px solid ${isSelected ? (isRecommended ? '#3b82f6' : '#10b981') : '#e5e7eb'}`,
-                      background: isSelected ? (isRecommended ? '#eff6ff' : '#f0fdf4') : '#fff',
+                      borderLeft: `3px solid ${isSelected ? accentColor : isPartner ? '#fcd34d' : '#e5e7eb'}`,
+                      background: isSelected ? selectedBg : isPartner ? '#fffef7' : 'var(--color-bg-secondary)',
                     }}
                   >
                     <div style={{ marginTop: '2px', flexShrink: 0 }}>
-                      <div style={{ width: '14px', height: '14px', borderRadius: '50%', border: `2px solid ${isSelected ? '#3b82f6' : '#d1d5db'}`, background: isSelected ? '#3b82f6' : '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        {isSelected && <div style={{ width: '5px', height: '5px', borderRadius: '50%', background: '#fff' }} />}
+                      <div style={{ width: '14px', height: '14px', borderRadius: '50%', border: `2px solid ${isSelected ? accentColor : '#d1d5db'}`, background: isSelected ? accentColor : '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        {isSelected && <div style={{ width: '5px', height: '5px', borderRadius: '50%', background: 'var(--color-bg-secondary)' }} />}
                       </div>
                     </div>
                     <div style={{ flex: 1 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '2px' }}>
-                        {isRecommended && <span style={{ fontSize: '12px' }}>⭐</span>}
-                        <span style={{ fontSize: '12px', fontWeight: isRecommended ? 600 : 500, color: isRecommended ? '#1e40af' : '#374151' }}>
-                          {lineObj.line} (rate: {lineObj.rate.toFixed(2)} MT/hr)
+                        {isPartner && <span style={{ fontSize: '11px' }}>⭐</span>}
+                        <span style={{ fontSize: '12px', fontWeight: isPartner ? 600 : 500, color: isPartner ? '#92400e' : '#374151' }}>
+                          {lineObj.line} {lineObj.rate > 0 ? `(rate: ${lineObj.rate.toFixed(2)} MT/hr)` : '(no rate on record)'}
                         </span>
+                        {isPartner && (
+                          <span style={{ fontSize: '9px', fontWeight: 700, color: '#b45309', background: '#fef3c7', padding: '1px 5px', borderRadius: '3px' }}>RECOMMENDED</span>
+                        )}
                       </div>
                       <div style={{ fontSize: '11px', color: '#6b7280' }}>
                         {fmLabel}
-                        {isRecommended ? ' · Best run rate among available lines' : ''}
+                        {isPartner ? ' · Same feedmill — generally compatible' : ''}
                       </div>
                     </div>
                   </div>
@@ -226,7 +249,7 @@ export function DivertOrderDialog({ order, allOrders, kbRecords, feedmillStatus,
 
         {/* Buttons */}
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
-          <button onClick={onClose} style={{ padding: '8px 18px', fontSize: '13px', color: '#374151', background: '#fff', border: '1px solid #d1d5db', borderRadius: '6px', cursor: 'pointer' }}>Cancel</button>
+          <button onClick={onClose} style={{ padding: '8px 18px', fontSize: '13px', color: '#374151', background: 'var(--color-bg-secondary)', border: '1px solid #d1d5db', borderRadius: '6px', cursor: 'pointer' }}>Cancel</button>
           <button
             onClick={handleConfirm}
             disabled={!selectedLine || availableLines.length === 0}
@@ -242,7 +265,7 @@ export function DivertOrderDialog({ order, allOrders, kbRecords, feedmillStatus,
 }
 
 // ─── REVERT ORDER DIALOG ──────────────────────────────────────────────────────
-export function RevertOrderDialog({ order, feedmillStatus, onConfirm, onClose }) {
+export function RevertOrderDialog({ order, feedmillStatus, lineShutdowns, onConfirm, onClose }) {
   const dd = order.diversion_data || {};
   const originalLine = dd.originalLine || '—';
   const originalFeedmill = dd.originalFeedmill || '—';
@@ -251,11 +274,19 @@ export function RevertOrderDialog({ order, feedmillStatus, onConfirm, onClose })
   const reason = dd.shutdownReason || '—';
 
   const origFM = LINE_FEEDMILL[originalLine];
-  const isOrigActive = origFM ? !(feedmillStatus?.[origFM]?.isShutdown) : false;
+  const origLineShutdown = !!(lineShutdowns?.[originalLine]?.isShutdown);
+  const origFMShutdown = origFM ? !!(feedmillStatus?.[origFM]?.isShutdown) : false;
+  const isOrigActive = !origLineShutdown && !origFMShutdown;
+  const isFeedmillShutdown = !!(dd.originalFeedmill);
+  const blockMessage = !isOrigActive
+    ? (isFeedmillShutdown
+        ? 'Cannot revert order until the feedmill is back in operation.'
+        : 'Cannot revert order while the original line is still in shutdown.')
+    : null;
 
   return createPortal(
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}>
-      <div style={{ background: '#fff', borderRadius: '12px', width: '100%', maxWidth: '480px', padding: '24px 28px', boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }}>
+      <div style={{ background: 'var(--color-bg-secondary)', borderRadius: '12px', width: '100%', maxWidth: '480px', padding: '24px 28px', boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }}>
         {/* Title */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -266,7 +297,7 @@ export function RevertOrderDialog({ order, feedmillStatus, onConfirm, onClose })
         </div>
 
         {/* Order Summary */}
-        <div style={{ background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '14px 18px', marginBottom: '16px' }}>
+        <div style={{ background: 'var(--color-bg-tertiary)', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '14px 18px', marginBottom: '16px' }}>
           <div style={{ fontSize: '11px', fontWeight: 600, color: '#6b7280', marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Order Summary</div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '6px' }}>
             <div style={{ fontSize: '12px' }}>
@@ -301,12 +332,20 @@ export function RevertOrderDialog({ order, feedmillStatus, onConfirm, onClose })
           This will move the order back to <strong>{originalLine}</strong>, resuming production there. Previously diverted orders can be re-diverted if needed.
         </div>
 
+        {/* Revert blocked message */}
+        {blockMessage && (
+          <div style={{ background: '#fef2f2', border: '1px solid #fca5a5', borderRadius: '6px', padding: '10px 14px', marginBottom: '16px', fontSize: '12px', color: '#b91c1c', lineHeight: 1.5 }}>
+            ⚠ {blockMessage}
+          </div>
+        )}
+
         {/* Buttons */}
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
-          <button onClick={onClose} style={{ padding: '8px 18px', fontSize: '13px', color: '#374151', background: '#fff', border: '1px solid #d1d5db', borderRadius: '6px', cursor: 'pointer' }}>Cancel</button>
+          <button onClick={onClose} style={{ padding: '8px 18px', fontSize: '13px', color: '#374151', background: 'var(--color-bg-secondary)', border: '1px solid #d1d5db', borderRadius: '6px', cursor: 'pointer' }}>Cancel</button>
           <button
-            onClick={() => onConfirm(order)}
-            style={{ padding: '8px 18px', fontSize: '13px', fontWeight: 600, color: '#fff', background: '#16a34a', border: 'none', borderRadius: '6px', cursor: 'pointer' }}
+            onClick={() => !blockMessage && onConfirm(order)}
+            disabled={!!blockMessage}
+            style={{ padding: '8px 18px', fontSize: '13px', fontWeight: 600, color: '#fff', background: blockMessage ? '#9ca3af' : '#16a34a', border: 'none', borderRadius: '6px', cursor: blockMessage ? 'not-allowed' : 'pointer', opacity: blockMessage ? 0.7 : 1 }}
           >
             Confirm Revert
           </button>

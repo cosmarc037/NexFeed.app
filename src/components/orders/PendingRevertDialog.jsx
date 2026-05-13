@@ -28,7 +28,7 @@ export default function PendingRevertDialog({ isOpen, onClose, order, parentOrde
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={onClose} className="text-[14px] font-semibold h-10 px-5">Cancel</Button>
-            <Button onClick={onMakeStandalone} className="bg-[#fd5108] hover:bg-[#fe7c39] text-[14px] font-semibold h-10 px-5">
+            <Button onClick={onMakeStandalone} className="bg-[var(--nexfeed-primary)] hover:bg-[var(--nexfeed-primary-dark)] text-[14px] font-semibold h-10 px-5">
               Move to Normal Orders
             </Button>
           </DialogFooter>
@@ -50,7 +50,7 @@ export default function PendingRevertDialog({ isOpen, onClose, order, parentOrde
         </DialogHeader>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} className="text-[14px] font-semibold h-10 px-5">Cancel</Button>
-          <Button onClick={onRevertToParent} className="bg-[#fd5108] hover:bg-[#fe7c39] text-[14px] font-semibold h-10 px-5">
+          <Button onClick={onRevertToParent} className="bg-[var(--nexfeed-primary)] hover:bg-[var(--nexfeed-primary-dark)] text-[14px] font-semibold h-10 px-5">
             Merge Back to Parent
           </Button>
         </DialogFooter>

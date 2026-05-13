@@ -23,7 +23,6 @@ const STATUS_DISPLAY_VALUES = [
   { label: "Planned",             value: "planned" },
   { label: "Hold",                value: "hold" },
   { label: "Cut",                 value: "cut" },
-  { label: "In Production",       value: "in_production" },
   { label: "On-going batching",   value: "ongoing_batching" },
   { label: "On-going pelleting",  value: "ongoing_pelleting" },
   { label: "On-going bagging",    value: "ongoing_bagging" },
@@ -226,8 +225,8 @@ function _getColValue(order, colKey) {
     case "readiness": return _readinessLabel(order);
     case "prio": return parseFloat(order.prio) || 0;
     case "fpr": return order.fpr || "";
-    case "planned_order": return `${order.fg || ""} ${order.sfg || ""}`.trim();
-    case "prod_order": return `${order.fg1 || ""} ${order.sfg1 || ""}`.trim();
+    case "planned_order": return [order.fg, order.sfg, order.pmx].filter(Boolean).join(" ");
+    case "prod_order": return [order.fg1, order.sfg1, order.sfgpmx].filter(Boolean).join(" ");
     case "mat_code_sfg": return order.kb_sfg_material_code || "";
     case "mat_code_fg": return order.material_code || order.material_code_fg || "";
     case "item_desc": return order.item_description || "";
@@ -280,6 +279,14 @@ export function applyColumnFilters(orders, activeFilters) {
         if (filter.items && filter.items.length > 0) {
           const desc = order.item_description || "";
           if (!filter.items.some((i) => i.toLowerCase() === desc.toLowerCase())) return false;
+        }
+        if (filter.colors && filter.colors.length > 0) {
+          const col = order.color || "";
+          if (!filter.colors.some((c) => c.toLowerCase() === col.toLowerCase())) return false;
+        }
+        if (filter.diameters && filter.diameters.length > 0) {
+          const dia = String(order.diameter ?? "");
+          if (!filter.diameters.includes(dia)) return false;
         }
         continue;
       }
@@ -668,6 +675,16 @@ function ToggleFilter({ config, activeFilter, onApply, onClear, onClose }) {
 
 /* ─── Custom filter components ───────────────────────────────────────────── */
 
+const COLOR_HEX_MAP = {
+  Brown: "#8B4513", Yellow: "#FFC107", White: "#e5e7eb", Red: "#DC2626",
+  Blue: "#2563EB", Green: "#16A34A", Orange: "#EA580C", Grey: "#9ca3af",
+  Gray: "#9ca3af", Black: "#1f2937", Pink: "#ec4899", Purple: "#7c3aed",
+};
+
+function getColorHex(color) {
+  return COLOR_HEX_MAP[color] || COLOR_HEX_MAP[color?.charAt(0).toUpperCase() + color?.slice(1).toLowerCase()] || "#9ca3af";
+}
+
 function ItemDescriptionFilter({ orders, activeFilter, onApply, onClear, onClose }) {
   const [selectedItems, setSelectedItems] = useState(
     () => new Set(activeFilter?.items || [])
@@ -675,24 +692,36 @@ function ItemDescriptionFilter({ orders, activeFilter, onApply, onClear, onClose
   const [selectedCategories, setSelectedCategories] = useState(
     () => new Set(activeFilter?.categories || [])
   );
+  const [selectedColors, setSelectedColors] = useState(
+    () => new Set(activeFilter?.colors || [])
+  );
+  const [selectedDiameters, setSelectedDiameters] = useState(
+    () => new Set((activeFilter?.diameters || []).map(String))
+  );
   const [itemSearch, setItemSearch] = useState("");
 
   const allItems = [...new Set(orders.map((o) => o.item_description).filter(Boolean))].sort();
   const allCategories = [...new Set(orders.map((o) => o.category).filter(Boolean))].sort();
+  const allColors = [...new Set(orders.map((o) => o.color).filter(Boolean))].sort();
+  const allDiameters = [...new Set(orders.map((o) => o.diameter).filter((v) => v != null && v !== "").map(String))].sort((a, b) => parseFloat(a) - parseFloat(b));
   const filteredItems = allItems.filter((v) =>
     v.toLowerCase().includes(itemSearch.toLowerCase())
   );
 
-  function toggleItem(val) {
-    const next = new Set(selectedItems);
+  function toggle(setter, set, val) {
+    const next = new Set(set);
     if (next.has(val)) next.delete(val); else next.add(val);
-    setSelectedItems(next);
+    setter(next);
   }
 
-  function toggleCat(val) {
-    const next = new Set(selectedCategories);
-    if (next.has(val)) next.delete(val); else next.add(val);
-    setSelectedCategories(next);
+  function handleApply() {
+    onApply({
+      items: Array.from(selectedItems),
+      categories: Array.from(selectedCategories),
+      colors: Array.from(selectedColors),
+      diameters: Array.from(selectedDiameters),
+    });
+    onClose();
   }
 
   return (
@@ -701,22 +730,91 @@ function ItemDescriptionFilter({ orders, activeFilter, onApply, onClear, onClose
         <span className="filter-dropdown-title">Filter: Item Description</span>
         <button className="filter-close-btn" onClick={onClose}>✕</button>
       </div>
+
+      {/* Category */}
+      {allCategories.length > 0 && (
+        <>
+          <div className="filter-section">
+            <div className="filter-section-title" style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+              <span>Category</span>
+              {selectedCategories.size > 0 && (
+                <button className="filter-action-btn" onClick={() => setSelectedCategories(new Set())}>Clear</button>
+              )}
+            </div>
+            <div className="filter-options-list" style={{ maxHeight: 100 }}>
+              {allCategories.map((cat) => (
+                <label key={cat} className="filter-option">
+                  <input type="checkbox" checked={selectedCategories.has(cat)} onChange={() => toggle(setSelectedCategories, selectedCategories, cat)} />
+                  <span>{cat}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+          <div className="filter-section-divider" />
+        </>
+      )}
+
+      {/* Color */}
+      {allColors.length > 0 && (
+        <>
+          <div className="filter-section">
+            <div className="filter-section-title" style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+              <span>Color</span>
+              {selectedColors.size > 0 && (
+                <button className="filter-action-btn" onClick={() => setSelectedColors(new Set())}>Clear</button>
+              )}
+            </div>
+            <div className="filter-options-list" style={{ maxHeight: 100 }}>
+              {allColors.map((color) => (
+                <label key={color} className="filter-option">
+                  <input type="checkbox" checked={selectedColors.has(color)} onChange={() => toggle(setSelectedColors, selectedColors, color)} />
+                  <span
+                    style={{
+                      display: "inline-block", width: 10, height: 10, borderRadius: "50%",
+                      background: getColorHex(color), border: "1px solid #d1d5db",
+                      flexShrink: 0, marginRight: 2,
+                    }}
+                  />
+                  <span>{color}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+          <div className="filter-section-divider" />
+        </>
+      )}
+
+      {/* Diameter */}
+      {allDiameters.length > 0 && (
+        <>
+          <div className="filter-section">
+            <div className="filter-section-title" style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+              <span>Diameter</span>
+              {selectedDiameters.size > 0 && (
+                <button className="filter-action-btn" onClick={() => setSelectedDiameters(new Set())}>Clear</button>
+              )}
+            </div>
+            <div className="filter-options-list" style={{ maxHeight: 100, display:"flex", flexWrap:"wrap", gap:4 }}>
+              {allDiameters.map((d) => (
+                <label key={d} className="filter-option" style={{ flex:"none" }}>
+                  <input type="checkbox" checked={selectedDiameters.has(d)} onChange={() => toggle(setSelectedDiameters, selectedDiameters, d)} />
+                  <span>{d}mm</span>
+                </label>
+              ))}
+            </div>
+          </div>
+          <div className="filter-section-divider" />
+        </>
+      )}
+
+      {/* Item */}
       <div className="filter-section">
-        <div className="filter-section-title">Category</div>
-        <div className="filter-options-list" style={{ maxHeight: 120 }}>
-          {allCategories.length === 0 ? (
-            <div style={{ color: "#9ca3af", fontSize: 11, padding: "4px 0" }}>No categories</div>
-          ) : allCategories.map((cat) => (
-            <label key={cat} className="filter-option">
-              <input type="checkbox" checked={selectedCategories.has(cat)} onChange={() => toggleCat(cat)} />
-              <span>{cat}</span>
-            </label>
-          ))}
+        <div className="filter-section-title" style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+          <span>Item</span>
+          {selectedItems.size > 0 && (
+            <button className="filter-action-btn" onClick={() => setSelectedItems(new Set())}>Clear</button>
+          )}
         </div>
-      </div>
-      <div className="filter-section-divider" />
-      <div className="filter-section">
-        <div className="filter-section-title">Item</div>
         <div className="filter-search">
           <input type="text" placeholder="Search items..." value={itemSearch}
             onChange={(e) => setItemSearch(e.target.value)} className="filter-search-input" autoFocus />
@@ -730,18 +828,16 @@ function ItemDescriptionFilter({ orders, activeFilter, onApply, onClear, onClose
             <div style={{ color: "#9ca3af", fontSize: 11, padding: "4px 0" }}>No items</div>
           ) : filteredItems.map((item) => (
             <label key={item} className="filter-option">
-              <input type="checkbox" checked={selectedItems.has(item)} onChange={() => toggleItem(item)} />
+              <input type="checkbox" checked={selectedItems.has(item)} onChange={() => toggle(setSelectedItems, selectedItems, item)} />
               <span>{item}</span>
             </label>
           ))}
         </div>
       </div>
+
       <div className="filter-dropdown-footer">
-        <button className="filter-clear-btn" onClick={() => { onClear(); onClose(); }}>Clear</button>
-        <button className="filter-apply-btn" onClick={() => {
-          onApply({ items: Array.from(selectedItems), categories: Array.from(selectedCategories) });
-          onClose();
-        }}>Apply</button>
+        <button className="filter-clear-btn" onClick={() => { onClear(); onClose(); }}>Clear all</button>
+        <button className="filter-apply-btn" onClick={handleApply}>Apply</button>
       </div>
     </>
   );
@@ -1074,7 +1170,7 @@ export function FilterDropdown({ colKey, orders, activeFilter, position, onApply
   const style = {
     position: "fixed",
     left: Math.min(position.x, window.innerWidth - 320),
-    top: Math.min(position.y, window.innerHeight - 420),
+    top: Math.min(position.y, window.innerHeight - 570),
     zIndex: 10000,
   };
 

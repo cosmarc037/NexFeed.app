@@ -74,7 +74,7 @@ export default function RemarksCell({ value, onSave, readOnly = false, placehold
           value={editValue}
           onChange={(e) => setEditValue(e.target.value)}
           onKeyDown={handleKeyDown}
-          className="w-full text-[13px] text-[#374151] border border-[#fd5108] rounded p-2 resize-y focus:outline-none leading-relaxed"
+          className="w-full text-[13px] text-[#374151] border border-[var(--nexfeed-primary)] rounded p-2 resize-y focus:outline-none leading-relaxed"
           style={{ minHeight: 60, maxHeight: 150 }}
           data-no-drag="true"
         />
@@ -86,7 +86,7 @@ export default function RemarksCell({ value, onSave, readOnly = false, placehold
           >Cancel</button>
           <button
             onClick={handleSave}
-            style={{ fontSize: 11, color: '#fff', background: '#fd5108', border: 'none', borderRadius: 3, padding: '2px 10px', cursor: 'pointer', fontWeight: 600 }}
+            style={{ fontSize: 11, color: '#fff', background: 'var(--nexfeed-primary)', border: 'none', borderRadius: 3, padding: '2px 10px', cursor: 'pointer', fontWeight: 600 }}
             data-no-drag="true"
           >Save</button>
         </div>
@@ -126,7 +126,7 @@ export default function RemarksCell({ value, onSave, readOnly = false, placehold
       {hasContent && isTruncated && (
         <button
           onClick={handleExpandClick}
-          className="absolute top-0 right-0 text-[#9ca3af] hover:text-[#fd5108] transition-colors leading-none"
+          className="absolute top-0 right-0 text-[#9ca3af] hover:text-[var(--nexfeed-primary)] transition-colors leading-none"
           style={{ fontSize: 12, background: 'none', border: 'none', padding: '1px 2px', cursor: 'pointer' }}
           title="View full text"
           data-no-drag="true"
@@ -154,14 +154,14 @@ export default function RemarksCell({ value, onSave, readOnly = false, placehold
               {!readOnly && (
                 <button
                   onClick={handleEditFromPopup}
-                  style={{ fontSize: 11, color: '#fd5108', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}
+                  style={{ fontSize: 11, color: 'var(--nexfeed-primary)', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}
                   className="hover:underline"
                 >Edit</button>
               )}
               <button
                 onClick={() => setExpanded(false)}
                 style={{ fontSize: 11, color: '#6b7280', background: 'none', border: 'none', cursor: 'pointer' }}
-                className="hover:text-[#fd5108]"
+                className="hover:text-[var(--nexfeed-primary)]"
               >Close</button>
             </div>
           </div>

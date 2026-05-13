@@ -113,8 +113,8 @@ function ChartInsightSection({ chartType, chartData, testIdSuffix }) {
       data-tour="analytics-smart-insight"
     >
       <div className="flex items-start gap-2">
-        <div className="p-1.5 rounded-md bg-[#fd5108]/10 mt-0.5">
-          <Sparkles className="h-3.5 w-3.5 text-[#fd5108]" />
+        <div className="p-1.5 rounded-md bg-[color-mix(in_srgb,var(--nexfeed-primary)_10%,transparent)] mt-0.5">
+          <Sparkles className="h-3.5 w-3.5 text-[var(--nexfeed-primary)]" />
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between gap-1 mb-1">
@@ -125,7 +125,7 @@ function ChartInsightSection({ chartType, chartData, testIdSuffix }) {
               onClick={() => fetchInsight(true)}
               disabled={isLoading}
               data-testid={`button-refresh-insight-${testIdSuffix}`}
-              className="text-[13px] text-[#fd5108] hover:text-[#fe7c39] flex items-center gap-1 disabled:opacity-50 shrink-0"
+              className="text-[13px] text-[var(--nexfeed-primary)] hover:text-[var(--nexfeed-primary-dark)] flex items-center gap-1 disabled:opacity-50 shrink-0"
             >
               <RefreshCw
                 className={`h-3 w-3 ${isLoading ? "animate-spin" : ""}`}
@@ -144,7 +144,7 @@ function ChartInsightSection({ chartType, chartData, testIdSuffix }) {
               <span className="text-[12px]">{insight}</span>
               <button
                 onClick={() => fetchInsight(true)}
-                className="text-[12px] text-[#fd5108] hover:underline ml-1"
+                className="text-[12px] text-[var(--nexfeed-primary)] hover:underline ml-1"
               >
                 Retry
               </button>
@@ -168,7 +168,28 @@ function ChartInsightSection({ chartType, chartData, testIdSuffix }) {
   );
 }
 
+function getPrimaryColor() {
+  return getComputedStyle(document.documentElement).getPropertyValue("--nexfeed-primary").trim() || "#fd5108";
+}
+function getPrimaryDarkColor() {
+  return getComputedStyle(document.documentElement).getPropertyValue("--nexfeed-primary-dark").trim() || "#fe7c39";
+}
+
 export default function AnalyticsDashboard({ orders }) {
+  const [primaryColor, setPrimaryColor] = useState(getPrimaryColor);
+  const [primaryDark, setPrimaryDark] = useState(getPrimaryDarkColor);
+
+  useEffect(() => {
+    const handleThemeChange = (e) => {
+      setPrimaryColor(e.detail?.primary || getPrimaryColor());
+      setPrimaryDark(e.detail?.dark || getPrimaryDarkColor());
+    };
+    window.addEventListener("nexfeed-theme-change", handleThemeChange);
+    return () => window.removeEventListener("nexfeed-theme-change", handleThemeChange);
+  }, []);
+
+  const CHART_COLORS = [primaryColor, primaryDark, "#ffaa72", "#ffcda8", "#2e343a", "#a1a8b3", "#b5bcc4"];
+
   const totalVolume = orders.reduce((s, o) => s + (o.total_volume_mt || 0), 0);
   const avgSize = orders.length ? totalVolume / orders.length : 0;
   const readyCount = orders.filter(getReadiness).length;
@@ -286,7 +307,7 @@ export default function AnalyticsDashboard({ orders }) {
         <Card className="border-0 shadow-sm" data-tour="analytics-volume-category">
           <CardHeader className="pb-6">
             <CardTitle className="text-[16px] flex items-center gap-2">
-              <Package className="h-6 w-6 text-[#fd5108]" />
+              <Package className="h-6 w-6 text-[var(--nexfeed-primary)]" />
               Volume by Category (MT)
             </CardTitle>
           </CardHeader>
@@ -304,12 +325,12 @@ export default function AnalyticsDashboard({ orders }) {
                   />
                   <Tooltip
                     contentStyle={{
-                      backgroundColor: "#fff",
+                      backgroundColor: 'var(--color-bg-secondary)',
                       border: "1px solid #e5e7eb",
                       borderRadius: "8px",
                     }}
                   />
-                  <Bar dataKey="value" fill="#fd5108" radius={[0, 4, 4, 0]} />
+                  <Bar dataKey="value" fill={primaryColor} radius={[0, 4, 4, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -324,7 +345,7 @@ export default function AnalyticsDashboard({ orders }) {
         <Card className="border-0 shadow-sm" data-tour="analytics-orders-line">
           <CardHeader className="pb-6">
             <CardTitle className="text-[16px] flex items-center gap-2">
-              <Factory className="h-6 w-6 text-[#fd5108]" />
+              <Factory className="h-6 w-6 text-[var(--nexfeed-primary)]" />
               Orders by Feedmill Line
             </CardTitle>
           </CardHeader>
@@ -346,7 +367,7 @@ export default function AnalyticsDashboard({ orders }) {
                     {lineData.map((entry, index) => (
                       <Cell
                         key={`cell-${index}`}
-                        fill={COLORS[index % COLORS.length]}
+                        fill={CHART_COLORS[index % CHART_COLORS.length]}
                       />
                     ))}
                   </Pie>
@@ -365,7 +386,7 @@ export default function AnalyticsDashboard({ orders }) {
         <Card className="border-0 shadow-sm lg:col-span-2" data-tour="analytics-top-items">
           <CardHeader className="pb-6">
             <CardTitle className="text-[16px] flex items-center gap-2">
-              <TrendingUp className="h-6 w-6 text-[#fd5108]" />
+              <TrendingUp className="h-6 w-6 text-[var(--nexfeed-primary)]" />
               Top 5 Most Ordered Items
             </CardTitle>
           </CardHeader>
@@ -384,12 +405,12 @@ export default function AnalyticsDashboard({ orders }) {
                   <YAxis tick={{ fontSize: 12 }} />
                   <Tooltip
                     contentStyle={{
-                      backgroundColor: "#fff",
+                      backgroundColor: 'var(--color-bg-secondary)',
                       border: "1px solid #e5e7eb",
                       borderRadius: "8px",
                     }}
                   />
-                  <Bar dataKey="count" fill="#fe7c39" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="count" fill={primaryDark} radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -404,7 +425,7 @@ export default function AnalyticsDashboard({ orders }) {
         <Card className="border-0 shadow-sm">
           <CardHeader className="pb-6">
             <CardTitle className="text-[16px] flex items-center gap-2">
-              <Package className="h-6 w-6 text-[#fd5108]" />
+              <Package className="h-6 w-6 text-[var(--nexfeed-primary)]" />
               Form Type Distribution
             </CardTitle>
           </CardHeader>
@@ -424,7 +445,7 @@ export default function AnalyticsDashboard({ orders }) {
                     labelLine={false}
                   >
                     {formData.map((_, i) => (
-                      <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                      <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
                     ))}
                   </Pie>
                   <Tooltip />
@@ -442,7 +463,7 @@ export default function AnalyticsDashboard({ orders }) {
         <Card className="border-0 shadow-sm">
           <CardHeader className="pb-6">
             <CardTitle className="text-[16px] flex items-center gap-2">
-              <Factory className="h-6 w-6 text-[#fd5108]" />
+              <Factory className="h-6 w-6 text-[var(--nexfeed-primary)]" />
               Line Utilization (%)
             </CardTitle>
           </CardHeader>
@@ -466,12 +487,12 @@ export default function AnalyticsDashboard({ orders }) {
                   <Tooltip
                     formatter={(v) => `${v}%`}
                     contentStyle={{
-                      backgroundColor: "#fff",
+                      backgroundColor: 'var(--color-bg-secondary)',
                       border: "1px solid #e5e7eb",
                       borderRadius: "8px",
                     }}
                   />
-                  <Bar dataKey="pct" fill="#fd5108" radius={[0, 4, 4, 0]} />
+                  <Bar dataKey="pct" fill={primaryColor} radius={[0, 4, 4, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>

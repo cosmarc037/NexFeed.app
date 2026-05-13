@@ -7,7 +7,6 @@ export const ALL_STATUSES = [
   { value: 'planned',           label: 'Planned',               group: 'Planning' },
   { value: 'hold',              label: 'Hold',                  group: 'Planning' },
   { value: 'cut',               label: 'Cut',                   group: 'Planning' },
-  { value: 'in_production',     label: 'In production',         group: 'Production' },
   { value: 'ongoing_batching',  label: 'On-going batching',     group: 'Production' },
   { value: 'ongoing_pelleting', label: 'On-going pelleting',    group: 'Production' },
   { value: 'ongoing_bagging',   label: 'On-going bagging',      group: 'Production' },
@@ -20,7 +19,6 @@ const LEAD_COMBINED_STATUSES_BASE = [
   { value: 'combined',          label: 'Combined with other PO', group: 'Planning' },
   { value: 'planned',           label: 'Planned',              group: 'Planning' },
   { value: 'hold',              label: 'Hold',                 group: 'Planning' },
-  { value: 'in_production',     label: 'In production',        group: 'Production' },
   { value: 'ongoing_batching',  label: 'On-going batching',    group: 'Production' },
   { value: 'ongoing_pelleting', label: 'On-going pelleting',   group: 'Production' },
   { value: 'ongoing_bagging',   label: 'On-going bagging',     group: 'Production' },
@@ -32,7 +30,6 @@ const CUT_ORDER_STATUSES_BASE = [
   { value: 'cut',               label: 'Cut',                  group: 'Cut' },
   { value: 'planned',           label: 'Planned',              group: 'Planning' },
   { value: 'hold',              label: 'Hold',                 group: 'Planning' },
-  { value: 'in_production',     label: 'In production',        group: 'Production' },
   { value: 'ongoing_batching',  label: 'On-going batching',    group: 'Production' },
   { value: 'ongoing_pelleting', label: 'On-going pelleting',   group: 'Production' },
   { value: 'ongoing_bagging',   label: 'On-going bagging',     group: 'Production' },
@@ -100,6 +97,37 @@ export const KNOWN_STATUSES = new Set([
 
 export function isCustomStatus(status) {
   return !!status && !KNOWN_STATUSES.has(status);
+}
+
+// Statuses that count as "actively being produced" for KPIs / counters / Overview tab
+export const ONGOING_STATUSES = ['ongoing_batching', 'ongoing_pelleting', 'ongoing_bagging'];
+
+export function isInProductionStatus(status) {
+  const s = String(status || '').trim().toLowerCase().replace(/[\s-]/g, '_');
+  return ONGOING_STATUSES.includes(s) || s === 'in_production';
+}
+
+export function isOngoingStatus(status) {
+  const s = String(status || '').trim().toLowerCase().replace(/[\s-]/g, '_');
+  return ONGOING_STATUSES.includes(s);
+}
+
+// "Not-yet-started" = orders not yet being produced and not finished/cancelled
+export function isNotYetStartedStatus(status) {
+  const s = String(status || '').trim().toLowerCase().replace(/[\s-]/g, '_');
+  return ['plotted', 'planned', 'hold', 'cut', 'combined'].includes(s);
+}
+
+// Status-flow rank — lower = higher in table (Done at top, Cancel at bottom).
+export function getStatusFlowRank(status) {
+  const s = String(status || '').trim().toLowerCase().replace(/[\s-]/g, '_');
+  if (s === 'completed' || s === 'done') return 1;
+  if (s === 'ongoing_bagging') return 2;
+  if (s === 'ongoing_pelleting') return 3;
+  if (s === 'ongoing_batching' || s === 'in_production') return 4;
+  if (['plotted', 'planned', 'hold', 'cut', 'combined'].includes(s)) return 5;
+  if (s === 'cancel_po' || s === 'cancelled') return 6;
+  return 5;
 }
 
 export function getStatusLabel(value) {

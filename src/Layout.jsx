@@ -13,8 +13,8 @@ export default function Layout({ children }) {
         :root {
           --font-headline: 'Lora', 'Georgia', 'Times New Roman', serif;
           --font-body: 'Helvetica Neue', 'Helvetica', 'Arial', sans-serif;
-          --primary: #fd5108;
-          --primary-medium: #fe7c39;
+          --primary: var(--nexfeed-primary, #fd5108);
+          --primary-medium: var(--nexfeed-primary-dark, #fe7c39);
           --primary-light: #ffaa72;
           --primary-tint1: #ffcda8;
           --primary-tint2: #ffe8d4;
@@ -38,7 +38,7 @@ export default function Layout({ children }) {
           font-family: var(--font-headline);
         }
         
-        body {
+        html:not(.nexfeed-dark) body {
           background-color: var(--grey-tint3);
         }
         

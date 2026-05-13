@@ -80,7 +80,7 @@ export async function generateN10DSummary(records, sapOrders = []) {
 
   // ── Avail date (when cumulative first exceeds inventory) ──────────────────
   const computeAvailDate = (dfl, inv, daily_values) => {
-    if (dfl >= inv) return today.toISOString().slice(0, 10);
+    if (dfl >= inv) return `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
     const dvArr = parseDV(daily_values);
     let cum = dfl;
     for (let i = 0; i < dvArr.length; i++) {
@@ -290,32 +290,263 @@ export async function generateSmartAlerts(allOrders, alertsSummary) {
   }
 }
 
-export async function generateCombineSchedulingImpact(data) {
-  const { scenario, insertionPrio, delayInfo, alternativePosition, newCompletion, orders, totalVolume, product, line } = data;
+function normalizeAvailDateForAI(targetAvailDate) {
+  if (!targetAvailDate || targetAvailDate === '—') return { display: 'No date', isDated: false };
+  const isISO = /^\d{4}-\d{2}-\d{2}/.test(targetAvailDate) && !isNaN(Date.parse(targetAvailDate));
+  if (isISO) {
+    const d = new Date(targetAvailDate);
+    const display = d.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+    return { display, isDated: true };
+  }
+  const raw = targetAvailDate.toLowerCase().trim();
+  if (raw === 'stock_sufficient') return { display: 'No date (stock sufficient)', isDated: false };
+  if (raw.includes('prio')) return { display: 'No date (priority replenishment)', isDated: false };
+  if (raw.includes('safety')) return { display: 'No date (safety stock reorder)', isDated: false };
+  if (raw.includes('sched')) return { display: 'No date (for scheduling)', isDated: false };
+  return { display: `No date (${targetAvailDate})`, isDated: false };
+}
 
-  const systemPrompt = `You are a feed production scheduling advisor. Analyze the scheduling impact of a proposed order combine and write a concise, specific 2-sentence recommendation for the production planner. Reference order names, priorities, volumes, and deadlines. Be direct and practical. Plain text only — no markdown, no asterisks, no bullet points.`;
+export async function generateCombineSchedulingImpact(ctx) {
+  const { line, combiningOrders = [], combinedVolume, combinedProductionHours, combinedAvailDate, availDateType, expectedInsertionPrio, removedPrios = [], savedChangeoverHrs, netDownstreamShiftHrs, interspersedImpact = [], minCombineRank, maxCombineRank, n10dStatus, n10dDfl, n10dInventory, lineContext = [], totalOrdersOnLine, calculatedAlerts = [], calculatedImpact = {} } = ctx;
 
-  const scenarioText =
-    scenario === 'no_dates'
-      ? `No start dates are set — completion times cannot be determined. The lead order will be placed at Priority ${insertionPrio} based on the highest priority child order.`
-      : scenario === 'no_delay'
-      ? `The combined order can be inserted at Priority ${insertionPrio} without delaying any downstream orders. All downstream orders remain within their deadline windows.`
-      : scenario === 'delay_alt'
-      ? `Inserting at Priority ${insertionPrio} would delay "${delayInfo?.order?.item_description || delayInfo?.order?.fpr || 'a downstream order'}"${delayInfo?.order?.target_avail_date ? ` (deadline: ${delayInfo.order.target_avail_date})` : ''} by approximately ${delayInfo?.delayHrs} hours. However, an alternative insertion at Priority ${alternativePosition} is available without causing any delays.`
-      : `Inserting at Priority ${insertionPrio} would delay "${delayInfo?.order?.item_description || delayInfo?.order?.fpr || 'a downstream order'}"${delayInfo?.order?.target_avail_date ? ` (deadline: ${delayInfo.order.target_avail_date})` : ''} by approximately ${delayInfo?.delayHrs} hours. No alternative insertion position avoids all delays.`;
+  const systemPrompt = `You are a production scheduling advisor for a feed manufacturing plant. Provide structured, concise scheduling recommendations. Plain text only — no markdown, no asterisks, no hash headers.`;
 
-  const userPrompt = `Product: ${product || 'Unknown'}
-Line: ${line || 'Unknown'}
-Total combined volume: ${typeof totalVolume?.toFixed === 'function' ? totalVolume.toFixed(1) : totalVolume} MT
-Orders being combined (${orders?.length || 0}): ${(orders || []).map(o => `"${o.item_description || o.fpr}" ${o.total_volume_mt}MT Prio${o.priority_seq}`).join('; ')}
-Estimated combined order completion: ${newCompletion || 'N/A'}
+  // Normalize the combined avail date for display
+  const combinedAvailNorm = normalizeAvailDateForAI(combinedAvailDate);
+  const combinedAvailDisplay = combinedAvailNorm.display;
+  const isDatedCombine = combinedAvailNorm.isDated;
 
-Scheduling result: ${scenarioText}
+  let alertsContext = '';
+  if (calculatedAlerts.length > 0) {
+    alertsContext = `
+KNOWN ISSUES DETECTED:
+${calculatedAlerts.map(a => {
+  if (a.type === 'volume_ceiling') return `- VOLUME WARNING: ${a.message}`;
+  if (a.type === 'n10d_risk') return `- STOCK RISK WARNING: Order "${a.orderName}" (FPR: ${a.fpr}, Prio ${a.prio}) has ${a.n10dStatus} stock status. A delay of ~${a.delayFormatted} from this combination may accelerate stock depletion.`;
+  // dated deadline
+  const availNorm = normalizeAvailDateForAI(a.availDate);
+  const completionDisplay = a.newCompletionFull || a.completionDate;
+  const delayDisplay = a.delayFormatted ? `~${a.delayFormatted}` : `approximately ${a.delayDays} days`;
+  return `- DELAY WARNING: Order "${a.orderName}" (FPR: ${a.fpr}, Prio ${a.prio}) new completion ${completionDisplay} will be past its Avail Date of ${availNorm.display} by ${delayDisplay}.`;
+}).join('\n')}
 
-Write a 2-sentence actionable recommendation for the planner based on this scheduling analysis.`;
+You MUST include ALL of these warnings in your Alerts section. Do not omit any.
+`;
+  }
+
+  // Insertion position is always deterministic — tell AI the exact position to state.
+  const safeInsertionPrio = expectedInsertionPrio ?? '?';
+  const insertionRule = isDatedCombine
+    ? `INSERTION POSITION — YOU MUST STATE PRIORITY ${safeInsertionPrio}:
+The combined order will be inserted at Priority ${safeInsertionPrio}.
+This is because the order with the earliest avail date (${combinedAvailDisplay}) is currently at Priority ${safeInsertionPrio}.
+Rule: For dated orders, the combined order always takes the position of the order with the earliest avail date.
+You MUST start your response with "Priority ${safeInsertionPrio}." — not just the number.
+Do NOT say the position "is correct". Use phrases like "takes this position because" or "is placed here since".
+Explain naturally — mention the avail date, the specific product name, and why this position makes sense in the schedule.`
+    : `INSERTION POSITION — YOU MUST STATE PRIORITY ${safeInsertionPrio}:
+The combined order will be inserted at Priority ${safeInsertionPrio}.
+This is because the order at Priority ${safeInsertionPrio} has the lowest priority number among the orders being combined.
+Rule: For non-dated orders, the combined order always takes the position of the lowest priority number.
+You MUST start your response with "Priority ${safeInsertionPrio}." — not just the number.
+Do NOT say the position "is correct". Use phrases like "takes this position because" or "is placed here since".
+Explain naturally — mention the current sequence context and why this position is appropriate.`;
+
+  const userPrompt = `You are a production scheduling advisor for a feed manufacturing plant.
+The planner is considering combining orders on ${line}.
+
+ORDERS BEING COMBINED:
+${combiningOrders.map(o => {
+  const norm = normalizeAvailDateForAI(o.availDate);
+  return `  Prio ${o.prio}: ${o.name} | ${o.volume} MT | Avail: ${norm.display} (${norm.isDated ? 'DATED' : 'NON-DATED'}) | Form: ${o.form}`;
+}).join('\n')}
+
+COMBINED ORDER AFTER MERGE:
+  Total Volume: ${combinedVolume} MT
+  Production Time: ${combinedProductionHours} hrs
+  Avail Date: ${combinedAvailDisplay} (${isDatedCombine ? 'DATED' : 'NON-DATED'})
+  Future Dispatches Status: ${n10dStatus || 'N/A'}
+  DFL: ${n10dDfl != null ? n10dDfl + ' MT' : 'N/A'} | Inventory: ${n10dInventory != null ? n10dInventory + ' MT' : 'N/A'}
+
+ORDERS MERGED INTO LEAD: ${removedPrios.length > 0 ? 'Priority ' + removedPrios.join(', Priority ') : 'None'}
+CRITICAL — production volume from merged orders is ABSORBED into the combined order's production time (${combinedProductionHours} hrs). It is NOT deleted or eliminated.
+The ONLY time freed for orders AFTER the entire combine group is the changeover slot that was between the merged orders: ${savedChangeoverHrs != null ? savedChangeoverHrs + ' hrs' : 'N/A'}.
+NET DOWNSTREAM TIME SHIFT (for orders after Priority ${maxCombineRank}): ${netDownstreamShiftHrs != null ? netDownstreamShiftHrs + ' hrs earlier' : 'unknown'}.
+
+=== PRE-GROUPED DATA — USE THESE EXACT GROUPINGS ===
+${(() => {
+  const { laterOrders = [], earlierOrders = [], deadlineMisses = [] } = calculatedImpact;
+
+  const groupByFormatted = (orders) => {
+    const groups = {};
+    orders.forEach(o => {
+      const key = o.shiftFormatted || 'unknown';
+      if (!groups[key]) groups[key] = { shiftFormatted: key, orders: [] };
+      groups[key].orders.push(o);
+    });
+    return Object.values(groups).map(g => {
+      const sorted = g.orders.sort((a, b) => a.prio - b.prio);
+      const prios = sorted.map(o => o.prio);
+      return { shiftFormatted: g.shiftFormatted, prioRange: prios.length === 1 ? String(prios[0]) : `${prios[0]}–${prios[prios.length - 1]}`, count: sorted.length, orders: sorted };
+    });
+  };
+  const groupByDelay = (orders) => {
+    const groups = {};
+    orders.forEach(o => {
+      const key = o.delayDays;
+      if (!groups[key]) groups[key] = { delayDays: key, orders: [] };
+      groups[key].orders.push(o);
+    });
+    return Object.values(groups).map(g => {
+      const sorted = g.orders.sort((a, b) => a.prio - b.prio);
+      const prios = sorted.map(o => o.prio);
+      return { delayDays: g.delayDays, prioRange: prios.length === 1 ? String(prios[0]) : `${prios[0]}–${prios[prios.length - 1]}`, count: sorted.length, orders: sorted };
+    });
+  };
+
+  const laterGroups = groupByFormatted(laterOrders);
+  const earlierGroups = groupByFormatted(earlierOrders);
+  const deadlineGroups = groupByDelay(deadlineMisses);
+
+  const lines = [];
+  if (laterGroups.length > 0) {
+    lines.push(`Orders starting later (${laterOrders.length} orders total):`);
+    laterGroups.forEach(g => {
+      lines.push(`  Group: Prio ${g.prioRange} (${g.count} order${g.count > 1 ? 's' : ''}) — ${g.shiftFormatted} later`);
+      lines.push(`  Orders: ${g.orders.map(o => `${o.name} (Prio ${o.prio}, Future Dispatches: ${o.n10dStatus || 'N/A'})`).join(', ')}`);
+    });
+  }
+  if (earlierGroups.length > 0) {
+    lines.push(`Orders starting earlier (${earlierOrders.length} orders total):`);
+    earlierGroups.forEach(g => {
+      lines.push(`  Group: Prio ${g.prioRange} (${g.count} order${g.count > 1 ? 's' : ''}) — ${g.shiftFormatted} earlier`);
+      lines.push(`  Orders: ${g.orders.map(o => `${o.name} (Prio ${o.prio}, Future Dispatches: ${o.n10dStatus || 'N/A'})`).join(', ')}`);
+    });
+  }
+  if (deadlineMisses.length > 0) {
+    const datedMs = deadlineMisses.filter(o => o.type === 'dated');
+    const n10dMs = deadlineMisses.filter(o => o.type === 'n10d_risk');
+    lines.push(`ORDERS AT RISK (${deadlineMisses.length} orders total) — YOU MUST INCLUDE ALL. DO NOT SKIP ANY.`);
+    if (datedMs.length > 0) {
+      lines.push(`Dated orders exceeding avail date (${datedMs.length}):`);
+      datedMs.forEach(o => {
+        lines.push(`  ⛔ Prio ${o.prio}: ${o.name}`);
+        lines.push(`     New Completion: ${o.newCompletionFull || o.newCompletion}`);
+        lines.push(`     Avail Date: ${o.availDate}`);
+        lines.push(`     Delay past avail: ~${o.delayFormatted || (o.delayDays + ' days')}`);
+        lines.push(`     Future Dispatches Status: ${o.n10dStatus || 'N/A'} | FPR: ${o.fpr || '—'}`);
+      });
+    }
+    if (n10dMs.length > 0) {
+      lines.push(`Non-dated Critical/Urgent stock risk orders (${n10dMs.length}):`);
+      n10dMs.forEach(o => {
+        lines.push(`  ⛔ Prio ${o.prio}: ${o.name}`);
+        lines.push(`     Future Dispatches Status: ${o.n10dStatus} — ACTUAL VALUE, USE AS-IS`);
+        lines.push(`     Delayed by: ~${o.delayFormatted}`);
+        lines.push(`     Risk: Stock depletion — this delay may accelerate stockout`);
+        lines.push(`     FPR: ${o.fpr || '—'}`);
+      });
+    }
+  }
+  if (lines.length === 0) lines.push('No downstream time shifts calculated.');
+  const totalEarlierLaterGroups = laterGroups.length + earlierGroups.length;
+  lines.push(`EARLIER/LATER GROUPS: ${totalEarlierLaterGroups} — write exactly ${totalEarlierLaterGroups} grouped bullet${totalEarlierLaterGroups !== 1 ? 's' : ''} for earlier/later sections.`);
+  if (deadlineMisses.length > 0) {
+    lines.push(`AT-RISK ORDERS: ${deadlineMisses.length} — list EACH INDIVIDUALLY (not grouped). Do NOT write "[future dispatch status]" — use the actual value shown above.`);
+  }
+  return lines.join('\n');
+})()}
+
+INTERSPERSED NON-COMBINED ORDERS (non-combined orders between Priority ${minCombineRank} and Priority ${maxCombineRank}):
+${interspersedImpact.length === 0
+  ? 'None — the combine group is contiguous with no other orders in between.'
+  : interspersedImpact.map(o =>
+    `  Prio ${o.prio}: ${o.name} — will start ${o.shiftHrs >= 0 ? o.shiftHrs + ' hrs EARLIER' : Math.abs(o.shiftHrs) + ' hrs LATER (delayed)'}`
+  ).join('\n')}
+${interspersedImpact.some(o => o.shiftHrs < 0)
+  ? 'WARNING: One or more interspersed orders will be significantly delayed because the combined order ('+combinedProductionHours+' hrs) now blocks them as a single large run.'
+  : ''}
+
+CURRENT LINE SEQUENCE (${line}, ${totalOrdersOnLine} orders):
+${lineContext.map(o => {
+  const norm = normalizeAvailDateForAI(o.availDate);
+  return `  Prio ${o.prio}: ${o.name} | ${o.volume} MT | Prod: ${o.prodHours} hrs | CO: ${o.changeover} hrs | Avail: ${norm.display} (${norm.isDated ? 'DATED' : 'NON-DATED'}) | Future Dispatches: ${o.n10dStatus} | Completion: ${o.completionDate}${o.isBeingCombined ? ' \u2190 BEING COMBINED' : ''}`;
+}).join('\n')}
+
+${insertionRule}
+
+${alertsContext}
+IMPORTANT:
+- You are analyzing ONLY the combine group shown under "ORDERS BEING COMBINED" above. Do not write about or reference any other product that is not listed there.
+- Use the EXACT priority numbers shown above. Do not invent priority numbers that don't exist.
+- The priority numbers in the current line sequence above are the REAL current positions.
+- After combining, the merged order takes one position and the removed slots shift everything up.
+- Do not reference "Prio 0" or priority numbers higher than ${totalOrdersOnLine}.
+- Your Insertion Position answer must reference the products listed under "ORDERS BEING COMBINED" only.
+
+RESPOND IN EXACTLY THIS FORMAT (no markdown, no # headers, no **bold**):
+
+Insertion Position:
+Priority ${safeInsertionPrio}. [2-3 sentences explaining why the combined order takes this position — use "takes this position because" or "is placed here since", never "is correct". Reference the specific product name and avail date (if dated) or lowest-prio logic (if non-dated). Do not use markdown.]
+
+Scheduling Impact:
+Your response has TWO mandatory parts: GROUPED BULLETS and SUMMARY. Both MUST always appear.
+
+=== PART 1: GROUPED BULLETS ===
+Use the PRE-GROUPED DATA above. Write EXACTLY ONE bullet per group — no more.
+If a section has no groups, skip that section entirely (no label, no text).
+Section labels (use exactly these, each on its own line):
+  Orders starting earlier:
+  Orders starting later:
+  Orders at risk of missing avail date:
+
+BULLET FORMAT:
+- Earlier/Later — Group of 2+ orders: ✅ Prio [range] ([count] orders) — all start ~[time] earlier. Notable: [pick 2-3 Critical/Urgent].
+- Earlier/Later — Single order: ✅ Prio [X]: [Name] — starts [time] earlier. [Future dispatch status if Critical/Urgent].
+- Use ✅ for earlier, ⚠ for later.
+- NEVER list individual orders for earlier/later if their group has 2+ orders.
+- NEVER output more grouped bullets than EARLIER/LATER GROUPS count above.
+
+For "Orders at risk of missing avail date" — MANDATORY IF AT-RISK DATA EXISTS ABOVE:
+- List EACH order INDIVIDUALLY — do NOT group.
+- For DATED orders: ⛔ Prio [X]: [Name] — new completion [exact date/time from data] exceeds avail date [exact date from data] by ~[delay from data]. [ACTUAL future dispatch status].
+- For NON-DATED Critical/Urgent orders: ⛔ Prio [X]: [Name] — [ACTUAL status, e.g. "Critical"] stock status. Delay of ~[time] may accelerate stock depletion.
+- NEVER write "[future dispatch status]" or "[N10D status]" as literal text — use the actual value (Critical, Urgent, Sufficient, Monitor, N/A).
+- NEVER flag non-dated orders that are Sufficient, Monitor, or N/A in this section.
+- DO NOT SKIP THIS SECTION if at-risk data exists above. It is required.
+- DO NOT say "No orders at risk" when at-risk data exists.
+
+TIME FORMAT: Do NOT use decimal hours.
+0.17 hrs = 10 min | 4.18 hrs = 4 hrs 11 min | 7.59 hrs = 7 hrs 35 min | 15.86 hrs = 15 hrs 52 min | 24.71 hrs = 1 day 43 min
+
+=== PART 2: SUMMARY (MANDATORY) ===
+After ALL bullet sections, write "---SUMMARY---" on its own line, then 3-5 sentences each on its OWN line.
+- ALWAYS include, even if there are only earlier orders.
+- If only earlier orders and no deadlines: be positive, mention time savings, recommend proceeding.
+- If delays exist: assess severity, mention Critical/Urgent orders.
+- If DEADLINE ORDERS exist above: you MUST mention them. DO NOT say "safe to proceed" or "no risks to avail dates". Recommend caution or against combining if delays are severe.
+- End with clear recommendation.
+- Do NOT repeat the grouped bullets. Do NOT use markdown.
+
+EXAMPLE:
+Orders starting earlier:
+✅ Prio 3–18 (16 orders) — all start ~10 min earlier. Notable: Gall 21 Chicken Layer (Prio 5) is Critical.
+Orders starting later:
+⚠ Prio 7–15 (9 orders) — all start ~4 hrs 11 min later. Notable: Gallimax 3 Red Pellet (Prio 12).
+---SUMMARY---
+The combination results in a net positive for 16 downstream orders.
+However, 9 interspersed orders will start approximately 4 hours later.
+Overall, it is safe to proceed — no avail dates are at risk.
+
+RULES: No markdown. Use PRE-GROUPED DATA — do NOT invent groupings or times not shown there.]
+
+Alerts:
+[List ONLY genuine warnings from the KNOWN ISSUES DETECTED section above. Each on its own line starting with ⚠. Include volume ceiling warnings and orders where completion date exceeds avail date.
+STRICTLY DO NOT include: downstream orders starting earlier, changeover savings, time shifts, or any positive scheduling effect — those belong in Scheduling Impact only, never in Alerts.
+If no genuine warnings exist, state exactly: "No alerts — all orders remain on schedule."]`;
 
   try {
-    const { content } = await postAI('recommendations', { systemPrompt, userPrompt, maxTokens: 180 });
+    const { content } = await postAI('recommendations', { systemPrompt, userPrompt, maxTokens: 500 });
     return content || null;
   } catch {
     return null;
@@ -324,12 +555,73 @@ Write a 2-sentence actionable recommendation for the planner based on this sched
 
 export async function generatePanelSummary(type, context) {
   const { scope, totalOrders, totalVolume, plotted, planned, inProduction, onHold, done, cancelled,
-    overdueOrders, criticalProducts, urgentProducts, combinableGroups, orders } = context;
+    overdueOrders, criticalProducts, urgentProducts, combinableGroups, orders, shutdownLines = [] } = context;
 
   if (type === 'production_insights') {
-    const systemPrompt = `You are a production planning advisor for a feed manufacturing plant. Generate a brief smart summary for the production insights panel. Be specific — use product names, priorities, and volumes. Keep it concise and actionable. Do NOT use markdown formatting — no asterisks, no bold, no hashes. Plain text only.`;
+    const hasShutdown = shutdownLines.length > 0;
 
-    const userPrompt = `SCOPE: ${scope}
+    const systemPrompt = hasShutdown
+      ? `You are a production planning advisor for a feed manufacturing plant. A production line shutdown is in effect. Provide a detailed, specific analysis of the shutdown impact and diversion recommendations. Use actual product names, volumes, future dispatch status, and estimated production times. Do NOT use markdown formatting — no asterisks, no bold, no hashes. Plain text only.`
+      : `You are a production planning advisor for a feed manufacturing plant. Generate a brief smart summary for the production insights panel. Be specific — use product names, priorities, and volumes. Keep it concise and actionable. Do NOT use markdown formatting — no asterisks, no bold, no hashes. Plain text only.`;
+
+    let shutdownSection = '';
+    if (hasShutdown) {
+      shutdownSection = shutdownLines.map(s => {
+        const partnerInfo = s.partnerLines.length > 0
+          ? s.partnerLines.map(pl => `${pl} (${s.partnerLineLoad[pl] ?? 0} orders, ${s.partnerLineVolume[pl] ?? 0} MT currently queued)`).join(', ')
+          : 'None — all feedmill lines shutdown';
+
+        const orderDetail = s.orders.map(o => {
+          const n10d = o.n10dStatus ? ` | Future Dispatches: ${o.n10dStatus}${o.dfl != null ? `, DFL: ${o.dfl} MT` : ''}${o.inventory != null ? `, Inventory: ${o.inventory} MT` : ''}` : '';
+          const hrs = o.productionHours ? ` | Est. production: ${o.productionHours} hrs` : '';
+          const avail = o.availDate ? ` | Avail: ${o.availDate}` : '';
+          const divert = o.canDivertOutside
+            ? ` | Can divert to: ${o.outsideLines.join(', ')}`
+            : o.canDivertWithin
+              ? ' | Can divert to partner line'
+              : ' | No diversion available';
+          return `  - Prio ${o.prio}: ${o.name} (${o.volume} MT, ${o.form})${n10d}${hrs}${avail}${divert}`;
+        }).join('\n');
+
+        return `SHUTDOWN ALERT — ${s.line} (${s.feedmill})
+Shutdown since: ${s.since} | Reason: ${s.reason}
+${s.allFeedmillDown ? 'ENTIRE FEEDMILL DOWN' : 'Single line shutdown'}
+Affected: ${s.orderCount} orders | ${s.totalVolume} MT total halted
+Can divert outside feedmill: ${s.divertibleOutsideCount} orders
+Can divert to partner line: ${s.divertibleWithinCount} orders
+Partner line(s) available: ${partnerInfo}
+
+Affected orders:
+${orderDetail}
+
+INSTRUCTION: Make shutdown impact and diversion the TOP PRIORITY. For each affected order, recommend the specific target line. Prioritize partner lines (same feedmill) first, then outside lines. Note if partner line capacity may be overloaded.`;
+      }).join('\n\n');
+    }
+
+    const userPrompt = hasShutdown
+      ? `SCOPE: ${scope}
+
+${shutdownSection}
+
+OVERALL STATUS:
+- Total active orders: ${totalOrders} (${totalVolume.toFixed(0)} MT) | In Production: ${inProduction} | On Hold: ${onHold}
+- Critical products: ${criticalProducts.length > 0 ? criticalProducts.map(p => p.name).join('; ') : 'None'}
+- Urgent products: ${urgentProducts.length > 0 ? urgentProducts.map(p => p.name).join('; ') : 'None'}
+- Overdue orders: ${overdueOrders.length > 0 ? overdueOrders.map(o => `${o.description} (due: ${o.availDate})`).join('; ') : 'None'}
+
+FORMAT:
+[2-3 sentence impact summary: total volume halted, most critical orders at risk, urgency level]
+
+Affected orders and estimated delays:
+[For each affected order: name, volume, future dispatch status, estimated production hours, and what happens if not diverted. Recommend specific target line.]
+
+Recommended actions:
+1. [Most urgent diversion — Critical or Urgent future dispatch orders first]
+2. [Second most urgent]
+3. [Third action]
+4. [Partner line capacity note]
+5. [Any other recommendation]`
+      : `SCOPE: ${scope}
 
 CURRENT DATA:
 - Total orders: ${totalOrders} (${totalVolume.toFixed(0)} MT)
@@ -352,7 +644,7 @@ Recommended actions:
 3. [Third action]`;
 
     try {
-      const { content } = await postAI('recommendations', { systemPrompt, userPrompt, maxTokens: 450 });
+      const { content } = await postAI('recommendations', { systemPrompt, userPrompt, maxTokens: hasShutdown ? 650 : 500 });
       return content;
     } catch {
       return null;
@@ -565,17 +857,28 @@ APP STRUCTURE:
 - Feedmill 3 (FM3): Line 6, Line 7
 - Powermix (PMX): Line 5
 
+APP NAVIGATION:
+- Dashboard
+  - Overview: Feedmill cards, line status, capacity monitoring, shutdown simulation
+  - Analytics: KPI cards, charts (volume by category, orders by line, top items), smart insights
+- Orders: Production order management per feedmill and line
+- Configurations
+  - Order History: Completed and cancelled orders archive
+  - Changeover Rules: Additional changeover time configuration
+  - Master Data: Product master data for auto-populating orders
+  - Future Dispatches: Dispatch forecast data for production prioritization
+
 ORDER STATUSES:
 - Locked (not auto-movable): Done, Cancel PO, In Production, On-going, Planned
 - Movable: Plotted, Hold, Cut, Uncombine, Merge Back, Custom
 
-N10D STATUS LEVELS:
+FUTURE DISPATCHES STATUS LEVELS:
 - Critical: DFL >= Inventory (needs production immediately)
 - Urgent: Cumulative demand breaches inventory within 3 days
 - Monitor: Breach within 4–10 days
 - Sufficient: No breach within 10 days
 
-COMBINE CRITERIA (all must match): Material Code FG, Material Code SFG, Category, Form, Batch Size, Line, SCADA. Volume ceiling warning at 200 MT.
+COMBINE CRITERIA (all must match): Material Code FG, Material Code SFG, Line, Formula Version (SCADA). Volume ceiling warning at 200 MT.
 
 PRODUCTION TIME FORMULA: Hours = Volume (MT) ÷ Run Rate (MT/hr)
 
@@ -585,7 +888,7 @@ ${JSON.stringify(lineLoad, null, 1)}
 ACTIVE ORDERS (non-completed, non-cancelled):
 ${JSON.stringify(orderRows, null, 1)}
 
-N10D STOCK STATUS:
+FUTURE DISPATCHES STOCK STATUS:
 ${JSON.stringify(n10dRows, null, 1)}
 
 KNOWLEDGE BASE (run rates & batch sizes):
@@ -772,8 +1075,11 @@ export function preSortOrders(orders, inferredTargetMap = {}) {
   for (const o of movableOrders) {
     const inf = inferredTargetMap[o.material_code];
 
-    const isHardDeadline = isValidAvailDate(o.target_avail_date)
-      && !(o.avail_date_source === 'auto_sequence' && inf?.status === 'Sufficient');
+    // A date is only a hard deadline if it came from SAP/manual entry — NOT from a previous
+    // auto-sequence run. N10D-sourced dates must always be recalculated from the latest N10D
+    // data so that a new upload is reflected when the user re-runs Auto-Sequence.
+    const isN10DSourced = o.avail_date_source === 'auto_sequence' || o.date_source === 'n10d';
+    const isHardDeadline = isValidAvailDate(o.target_avail_date) && !isN10DSourced;
 
     let effectiveDate = null;
     let n10dStatus = null;
@@ -912,9 +1218,9 @@ export async function autoSequenceOrders(orders, feedmillName, lineName, inferre
   // Categorize each order: A=actual avail date, B=inferred target (incl. Critical), C=gap filler, D=stock sufficient
   const categorize = (o) => {
     const inf = inferredTargetMap[o.material_code];
-    // Hard deadline only if NOT a Sufficient N10D-derived date written by auto-sequence
-    const isHardDeadline = isValidAvailDate(o.target_avail_date)
-      && !(o.avail_date_source === 'auto_sequence' && inf?.status === 'Sufficient');
+    // Hard deadline only if date was NOT written by auto-sequence or N10D
+    const _catN10DSourced = o.avail_date_source === 'auto_sequence' || o.date_source === 'n10d';
+    const isHardDeadline = isValidAvailDate(o.target_avail_date) && !_catN10DSourced;
     if (isHardDeadline) return 'A';
     if (inf?.status === 'Sufficient') return 'D';
     if (inf?.status === 'Critical' || inf?.status === 'Urgent' || inf?.status === 'Monitor') return 'B';
@@ -927,7 +1233,7 @@ export async function autoSequenceOrders(orders, feedmillName, lineName, inferre
   const hasStockData = Object.keys(inferredTargetMap).length > 0;
 
   const noStockDataNote = !hasStockData
-    ? `\n\nNOTE: No Next 10 Days stock data is available for this line. Non-dated orders are treated as gap fillers with no date constraint. Consider uploading the "Next 10 Days" file for smarter prioritization.`
+    ? `\n\nNOTE: No Future Dispatches stock data is available for this line. Non-dated orders are treated as gap fillers with no date constraint. Consider uploading the "Future Dispatches" file for smarter prioritization.`
     : '';
 
   const systemPrompt = `You are NexFeed's AI scheduling optimizer for feed mill production. You calculate start times and completion dates for a pre-ordered production sequence.
@@ -942,7 +1248,7 @@ Your only job is to:
 
 ORDER CATEGORIES:
 - Category A: Actual avail date (hard deadline) — HIGHEST priority.
-- Category B: Inferred target date from Next 10 Days stock data (soft deadline) — interleaved with A by date.
+- Category B: Inferred target date from Future Dispatches stock data (soft deadline) — interleaved with A by date.
 - Category C: Non-dated, no stock target — gap fillers placed between dated/targeted orders.
 - Category D: Stock Sufficient — already has enough inventory; LOWEST priority.
 
@@ -957,8 +1263,8 @@ SCHEDULING RULES:
 SEQUENCE ORDER (fixed — do not change):
 ALL orders are pre-sorted in ONE single chronological list by effective date — no grouping by source.
 - Cat A: effective date = actual avail date (hard deadline)
-- Cat B: effective date = inferred stock target date from N10D (Critical = today)
-- Cat D: effective date = last day of N10D 10-day window (Sufficient = stock covers demand for now)
+- Cat B: effective date = inferred stock target date from Future Dispatches (Critical = today)
+- Cat D: effective date = last day of Future Dispatches window (Sufficient = stock covers demand for now)
 - Cat C: no effective date — gap fillers placed AFTER all dated/targeted orders
 Cat A, B, and D orders are ALL sorted together chronologically. A Sufficient order due Apr 9 appears BEFORE a hard-deadline order due Apr 11.${noStockDataNote}
 
@@ -1079,7 +1385,7 @@ Calculate start/completion for each order in the order shown. Assign the correct
     // Inject no-stock-data note into insights if no N10D data uploaded
     if (!hasStockData) {
       if (!parsed.insights) parsed.insights = [];
-      parsed.insights.unshift('📊 No stock level data available. Upload the "Next 10 Days" file in Configurations for smarter prioritization of prio replenish and safety stock orders.');
+      parsed.insights.unshift('📊 No stock level data available. Upload the "Future Dispatches" file in Configurations for smarter prioritization of prio replenish and safety stock orders.');
     }
 
     // Ensure summary includes stock category counts
@@ -1261,7 +1567,7 @@ export async function generatePerRowSequenceInsights(simRows, excludedOrders = [
     return `Priority ${row._simPrio}: "${row.item_description || 'Unknown'}"
   FPR: ${row.fpr || '-'} | Volume: ${vol} MT | Order Status: ${row.status || '-'}
   Planned/Locked by planner: ${isPlanned ? 'Yes' : 'No'} | Critical stock: ${isCritical ? 'Yes' : 'No'}
-  N10D Status: ${n10dStatus}
+  Future Dispatches Status: ${n10dStatus}
   Availability Date: ${availContext}
   Stock target breach date: ${targetContext || 'N/A'}
   DFL: ${dfl != null ? dfl + ' MT' : 'N/A'} | Inventory: ${inv != null ? inv + ' MT' : 'N/A'} | DFL/Inv Ratio: ${ratio || 'N/A'}`;
@@ -1344,7 +1650,7 @@ export async function generateVolumeImpactAnalysis(changedRow, newVolume, follow
         const availFmt = r.target_avail_date && /^\d{4}-\d{2}-\d{2}/.test(r.target_avail_date)
           ? fmtFriendly(r.target_avail_date) : (r.target_avail_date || 'No deadline');
         const completionFmt = r._simCompletionStr || 'Not set';
-        return `Priority ${r._simPrio}: "${r.item_description || 'Unknown'}" | Vol: ${r.volume_override ?? r.total_volume_mt} MT | Avail: ${availFmt} | Completion: ${completionFmt} | N10D: ${n10dStatus} | DFL: ${inf.dueForLoading ?? 'N/A'} MT | Inv: ${inf.inventory ?? 'N/A'} MT`;
+        return `Priority ${r._simPrio}: "${r.item_description || 'Unknown'}" | Vol: ${r.volume_override ?? r.total_volume_mt} MT | Avail: ${availFmt} | Completion: ${completionFmt} | Future Dispatches: ${n10dStatus} | DFL: ${inf.dueForLoading ?? 'N/A'} MT | Inv: ${inf.inventory ?? 'N/A'} MT`;
       }).join('\n');
 
   const systemPrompt = `You are a production planning advisor for a feed manufacturing plant. A planner is changing the volume of a production order. Analyze the scheduling impact on following orders concisely in 3-5 sentences.
@@ -1514,7 +1820,7 @@ export async function generateOrderImpactAnalysis(newOrder, existingOrders) {
 
   // ── Step 4: APP calculates production time ────────────────────────────────
   const prodHrs    = parseFloat(newOrder.production_hours) || 0;
-  const changeover = 0.17;
+  const changeover = parseFloat(newOrder.changeover_time ?? 0.17) || 0.17;
   const totalAdded = prodHrs + changeover;
 
   // ── Step 5: APP calculates deadline risk ──────────────────────────────────
@@ -1772,7 +2078,7 @@ export async function generateProductInsights(n10dRecords, allOrders = []) {
 
     if (dfl >= inv) {
       status = 'Critical';
-      availDate = _today.toISOString().slice(0, 10);
+      availDate = `${_today.getFullYear()}-${String(_today.getMonth()+1).padStart(2,'0')}-${String(_today.getDate()).padStart(2,'0')}`;
       daysUntilBreach = 0;
     } else {
       let cum = dfl;
@@ -1807,6 +2113,15 @@ export async function generateProductInsights(n10dRecords, allOrders = []) {
 
     const sysA = `You are a production planning advisor for a feed manufacturing plant. Generate a helpful 3-5 sentence production insight for each product.
 
+FIELD DEFINITIONS — interpret these consistently across all insights:
+- Inventory = current stock on hand (what we have in the warehouse right now)
+- DFL (Due for Loading) = demand / required dispatch quantity (what needs to go out)
+- If DFL > Inventory → stock is insufficient → shortage / stockout risk
+- If Inventory > DFL → stock is sufficient → buffer remains
+- Buffer = Inventory minus DFL (positive = surplus; negative = deficit)
+- Always write: "Current inventory (X MT) covers/falls below the required demand (Y MT)"
+- Never reverse these fields — Inventory is NEVER demand, DFL is NEVER stock
+
 RULES:
 - Do NOT just restate the data. Provide actionable advice.
 - Tell the planner WHEN to act, WHAT to do, and WHY.
@@ -1818,10 +2133,10 @@ RULES:
 - Output each insight on a SINGLE LINE — no line breaks within an insight.
 
 TONE PER STATUS:
-Critical: Urgent. State deficit clearly. Recommend producing NOW or within 24 hours. Warn about consequences of delay.
+Critical: Urgent. State deficit clearly (current inventory X MT is below required demand Y MT). Recommend producing NOW or within 24 hours. Warn about consequences of delay.
 Urgent: Firm. State exactly how many days remain. Recommend scheduling within 1-2 days. Mention last safe production date.
 Monitor: Advisory. State the window (X days). Recommend planning within the coming week. Note buffer is shrinking.
-Sufficient: Reassuring. Confirm stock covers demand. State how long inventory will last. Recommend routine monitoring only.`;
+Sufficient: Reassuring. Confirm current inventory covers required demand. State how long stock will last. Recommend routine monitoring only.`;
 
     const usrA = `Generate insights for these products. Output one per line: [material_code]: [3-5 sentence insight on a single line]\n\n${productLines}`;
 
@@ -1841,13 +2156,13 @@ Sufficient: Reassuring. Confirm stock covers demand. State how long inventory wi
   const n10dCodes = new Set(enriched.map(p => String(p.material_code)));
   const datedOrders = (allOrders || []).filter(o => {
     const code = String(o.material_code_fg || o.material_code || '');
-    const av = String(o.avail_date || o.target_avail_date || '').toLowerCase().trim();
-    return code && !n10dCodes.has(code) && av && av !== 'prio replenish' && av !== 'prio_replenish' && av !== 'safety stocks' && /\d/.test(av);
+    const av = String(o.target_avail_date || '');
+    return code && !n10dCodes.has(code) && /^\d{4}-\d{2}-\d{2}/.test(av) && !isNaN(Date.parse(av));
   });
 
   if (datedOrders.length > 0) {
     const orderLines = datedOrders.map(o => {
-      const av = o.avail_date || o.target_avail_date || '';
+      const av = o.target_avail_date || '';
       const deadline = av ? new Date(av) : null;
       const daysLeft = deadline && !isNaN(deadline) ? Math.ceil((deadline - _today) / 86400000) : null;
       const completionD = deadline && !isNaN(deadline) ? _fmtFull(new Date(deadline.getTime() - 86400000)) : null;
@@ -1886,7 +2201,7 @@ TONE:
   (allOrders || []).forEach(o => {
     const code = String(o.material_code_fg || o.material_code || '');
     if (code && !insightMap[code]) {
-      insightMap[code] = `This order is scheduled for ${o.volume_override || o.total_volume_mt || 0} MT on ${o.feedmill_line || 'an unassigned line'}. No stock level data available from Next 10 Days.`;
+      insightMap[code] = `This order is scheduled for ${o.volume_override || o.total_volume_mt || 0} MT on ${o.feedmill_line || 'an unassigned line'}. No stock level data available from Future Dispatches.`;
     }
   });
 
@@ -1938,6 +2253,15 @@ export function buildInsightTemplates(n10dRecords, allOrders) {
     const bufferPct = inv > 0 ? (((inv - dfl) / inv) * 100).toFixed(1) : '-100.0';
     const dvArr = _parseDV(r.daily_values);
 
+    console.debug('[Future Dispatches Logic Check]', {
+      materialCode: r.material_code,
+      item: r.item_description,
+      inventory: inv,
+      dueForLoading: dfl,
+      balance: Number((inv - dfl).toFixed(2)),
+      interpretedAs: { inventory: 'stock (on hand)', dueForLoading: 'demand (dispatch quantity)' },
+    });
+
     let status = 'Sufficient';
     let availDate = null;
     let completionDate = null;
@@ -1983,25 +2307,59 @@ export function buildInsightTemplates(n10dRecords, allOrders) {
     }
   });
 
+  // For non-N10D orders, key by order ID (prefixed) so each order gets its own
+  // date-accurate insight instead of sharing the first-order's date by material code.
+  // SmartInsightCell looks up "order:${id}" first, then falls back to material code
+  // for N10D-sourced insights.
   (allOrders || []).forEach(o => {
     const code = String(o.material_code_fg || o.material_code || '');
-    if (!code || n10dCodes.has(code) || templateMap[code]) return;
+    if (!code || n10dCodes.has(code)) return; // N10D products use the code-level insight
 
-    const av = String(o.avail_date || o.target_avail_date || '').toLowerCase().trim();
-    const isDated = av && av !== 'prio replenish' && av !== 'prio_replenish' && av !== 'safety stocks' && /\d/.test(av);
+    const cacheKey = o.id ? `order:${o.id}` : code;
 
-    if (isDated) {
-      const rawDate = o.avail_date || o.target_avail_date;
-      const deadline = new Date(rawDate);
-      const daysLeft = !isNaN(deadline) ? Math.ceil((deadline - today) / 86400000) : null;
-      const prodTime = o.production_hours ? Number(o.production_hours).toFixed(2) : 'N/A';
-      const text = `This order has a deadline of ${_fmtFull(rawDate)} — ${daysLeft !== null ? daysLeft : 'Unknown'} days remaining. Estimated production time is ${prodTime} hours.`;
-      templateMap[code] = _makePair(text, '📅 ');
+    // Resolve the best displayed date using the same priority the row uses:
+    // end_date (if present and valid) → future_dispatch_date → target_avail_date
+    const _isISO = (v) => v && /^\d{4}-\d{2}-\d{2}/.test(v) && !isNaN(Date.parse(v));
+
+    let chosenDate = null;
+    let chosenDateType = null;
+
+    if (_isISO(o.end_date)) {
+      chosenDate = o.end_date;
+      chosenDateType = 'end date';
+    } else if (_isISO(o.future_dispatch_date)) {
+      chosenDate = o.future_dispatch_date;
+      chosenDateType = 'future dispatch target';
+    } else if (_isISO(o.target_avail_date)) {
+      chosenDate = o.target_avail_date;
+      chosenDateType = 'target avail date';
+    }
+
+    const prodTime = o.production_hours ? Number(o.production_hours).toFixed(2) : 'N/A';
+    const compStr = _isISO(o.target_completion_date) ? _fmtFull(o.target_completion_date.split(' ')[0]) : null;
+
+    let text;
+    if (chosenDate) {
+      const dateObj = new Date(chosenDate);
+      const daysLeft = !isNaN(dateObj) ? Math.ceil((dateObj - today) / 86400000) : null;
+      const daysStr = daysLeft !== null ? `${daysLeft} days remaining` : null;
+      const completionNote = compStr ? ` Estimated completion: ${compStr}.` : '';
+      text = `This order has a ${chosenDateType} of ${_fmtFull(chosenDate)}${daysStr ? ` — ${daysStr}` : ''}.${completionNote} Estimated production time is ${prodTime} hours.`;
+      console.debug('[Product Insight Date Debug]', {
+        orderId: o.id,
+        item: o.item_description,
+        chosenDate,
+        chosenDateType,
+        rawTargetAvailDate: o.target_avail_date,
+        rawEndDate: o.end_date,
+        rawFutureDispatch: o.future_dispatch_date,
+      });
+      templateMap[cacheKey] = _makePair(text, '📅 ');
     } else {
       const vol = o.volume_override || o.total_volume_mt || 0;
       const lineName = o.feedmill_line || 'an unassigned line';
-      const text = `No stock level data available from Next 10 Days. This order is scheduled for ${vol} MT on ${lineName}.`;
-      templateMap[code] = { template: text, templateEmoji: text };
+      text = `No stock level data available from Future Dispatches. This order is scheduled for ${vol} MT on ${lineName}.${compStr ? ` Estimated completion: ${compStr}.` : ''}`;
+      templateMap[cacheKey] = { template: text, templateEmoji: text };
     }
   });
 
@@ -2077,7 +2435,7 @@ export async function generateProductAIInsights(n10dRecords, allOrders) {
 
     if (dfl >= inv) {
       status = 'Critical';
-      availDate = _today.toISOString().slice(0, 10);
+      availDate = `${_today.getFullYear()}-${String(_today.getMonth()+1).padStart(2,'0')}-${String(_today.getDate()).padStart(2,'0')}`;
       daysUntilBreach = 0;
     } else {
       let cum = dfl;
@@ -2104,6 +2462,15 @@ export async function generateProductAIInsights(n10dRecords, allOrders) {
   if (enriched.length > 0) {
     const sysA = `You are a production planning advisor for a feed manufacturing plant. Generate a helpful 3-5 sentence production insight for each product.
 
+FIELD DEFINITIONS — interpret these consistently across all insights:
+- Inventory = current stock on hand (what we have in the warehouse right now)
+- DFL (Due for Loading) = demand / required dispatch quantity (what needs to go out)
+- If DFL > Inventory → stock is insufficient → shortage / stockout risk
+- If Inventory > DFL → stock is sufficient → buffer remains
+- Buffer = Inventory minus DFL (positive = surplus; negative = deficit)
+- Always write: "Current inventory (X MT) covers/falls below the required demand (Y MT)"
+- Never reverse these fields — Inventory is NEVER demand, DFL is NEVER stock
+
 RULES:
 - Do NOT just restate the data. Provide actionable advice.
 - Tell the planner WHEN to act, WHAT to do, and WHY.
@@ -2116,10 +2483,10 @@ RULES:
 - Output each insight on a SINGLE LINE — no line breaks within an insight.
 
 TONE PER STATUS:
-Critical: Urgent. State deficit clearly. Recommend producing NOW or within 24 hours. Warn about consequences of delay. Mention bumping lower-priority orders.
+Critical: Urgent. State deficit clearly (current inventory X MT is below required demand Y MT). Recommend producing NOW or within 24 hours. Warn about consequences of delay. Mention bumping lower-priority orders.
 Urgent: Firm. State exactly how many days remain. Recommend scheduling within 1-2 days. Mention last safe production date. Suggest checking line availability.
 Monitor: Advisory. State the window (X days). Recommend planning within the coming week. Note buffer is shrinking. Suggest monitoring daily demand.
-Sufficient: Reassuring. Confirm stock covers demand. State how long inventory will last. Recommend routine monitoring only.
+Sufficient: Reassuring. Confirm current inventory covers required demand. State how long stock will last. Recommend routine monitoring only.
 
 OUTPUT FORMAT: Return ONLY a valid JSON object — no markdown, no explanation — like this:
 {"material_code_1": "advisory text", "material_code_2": "advisory text"}`;
@@ -2144,8 +2511,8 @@ OUTPUT FORMAT: Return ONLY a valid JSON object — no markdown, no explanation �
   const n10dCodes = new Set(enriched.map(p => String(p.material_code)));
   const datedOrders = (allOrders || []).filter(o => {
     const code = String(o.material_code_fg || o.material_code || '');
-    const av = String(o.avail_date || o.target_avail_date || '').toLowerCase().trim();
-    return code && !n10dCodes.has(code) && av && av !== 'prio replenish' && av !== 'prio_replenish' && av !== 'safety stocks' && /\d/.test(av);
+    const av = String(o.target_avail_date || '');
+    return code && !n10dCodes.has(code) && /^\d{4}-\d{2}-\d{2}/.test(av) && !isNaN(Date.parse(av));
   });
 
   if (datedOrders.length > 0) {
@@ -2172,7 +2539,7 @@ OUTPUT FORMAT: Return ONLY a valid JSON object — no markdown, no explanation �
     for (const chunk of chunksB) {
       const orderLines = chunk.map(o => {
         const code = o.material_code_fg || o.material_code;
-        const av = o.avail_date || o.target_avail_date || '';
+        const av = o.target_avail_date || '';
         const deadline = av ? new Date(av) : null;
         const daysLeft = deadline && !isNaN(deadline) ? Math.ceil((deadline - _today) / 86400000) : null;
         const completionD = deadline && !isNaN(deadline) ? _fmtFull(new Date(deadline.getTime() - 86400000)) : null;
@@ -2192,4 +2559,549 @@ OUTPUT FORMAT: Return ONLY a valid JSON object — no markdown, no explanation �
   }
 
   return aiMap;
+}
+
+// ─── Shutdown Impact Analysis ─────────────────────────────────────────────────
+function parseShutdownDialogResponse(response) {
+  let cleaned = response;
+  cleaned = cleaned.replace(/#{1,6}\s*/g, '');
+  cleaned = cleaned.replace(/SECTION\s*\d+\s*[—\-:]\s*(ANALYSIS|DIVERSIONS|IMPACT)[:\s]*/gi, '');
+  cleaned = cleaned.replace(/\*\*/g, '');
+  cleaned = cleaned.replace(/\*([^*]+)\*/g, '$1');
+  cleaned = cleaned.replace(/_([^_]+)_/g, '$1');
+  cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
+  return cleaned.trim();
+}
+
+export async function generateShutdownAnalysis(context) {
+  const {
+    target, feedmill,
+    affectedOrders = [], totalVolume = 0, totalProductionHours = 0,
+    partnerLines = [], partnerLineLoad = {}, partnerLineVolume = {},
+    outsideAvailableLines = [], outsideLineLoad = {}, outsideLineVolume = {},
+  } = context;
+
+  const systemPrompt = 'You are a production planning advisor for a feed manufacturing plant. Provide clear, specific, actionable analysis.';
+
+  const userPrompt = `
+You are a production planning advisor for a feed manufacturing plant.
+A planner is about to shut down ${target} (${feedmill}).
+Provide a clear impact analysis.
+
+SHUTDOWN TARGET: ${target}
+FEEDMILL: ${feedmill}
+
+AFFECTED ORDERS (${affectedOrders.length} orders, ${totalVolume} MT):
+${affectedOrders.map(o => `
+Prio ${o.prio}: ${o.name}
+  Volume: ${o.volume} MT | Form: ${o.form} | FPR: ${o.fpr || 'N/A'}
+  Future Dispatches Status: ${o.n10dStatus || 'N/A'}
+  DFL: ${o.dfl || 'N/A'} MT | Inventory: ${o.inventory || 'N/A'} MT
+  Avail Date: ${o.availDate || 'N/A'}
+  Production Time: ${o.productionHours} hrs (Rate: ${o.runRate} MT/hr)
+  Can divert to partner line (${o.partnerLines.join(', ') || 'none'}): ${o.canDivertWithin ? 'Yes' : 'No'}
+  Can divert outside feedmill: ${o.canDivertOutside ? `Yes (${o.outsideLines.join(', ')})` : 'No'}
+`).join('\n')}
+
+PARTNER LINE STATUS:
+${partnerLines.length > 0
+  ? partnerLines.map(l => `${l}: ${partnerLineLoad[l]} orders, ${partnerLineVolume[l]} MT currently loaded`).join('\n')
+  : 'No partner lines available — all lines in feedmill are affected'}
+
+LINES OUTSIDE FEEDMILL (available):
+${outsideAvailableLines.length > 0
+  ? outsideAvailableLines.map(l => `${l} (${outsideLineLoad[l]} orders, ${outsideLineVolume[l]} MT)`).join(', ')
+  : 'None identified with matching run rates'}
+
+RESPONSE FORMAT:
+Write a 2-3 sentence summary paragraph first.
+
+Then write "Affected orders:" as a header line.
+
+For each order write ONE compact bullet — all details on a single line or two. Do NOT put each detail as a separate bullet. Format:
+• [Product Name] — [Volume] MT, [Future Dispatch Status]. Prod time: [X.XX] hrs. [Recommendation]. [Brief reason].
+
+Example bullets:
+• Gall 21 Chicken Layer P (Breeder) 50Kg — 39 MT, Critical. Prod time: 2.00 hrs. Divert to Line 2 immediately. DFL exceeds inventory — stockout risk.
+• Elite XP Startex, Mini-pellet 50kg — 80 MT, Sufficient. Prod time: 4.19 hrs. Can divert to Line 2 or Line 3/4 (outside FM1). No urgency.
+
+After listing all orders, write a "Capacity note:" line about the partner line current load and diversion impact.
+
+Then write a "Total impact:" line with total halted production hours if orders are not diverted.
+
+Rules:
+- Prioritize Critical and Urgent orders first
+- Keep each bullet to 1-2 lines maximum
+- Do NOT break a single order into multiple bullets
+- Do NOT use markdown formatting (no #, ##, ###, **, etc.)
+- Use full month names for dates
+`;
+
+  try {
+    const { content } = await postAI('suggest-start', { systemPrompt, userPrompt, maxTokens: 900 });
+    const analysis = parseShutdownDialogResponse(content);
+    return { analysis: analysis || 'Analysis complete. Review the affected orders and proceed with the shutdown.' };
+  } catch (err) {
+    console.error('Shutdown analysis failed:', err);
+    return { analysis: 'Unable to generate analysis. You can still proceed with the shutdown.' };
+  }
+}
+
+/* ─── Plant-level auto-sequence AI helpers (shared with Dashboard) ─── */
+
+// Used by aiSequenceStrategies.js — calls the structured-JSON auto-sequence endpoint
+export async function callSequenceStrategyAI(systemPrompt, userPrompt, maxTokens = 3500, signal, line) {
+  const res = await fetch("/api/ai/auto-sequence", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ systemPrompt, userPrompt, maxTokens, line }),
+    signal,
+  });
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.detail || errData.error || "AI sequence strategy request failed");
+  }
+  const data = await res.json();
+  return data.content || "";
+}
+
+// ── Plant-level per-row sequence insights (AI-generated, all strategies) ──────
+// Returns {[prio]: {short, long}} for the final visible sequence on a given
+// line.  Works for rule_based, AI strategies, and profitability-adjusted
+// orders.  The prompt is strategy-aware and margin-aware so explanations always
+// match what the user actually sees.  Returns {} on any failure so the caller
+// can apply a deterministic fallback.
+export async function generatePlantRowSequenceInsights({ orders, line, strategyId, strategyName, isProfitabilityApplied, strategyPrimaryEmphasis }) {
+  if (!orders || orders.length === 0) return {};
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  function fmtDate(d) {
+    if (!d) return null;
+    try {
+      const date = new Date(d + 'T00:00:00');
+      if (isNaN(date.getTime())) return null;
+      return date.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+    } catch { return null; }
+  }
+
+  function daysAway(dateStr) {
+    if (!dateStr || !/^\d{4}-\d{2}-\d{2}/.test(dateStr)) return null;
+    const d = new Date(dateStr + 'T00:00:00');
+    if (isNaN(d.getTime())) return null;
+    d.setHours(0, 0, 0, 0);
+    return Math.round((d - today) / (1000 * 60 * 60 * 24));
+  }
+
+  const isRuleBased = strategyId === 'rule_based';
+  const stratLabel = strategyName || (isRuleBased ? 'Standard Sequence' : strategyId);
+
+  const orderLines = orders.map((order, i) => {
+    const status   = order._n10dStatus || 'N/A';
+    const isMTO    = !!(order._isMTO || (order.order_type && /mto|actual/i.test(String(order.order_type))));
+    const vol      = parseFloat(order.volume_override || order.total_volume_mt || 0).toFixed(1);
+    const hasMargin = order._hasMarginData === true;
+    const margin   = hasMargin && order._margin != null ? `${parseFloat(order._margin).toFixed(1)}%` : null;
+    const rawAvail = order.target_avail_date && /^\d{4}-\d{2}-\d{2}/.test(String(order.target_avail_date))
+      ? String(order.target_avail_date).substring(0, 10) : null;
+    const availFmt = rawAvail ? fmtDate(rawAvail) : null;
+    const days     = rawAvail ? daysAway(rawAvail) : null;
+    const availCtx = availFmt
+      ? (days == null ? availFmt : days < 0
+          ? `${availFmt} — PAST DUE by ${Math.abs(days)} day(s)`
+          : days === 0 ? `${availFmt} — DUE TODAY`
+          : `${availFmt} — in ${days} day(s)`)
+      : 'No deadline';
+    // _changeoverTotal = OUTGOING CO (this order → next order), same value shown in the table.
+    // "Incoming CO" (prev → this) = prev order's _changeoverTotal.
+    const outCO = order._changeoverTotal != null && parseFloat(order._changeoverTotal) > 0
+      ? `${parseFloat(order._changeoverTotal).toFixed(2)} hrs` : null;
+    const prevOrd  = i > 0 ? orders[i - 1] : null;
+    const inCO  = prevOrd != null && prevOrd._changeoverTotal != null && parseFloat(prevOrd._changeoverTotal) > 0
+      ? `${parseFloat(prevOrd._changeoverTotal).toFixed(2)} hrs` : null;
+    const color    = order.color    ? String(order.color).trim()    : null;
+    const diameter = order.diameter ? `${parseFloat(order.diameter).toFixed(2)}mm` : null;
+    const category = order.category ? String(order.category).trim() : null;
+    const physAttr = [color, diameter, category].filter(Boolean).join(' · ');
+    const prevColor = prevOrd?.color    ? String(prevOrd.color).trim()    : null;
+    const prevDiam  = prevOrd?.diameter ? `${parseFloat(prevOrd.diameter).toFixed(2)}mm` : null;
+    const prevCat   = prevOrd?.category ? String(prevOrd.category).trim() : null;
+    const prevPhys  = [prevColor, prevDiam, prevCat].filter(Boolean).join(' · ');
+    return `Position ${i + 1}: "${order.item_description || 'Unknown'}"
+  Volume: ${vol} MT | Future Dispatch Status: ${status} | MTO/Actual-Dated: ${isMTO ? 'Yes (contracted deadline)' : 'No'}
+  Avail Date: ${availCtx}${margin ? ` | Margin: ${margin}` : ''}
+  Physical: ${physAttr || 'unknown'}${prevPhys ? ` | Prev order: ${prevPhys}` : '(first in sequence)'}${inCO ? ` | Incoming CO (prev→this): ${inCO}` : (i === 0 ? ' | No incoming CO (first position)' : '')}${outCO ? ` | Outgoing CO (this→next): ${outCO}` : ' | No outgoing CO (last position)'}`;
+  }).join('\n\n');
+
+  const isCOEmphasis = strategyPrimaryEmphasis === 'changeover'
+    || (!isRuleBased && /changeover|diameter|cluster/i.test(stratLabel));
+
+  const strategyContext = isRuleBased
+    ? `ACTIVE STRATEGY: Standard Sequence (rule-based). Orders are arranged by availability date ascending, then by urgency tier (Critical > Urgent > Monitor > Flexible/Sufficient). MTO orders are locked at contracted deadlines and the sequence is built around them.`
+    : `ACTIVE STRATEGY: "${stratLabel}" (AI-generated). This strategy has its own declared ordering rationale. Explain placements in line with the strategy's intent — which may emphasise changeover reduction, schedule advancement, or profitability.`;
+
+  const coEmphasisNote = isCOEmphasis ? `
+CHANGEOVER-FOCUSED STRATEGY: This strategy's primary goal is reducing total changeover time by clustering compatible orders. When writing insights:
+- Check the "Physical" attributes (color, diameter, category) of this order vs its neighbors.
+- If this order shares diameter, color, or category with the previous order: say so explicitly. Example: "Placed beside a compatible 3.00mm Yellow order to avoid a diameter-change penalty."
+- If the previous order has a different diameter or color, explain the transition cost and why the order still fits here (e.g. date constraint, end of run, or no better option).
+- Red orders have an expensive outgoing transition (Red → Any). If an order is red, note its position relative to other red orders or explain why the red transition occurs where it does.
+- Mention specific attributes (e.g. "3.00mm", "Yellow", "Swine") not just generic phrases like "compatible order".
+- Changeover reason is the PRIMARY explanation; date safety is secondary unless the order is MTO/Critical/Urgent/Monitor.` : '';
+
+  const profNote = isProfitabilityApplied
+    ? `\nPROFITABILITY SORT APPLIED: Within same availability-date groups, orders have been re-ranked from highest to lowest margin. When explaining a position, note if margin was the tiebreaker among same-date peers and cite the margin percentage if available.`
+    : '';
+
+  const systemPrompt = `You are a production scheduling advisor for a feed mill. For each order in the sequence below, write two levels of insight explaining WHY it is at its current position:
+- SHORT (1-2 sentences): direct summary citing the main placement reason.
+- LONG (3-5 sentences): expand on the short, citing specific dates, days-away counts, urgency tier, MTO lock, margin, or changeover as relevant.
+
+${strategyContext}${coEmphasisNote}${profNote}
+
+RULES:
+- Match the actual visible position exactly — never contradict it.
+- For MTO/Actual-Dated orders: the contracted deadline is the primary lock.
+- For Critical orders: DFL meets or exceeds inventory — stockout risk drives placement.
+- For Urgent/Monitor orders: stock breach timeline is the driver.
+- For profitability-adjusted positions: explain margin was the tiebreaker within the same date window.
+- For changeover-focused strategies: use the Physical attributes in the data to name specific diameter/color/category matches or mismatches — do not write generic "for changeover reduction" phrases.
+- For the LAST position in the sequence: its displayed CO is 0.00 (nothing follows it). Do NOT mention any "incoming" changeover value. Explain only why it closes the run — date safety, strategy rationale, or placement benefit.
+- Use full month names for dates (e.g., May 12, 2026). No markdown. Be specific.
+
+OUTPUT FORMAT — one SHORT and one LONG line per position, using these exact prefixes:
+PRIO_1_SHORT: [1-2 sentence insight]
+PRIO_1_LONG: [3-5 sentence insight]
+PRIO_2_SHORT: [...]
+PRIO_2_LONG: [...]
+(continue for all ${orders.length} positions)`;
+
+  const userPrompt = `LINE: ${line}
+STRATEGY: ${stratLabel}${isProfitabilityApplied ? ' + Profitability Sort' : ''}
+
+FINAL VISIBLE SEQUENCE (${orders.length} order${orders.length !== 1 ? 's' : ''}):
+${orderLines}
+
+Write SHORT and LONG insights for every position. Do not skip any.`;
+
+  try {
+    const { content } = await postAI('recommendations', { systemPrompt, userPrompt, maxTokens: 2500 });
+    const insights = {};
+    const contentLines = content.split('\n');
+    let currentPrio  = null;
+    let currentField = null;
+    let buffer       = '';
+
+    const flush = () => {
+      if (currentPrio && currentField && buffer.trim()) {
+        if (!insights[currentPrio]) insights[currentPrio] = {};
+        insights[currentPrio][currentField] = buffer.trim();
+      }
+    };
+
+    contentLines.forEach(ln => {
+      const shortM = ln.match(/^PRIO_(\d+)_SHORT:\s*(.*)/i);
+      const longM  = ln.match(/^PRIO_(\d+)_LONG:\s*(.*)/i);
+      if (shortM || longM) {
+        flush();
+        if (shortM) { currentPrio = parseInt(shortM[1]); currentField = 'short'; buffer = shortM[2] || ''; }
+        else        { currentPrio = parseInt(longM[1]);  currentField = 'long';  buffer = longM[2]  || ''; }
+      } else if (currentPrio && currentField) {
+        buffer += (buffer ? ' ' : '') + ln.trim();
+      }
+    });
+    flush();
+
+    // Ensure every position has both fields (defensive — AI occasionally skips one)
+    orders.forEach((_, i) => {
+      const p = i + 1;
+      if (!insights[p]) insights[p] = {};
+      if (!insights[p].short) insights[p].short = 'Positioned by scheduling strategy.';
+      if (!insights[p].long)  insights[p].long  = insights[p].short;
+    });
+
+    return insights;
+  } catch {
+    return {}; // caller applies deterministic fallback
+  }
+}
+
+// ── Orchestrator: enrich all strategy results with pre-built row insights ─────
+// Called once per auto-sequence run (and once per per-line refresh) BEFORE the
+// preview modal opens.  Runs all AI insight calls in parallel so the overhead
+// is just one additional "wave" on top of strategy generation.
+// Mutates each strategy object in place: attaches `rowInsights` and
+// `insightSource`, then stamps `strategiesObj.runId` for provenance.
+export async function enrichStrategiesWithRowInsights(strategiesObj) {
+  if (!strategiesObj?.byLine) return;
+
+  const tasks = [];
+  Object.entries(strategiesObj.byLine).forEach(([line, lineStrategies]) => {
+    ['rule_based', 'ai_option_1', 'ai_option_2'].forEach(stratId => {
+      const strat = lineStrategies?.[stratId];
+      if (!strat?.orders?.length) return;
+
+      tasks.push(
+        generatePlantRowSequenceInsights({
+          orders:                   strat.orders,
+          line,
+          strategyId:               stratId,
+          strategyName:             strat.name,
+          isProfitabilityApplied:   false,
+          strategyPrimaryEmphasis:  strat.primaryEmphasis || null,
+        })
+          .then(insights => {
+            const ok = Object.keys(insights).length > 0;
+            strat.rowInsights    = ok ? insights : null;
+            strat.insightSource  = ok ? 'ai'     : 'failed';
+            console.debug('[AutoSequence Insight Build]', {
+              lineId: line, strategyId: stratId,
+              generatedDuringRun: true,
+              orderCount: strat.orders.length,
+              success: ok,
+            });
+          })
+          .catch(() => {
+            strat.rowInsights   = null;
+            strat.insightSource = 'failed';
+            console.debug('[AutoSequence Insight Build]', {
+              lineId: line, strategyId: stratId,
+              generatedDuringRun: true,
+              orderCount: strat.orders.length,
+              success: false,
+            });
+          })
+      );
+    });
+  });
+
+  // Best-effort: a failure on one strategy never blocks the others or the modal.
+  await Promise.allSettled(tasks);
+
+  // Tag this preview package with a unique run ID for provenance / debugging.
+  strategiesObj.runId = (typeof crypto !== 'undefined' && crypto.randomUUID)
+    ? crypto.randomUUID()
+    : `run-${Date.now()}`;
+}
+
+export async function callPlantActionsAI(systemPrompt, userPrompt, maxTokens = 1200, signal) {
+  const res = await fetch("/api/ai/recommendations", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ systemPrompt, userPrompt, maxTokens }),
+    signal,
+  });
+  if (!res.ok) throw new Error("AI request failed");
+  const data = await res.json();
+  return data.content || "";
+}
+
+const _lineShort = (line) => {
+  const m = (line || "").match(/Line\s*(\d+)/i);
+  return m ? `L${m[1]}` : line || "";
+};
+
+export function buildPlantActionsPrompt(placementLog) {
+  const LINE_RATES_TEXT = `Line 1: 20 MT/hr | Line 2: 20 MT/hr | Line 3: 10 MT/hr | Line 4: 10 MT/hr | Line 5: 10 MT/hr | Line 6: 10 MT/hr | Line 7: 10 MT/hr`;
+  // Run rates by canonical line name — used to compute queue times for precomputed in-place insights.
+  const LINE_RUN_RATES = { "Line 1": 20, "Line 2": 20, "Line 3": 10, "Line 4": 10, "Line 5": 10, "Line 6": 10, "Line 7": 10 };
+
+  // Deterministic insights for combine-in-place actions.
+  // These are built from exact data values and bypass AI text generation to guarantee
+  // mathematically consistent language with no move/zero-load confusion.
+  // parsePlantActionsResponse applies these as overrides after parsing the AI response.
+  const precomputedInsights = {};
+
+  const actionsText = placementLog.map((entry, index) => {
+    if (entry.type === "combined") {
+      const inPlace = (entry.fromLines || []).every(fl => fl === entry.toLine);
+      const best = entry.bestLineReason || {};
+
+      if (inPlace) {
+        // --- Combine-in-place: deterministic insight from exact data ---
+        // Run rate: prefer lineScores entry for the destination, fall back to lookup.
+        const runRate =
+          (entry.lineScores || []).find(ls => ls.line === entry.toLine)?.runRate
+          ?? LINE_RUN_RATES[entry.toLine]
+          ?? 20;
+        // True pre-combine load from snapshot (preCombineMTByLine captured before sub-order removal).
+        const destMTBefore = entry.preCombineMTByLine
+          ? (entry.preCombineMTByLine[entry.toLine] ?? 0)
+          : (best.totalMTBefore ?? 0);
+        // Post-combine load (order count collapsed, total MT unchanged for pure in-place).
+        const destMTAfter = best.totalMTAfter ?? (entry.totalVolume ?? 0);
+        const beforeQueue = runRate > 0 ? destMTBefore / runRate : 0;
+        const afterQueue  = runRate > 0 ? destMTAfter  / runRate : 0;
+        const ordersCount = entry.ordersCount ?? 2;
+        const changeoversSaved = entry.changeoversSaved ?? 0;
+        const minutesSaved = Math.round((entry.timeSaved ?? 0) * 60);
+        const lineShort = _lineShort(entry.toLine);
+
+        console.debug('[Combine Insight Debug] in-place', {
+          actionIndex: index, toLine: entry.toLine, runRate,
+          destMTBefore, destMTAfter, beforeQueue, afterQueue,
+          preCombineMTByLine: entry.preCombineMTByLine, lineScores: entry.lineScores,
+        });
+
+        // Spec template: internally consistent, no move-language, correct math.
+        const text = `${ordersCount} order${ordersCount !== 1 ? "s" : ""} of ${entry.product} already on ${lineShort} were combined into a single ${(entry.totalVolume ?? 0).toFixed(1)} MT production run — no MT was moved between lines. Before combining, ${lineShort} already had ${destMTBefore.toFixed(1)} MT queued (${beforeQueue.toFixed(2)} hrs at ${runRate} MT/hr). After combining, the total queued load remained ${destMTAfter.toFixed(1)} MT, so queue time stayed at ${afterQueue.toFixed(2)} hrs. This consolidation eliminates ${changeoversSaved} changeover(s), saving approximately ${minutesSaved} minute(s).`;
+
+        precomputedInsights[index] = text;
+
+        // Include a minimal placeholder in the AI prompt so ACTION numbering stays consistent.
+        // parsePlantActionsResponse will override this entry with the precomputed text regardless.
+        return `ACTION ${index + 1}: COMBINED IN-PLACE (precomputed — output verbatim)
+Product: ${entry.product}
+Orders: ${ordersCount}, Total: ${(entry.totalVolume ?? 0).toFixed(1)} MT on ${lineShort}
+Changeovers Saved: ${changeoversSaved} (${minutesSaved} min)
+Output exactly: ${text}`;
+      }
+
+      // --- Cross-line combine: AI-generated ---
+      const otherLines = [...new Set((entry.fromLines || []).filter(fl => fl !== entry.toLine))];
+      const eligListC = Array.isArray(entry.eligibleLines) ? entry.eligibleLines : [];
+      const eligShortC = eligListC.map(_lineShort).join(", ") || "unknown";
+      const eligibilityLineC = entry.onlyTargetEligible
+        ? `ELIGIBILITY (PRIMARY DRIVER): ${_lineShort(entry.toLine)} is the ONLY eligible production line for this item per master data run-rate mapping. Lead the explanation with this fact before discussing changeover savings or queue times.`
+        : (eligListC.length > 0
+            ? `ELIGIBILITY: This item can be produced on ${eligListC.length} line(s): ${eligShortC}.`
+            : `ELIGIBILITY: Eligibility data not available for this combined action.`);
+
+      const lineDetails = (entry.lineScores || []).map((ls) => {
+        const mtBefore = ls.totalMTBefore || 0;
+        const qBefore = ls.runRate > 0 ? mtBefore / ls.runRate : 0;
+        return `  ${_lineShort(ls.line)}: ${mtBefore.toFixed(1)} MT ÷ ${ls.runRate || "?"} MT/hr = ${qBefore.toFixed(2)} hrs (after: ${(ls.totalMTAfter || 0).toFixed(1)} MT)`;
+      }).join("\n");
+
+      const destMTBefore = best.totalMTBefore || 0;
+      const destMTAfter  = best.totalMTAfter  || 0;
+
+      return `ACTION ${index + 1}: COMBINED
+Product: ${entry.product}
+Orders: ${entry.ordersCount}, Total: ${(entry.totalVolume || 0).toFixed(1)} MT
+Movement: From ${otherLines.map(l => _lineShort(l)).join(", ")} → ${_lineShort(entry.toLine)}
+COMBINE TYPE: Cross-line combine — orders moved from other line(s) onto ${_lineShort(entry.toLine)}.
+${eligibilityLineC}
+Eligible Lines (with load BEFORE combine):
+${lineDetails}
+Destination MT: ${destMTBefore.toFixed(1)} → ${destMTAfter.toFixed(1)} MT
+Changeovers Saved: ${entry.changeoversSaved} (${(entry.timeSaved || 0).toFixed(2)} hrs)`;
+    }
+    if (entry.type === "moved") {
+      const from = entry.fromLineReason || {};
+      const toScore = (entry.lineScores || []).find(ls => ls.line === entry.toLine) || {};
+      const eligList = Array.isArray(entry.eligibleLines) ? entry.eligibleLines : [];
+      const eligShort = eligList.map(_lineShort).join(", ") || "unknown";
+      const fromShort = _lineShort(entry.fromLine);
+      const toShort   = _lineShort(entry.toLine);
+      const vol = (entry.volume || 0).toFixed(1);
+      const toBeforeMT    = (toScore.totalMTBefore || 0).toFixed(1);
+      const toAfterMT     = (toScore.totalMTAfter  || 0).toFixed(1);
+      const toBeforeQueue = (toScore.queueTimeBefore || 0).toFixed(2);
+      const toAfterQueue  = (toScore.queueTimeAfter  || 0).toFixed(2);
+      const toRunRate     = toScore.runRate || "?";
+      const fromQueue     = (from.queueTime || 0).toFixed(2);
+
+      // GUARD: is the destination queue genuinely lower than the source?
+      const destQueueLower = (toScore.queueTimeBefore || 0) < (from.queueTime || 0);
+
+      console.debug('[Move Insight Reasoning]', {
+        actionIndex: index,
+        product: entry.product,
+        fromLine: entry.fromLine,
+        toLine: entry.toLine,
+        sourceQueue: from.queueTime,
+        targetQueueBefore: toScore.queueTimeBefore,
+        eligibleLines: entry.eligibleLines,
+        onlyTargetEligible: entry.onlyTargetEligible,
+        sourceEligible: entry.sourceEligible,
+        destQueueLower,
+      });
+
+      // If destination is the only eligible line OR queue comparison would be contradictory,
+      // generate a deterministic eligibility-driven insight and bypass the AI for this action.
+      if (entry.onlyTargetEligible || !destQueueLower) {
+        const sourceNotEligible = !entry.sourceEligible;
+        const eligNote = sourceNotEligible
+          ? `Although the order appeared on ${fromShort} initially, ${toShort} is the valid production line for this product based on Master Data run-rate mapping.`
+          : `${toShort} is the eligible production line for this item based on Master Data run-rate mapping.`;
+        const text = `${entry.product} (${vol} MT) was moved from ${fromShort} to ${toShort} because ${toShort} is the eligible production line for this item based on Master Data run-rate mapping. ${eligNote} Before placement, ${toShort} had ${toBeforeMT} MT queued (${toBeforeQueue} hrs at ${toRunRate} MT/hr); after placement, its load increased to ${toAfterMT} MT (${toAfterQueue} hrs). Although ${fromShort} had a lower queue time of ${fromQueue} hrs, the order was placed on ${toShort} because that line is eligible for this product.`;
+        precomputedInsights[index] = text;
+
+        return `ACTION ${index + 1}: MOVED — ELIGIBILITY-DRIVEN (precomputed — output verbatim)
+Product: ${entry.product}, Volume: ${vol} MT
+From: ${fromShort} → ${toShort}
+Reason: ${toShort} is the ONLY eligible line for this product from Master Data. Queue comparison would be contradictory (source queue ${fromQueue} hrs < destination queue ${toBeforeQueue} hrs).
+Output exactly: ${text}`;
+      }
+
+      // Queue-driven move: destination genuinely has lower queue — let AI generate.
+      const eligibilityLine = eligList.length === 1
+        ? `ELIGIBILITY (PRIMARY DRIVER): ${toShort} is the ONLY eligible production line for this item per master data run-rate mapping. The source line cannot produce this product. Lead the explanation with this fact before discussing queue times.`
+        : `ELIGIBILITY: This item can be produced on ${eligList.length} line(s): ${eligShort}. Multiple eligible lines exist, so the move is driven by queue/load balancing, not by eligibility.`;
+
+      const lineDetails = (entry.lineScores || [])
+        .map((ls) => `  ${_lineShort(ls.line)}: ${(ls.totalMTBefore || 0).toFixed(1)} MT ÷ ${ls.runRate || "?"} MT/hr = ${(ls.queueTimeBefore || 0).toFixed(2)} hrs`)
+        .join("\n");
+
+      return `ACTION ${index + 1}: MOVED
+Product: ${entry.product}, Volume: ${vol} MT
+From: ${fromShort} → ${toShort}
+${eligibilityLine}
+Eligible Lines (with current load):
+${lineDetails}
+Source (${fromShort}): ${(from.totalMTBefore || 0).toFixed(1)} MT before → ${(from.totalMTAfter || 0).toFixed(1)} MT after | Queue: ${fromQueue} hrs → ${(from.queueTimeAfter || 0).toFixed(2)} hrs (${from.runRate || "?"} MT/hr)
+Destination (${toShort}): ${toBeforeMT} MT before → ${toAfterMT} MT after | Queue: ${toBeforeQueue} hrs → ${toAfterQueue} hrs`;
+    }
+    return "";
+  }).filter(Boolean).join("\n\n");
+
+  const systemPrompt = `You are a production scheduling advisor for a feed manufacturing plant. Explain each auto-sequence action clearly and concisely. Plain text only — no markdown, no asterisks, no bold markers.`;
+  const userPrompt = `LINE RUN RATES: ${LINE_RATES_TEXT}
+Queue Time Formula: Total MT on line ÷ Line run rate = Queue time in hours. Lower = better.
+
+For EACH action write a 2-4 sentence explanation covering: what happened, queue time calculations for the chosen line vs. at least one other line, and the impact (MT change on destination, changeovers saved).
+
+${actionsText}
+
+RESPONSE FORMAT — for each action write exactly:
+ACTION [number]:
+[2-4 sentences, plain text, no bold, no markdown]
+
+RULES:
+- EXPLANATION PRIORITY for MOVED actions:
+  1. If the data line says "ELIGIBILITY (PRIMARY DRIVER)", you MUST lead the explanation with eligibility — state plainly that the destination is the only line that can produce this item per master data run-rate mapping, and that the source line is not eligible. Mention queue times only as secondary context (e.g. "the destination queue did increase from X to Y hrs, but this move was required").
+  2. If multiple lines are eligible, lead with the queue/load-balancing rationale (lower queue time, better balancing) and cite the comparison.
+- COMBINE IN-PLACE actions (COMBINE TYPE says "In-place combine"): The orders were ALREADY on that line — this is NOT a move. Do NOT use phrases like "Before the move", "after adding", or imply the line gained new load. The total MT on the line stays the same before and after. Focus on: the orders were combined in place, the order count decreased, and changeovers were reduced. Use wording like "The two orders already on L1 were combined in place into a single order. The total queued load on L1 remained the same at X MT (Y hrs at Z MT/hr), but the order count decreased from N to 1, eliminating N-1 changeover(s)."
+- CROSS-LINE COMBINE actions (COMBINE TYPE says "Cross-line combine"): Orders moved from other line(s) — describe load increase at destination and reduction at source.
+- Use the "before → after" MT and queue time figures exactly as given in the data. Do NOT report a line as 0 MT before an in-place combine.
+- Show ALL eligible lines with their queue time formula.
+- Use EXACT numbers from the data — do NOT invent.
+- Do NOT use ** or any formatting markers.
+- Do NOT say "other options not provided" — all options ARE provided.
+- Use line short names (L1, L2, etc.).`;
+
+  return { systemPrompt, userPrompt, precomputedInsights };
+}
+
+export function parsePlantActionsResponse(response, placementLog, precomputedInsights = {}) {
+  let cleaned = (response || "").trim().replace(/\*\*/g, "").replace(/#{1,6}\s*/g, "");
+  const explanations = {};
+  const parts = cleaned.split(/ACTION\s*(\d+)\s*:/gi);
+  for (let i = 1; i < parts.length; i += 2) {
+    const actionNum = parseInt(parts[i]);
+    const explanation = parts[i + 1]?.trim();
+    if (actionNum && explanation) {
+      explanations[actionNum - 1] = explanation
+        .split("\n").map((l) => l.trim()).filter((l) => l.length > 0).join(" ").trim();
+    }
+  }
+  // Apply deterministic overrides for combine-in-place actions.
+  // These are pre-computed from exact data values in buildPlantActionsPrompt,
+  // guaranteeing mathematically consistent language regardless of what the AI generated.
+  Object.entries(precomputedInsights).forEach(([indexStr, text]) => {
+    explanations[parseInt(indexStr)] = text;
+  });
+  return explanations;
 }

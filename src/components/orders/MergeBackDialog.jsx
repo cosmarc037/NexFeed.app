@@ -121,7 +121,7 @@ export default function MergeBackDialog({ open, onClose, onConfirm, portion1, po
           </Button>
           <Button
             onClick={onConfirm}
-            className="bg-[#fd5108] hover:bg-[#e8490b] text-white text-[14px] font-semibold h-10 px-5"
+            className="bg-[var(--nexfeed-primary)] hover:bg-[var(--nexfeed-primary-dark)] text-white text-[14px] font-semibold h-10 px-5"
             data-testid="button-merge-back-confirm"
           >
             Confirm Merge

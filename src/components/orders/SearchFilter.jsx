@@ -53,7 +53,7 @@ export default function SearchFilter({
             <Filter className="h-4 w-4" />
             Filters
             {activeFilterCount > 0 && (
-              <Badge className="bg-[#fd5108] text-white h-5 w-5 p-0 flex items-center justify-center text-xs">
+              <Badge className="bg-[var(--nexfeed-primary)] text-white h-5 w-5 p-0 flex items-center justify-center text-xs">
                 {activeFilterCount}
               </Badge>
             )}
@@ -68,7 +68,7 @@ export default function SearchFilter({
                   variant="ghost" 
                   size="sm" 
                   onClick={onClearFilters}
-                  className="text-xs text-[#fd5108] h-7"
+                  className="text-xs text-[var(--nexfeed-primary)] h-7"
                 >
                   Clear all
                 </Button>
@@ -115,7 +115,6 @@ export default function SearchFilter({
                     <SelectItem value="cut">Cut</SelectItem>
                     <SelectItem value="combined">Combine with other PO</SelectItem>
                     <SelectItem value="cancel_po">Cancel PO</SelectItem>
-                    <SelectItem value="in_production">In production</SelectItem>
                     <SelectItem value="ongoing_batching">On-going batching</SelectItem>
                     <SelectItem value="ongoing_pelleting">On-going pelleting</SelectItem>
                     <SelectItem value="ongoing_bagging">On-going bagging</SelectItem>

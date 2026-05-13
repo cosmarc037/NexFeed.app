@@ -121,7 +121,7 @@ export default function CutCombineModal({
               <Button 
                 onClick={handleCut}
                 disabled={!cutAmount || parseFloat(cutAmount) <= 0 || parseFloat(cutAmount) >= order.total_volume_mt}
-                className="bg-[#fd5108] hover:bg-[#fe7c39]"
+                className="bg-[var(--nexfeed-primary)] hover:bg-[var(--nexfeed-primary-dark)]"
               >
                 <Scissors className="h-4 w-4 mr-2" />
                 Cut Order
@@ -185,7 +185,7 @@ export default function CutCombineModal({
               <Button 
                 onClick={handleCombine}
                 disabled={selectedOrders.length === 0}
-                className="bg-[#fd5108] hover:bg-[#fe7c39]"
+                className="bg-[var(--nexfeed-primary)] hover:bg-[var(--nexfeed-primary-dark)]"
               >
                 <Combine className="h-4 w-4 mr-2" />
                 Combine Orders

@@ -99,7 +99,7 @@ function ConfirmOrderDialog({ orderData, onConfirm, onCancel, isLoading = false 
         </div>
 
         {/* Summary card */}
-        <div style={{ background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 8, padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div style={{ background: 'var(--color-bg-tertiary)', border: '1px solid #e5e7eb', borderRadius: 8, padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 12 }}>
           {/* Row 1 */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
             <Row label="Material Code" value={materialCode} />
@@ -153,7 +153,7 @@ function ConfirmOrderDialog({ orderData, onConfirm, onCancel, isLoading = false 
           <button
             onClick={onConfirm}
             disabled={isLoading}
-            style={{ height: 40, padding: '0 20px', fontSize: 14, fontWeight: 600, background: isLoading ? '#fe9d72' : '#fd5108', border: 'none', borderRadius: 6, color: 'white', cursor: isLoading ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
+            style={{ height: 40, padding: '0 20px', fontSize: 14, fontWeight: 600, background: isLoading ? 'var(--nexfeed-primary-dark)' : 'var(--nexfeed-primary)', border: 'none', borderRadius: 6, color: 'white', cursor: isLoading ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
             data-testid="button-confirm-add"
           >
             {isLoading
@@ -209,7 +209,7 @@ function Field({ label, required, children }) {
 
 function ReadOnlyValue({ value, placeholder }) {
   return (
-    <div style={{ height: 40, padding: '0 12px', border: '1px solid #f3f4f6', borderRadius: 6, display: 'flex', alignItems: 'center', background: '#f9fafb' }}>
+    <div style={{ height: 40, padding: '0 12px', border: '1px solid #f3f4f6', borderRadius: 6, display: 'flex', alignItems: 'center', background: 'var(--color-bg-tertiary)' }}>
       {value != null && value !== ''
         ? <span style={{ fontSize: 14, color: '#2e343a' }}>{value}</span>
         : <span style={{ fontSize: 14, color: '#9ca3af', fontStyle: 'italic' }}>{placeholder || '—'}</span>
@@ -229,9 +229,9 @@ function LineLinkBtn({ line, onClick }) {
   return (
     <button
       type="button"
-      style={{ fontSize: 12, color: '#fd5108', background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontWeight: 500 }}
+      style={{ fontSize: 12, color: 'var(--nexfeed-primary)', background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontWeight: 500 }}
       onMouseEnter={e => { e.currentTarget.style.textDecoration = 'underline'; e.currentTarget.style.color = '#c2410c'; }}
-      onMouseLeave={e => { e.currentTarget.style.textDecoration = 'none'; e.currentTarget.style.color = '#fd5108'; }}
+      onMouseLeave={e => { e.currentTarget.style.textDecoration = 'none'; e.currentTarget.style.color = 'var(--nexfeed-primary)'; }}
       onClick={() => onClick(line)}
     >{line}</button>
   );
@@ -459,7 +459,7 @@ function SwitchLineDialog({ targetLine, onConfirm, onCancel }) {
             Cancel
           </Button>
           <button
-            style={{ height: 38, padding: '0 18px', fontSize: 14, fontWeight: 600, background: '#fd5108', color: 'white', border: 'none', borderRadius: 6, cursor: 'pointer' }}
+            style={{ height: 38, padding: '0 18px', fontSize: 14, fontWeight: 600, background: 'var(--nexfeed-primary)', color: 'white', border: 'none', borderRadius: 6, cursor: 'pointer' }}
             onClick={onConfirm}
           >
             Switch to {targetLine}
@@ -760,11 +760,14 @@ export default function AddOrderDialog({
         material_code: String(selectedProduct.fg_material_code || ''),
         item_description: selectedProduct.fg_item_description || '',
         category: selectedProduct.category || '',
+        color: selectedProduct.color || '',
         form: selectedProduct.form || '',
+        diameter: selectedProduct.diameter != null && selectedProduct.diameter !== "" ? parseFloat(selectedProduct.diameter) : null,
         total_volume_mt: vol, feedmill_line: line,
         target_avail_date: availValue, original_avail_date: availValue,
         batch_size: bs, production_hours: prodHrs,
-        changeover_time: 0.17, run_rate: rr || null,
+        changeover_time: selectedProduct?.changeover != null && selectedProduct.changeover !== "" ? parseFloat(selectedProduct.changeover) || 0.17 : 0.17,
+        run_rate: rr || null,
         fg: fg || null, sfg: sfg || null, pmx: pmx || null,
         status: 'plotted',
       });
@@ -816,7 +819,7 @@ export default function AddOrderDialog({
             <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
               <div>
                 <h2 style={{ fontSize: 18, fontWeight: 700, color: '#1a1a1a', display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <Plus style={{ width: 18, height: 18, color: '#fd5108' }} />
+                  <Plus style={{ width: 18, height: 18, color: 'var(--nexfeed-primary)' }} />
                   Add New Order
                 </h2>
                 <p style={{ fontSize: 12, color: '#6b7280', marginTop: 3 }}>Manually create a new production order</p>
@@ -881,7 +884,7 @@ export default function AddOrderDialog({
                               <button
                                 key={p.fg_material_code}
                                 style={{ width: '100%', padding: '10px 14px', textAlign: 'left', background: 'none', border: 'none', borderBottom: '1px solid #f3f4f6', cursor: 'pointer' }}
-                                onMouseEnter={e => e.currentTarget.style.background = '#f9fafb'}
+                                onMouseEnter={e => e.currentTarget.style.background = 'var(--color-hover-bg)'}
                                 onMouseLeave={e => e.currentTarget.style.background = 'none'}
                                 onClick={() => selectProduct(p)}
                                 data-testid={`option-product-${p.fg_material_code}`}
@@ -895,7 +898,7 @@ export default function AddOrderDialog({
                           })}
                           {dropdownProducts.greyed.length > 0 && (
                             <>
-                              <div style={{ padding: '5px 14px 4px', fontSize: 10, color: '#9ca3af', fontStyle: 'italic', borderTop: dropdownProducts.selectable.length > 0 ? '1px solid #e5e7eb' : 'none', background: '#fafafa' }}>
+                              <div style={{ padding: '5px 14px 4px', fontSize: 10, color: '#9ca3af', fontStyle: 'italic', borderTop: dropdownProducts.selectable.length > 0 ? '1px solid #e5e7eb' : 'none', background: 'var(--color-bg-tertiary)' }}>
                                 Products without production history
                               </div>
                               {dropdownProducts.greyed.map(p => (
@@ -964,7 +967,7 @@ export default function AddOrderDialog({
                 {/* Row 1, Col 2 — Batch Size */}
                 <div>
                   <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 5 }}>Batch Size</label>
-                  <div style={{ height: 40, padding: '0 12px', border: '1px solid #e5e7eb', borderRadius: 6, display: 'flex', alignItems: 'center', background: '#f9fafb', cursor: 'default' }}>
+                  <div style={{ height: 40, padding: '0 12px', border: '1px solid #e5e7eb', borderRadius: 6, display: 'flex', alignItems: 'center', background: 'var(--color-bg-tertiary)', cursor: 'default' }}>
                     {batchSize != null
                       ? <span style={{ fontSize: 14, color: '#1a1a1a' }}>{batchSize.toFixed(2)}</span>
                       : null}
@@ -974,7 +977,7 @@ export default function AddOrderDialog({
                 {/* Row 1, Col 3 — Batches */}
                 <div>
                   <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 5 }}>Batches</label>
-                  <div style={{ height: 40, padding: '0 12px', border: '1px solid #e5e7eb', borderRadius: 6, display: 'flex', alignItems: 'center', background: '#f9fafb', cursor: 'default' }}>
+                  <div style={{ height: 40, padding: '0 12px', border: '1px solid #e5e7eb', borderRadius: 6, display: 'flex', alignItems: 'center', background: 'var(--color-bg-tertiary)', cursor: 'default' }}>
                     {batches > 0
                       ? <span style={{ fontSize: 14, color: '#1a1a1a' }}>{batches}</span>
                       : null}
@@ -984,7 +987,7 @@ export default function AddOrderDialog({
                 {/* Row 2, Col 1 — Production Time */}
                 <div>
                   <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 5 }}>Production Time</label>
-                  <div style={{ height: 40, padding: '0 12px', border: '1px solid #e5e7eb', borderRadius: 6, display: 'flex', alignItems: 'center', background: '#f9fafb', cursor: 'default' }}>
+                  <div style={{ height: 40, padding: '0 12px', border: '1px solid #e5e7eb', borderRadius: 6, display: 'flex', alignItems: 'center', background: 'var(--color-bg-tertiary)', cursor: 'default' }}>
                     {vol > 0 && runRateInfo[line] != null
                       ? <span style={{ fontSize: 14, color: '#1a1a1a' }}>{(vol / runRateInfo[line]).toFixed(2)} hrs</span>
                       : vol > 0 && line
@@ -999,9 +1002,13 @@ export default function AddOrderDialog({
                 {/* Row 2, Col 2 — Changeover */}
                 <div>
                   <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 5 }}>Changeover</label>
-                  <div style={{ height: 40, padding: '0 12px', border: '1px solid #e5e7eb', borderRadius: 6, display: 'flex', alignItems: 'center', background: '#f9fafb', cursor: 'default' }}>
+                  <div style={{ height: 40, padding: '0 12px', border: '1px solid #e5e7eb', borderRadius: 6, display: 'flex', alignItems: 'center', background: 'var(--color-bg-tertiary)', cursor: 'default' }}>
                     {selectedProduct
-                      ? <span style={{ fontSize: 14, color: '#1a1a1a' }}>0.17 hrs</span>
+                      ? <span style={{ fontSize: 14, color: '#1a1a1a' }}>
+                          {selectedProduct.changeover != null && selectedProduct.changeover !== ""
+                            ? `${parseFloat(selectedProduct.changeover) || 0.17} hrs`
+                            : '0.17 hrs'}
+                        </span>
                       : null}
                   </div>
                 </div>
@@ -1009,7 +1016,7 @@ export default function AddOrderDialog({
                 {/* Row 2, Col 3 — Run Rate */}
                 <div>
                   <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 5 }}>Run Rate</label>
-                  <div style={{ height: 40, padding: '0 12px', border: '1px solid #e5e7eb', borderRadius: 6, display: 'flex', alignItems: 'center', background: '#f9fafb', cursor: 'default' }}>
+                  <div style={{ height: 40, padding: '0 12px', border: '1px solid #e5e7eb', borderRadius: 6, display: 'flex', alignItems: 'center', background: 'var(--color-bg-tertiary)', cursor: 'default' }}>
                     {runRateInfo[line] != null
                       ? <span style={{ fontSize: 14, color: '#1a1a1a' }}>{runRateInfo[line].toFixed(2)} MT/hr</span>
                       : selectedProduct && line
@@ -1030,7 +1037,7 @@ export default function AddOrderDialog({
                     ⚠ {vol} MT is not divisible by batch size {batchSize?.toFixed(2)}. Suggested: <strong>{suggestedVolume} MT</strong> ({Math.ceil(suggestedVolume / batchSize)} batches)
                   </p>
                   <button
-                    style={{ fontSize: 11, color: '#fd5108', fontWeight: 600, marginTop: 4, background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}
+                    style={{ fontSize: 11, color: 'var(--nexfeed-primary)', fontWeight: 600, marginTop: 4, background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}
                     onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
                     onMouseLeave={e => e.currentTarget.style.textDecoration = 'none'}
                     onClick={() => setVolume(String(suggestedVolume))}
@@ -1157,7 +1164,7 @@ export default function AddOrderDialog({
                       display: 'flex', alignItems: 'center', gap: 4,
                       background: 'none', border: 'none', borderRadius: 5,
                       padding: '3px 0', cursor: impactLoading ? 'not-allowed' : 'pointer',
-                      color: impactLoading ? '#d1d5db' : '#fd5108',
+                      color: impactLoading ? '#d1d5db' : 'var(--nexfeed-primary)',
                       fontSize: 11, fontWeight: 500,
                     }}
                     data-testid="button-refresh-impact"
@@ -1173,7 +1180,7 @@ export default function AddOrderDialog({
                 </p>
               ) : impactLoading ? (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <Loader2 style={{ width: 14, height: 14, color: '#fd5108' }} className="animate-spin" />
+                  <Loader2 style={{ width: 14, height: 14, color: 'var(--nexfeed-primary)' }} className="animate-spin" />
                   <span style={{ fontSize: 12, color: '#9ca3af', fontStyle: 'italic' }}>Analyzing impact...</span>
                 </div>
               ) : impactAnalysis ? (
@@ -1199,7 +1206,7 @@ export default function AddOrderDialog({
               disabled={!isComplete}
               style={{
                 height: 40, padding: '0 20px', fontSize: 14, fontWeight: 600, borderRadius: 6, border: 'none',
-                background: isComplete ? '#fd5108' : '#f3f4f6',
+                background: isComplete ? 'var(--nexfeed-primary)' : '#f3f4f6',
                 color: isComplete ? 'white' : '#d1d5db',
                 cursor: isComplete ? 'pointer' : 'not-allowed',
                 display: 'flex', alignItems: 'center', gap: 6,

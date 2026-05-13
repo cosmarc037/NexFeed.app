@@ -58,7 +58,7 @@ export default function UploadModal({ isOpen, onClose, onUpload, isUploading }) 
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <FileSpreadsheet className="h-5 w-5 text-[#fd5108]" />
+            <FileSpreadsheet className="h-5 w-5 text-[var(--nexfeed-primary)]" />
             Upload SAP Planned Orders
           </DialogTitle>
           <DialogDescription>
@@ -70,7 +70,7 @@ export default function UploadModal({ isOpen, onClose, onUpload, isUploading }) 
           <div
             className={`border-2 border-dashed rounded-xl p-8 text-center transition-all ${
               dragActive 
-                ? 'border-[#fd5108] bg-orange-50' 
+                ? 'border-[var(--nexfeed-primary)] bg-orange-50' 
                 : 'border-gray-200 hover:border-gray-300'
             }`}
             onDragEnter={handleDrag}
@@ -106,7 +106,7 @@ export default function UploadModal({ isOpen, onClose, onUpload, isUploading }) 
               <label htmlFor="file-upload" className="cursor-pointer">
                 <Upload className="h-10 w-10 text-gray-400 mx-auto mb-3" />
                 <p className="text-sm text-gray-600 mb-1">
-                  <span className="text-[#fd5108] font-medium">Click to upload</span> or drag and drop
+                  <span className="text-[var(--nexfeed-primary)] font-medium">Click to upload</span> or drag and drop
                 </p>
                 <p className="text-xs text-gray-400">
                   Excel files only (.xlsx, .xls)
@@ -122,7 +122,7 @@ export default function UploadModal({ isOpen, onClose, onUpload, isUploading }) 
             <Button 
               onClick={handleUpload} 
               disabled={!selectedFile || isUploading}
-              className="bg-[#fd5108] hover:bg-[#fe7c39]"
+              className="bg-[var(--nexfeed-primary)] hover:bg-[var(--nexfeed-primary-dark)]"
             >
               {isUploading ? (
                 <>

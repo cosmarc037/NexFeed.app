@@ -139,6 +139,41 @@ async function initTables() {
   `);
   await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS diversion_data JSONB`).catch(() => {});
   await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS done_timestamp TEXT`).catch(() => {});
+  await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS color TEXT`).catch(() => {});
+  await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS diameter NUMERIC(10,3)`).catch(() => {});
+  await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS pre_combine_status TEXT`).catch(() => {});
+  await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS pre_combine_line TEXT`).catch(() => {});
+  await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS pre_combine_prio INTEGER`).catch(() => {});
+  await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS pre_combine_partner_id TEXT`).catch(() => {});
+  await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS pre_combine_original_volume NUMERIC(10,3)`).catch(() => {});
+  await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS date_source TEXT`).catch(() => {});
+  await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS inferred_target_date TEXT`).catch(() => {});
+  await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS inferred_target_label TEXT`).catch(() => {});
+  await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS has_manual_override BOOLEAN DEFAULT FALSE`).catch(() => {});
+  await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS manual_edit_date TEXT`).catch(() => {});
+  await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS last_n10d_update TEXT`).catch(() => {});
+  await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS n10d_update_available BOOLEAN DEFAULT FALSE`).catch(() => {});
+  await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS n10d_update_new_date TEXT`).catch(() => {});
+  await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS frozen_changeover NUMERIC(10,3)`).catch(() => {});
+  await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS changeover_frozen_at TEXT`).catch(() => {});
+  await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS frozen_changeover_breakdown TEXT`).catch(() => {});
+  // Corrective migration: undo the previous back-fill that incorrectly set frozen_changeover = changeover_time (base only).
+  // Orders where frozen_changeover == changeover_time were incorrectly back-filled; reset so enrichment computes them dynamically.
+  await pool.query(`
+    UPDATE orders
+    SET frozen_changeover = NULL,
+        changeover_frozen_at = NULL
+    WHERE status = 'completed'
+      AND frozen_changeover IS NOT NULL
+      AND frozen_changeover_breakdown IS NULL
+      AND ABS(frozen_changeover - COALESCE(changeover_time, 0.17)) < 0.001
+  `).catch(() => {});
+  await pool.query(`ALTER TABLE knowledge_base_uploads ADD COLUMN IF NOT EXISTS snapshot_json TEXT`).catch(() => {});
+  await pool.query(`ALTER TABLE knowledge_base ADD COLUMN IF NOT EXISTS category TEXT`).catch(() => {});
+  await pool.query(`ALTER TABLE knowledge_base ADD COLUMN IF NOT EXISTS color TEXT`).catch(() => {});
+  await pool.query(`ALTER TABLE knowledge_base ADD COLUMN IF NOT EXISTS changeover NUMERIC(10,3)`).catch(() => {});
+  await pool.query(`ALTER TABLE knowledge_base ADD COLUMN IF NOT EXISTS pricing_php NUMERIC(12,2)`).catch(() => {});
+  await pool.query(`ALTER TABLE knowledge_base ADD COLUMN IF NOT EXISTS margin NUMERIC(8,4)`).catch(() => {});
 }
 initTables().catch(console.error);
 
@@ -389,14 +424,22 @@ app.put('/api/entities/:entity/:id', async (req, res) => {
     const validCols = await getTableColumns(table);
     const data = stringifyJsonFields(filterToValidColumns({ ...req.body, updated_date: new Date() }, validCols));
     const { clause, values } = buildSetClause(data);
+    if (!clause) {
+      console.error(`[PUT] ${table}/${req.params.id} — empty SET clause! body keys: ${Object.keys(req.body).join(',')}`);
+      return res.status(400).json({ error: 'No valid fields to update' });
+    }
     const result = await pool.query(
       `UPDATE ${table} SET ${clause} WHERE id = $${values.length + 1} RETURNING *`,
       [...values, req.params.id]
     );
-    if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    if (result.rows.length === 0) {
+      console.error(`[PUT] ${table}/${req.params.id} — NOT FOUND (0 rows). Keys: ${Object.keys(req.body).join(',')}`);
+      return res.status(404).json({ error: 'Not found' });
+    }
+    console.log(`[PUT] ${table}/${req.params.id} — OK. Keys: ${Object.keys(req.body).join(',')}`);
     res.json(result.rows[0]);
   } catch (err) {
-    console.error(err);
+    console.error(`[PUT] ${table}/${req.params.id} — ERROR:`, err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -432,27 +475,65 @@ app.post('/api/integrations/core/extract-data', async (req, res) => {
 });
 
 const AZURE_OPENAI_ENDPOINT = 'https://nexfeed-ai.cognitiveservices.azure.com';
-const AZURE_OPENAI_DEPLOYMENT = 'gpt-4o-mini';
+const AZURE_OPENAI_DEPLOYMENT = 'gpt-4.1-mini';
 const AZURE_OPENAI_API_VERSION = '2024-12-01-preview';
 const AZURE_OPENAI_KEY = process.env.VITE_AZURE_OPENAI_KEY;
 if (!AZURE_OPENAI_KEY) console.warn('Warning: VITE_AZURE_OPENAI_KEY not set. AI features will not work.');
+console.log(`AI model: ${AZURE_OPENAI_DEPLOYMENT} (${AZURE_OPENAI_ENDPOINT})`)
+
+// Wraps a fetch with an AbortController-based timeout. Rejects with an error
+// whose message starts with "Timeout:" if the fetch doesn't settle in time.
+function fetchWithTimeout(url, options, timeoutMs) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  return fetch(url, { ...options, signal: ctrl.signal })
+    .catch(err => {
+      if (err.name === 'AbortError') throw new Error(`Timeout: Azure OpenAI did not respond within ${timeoutMs}ms`);
+      throw err;
+    })
+    .finally(() => clearTimeout(timer));
+}
+
+// Retry wrapper: attempts the async fn up to maxAttempts times with exponential
+// back-off (baseDelay, baseDelay*2, baseDelay*4, …). Retries on 429/5xx and
+// network errors. Re-throws after maxAttempts exhausted.
+async function withRetry(fn, { maxAttempts = 3, baseDelayMs = 1500 } = {}) {
+  let lastErr;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      const msg = String(err.message || '');
+      // Don't retry client errors (4xx except 429) or timeout exceeded on last attempt
+      const is429 = msg.includes('429');
+      const is5xx = /Azure OpenAI error 5\d\d/.test(msg);
+      const isNet = msg.startsWith('Timeout:') || msg.includes('ECONNRESET') || msg.includes('ECONNREFUSED') || msg.includes('fetch failed');
+      if (!is429 && !is5xx && !isNet) throw err;
+      if (attempt === maxAttempts) break;
+      const delay = baseDelayMs * Math.pow(2, attempt - 1);
+      console.warn(`[Azure OpenAI] Attempt ${attempt} failed (${msg.substring(0, 80)}). Retrying in ${delay}ms…`);
+      await new Promise(r => setTimeout(r, delay));
+    }
+  }
+  throw lastErr;
+}
 
 async function callAzureOpenAI(messages, maxTokens = 800) {
   const url = `${AZURE_OPENAI_ENDPOINT}/openai/deployments/${AZURE_OPENAI_DEPLOYMENT}/chat/completions?api-version=${AZURE_OPENAI_API_VERSION}`;
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'api-key': AZURE_OPENAI_KEY,
-    },
-    body: JSON.stringify({ messages, max_tokens: maxTokens, temperature: 0.7 }),
+  const body = JSON.stringify({ messages, max_tokens: maxTokens, temperature: 0.7 });
+  const headers = { 'Content-Type': 'application/json', 'api-key': AZURE_OPENAI_KEY };
+  // 55 s timeout keeps us safely under Replit's 60 s proxy limit.
+  const TIMEOUT_MS = 55_000;
+  return withRetry(async () => {
+    const response = await fetchWithTimeout(url, { method: 'POST', headers, body }, TIMEOUT_MS);
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`Azure OpenAI error ${response.status}: ${errText}`);
+    }
+    const data = await response.json();
+    return data.choices?.[0]?.message?.content || '';
   });
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`Azure OpenAI error ${response.status}: ${errText}`);
-  }
-  const data = await response.json();
-  return data.choices?.[0]?.message?.content || '';
 }
 
 app.post('/api/ai/chat', async (req, res) => {
@@ -542,17 +623,20 @@ app.post('/api/ai/report_insight', async (req, res) => {
 });
 
 app.post('/api/ai/auto-sequence', async (req, res) => {
+  const { systemPrompt, userPrompt, maxTokens, line } = req.body;
+  const tag = line ? `[${line}]` : '';
+  console.log(`AI auto-sequence${tag}: request received (maxTokens=${maxTokens || 2000})`);
   try {
-    const { systemPrompt, userPrompt, maxTokens } = req.body;
     const messages = [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userPrompt },
     ];
     const content = await callAzureOpenAI(messages, maxTokens || 2000);
+    console.log(`AI auto-sequence${tag}: OK (${content.length} chars)`);
     res.json({ content });
   } catch (err) {
-    console.error('AI auto-sequence error:', err.message);
-    res.status(500).json({ error: 'Auto-sequence analysis unavailable.' });
+    console.error(`AI auto-sequence${tag} error:`, err.message);
+    res.status(500).json({ error: 'Auto-sequence analysis unavailable.', detail: err.message });
   }
 });
 

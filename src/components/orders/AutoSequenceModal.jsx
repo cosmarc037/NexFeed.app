@@ -208,7 +208,9 @@ function buildSimRows(rows, localEdits = {}) {
   let prevCompletion = null;
 
   return rows.map((row, i) => {
-    const effectiveChangeover = parseFloat(row.changeover_time ?? 0.17) || 0.17;
+    const effectiveChangeover = row._effectiveChangeover != null
+      ? parseFloat(row._effectiveChangeover)
+      : parseFloat(row.changeover_time ?? 0.17) || 0.17;
 
     const edits = localEdits[row.id] || {};
     const startDate =
@@ -326,6 +328,115 @@ function isOverText(e) {
   return false;
 }
 
+// ── Preview Changeover Calculation ────────────────────────────────────────
+const PREVIEW_LINE_TO_FM = {
+  "Line 1": "fm1", "Line 2": "fm1",
+  "Line 3": "fm2", "Line 4": "fm2",
+  "Line 5": null,
+  "Line 6": "fm3", "Line 7": "fm3",
+};
+function previewNormalizeColor(c) { return (c || "").trim().toLowerCase(); }
+function previewGetBaseChangeover(form) {
+  const f = (form || "").trim().toUpperCase();
+  if (f === "C") return 0.33;
+  return 0.17; // P, MP, others
+}
+function previewCalcAdditional(cur, nxt, rules) {
+  const fm = PREVIEW_LINE_TO_FM[cur?.feedmill_line] || PREVIEW_LINE_TO_FM[nxt?.feedmill_line];
+  if (!fm || !rules) return 0;
+  const additionalRules = Array.isArray(rules) ? rules : (rules.additionalRules || []);
+  const ruleMap = {};
+  for (const r of additionalRules) ruleMap[r.type] = r;
+  const curColor = previewNormalizeColor(cur.color);
+  const nxtColor = previewNormalizeColor(nxt.color);
+  const curDiam = parseFloat(cur.diameter) || 0;
+  const nxtDiam = parseFloat(nxt.diameter) || 0;
+  const curCat = (cur.category || "").trim().toLowerCase();
+  const nxtCat = (nxt.category || "").trim().toLowerCase();
+  let total = 0;
+  const getVal = (r) => (r ? parseFloat(r.values?.[fm]) || 0 : 0);
+  // Diameter change
+  if (curDiam > 0 && nxtDiam > 0 && curDiam !== nxtDiam)
+    total += getVal(ruleMap["diameter_change"] || ruleMap["diameter"]);
+  // Color: yellow ↔ brown
+  const YB = ["yellow", "brown", "yellow/brown", "brown/yellow"];
+  if (YB.includes(curColor) && YB.includes(nxtColor) && curColor !== nxtColor)
+    total += getVal(ruleMap["color_yellow_brown"] || ruleMap["yellow_brown"]);
+  // Color: red → any
+  if (curColor === "red" && nxtColor !== "red")
+    total += getVal(ruleMap["color_red_out"] || ruleMap["red_to_any"]);
+  // Color: green → any
+  if (curColor === "green" && nxtColor !== "green")
+    total += getVal(ruleMap["color_green_out"] || ruleMap["green_to_any"]);
+  // Color: any → red/green
+  if (curColor !== nxtColor && (nxtColor === "red" || nxtColor === "green"))
+    total += getVal(ruleMap["color_to_red_green"] || ruleMap["any_to_red_green"]);
+  // Category change
+  if (curCat && nxtCat && curCat !== nxtCat)
+    total += getVal(ruleMap["category"] || ruleMap["category_change"]);
+  return total;
+}
+function applyPreviewChangeovers(rows, changeoverRules) {
+  if (!rows || !rows.length) return rows;
+  rows.forEach((order, index) => {
+    const st = (order.status || "").toLowerCase();
+    // Done/Cancel orders: use frozen_changeover if saved, otherwise fall back to changeover_time
+    if (st === "completed" || st === "done" || st === "cancel_po") {
+      const isFrozen = order.frozen_changeover != null;
+      const retained = isFrozen ? parseFloat(order.frozen_changeover) : parseFloat(order.changeover_time ?? 0);
+      order._effectiveChangeover = retained;
+      order._changeoverTotal = retained;
+      order._changeoverBase = retained;
+      order._changeoverAdditional = 0;
+      order._changeoverCalculated = false;
+      order._isFrozen = isFrozen;
+      return;
+    }
+    // Use the order's own changeover_time field (same source as Dashboard), fallback to form-based default
+    const base = parseFloat(order.changeover_time ?? previewGetBaseChangeover(order.form)) || previewGetBaseChangeover(order.form);
+    let following = null;
+    for (let j = index + 1; j < rows.length; j++) {
+      const s = (rows[j].status || "").toLowerCase();
+      if (s !== "done" && s !== "completed" && s !== "cancel_po") { following = rows[j]; break; }
+    }
+    const additional = following ? previewCalcAdditional(order, following, changeoverRules) : 0;
+    const total = following ? parseFloat((base + additional).toFixed(3)) : 0;
+    order._effectiveChangeover = total;
+    order._changeoverTotal = total;
+    order._changeoverBase = base;
+    order._changeoverAdditional = additional;
+    order._changeoverCalculated = true;
+  });
+  return rows;
+}
+
+function formatAvailDate(targetAvailDate) {
+  if (!targetAvailDate) return "—";
+  const isISO = /^\d{4}-\d{2}-\d{2}/.test(targetAvailDate);
+  if (isISO && !isNaN(Date.parse(targetAvailDate))) {
+    return new Date(targetAvailDate).toLocaleDateString("en-GB", {
+      day: "2-digit", month: "short", year: "numeric",
+    });
+  }
+  const raw = String(targetAvailDate).toLowerCase().trim();
+  if (raw.includes("prio")) return "prio replenish";
+  if (raw.includes("safety")) return "safety stocks";
+  if (raw === "stock_sufficient") return "stock sufficient";
+  if (raw.includes("sched")) return "for sched";
+  return targetAvailDate;
+}
+
+function MovementIndicator({ movement, delta }) {
+  if (!movement || movement === 'same' || !delta) return null;
+  if (movement === 'up') return (
+    <span className="as-movement-icon as-movement-icon-up" title={`Moved up ${delta} position${delta > 1 ? 's' : ''}`}>▲</span>
+  );
+  if (movement === 'down') return (
+    <span className="as-movement-icon as-movement-icon-down" title={`Moved down ${delta} position${delta > 1 ? 's' : ''}`}>▼</span>
+  );
+  return null;
+}
+
 export default function AutoSequenceModal({
   isOpen,
   onClose,
@@ -336,9 +447,11 @@ export default function AutoSequenceModal({
   feedmillName,
   lineName,
   inferredTargetMap = {},
+  changeoverRules = null,
 }) {
   const [simRows, setSimRows] = useState([]);
   const [originalAiRows, setOriginalAiRows] = useState([]);
+  const [preSequenceSnapshot, setPreSequenceSnapshot] = useState([]);
   const [localEdits, setLocalEdits] = useState({}); // { [id]: { startDate?, startTime? } }
   const [editingCell, setEditingCell] = useState(null); // { id, field: 'date'|'time' }
   const [insightsOpen, setInsightsOpen] = useState(true);
@@ -436,6 +549,14 @@ export default function AutoSequenceModal({
     for (const o of currentOrders) oMap[o.id] = o;
     orderMapRef.current = oMap;
 
+    // Capture deep copy of the pre-AI order — this is what the Before table shows.
+    // Sorted by the user's current prio so the Before table reflects exactly what
+    // they saw before clicking Auto-Sequence.
+    const preSorted = [...currentOrders].sort((a, b) => (a.prio ?? 0) - (b.prio ?? 0));
+    const preSnap = preSorted.map((o) => ({ ...o }));
+    applyPreviewChangeovers(preSnap, changeoverRules);
+    setPreSequenceSnapshot(preSnap);
+
     const sorted = [...result.proposedSequence].sort(
       (a, b) => a.proposedPrio - b.proposedPrio,
     );
@@ -481,6 +602,7 @@ export default function AutoSequenceModal({
     }
 
     const withCats = buildRows(rows);
+    applyPreviewChangeovers(withCats, changeoverRules);
     const edits = {};
     const built = buildSimRows(withCats, edits);
     setLocalEdits(edits);
@@ -559,6 +681,7 @@ export default function AutoSequenceModal({
   const tradeoffCount = simRows.filter(
     (r) => r._simStatus === "yellow" || r._simStatus === "amber",
   ).length;
+  const movedCount = simRows.filter((r) => r._simMoved).length;
   const stockTargetedCount =
     summary.stockTargeted ?? simRows.filter((r) => r._category === "B").length;
   const stockSufficientCount =
@@ -623,6 +746,7 @@ export default function AutoSequenceModal({
     const movedRow = src[fromIndex];
     if (!movedRow) return;
     const reordered = computeReorderedRows(fromIndex, toIndex, src);
+    applyPreviewChangeovers(reordered, changeoverRules);
     const rebuilt = buildSimRows(reordered, localEdits);
     setSimRows(assignSlots(rebuilt));
   };
@@ -675,14 +799,26 @@ export default function AutoSequenceModal({
 
   const handleReset = () => {
     setLocalEdits({});
-    setSimRows(
-      assignSlots(
-        buildSimRows(
-          originalAiRows.map((r) => ({ ...r })),
-          {},
+    if (preSequenceSnapshot.length > 0) {
+      // Rebuild After table from the true pre-AI snapshot (original user order),
+      // with _originalPrio = current index so all rows show "no movement".
+      const withOriginalPrio = preSequenceSnapshot.map((o, i) => ({
+        ...o,
+        _originalPrio: i + 1,
+      }));
+      const withCats = buildRows(withOriginalPrio);
+      applyPreviewChangeovers(withCats, changeoverRules);
+      setSimRows(assignSlots(buildSimRows(withCats, {})));
+    } else {
+      setSimRows(
+        assignSlots(
+          buildSimRows(
+            originalAiRows.map((r) => ({ ...r })),
+            {},
+          ),
         ),
-      ),
-    );
+      );
+    }
     setReanalyzeNote(null);
   };
 
@@ -728,6 +864,7 @@ export default function AutoSequenceModal({
       }
 
       const withCats = buildRows(compactedResort);
+      applyPreviewChangeovers(withCats, changeoverRules);
       const built = buildSimRows(withCats, localEdits);
       const moved = built.filter((r) => r._simMoved).length;
       setSimRows(assignSlots(built));
@@ -885,7 +1022,8 @@ export default function AutoSequenceModal({
         onClick={onClose}
       >
         <div
-          className="bg-white rounded-xl shadow-2xl w-[98vw] max-w-[1400px] h-[92vh] flex flex-col"
+          className="rounded-xl shadow-2xl w-[98vw] max-w-[1400px] h-[92vh] flex flex-col"
+          style={{ background: 'var(--color-bg-secondary)' }}
           onClick={(e) => e.stopPropagation()}
         >
           <div className="px-6 pt-5 pb-4 border-b border-gray-200 shrink-0">
@@ -895,7 +1033,7 @@ export default function AutoSequenceModal({
                   className="flex items-center gap-1.5 text-[18px] font-bold text-[#1a1a1a] leading-tight"
                   data-testid="text-modal-title"
                 >
-                  <span style={{ color: "#fd5108" }}>✨</span> Auto-Sequence
+                  <span style={{ color: "var(--nexfeed-primary)" }}>✨</span> Auto-Sequence
                   Preview
                 </h2>
                 <p className="text-[13px] text-[#6b7280] mt-0.5">
@@ -916,7 +1054,7 @@ export default function AutoSequenceModal({
 
           {loading ? (
             <div className="flex-1 flex flex-col items-center justify-center py-16 px-8">
-              <Loader2 className="h-10 w-10 text-[#fd5108] animate-spin mb-4" />
+              <Loader2 className="h-10 w-10 text-[var(--nexfeed-primary)] animate-spin mb-4" />
               <p
                 className="text-sm font-medium text-[#2e343a]"
                 data-testid="text-loading"
@@ -973,6 +1111,11 @@ export default function AutoSequenceModal({
                     label: "Planned",
                     color: "#2563eb",
                   }] : []),
+                  ...(movedCount > 0 ? [{
+                    value: movedCount,
+                    label: "Orders Moved",
+                    color: "#ea580c",
+                  }] : []),
                 ].map(({ value, label, color }) => (
                   <div
                     key={label}
@@ -980,7 +1123,7 @@ export default function AutoSequenceModal({
                       border: "1px solid #e5e7eb",
                       borderRadius: 8,
                       padding: "8px 16px",
-                      background: "white",
+                      background: "var(--color-bg-secondary)",
                     }}
                   >
                     <div
@@ -1006,7 +1149,7 @@ export default function AutoSequenceModal({
                       border: "1px solid #e5e7eb",
                       borderRadius: 8,
                       padding: "8px 16px",
-                      background: "white",
+                      background: "var(--color-bg-secondary)",
                     }}
                   >
                     <div
@@ -1035,7 +1178,7 @@ export default function AutoSequenceModal({
                     style={{
                       border: "1px solid #e5e7eb",
                       borderRadius: 8,
-                      background: "#ffffff",
+                      background: "var(--color-bg-secondary)",
                       overflow: "hidden",
                     }}
                   >
@@ -1058,7 +1201,7 @@ export default function AutoSequenceModal({
                             alignItems: "center",
                             gap: 4,
                             fontSize: 11,
-                            color: insightsLoading ? "#9ca3af" : "#fd5108",
+                            color: insightsLoading ? "#9ca3af" : "var(--nexfeed-primary)",
                             background: "none",
                             border: "none",
                             padding: 0,
@@ -1184,27 +1327,126 @@ export default function AutoSequenceModal({
                 </div>
               )}
 
-              <div className="flex-1 overflow-auto px-6 py-3">
-                {/* Excluded count note */}
-                {availableSlots.length < (currentOrders || []).length && (
-                  <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 8 }}>
-                    {(currentOrders || []).length - availableSlots.length} order(s) excluded (Done, In Production, On-going, Cancelled)
+              <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column", padding: "12px 20px" }}>
+              <div style={{ flex: 1, border: "1px solid #e5e7eb", borderRadius: 10, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+              <div className="as-comparison-outer">
+                {/* ── Before panel ── */}
+                <div className="as-before-panel">
+                  <div className="as-before-label">
+                    <span>📋</span> Before
                   </div>
-                )}
-                <div
-                  style={{
-                    border: "1px solid #e5e7eb",
-                    borderRadius: 8,
-                  }}
-                >
+                  <div className="as-before-table-wrap">
+                    <table className="as-before-table" style={{ minWidth: 1300 }}>
+                      <thead>
+                        <tr>
+                          <th className="as-col-prio">Prio</th>
+                          <th className="as-col-fpr">FPR</th>
+                          <th className="as-col-planned">Planned Order</th>
+                          <th className="as-col-material">Material Code (FG)</th>
+                          <th className="as-col-desc">Item Description</th>
+                          <th className="as-col-form">Form</th>
+                          <th className="as-col-volume">Volume (MT)</th>
+                          <th className="as-col-batch">Batch Size</th>
+                          <th className="as-col-batches">Batches</th>
+                          <th className="as-col-prod">Production Time</th>
+                          <th className="as-col-start-date">Start Date</th>
+                          <th className="as-col-start-time">Start Time</th>
+                          <th className="as-col-avail">Avail Date</th>
+                          <th className="as-col-completion">Estimated Completion Date</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {preSequenceSnapshot.map((row, idx) => (
+                          <tr key={row.id} className="auto-sequence-row-before">
+                            <td className="as-col-prio">
+                              <span className="as-before-prio">{idx + 1}</span>
+                            </td>
+                            <td className="as-col-fpr" style={{ color: "#2e343a" }}>{row.fpr || "-"}</td>
+                            <td className="as-col-planned">
+                              <div style={{ color: "#2e343a" }}>{row.fg || "—"}</div>
+                              <div style={{ fontSize: 10, color: "#6b7280", marginTop: 2 }}>{row.sfg || "—"}</div>
+                            </td>
+                            <td className="as-col-material">
+                              <span title={row.material_code || ""} style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#2e343a" }}>
+                                {row.material_code || "-"}
+                              </span>
+                            </td>
+                            <td className="as-col-desc">
+                              <div style={{ fontSize: 12, fontWeight: 500, color: "#1a1a1a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 220 }}
+                                title={row.item_description || ""}>
+                                {row.item_description || "-"}
+                              </div>
+                              {(row.category || row.color || row.diameter) && (
+                                <div style={{ fontSize: 10, color: "#6b7280", marginTop: 2 }}>
+                                  {[
+                                    row.category || null,
+                                    row.color || null,
+                                    row.diameter != null && row.diameter !== "" ? `${parseFloat(row.diameter).toFixed(2)}mm` : null,
+                                  ].filter(Boolean).join(" · ")}
+                                </div>
+                              )}
+                            </td>
+                            <td className="as-col-form" style={{ color: "#2e343a" }}>{row.form || "-"}</td>
+                            <td className="as-col-volume">
+                              <strong style={{ color: "#1a1a1a" }}>{fmtVolume(getEffectiveVol(row))}</strong>
+                              <span style={{ color: "#6b7280", marginLeft: 2 }}>MT</span>
+                            </td>
+                            <td className="as-col-batch" style={{ color: "#2e343a" }}>
+                              {row.batch_size ? parseFloat(row.batch_size).toFixed(2) : "-"}
+                            </td>
+                            <td className="as-col-batches" style={{ color: "#2e343a" }}>{numBatches(row)}</td>
+                            <td className="as-col-prod">
+                              <div style={{ fontSize: 12, fontWeight: 600, color: "#1a1a1a" }}>
+                                {formatProductionHours(row.production_hours)} hours
+                              </div>
+                              <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 2 }}>
+                                CO: {formatChangeover(row._effectiveChangeover ?? 0.17)}
+                              </div>
+                            </td>
+                            <td className="as-col-start-date" style={{ color: "#2e343a" }}>
+                              {row.start_date
+                                ? new Date(row.start_date).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })
+                                : <span style={{ color: "#d1d5db", fontStyle: "italic", fontSize: 11 }}>—</span>}
+                            </td>
+                            <td className="as-col-start-time" style={{ color: "#2e343a" }}>
+                              {row.start_time || <span style={{ color: "#d1d5db", fontStyle: "italic", fontSize: 11 }}>—</span>}
+                            </td>
+                            <td className="as-col-avail" style={{ color: "#2e343a" }}>
+                              {formatAvailDate(row.target_avail_date)}
+                            </td>
+                            <td className="as-col-completion" style={{ color: "#2e343a" }}>
+                              {row.target_completion_date
+                                ? row.target_completion_date
+                                : <span style={{ color: "#d1d5db", fontStyle: "italic" }}>—</span>}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Divider */}
+                <div className="as-comparison-divider" />
+
+                {/* ── After panel ── */}
+                <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+                  <div className="as-after-label">
+                    <span>✨</span> After{movedCount > 0 ? ` — ${movedCount} order${movedCount > 1 ? "s" : ""} repositioned` : " (AI Optimized)"}
+                  </div>
+                  <div style={{ flex: 1, overflowY: "auto", overflowX: "auto" }}>
+                    {availableSlots.length < (currentOrders || []).length && (
+                      <div style={{ fontSize: 11, color: "#6b7280", margin: "6px 8px 4px" }}>
+                        {(currentOrders || []).length - availableSlots.length} order(s) excluded (Done, In Production, On-going, Cancelled)
+                      </div>
+                    )}
                   <DragDropContext onDragEnd={handleDragEnd}>
                     <table
-                      className="preview-table"
+                      className="as-after-table"
                       style={{
-                        minWidth: 1980,
+                        minWidth: 1400,
                         width: "100%",
-                        borderCollapse: "separate",
-                        borderSpacing: 0,
+                        borderCollapse: "collapse",
                         fontSize: 12,
                       }}
                     >
@@ -1215,7 +1457,7 @@ export default function AutoSequenceModal({
                               position: "sticky",
                               top: 0,
                               zIndex: 20,
-                              background: "#f9fafb",
+                              background: "var(--color-bg-tertiary)",
                               fontSize: 10,
                               fontWeight: 400,
                               color: "#6b7280",
@@ -1240,7 +1482,7 @@ export default function AutoSequenceModal({
                               <TH style={{ width: 140, textAlign: "center" }}>Start Date</TH>
                               <TH style={{ width: 140, textAlign: "center" }}>Start Time</TH>
                               <TH style={{ width: 140, textAlign: "left" }}>Avail Date</TH>
-                              <TH style={{ width: 175, textAlign: "left" }}>Completion Date</TH>
+                              <TH style={{ width: 175, textAlign: "left" }}>Estimated Completion Date</TH>
                               <TH style={{ minWidth: 280, width: 300, whiteSpace: "nowrap" }}>
                                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
                                   <span style={{ fontSize: 11, fontWeight: 600, color: "#6b7280" }}>✨ Sequence Insight</span>
@@ -1253,7 +1495,7 @@ export default function AutoSequenceModal({
                                       cursor: isGeneratingRowInsights ? "not-allowed" : "pointer",
                                       fontSize: 10,
                                       fontWeight: 500,
-                                      color: isGeneratingRowInsights ? "#9ca3af" : "#fd5108",
+                                      color: isGeneratingRowInsights ? "#9ca3af" : "var(--nexfeed-primary)",
                                       padding: 0,
                                       opacity: isGeneratingRowInsights ? 0.6 : 1,
                                       flexShrink: 0,
@@ -1295,6 +1537,16 @@ export default function AutoSequenceModal({
                               const isChildRow = !!row.parent_id;
 
                               const isPlanned = row.status === "planned";
+                              const movementDelta =
+                                row._simMoved && row._originalPrio != null
+                                  ? row._originalPrio - (index + 1)
+                                  : 0;
+                              const moveDir =
+                                movementDelta > 0
+                                  ? "up"
+                                  : movementDelta < 0
+                                    ? "down"
+                                    : "same";
                               return (
                                 <Draggable
                                   key={row.id}
@@ -1330,25 +1582,9 @@ export default function AutoSequenceModal({
                                         }
                                       }}
                                       className={cn(
-                                        "border-l-4 transition-all",
-                                        isPlanned
-                                          ? "border-l-[#2563eb]"
-                                          : isLeadRow
-                                            ? "border-l-[#1565c0]"
-                                            : isChildRow
-                                              ? "border-l-[#1976d2]"
-                                              : borderColor,
-                                        isPlanned
-                                          ? "bg-[#eff6ff]"
-                                          : isLeadRow
-                                            ? "bg-[#d0e8fc]"
-                                            : isChildRow
-                                              ? "bg-[#e3f2fd]"
-                                              : row._simMoved
-                                                ? "bg-[#fffbeb]"
-                                                : "bg-white",
+                                        "auto-sequence-row-after",
                                         snapshot.isDragging &&
-                                          "shadow-xl bg-white ring-2 ring-[#fd5108]/20 opacity-95",
+                                          "shadow-xl ring-2 ring-[var(--nexfeed-primary)/20] opacity-95",
                                       )}
                                       style={{
                                         ...draggableProvided.draggableProps
@@ -1487,11 +1723,6 @@ export default function AutoSequenceModal({
                                         >
                                           {row.sfg || "—"}
                                         </div>
-                                        {isPlanned && (
-                                          <div style={{ fontSize: 10, color: "#2563eb", fontWeight: 500, marginTop: 2, display: "flex", alignItems: "center", gap: 3 }}>
-                                            🔒 Planned — locked
-                                          </div>
-                                        )}
                                       </td>
 
                                       {/* Material Code */}
@@ -1563,8 +1794,15 @@ export default function AutoSequenceModal({
                                                 flexShrink: 0,
                                               }}
                                             >
-                                              Child
+                                              Sub
                                             </span>
+                                          )}
+                                          <MovementIndicator
+                                            movement={moveDir}
+                                            delta={Math.abs(movementDelta)}
+                                          />
+                                          {isPlanned && (
+                                            <span style={{ fontSize: 12, flexShrink: 0, lineHeight: 1 }} title="Planned — locked">🔒</span>
                                           )}
                                           <span
                                             title={row.item_description || ""}
@@ -1580,7 +1818,7 @@ export default function AutoSequenceModal({
                                             {row.item_description || "-"}
                                           </span>
                                         </div>
-                                        {row.category && (
+                                        {(row.category || row.color || row.diameter) && (
                                           <div
                                             style={{
                                               fontSize: 10,
@@ -1590,7 +1828,11 @@ export default function AutoSequenceModal({
                                               textOverflow: "ellipsis",
                                             }}
                                           >
-                                            {row.category}
+                                            {[
+                                              row.category || null,
+                                              row.color || null,
+                                              row.diameter != null && row.diameter !== "" ? `${parseFloat(row.diameter).toFixed(2)}mm` : null,
+                                            ].filter(Boolean).join(" · ")}
                                           </div>
                                         )}
                                       </td>
@@ -1673,7 +1915,7 @@ export default function AutoSequenceModal({
                                       <td
                                         style={{
                                           width: 140,
-                                          padding: "6px",
+                                          padding: editingCell?.id === row.id && editingCell?.field === "startDate" ? "6px" : "9px 6px",
                                           textAlign: "center",
                                           cursor: editingCell?.id === row.id && editingCell?.field === "startDate" ? "default" : "pointer",
                                         }}
@@ -1690,7 +1932,7 @@ export default function AutoSequenceModal({
                                               type="date"
                                               style={{
                                                 fontSize: 12,
-                                                border: "1px solid #fd5108",
+                                                border: "1px solid var(--nexfeed-primary)",
                                                 borderRadius: 4,
                                                 padding: "2px 4px",
                                                 width: 118,
@@ -1708,17 +1950,17 @@ export default function AutoSequenceModal({
                                               <button
                                                 onMouseDown={(e) => e.preventDefault()}
                                                 onClick={() => handleSaveEdit(row.id, "startDate", editDateVal || null)}
-                                                style={{ padding: "2px 7px", borderRadius: 4, border: "none", background: "#fd5108", color: "white", fontSize: 10, cursor: "pointer", fontWeight: 600 }}
+                                                style={{ padding: "2px 7px", borderRadius: 4, border: "none", background: "var(--nexfeed-primary)", color: "white", fontSize: 10, cursor: "pointer", fontWeight: 600 }}
                                               >Save</button>
                                               <button
                                                 onMouseDown={(e) => e.preventDefault()}
                                                 onClick={() => handleSaveEdit(row.id, "startDate", null)}
-                                                style={{ padding: "2px 7px", borderRadius: 4, border: "1px solid #d1d5db", background: "white", color: "#374151", fontSize: 10, cursor: "pointer" }}
+                                                style={{ padding: "2px 7px", borderRadius: 4, border: "1px solid #d1d5db", background: "var(--color-bg-secondary)", color: "#374151", fontSize: 10, cursor: "pointer" }}
                                               >Clear</button>
                                               <button
                                                 onMouseDown={(e) => e.preventDefault()}
                                                 onClick={() => setEditingCell(null)}
-                                                style={{ padding: "2px 7px", borderRadius: 4, border: "1px solid #d1d5db", background: "white", color: "#6b7280", fontSize: 10, cursor: "pointer" }}
+                                                style={{ padding: "2px 7px", borderRadius: 4, border: "1px solid #d1d5db", background: "var(--color-bg-secondary)", color: "#6b7280", fontSize: 10, cursor: "pointer" }}
                                               >Cancel</button>
                                             </div>
                                           </div>
@@ -1737,7 +1979,7 @@ export default function AutoSequenceModal({
                                       <td
                                         style={{
                                           width: 140,
-                                          padding: "6px",
+                                          padding: editingCell?.id === row.id && editingCell?.field === "startTime" ? "6px" : "9px 6px",
                                           textAlign: "center",
                                           cursor: editingCell?.id === row.id && editingCell?.field === "startTime" ? "default" : "pointer",
                                         }}
@@ -1759,7 +2001,7 @@ export default function AutoSequenceModal({
                                                 value={editTimeH}
                                                 autoFocus
                                                 onChange={(e) => setEditTimeH(e.target.value.replace(/\D/g, ""))}
-                                                style={{ width: 28, fontSize: 12, border: "1px solid #fd5108", borderRadius: 4, padding: "2px 3px", textAlign: "center", outline: "none" }}
+                                                style={{ width: 28, fontSize: 12, border: "1px solid var(--nexfeed-primary)", borderRadius: 4, padding: "2px 3px", textAlign: "center", outline: "none" }}
                                               />
                                               <span style={{ fontWeight: 700, fontSize: 12 }}>:</span>
                                               <input
@@ -1767,29 +2009,29 @@ export default function AutoSequenceModal({
                                                 maxLength={2}
                                                 value={editTimeM}
                                                 onChange={(e) => setEditTimeM(e.target.value.replace(/\D/g, ""))}
-                                                style={{ width: 28, fontSize: 12, border: "1px solid #fd5108", borderRadius: 4, padding: "2px 3px", textAlign: "center", outline: "none" }}
+                                                style={{ width: 28, fontSize: 12, border: "1px solid var(--nexfeed-primary)", borderRadius: 4, padding: "2px 3px", textAlign: "center", outline: "none" }}
                                               />
                                               <button
                                                 onMouseDown={(e) => e.preventDefault()}
                                                 onClick={() => setEditTimeAP((ap) => ap === "AM" ? "PM" : "AM")}
-                                                style={{ padding: "2px 5px", borderRadius: 4, border: "1px solid #fd5108", background: "#fff7f5", color: "#fd5108", fontSize: 10, cursor: "pointer", fontWeight: 700 }}
+                                                style={{ padding: "2px 5px", borderRadius: 4, border: "1px solid var(--nexfeed-primary)", background: "#fff7f5", color: "var(--nexfeed-primary)", fontSize: 10, cursor: "pointer", fontWeight: 700 }}
                                               >{editTimeAP}</button>
                                             </div>
                                             <div style={{ display: "flex", gap: 3 }}>
                                               <button
                                                 onMouseDown={(e) => e.preventDefault()}
                                                 onClick={() => handleSaveEdit(row.id, "startTime", to24h(editTimeH, editTimeM, editTimeAP))}
-                                                style={{ padding: "2px 7px", borderRadius: 4, border: "none", background: "#fd5108", color: "white", fontSize: 10, cursor: "pointer", fontWeight: 600 }}
+                                                style={{ padding: "2px 7px", borderRadius: 4, border: "none", background: "var(--nexfeed-primary)", color: "white", fontSize: 10, cursor: "pointer", fontWeight: 600 }}
                                               >Save</button>
                                               <button
                                                 onMouseDown={(e) => e.preventDefault()}
                                                 onClick={() => handleSaveEdit(row.id, "startTime", null)}
-                                                style={{ padding: "2px 7px", borderRadius: 4, border: "1px solid #d1d5db", background: "white", color: "#374151", fontSize: 10, cursor: "pointer" }}
+                                                style={{ padding: "2px 7px", borderRadius: 4, border: "1px solid #d1d5db", background: "var(--color-bg-secondary)", color: "#374151", fontSize: 10, cursor: "pointer" }}
                                               >Clear</button>
                                               <button
                                                 onMouseDown={(e) => e.preventDefault()}
                                                 onClick={() => setEditingCell(null)}
-                                                style={{ padding: "2px 7px", borderRadius: 4, border: "1px solid #d1d5db", background: "white", color: "#6b7280", fontSize: 10, cursor: "pointer" }}
+                                                style={{ padding: "2px 7px", borderRadius: 4, border: "1px solid #d1d5db", background: "var(--color-bg-secondary)", color: "#6b7280", fontSize: 10, cursor: "pointer" }}
                                               >Cancel</button>
                                             </div>
                                           </div>
@@ -1808,7 +2050,7 @@ export default function AutoSequenceModal({
                                       <td
                                         style={{
                                           width: 140,
-                                          padding: editAvailDateId === row.id ? "6px" : "10px 6px",
+                                          padding: editAvailDateId === row.id ? "6px" : "9px 6px",
                                           textAlign: "left",
                                           cursor: isAvailDateValid(row.target_avail_date) && row._category === "A" && editAvailDateId !== row.id ? "pointer" : "default",
                                         }}
@@ -1831,15 +2073,15 @@ export default function AutoSequenceModal({
                                                 if (e.key === "Enter") handleSaveAvailDate(row.id, editAvailDateVal || null);
                                                 if (e.key === "Escape") setEditAvailDateId(null);
                                               }}
-                                              style={{ fontSize: 11, border: "1px solid #fd5108", borderRadius: 4, padding: "2px 4px", width: 118, outline: "none" }}
+                                              style={{ fontSize: 11, border: "1px solid var(--nexfeed-primary)", borderRadius: 4, padding: "2px 4px", width: 118, outline: "none" }}
                                             />
                                             <div style={{ display: "flex", gap: 3 }}>
                                               <button onMouseDown={(e) => e.preventDefault()} onClick={() => handleSaveAvailDate(row.id, editAvailDateVal || null)}
-                                                style={{ padding: "2px 7px", borderRadius: 4, border: "none", background: "#fd5108", color: "white", fontSize: 10, cursor: "pointer", fontWeight: 600 }}>Save</button>
+                                                style={{ padding: "2px 7px", borderRadius: 4, border: "none", background: "var(--nexfeed-primary)", color: "white", fontSize: 10, cursor: "pointer", fontWeight: 600 }}>Save</button>
                                               <button onMouseDown={(e) => e.preventDefault()} onClick={() => handleSaveAvailDate(row.id, null)}
-                                                style={{ padding: "2px 7px", borderRadius: 4, border: "1px solid #d1d5db", background: "white", color: "#374151", fontSize: 10, cursor: "pointer" }}>Clear</button>
+                                                style={{ padding: "2px 7px", borderRadius: 4, border: "1px solid #d1d5db", background: "var(--color-bg-secondary)", color: "#374151", fontSize: 10, cursor: "pointer" }}>Clear</button>
                                               <button onMouseDown={(e) => e.preventDefault()} onClick={() => setEditAvailDateId(null)}
-                                                style={{ padding: "2px 7px", borderRadius: 4, border: "1px solid #d1d5db", background: "white", color: "#6b7280", fontSize: 10, cursor: "pointer" }}>Cancel</button>
+                                                style={{ padding: "2px 7px", borderRadius: 4, border: "1px solid #d1d5db", background: "var(--color-bg-secondary)", color: "#6b7280", fontSize: 10, cursor: "pointer" }}>Cancel</button>
                                             </div>
                                           </div>
                                         ) : (<>
@@ -1864,7 +2106,7 @@ export default function AutoSequenceModal({
                                                         ? "#ca8a04"
                                                         : "#1d4ed8"
                                                   : isNonDate
-                                                    ? "#fd5108"
+                                                    ? "var(--nexfeed-primary)"
                                                     : "#2e343a",
                                               fontWeight:
                                                 isStockSufficient ||
@@ -2082,7 +2324,7 @@ export default function AutoSequenceModal({
                                               autoFocus
                                               value={editCompletionDate}
                                               onChange={(e) => setEditCompletionDate(e.target.value)}
-                                              style={{ fontSize: 11, border: "1px solid #fd5108", borderRadius: 4, padding: "2px 4px", width: 118, outline: "none" }}
+                                              style={{ fontSize: 11, border: "1px solid var(--nexfeed-primary)", borderRadius: 4, padding: "2px 4px", width: 118, outline: "none" }}
                                             />
                                             <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
                                               <input
@@ -2090,7 +2332,7 @@ export default function AutoSequenceModal({
                                                 maxLength={2}
                                                 value={editCompletionTimeH}
                                                 onChange={(e) => setEditCompletionTimeH(e.target.value.replace(/\D/g, ""))}
-                                                style={{ width: 26, fontSize: 11, border: "1px solid #fd5108", borderRadius: 4, padding: "2px 3px", textAlign: "center", outline: "none" }}
+                                                style={{ width: 26, fontSize: 11, border: "1px solid var(--nexfeed-primary)", borderRadius: 4, padding: "2px 3px", textAlign: "center", outline: "none" }}
                                               />
                                               <span style={{ fontWeight: 700, fontSize: 11 }}>:</span>
                                               <input
@@ -2098,24 +2340,24 @@ export default function AutoSequenceModal({
                                                 maxLength={2}
                                                 value={editCompletionTimeM}
                                                 onChange={(e) => setEditCompletionTimeM(e.target.value.replace(/\D/g, ""))}
-                                                style={{ width: 26, fontSize: 11, border: "1px solid #fd5108", borderRadius: 4, padding: "2px 3px", textAlign: "center", outline: "none" }}
+                                                style={{ width: 26, fontSize: 11, border: "1px solid var(--nexfeed-primary)", borderRadius: 4, padding: "2px 3px", textAlign: "center", outline: "none" }}
                                               />
                                               <button
                                                 onMouseDown={(e) => e.preventDefault()}
                                                 onClick={() => setEditCompletionTimeAP((ap) => ap === "AM" ? "PM" : "AM")}
-                                                style={{ padding: "1px 4px", borderRadius: 4, border: "1px solid #fd5108", background: "#fff7f5", color: "#fd5108", fontSize: 10, cursor: "pointer", fontWeight: 700 }}
+                                                style={{ padding: "1px 4px", borderRadius: 4, border: "1px solid var(--nexfeed-primary)", background: "#fff7f5", color: "var(--nexfeed-primary)", fontSize: 10, cursor: "pointer", fontWeight: 700 }}
                                               >{editCompletionTimeAP}</button>
                                             </div>
                                             <div style={{ display: "flex", gap: 3 }}>
                                               <button
                                                 onMouseDown={(e) => e.preventDefault()}
                                                 onClick={() => handleRequestCompletionOverride(row.id)}
-                                                style={{ padding: "2px 7px", borderRadius: 4, border: "none", background: "#fd5108", color: "white", fontSize: 10, cursor: "pointer", fontWeight: 600 }}
+                                                style={{ padding: "2px 7px", borderRadius: 4, border: "none", background: "var(--nexfeed-primary)", color: "white", fontSize: 10, cursor: "pointer", fontWeight: 600 }}
                                               >Set Override</button>
                                               <button
                                                 onMouseDown={(e) => e.preventDefault()}
                                                 onClick={() => setEditCompletionId(null)}
-                                                style={{ padding: "2px 7px", borderRadius: 4, border: "1px solid #d1d5db", background: "white", color: "#6b7280", fontSize: 10, cursor: "pointer" }}
+                                                style={{ padding: "2px 7px", borderRadius: 4, border: "1px solid #d1d5db", background: "var(--color-bg-secondary)", color: "#6b7280", fontSize: 10, cursor: "pointer" }}
                                               >Cancel</button>
                                             </div>
                                           </div>
@@ -2151,34 +2393,25 @@ export default function AutoSequenceModal({
                                       </td>
 
                                       {/* Sequence Insight */}
-                                      <td
-                                        style={{
-                                          minWidth: 280,
-                                          width: 300,
-                                          verticalAlign: "top",
-                                          padding: "10px 12px",
-                                          background: isPlanned ? "#eff6ff" : undefined,
-                                        }}
-                                      >
-                                        {isGeneratingRowInsights && !sequenceInsights[row._simPrio] && (
-                                          <div style={{ fontSize: 11, color: "#9ca3af", fontStyle: "italic", display: "flex", alignItems: "center", gap: 4 }}>
-                                            <span style={{ display: "inline-block", animation: "spin 1s linear infinite", fontSize: 10 }}>✨</span>
-                                            Generating...
-                                          </div>
-                                        )}
-                                        {isGeneratingRowInsights && sequenceInsights[row._simPrio] && (
-                                          <div style={{ fontSize: 11, color: "#374151", lineHeight: 1.6, whiteSpace: "normal", wordWrap: "break-word", opacity: 0.5 }}>
-                                            {sequenceInsights[row._simPrio]}
-                                          </div>
-                                        )}
-                                        {!isGeneratingRowInsights && sequenceInsights[row._simPrio] && (
-                                          <div style={{ fontSize: 11, color: "#374151", lineHeight: 1.6, whiteSpace: "normal", wordWrap: "break-word" }}>
-                                            {sequenceInsights[row._simPrio]}
-                                          </div>
-                                        )}
-                                        {!isGeneratingRowInsights && !sequenceInsights[row._simPrio] && (
-                                          <span style={{ fontSize: 11, color: "#d1d5db" }}>—</span>
-                                        )}
+                                      <td className="as-col-insight" style={{ verticalAlign: "top", padding: "10px 8px" }}>
+                                        <div className="as-insight-cell">
+                                          {isGeneratingRowInsights && !sequenceInsights[row._simPrio] ? (
+                                            <span style={{ fontSize: 11, color: "#9ca3af", fontStyle: "italic" }}>
+                                              ✨ Generating...
+                                            </span>
+                                          ) : (
+                                            <>
+                                              <span className={`as-insight-text${isGeneratingRowInsights ? " as-insight-text-loading" : ""}`}>
+                                                {sequenceInsights[row._simPrio] || "—"}
+                                              </span>
+                                              {sequenceInsights[row._simPrio] && (
+                                                <div className="as-insight-tooltip">
+                                                  {sequenceInsights[row._simPrio]}
+                                                </div>
+                                              )}
+                                            </>
+                                          )}
+                                        </div>
                                       </td>
                                     </tr>
                                   )}
@@ -2191,10 +2424,13 @@ export default function AutoSequenceModal({
                       </Droppable>
                     </table>
                   </DragDropContext>
-                </div>
-              </div>
+                  </div>{/* end After scroll container */}
+                </div>{/* end After panel column */}
+              </div>{/* end as-comparison-outer */}
+              </div>{/* end comparison container border/rounded */}
+              </div>{/* end comparison padding wrapper */}
 
-              <div className="flex items-center justify-between px-6 py-3 border-t border-gray-200 bg-white shrink-0">
+              <div className="flex items-center justify-between px-6 py-3 border-t border-gray-200 shrink-0" style={{ background: 'var(--color-bg-secondary)' }}>
                 <div className="flex items-center gap-2">
                   <button
                     onClick={handleReanalyze}
@@ -2205,20 +2441,20 @@ export default function AutoSequenceModal({
                       alignItems: "center",
                       gap: 6,
                       fontSize: 12,
-                      color: isReanalyzing ? "white" : "#fd5108",
-                      border: "1px solid #fd5108",
+                      color: isReanalyzing ? "white" : "var(--nexfeed-primary)",
+                      border: "1px solid var(--nexfeed-primary)",
                       borderRadius: 6,
                       padding: "6px 12px",
-                      background: isReanalyzing ? "#fd5108" : "white",
+                      background: isReanalyzing ? "var(--nexfeed-primary)" : "var(--color-bg-secondary)",
                       cursor: isReanalyzing ? "not-allowed" : "pointer",
                       fontWeight: 500,
                       opacity: isReanalyzing ? 0.85 : 1,
                     }}
                     onMouseEnter={(e) => {
-                      if (!isReanalyzing) { e.currentTarget.style.background = "#fd5108"; e.currentTarget.style.color = "white"; }
+                      if (!isReanalyzing) { e.currentTarget.style.background = "var(--nexfeed-primary)"; e.currentTarget.style.color = "white"; }
                     }}
                     onMouseLeave={(e) => {
-                      if (!isReanalyzing) { e.currentTarget.style.background = "white"; e.currentTarget.style.color = "#fd5108"; }
+                      if (!isReanalyzing) { e.currentTarget.style.background = "var(--color-bg-secondary)"; e.currentTarget.style.color = "var(--nexfeed-primary)"; }
                     }}
                     data-testid="button-reanalyze-sequence"
                   >
@@ -2236,7 +2472,7 @@ export default function AutoSequenceModal({
                       border: "1px solid #d1d5db",
                       borderRadius: 6,
                       padding: "6px 12px",
-                      background: "white",
+                      background: "var(--color-bg-secondary)",
                       cursor: "pointer",
                       fontWeight: 500,
                     }}
@@ -2266,7 +2502,7 @@ export default function AutoSequenceModal({
                       border: "1px solid #d1d5db",
                       borderRadius: 6,
                       padding: "6px 12px",
-                      background: "white",
+                      background: "var(--color-bg-secondary)",
                       cursor: "pointer",
                       fontWeight: 500,
                     }}
@@ -2286,7 +2522,7 @@ export default function AutoSequenceModal({
                     style={{
                       fontSize: 12,
                       color: "white",
-                      background: simRows.length === 0 ? "#fca48a" : "#fd5108",
+                      background: simRows.length === 0 ? "#fca48a" : "var(--nexfeed-primary)",
                       border: "none",
                       borderRadius: 6,
                       padding: "6px 14px",
@@ -2299,7 +2535,7 @@ export default function AutoSequenceModal({
                     }}
                     onMouseLeave={(e) => {
                       if (simRows.length > 0)
-                        e.currentTarget.style.background = "#fd5108";
+                        e.currentTarget.style.background = "var(--nexfeed-primary)";
                     }}
                     data-testid="button-apply-sequence"
                   >
@@ -2329,7 +2565,7 @@ export default function AutoSequenceModal({
         >
           <div
             style={{
-              background: "white",
+              background: "var(--color-bg-secondary)",
               borderRadius: 10,
               padding: "26px 28px",
               maxWidth: 460,
@@ -2376,7 +2612,7 @@ export default function AutoSequenceModal({
                 onClick={() => setDragWarnDialog(null)}
                 style={{
                   padding: "8px 18px", borderRadius: 6, border: "1px solid #d1d5db",
-                  background: "white", color: "#374151", fontSize: 13, cursor: "pointer", fontWeight: 500,
+                  background: "var(--color-bg-secondary)", color: "#374151", fontSize: 13, cursor: "pointer", fontWeight: 500,
                 }}
               >
                 Cancel
@@ -2389,7 +2625,7 @@ export default function AutoSequenceModal({
                 }}
                 style={{
                   padding: "8px 18px", borderRadius: 6, border: "none",
-                  background: "#fd5108", color: "white", fontSize: 13, cursor: "pointer", fontWeight: 600,
+                  background: "var(--nexfeed-primary)", color: "white", fontSize: 13, cursor: "pointer", fontWeight: 600,
                 }}
               >
                 Proceed Anyway
@@ -2412,7 +2648,7 @@ export default function AutoSequenceModal({
         >
           <div
             style={{
-              background: "white", borderRadius: 10, padding: "26px 28px",
+              background: "var(--color-bg-secondary)", borderRadius: 10, padding: "26px 28px",
               maxWidth: 480, width: "90%",
               boxShadow: "0 8px 40px rgba(0,0,0,0.22)",
             }}
@@ -2438,11 +2674,11 @@ export default function AutoSequenceModal({
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
               <button
                 onClick={() => setCompletionOverrideDialog(null)}
-                style={{ padding: "8px 20px", borderRadius: 6, border: "1px solid #d1d5db", background: "white", color: "#374151", fontSize: 13, cursor: "pointer", fontWeight: 500 }}
+                style={{ padding: "8px 20px", borderRadius: 6, border: "1px solid #d1d5db", background: "var(--color-bg-secondary)", color: "#374151", fontSize: 13, cursor: "pointer", fontWeight: 500 }}
               >Cancel</button>
               <button
                 onClick={handleConfirmCompletionOverride}
-                style={{ padding: "8px 20px", borderRadius: 6, border: "none", background: "#fd5108", color: "white", fontSize: 13, cursor: "pointer", fontWeight: 600 }}
+                style={{ padding: "8px 20px", borderRadius: 6, border: "none", background: "var(--nexfeed-primary)", color: "white", fontSize: 13, cursor: "pointer", fontWeight: 600 }}
               >Proceed</button>
             </div>
           </div>
@@ -2469,7 +2705,7 @@ export default function AutoSequenceModal({
               Go Back
             </AlertDialogCancel>
             <AlertDialogAction
-              className="bg-[#fd5108] hover:bg-[#c44107] text-white text-[14px] font-semibold h-10 px-5"
+              className="bg-[var(--nexfeed-primary)] hover:bg-[#c44107] text-white text-[14px] font-semibold h-10 px-5"
               onClick={(e) => { e.preventDefault(); handleConfirmApply(); }}
               disabled={isApplying}
               style={{ display:"inline-flex", alignItems:"center", gap:6, opacity: isApplying ? 0.85 : 1, cursor: isApplying ? "not-allowed" : "pointer" }}

@@ -1,0 +1,517 @@
+```
+Fix AI Profit Sequence Insight so both changeover and margin are pulled correctly from the final row data and master data lookup.
+
+Problem observed:
+- Production hours in the profit insight now match the row — good
+- But changeover in the insight is still wrong
+  - example: row shows CO: 0.83, but insight uses 0.17
+  - row shows CO: 1.67, but insight uses 0.17
+  - row shows CO: 2.33, but insight uses 0.17
+- Margin is still not being retrieved correctly from master data via material code
+  - insight keeps using margin = 0
+  - so profit rate becomes 0 / (...) even when margin should exist
+
+Goal:
+Use the exact same values the row is already displaying:
+- production hours = final row production hours
+- changeover hours = final row changeover for that order
+- margin = matched from master data by material code
+- profit rate = margin / (production hours + changeover hours)
+
+Do not let the AI guess or re-estimate these values.
+
+--------------------------------------------------
+1. FIX CHANGEOVER SOURCE FOR PROFIT INSIGHT
+--------------------------------------------------
+
+The insight must use the order’s final displayed changeover, not a fallback or recomputed default unless absolutely necessary.
+
+Create / update a helper like this:
+
+```javascript
+function getDisplayedChangeoverHours(order, previousOrder, changeoverRules, line) {
+  const candidates = [
+    order.changeover,
+    order._changeoverHrs,
+    order._changeover,
+    order.change_over,
+  ];
+
+  for (const val of candidates) {
+    const parsed = parseFloat(val);
+    if (!Number.isNaN(parsed)) {
+      return parsed;
+    }
+  }
+
+  if (previousOrder) {
+    const recalculated = parseFloat(
+      calculateChangeoverBetween(previousOrder, order, changeoverRules, line) || 0
+    );
+    if (!Number.isNaN(recalculated)) {
+      return recalculated;
+    }
+  }
+
+  return 0;
+}
+```
+
+Important:
+- Prefer the changeover already stored on the row
+- Only recalculate from previousOrder as a fallback
+- Do not default to base changeover (0.17) if the row already has a real changeover
+
+--------------------------------------------------
+2. FIX MARGIN LOOKUP FROM MASTER DATA BY MATERIAL CODE
+--------------------------------------------------
+
+The current master data lookup is failing, likely because:
+- material code formats differ
+- one side may be numeric and the other string
+- one side may contain leading/trailing spaces
+- the code may be stored in a different master data field name
+
+Create a normalization helper:
+
+```javascript
+function normalizeMaterialCode(value) {
+  if (value == null) return '';
+  return String(value).trim();
+}
+```
+
+Then create a dedicated margin lookup helper:
+
+```javascript
+function getMarginFromMasterData(order, masterData) {
+  const orderCode = normalizeMaterialCode(order.material_code_fg || order.material_code);
+
+  if (!orderCode) {
+    return { margin: 0, marginFound: false, matchedField: null };
+  }
+
+  const match = masterData.find(md => {
+    const codesToCheck = [
+      md.material_code_fg,
+      md.material_code,
+      md.MaterialCode,
+      md['Material Code (FG)'],
+      md['Material Code'],
+    ].map(normalizeMaterialCode);
+
+    return codesToCheck.includes(orderCode);
+  });
+
+  if (!match) {
+    return { margin: 0, marginFound: false, matchedField: null };
+  }
+
+  const rawMargin =
+    match.Margin ??
+    match.margin ??
+    match['Margin'] ??
+    match['MARGIN'] ??
+    null;
+
+  const parsedMargin = parseFloat(rawMargin);
+
+  if (Number.isNaN(parsedMargin)) {
+    return { margin: 0, marginFound: false, matchedField: 'margin-unparseable' };
+  }
+
+  return {
+    margin: parsedMargin,
+    marginFound: true,
+    matchedField: 'Margin',
+  };
+}
+```
+
+Important:
+- Match master data by normalized material code
+- Check multiple possible field names if needed
+- Do not assume only one exact property spelling
+- If not found, explicitly mark `marginFound: false`
+
+--------------------------------------------------
+3. ENSURE AI PROFIT ORDERS ARE ENRICHED WITH CORRECT MARGIN BEFORE INSIGHT GENERATION
+--------------------------------------------------
+
+Update / replace margin enrichment so it uses the helper above:
+
+```javascript
+function ensureMarginPresent(ordersByLine, masterData) {
+  const result = {};
+
+  Object.entries(ordersByLine).forEach(([line, orders]) => {
+    result[line] = orders.map(order => {
+      const existing = parseFloat(order._margin);
+      if (!Number.isNaN(existing) && existing !== 0) {
+        return order;
+      }
+
+      const { margin, marginFound, matchedField } = getMarginFromMasterData(order, masterData);
+
+      return {
+        ...order,
+        _margin: margin,
+        _marginFound: marginFound,
+        _marginMatchedField: matchedField,
+      };
+    });
+  });
+
+  return result;
+}
+```
+
+Run this before AI Profit insight generation.
+
+--------------------------------------------------
+4. BUILD PROFIT INSIGHT CONTEXT USING FINAL DISPLAYED VALUES
+--------------------------------------------------
+
+Update the order insight context builder to use:
+- final row production hours
+- final row changeover hours
+- margin from `_margin`
+- `marginFound`
+- calculated profit rate from these exact values
+
+```javascript
+function getDisplayedProductionHours(order, line) {
+  const candidates = [
+    order.production_time,
+    order._productionTimeHrs,
+    order._production_time,
+  ];
+
+  for (const val of candidates) {
+    const parsed = parseFloat(val);
+    if (!Number.isNaN(parsed)) {
+      return parsed;
+    }
+  }
+
+  const volume = parseFloat(order.volume_override || order.volume || order.total_volume_mt || 0) || 0;
+  const runRate = getLineRunRate(normalizeLine(line));
+  return runRate > 0 ? volume / runRate : 0;
+}
+
+function calculateDisplayedProfitRate({ margin, productionHours, changeoverHours }) {
+  const total = productionHours + changeoverHours;
+  if (total <= 0) return 0;
+  return margin / total;
+}
+```
+
+Then:
+
+```javascript
+function buildOrderInsightContext({
+  order,
+  previousOrder,
+  nextOrder,
+  strategyId,
+  line,
+  lineOrders,
+  index,
+  changeoverRules,
+}) {
+  const effectiveAvailDate = normalizeDate(order._aiSuggestedDate || order.target_avail_date);
+  const protectedReason = getProtectedReason(order);
+
+  const productionHours = getDisplayedProductionHours(order, line);
+  const changeoverHours = getDisplayedChangeoverHours(order, previousOrder, changeoverRules, line);
+
+  const margin = parseFloat(order._margin ?? 0) || 0;
+  const marginFound = !!order._marginFound;
+
+  const profitRate = calculateDisplayedProfitRate({
+    margin,
+    productionHours,
+    changeoverHours,
+  });
+
+  const ctx = {
+    strategy: strategyId,
+    line,
+    position: index + 1,
+    totalOrders: lineOrders.length,
+
+    order_id: order.id,
+    material_code_fg: order.material_code_fg,
+    item_description: order.item_description,
+
+    category: order.category,
+    color: order.color,
+    diameter: order.diameter,
+    form: order.form,
+    materialSignature: getMaterialSignature(order),
+
+    effectiveAvailDate,
+    originalAvailDate: normalizeDate(order._originalAvailDate || order.target_avail_date),
+    estimatedCompletionDate: order.estimated_completion_date || order._estimatedCompletion || null,
+
+    n10dStatus: order._n10dStatus || order.inferred_target_label || '',
+    protectedReason,
+
+    previousOrder: previousOrder
+      ? {
+          order_id: previousOrder.id,
+          item_description: previousOrder.item_description,
+          materialSignature: getMaterialSignature(previousOrder),
+          effectiveAvailDate: normalizeDate(previousOrder._aiSuggestedDate || previousOrder.target_avail_date),
+        }
+      : null,
+
+    nextOrder: nextOrder
+      ? {
+          order_id: nextOrder.id,
+          item_description: nextOrder.item_description,
+          materialSignature: getMaterialSignature(nextOrder),
+          effectiveAvailDate: normalizeDate(nextOrder._aiSuggestedDate || nextOrder.target_avail_date),
+        }
+      : null,
+
+    productionHours: Number(productionHours.toFixed(2)),
+    changeoverHours: Number(changeoverHours.toFixed(2)),
+    margin: Number(margin.toFixed(2)),
+    marginFound,
+    profitRate: Number(profitRate.toFixed(2)),
+
+    aiDateReason: order._aiDateReason || order._aiReasoning || '',
+  };
+
+  return strategyId === 'ai_profit'
+    ? validateProfitInsightContext(ctx)
+    : ctx;
+}
+```
+
+--------------------------------------------------
+5. VALIDATE THE PROFIT INSIGHT CONTEXT BEFORE SENDING TO AI
+--------------------------------------------------
+
+```javascript
+function validateProfitInsightContext(ctx) {
+  const expectedProfitRate =
+    (ctx.productionHours + ctx.changeoverHours) > 0
+      ? ctx.margin / (ctx.productionHours + ctx.changeoverHours)
+      : 0;
+
+  const roundedExpected = Number(expectedProfitRate.toFixed(2));
+
+  if (Math.abs(roundedExpected - ctx.profitRate) > 0.01) {
+    console.warn('[Profit Insight] Profit rate mismatch', {
+      order_id: ctx.order_id,
+      margin: ctx.margin,
+      productionHours: ctx.productionHours,
+      changeoverHours: ctx.changeoverHours,
+      ctxProfitRate: ctx.profitRate,
+      expectedProfitRate: roundedExpected,
+    });
+
+    ctx.profitRate = roundedExpected;
+  }
+
+  return ctx;
+}
+```
+
+--------------------------------------------------
+6. UPDATE THE AI PROMPT SO IT USES PROVIDED VALUES EXACTLY
+--------------------------------------------------
+
+For ai_profit insight generation, update the prompt:
+
+```javascript
+function buildStrategyInsightsPrompt({ strategyId, lineContexts }) {
+  return `
+You are generating row-level sequencing explanations for a production scheduling system.
+
+The selected strategy is: ${strategyId}
+
+IMPORTANT:
+- Use the provided numeric values exactly as given
+- Do not estimate or replace margin, productionHours, changeoverHours, or profitRate
+- If marginFound is false, explain that margin data is unavailable
+- If strategy is ai_profit, use the formula exactly as:
+  Profit Rate = Margin ÷ (Production Hours + Changeover Hours)
+
+Return valid JSON only:
+{
+  "results": [
+    {
+      "order_id": "123",
+      "short": "Prioritized here due to higher profit rate among safe flexible orders.",
+      "long": "This order was prioritized because it delivers stronger value per line-hour than other safe options. Profit Rate = 18.00 ÷ (2.00 + 0.83) = 6.36 profit/hr."
+    }
+  ]
+}
+
+### Order contexts:
+${JSON.stringify(lineContexts, null, 2)}
+`;
+}
+```
+
+--------------------------------------------------
+7. IF MARGIN IS MISSING, DO NOT FAKE PROFIT JUSTIFICATION
+--------------------------------------------------
+
+If `marginFound === false`, AI should not say:
+- "margin is zero, so no profitability potential"
+
+Instead it should say:
+- margin data was not found in master data
+- profitability could not be fully quantified for this order
+
+Add fallback logic:
+
+```javascript
+function getFallbackProfitInsight(ctx) {
+  if (!ctx.marginFound) {
+    return {
+      short: 'Scheduled within profit strategy, but margin data is unavailable.',
+      long: 'This order is part of the profit-optimized sequence, but no matching margin value was found in master data for its material code. Its placement still respects safe scheduling, date constraints, and production flow.',
+    };
+  }
+
+  return {
+    short: 'Scheduled using profit-optimized sequencing.',
+    long: `This order was evaluated using profit-rate logic. Profit Rate = ${ctx.margin.toFixed(2)} ÷ (${ctx.productionHours.toFixed(2)} + ${ctx.changeoverHours.toFixed(2)}) = ${ctx.profitRate.toFixed(2)} profit/hr.`,
+  };
+}
+```
+
+--------------------------------------------------
+8. ADD DEBUG LOGS FOR MATERIAL CODE MATCHING
+--------------------------------------------------
+
+Temporarily add debug logs to confirm the master data lookup is working:
+
+```javascript
+function getMarginFromMasterData(order, masterData) {
+  const orderCode = normalizeMaterialCode(order.material_code_fg || order.material_code);
+
+  const match = masterData.find(md => {
+    const codesToCheck = [
+      md.material_code_fg,
+      md.material_code,
+      md.MaterialCode,
+      md['Material Code (FG)'],
+      md['Material Code'],
+    ].map(normalizeMaterialCode);
+
+    return codesToCheck.includes(orderCode);
+  });
+
+  if (!match) {
+    console.warn('[Margin Lookup] No master data match found', {
+      order_id: order.id,
+      orderCode,
+    });
+    return { margin: 0, marginFound: false, matchedField: null };
+  }
+
+  console.debug('[Margin Lookup] Match found', {
+    order_id: order.id,
+    orderCode,
+    matchedMaterial: match.material_code_fg || match.material_code || match.MaterialCode,
+    margin: match.Margin ?? match.margin,
+  });
+
+  const rawMargin =
+    match.Margin ??
+    match.margin ??
+    match['Margin'] ??
+    match['MARGIN'] ??
+    null;
+
+  const parsedMargin = parseFloat(rawMargin);
+
+  if (Number.isNaN(parsedMargin)) {
+    console.warn('[Margin Lookup] Margin parse failed', {
+      order_id: order.id,
+      orderCode,
+      rawMargin,
+    });
+    return { margin: 0, marginFound: false, matchedField: 'margin-unparseable' };
+  }
+
+  return {
+    margin: parsedMargin,
+    marginFound: true,
+    matchedField: 'Margin',
+  };
+}
+```
+
+--------------------------------------------------
+9. RUN INSIGHT GENERATION ONLY AFTER FINAL STRATEGY OUTPUT IS READY
+--------------------------------------------------
+
+For `ai_profit`:
+1. generate final sequence
+2. compute final production hours + changeover on rows
+3. ensure margin is present
+4. build AI insight contexts from those final rows
+5. generate AI insights
+
+Do not run AI insight generation too early.
+
+Example:
+
+```javascript
+strategies.ai_profit.orders = ensureMarginPresent(strategies.ai_profit.orders, masterData);
+
+strategies.ai_profit.orders = await generateStrategyInsights({
+  strategyId: 'ai_profit',
+  ordersByLine: strategies.ai_profit.orders,
+  changeoverRules,
+  masterData,
+  n10dData,
+});
+```
+
+--------------------------------------------------
+10. EXPECTED RESULT
+--------------------------------------------------
+
+If the row shows:
+- Production Time = 2.00
+- CO = 0.83
+- Margin = 18.00
+
+then the long insight should show:
+- Profit Rate = 18.00 ÷ (2.00 + 0.83) = 6.36 profit/hr
+
+If the row shows:
+- Production Time = 7.97
+- CO = 1.67
+- Margin = 22.00
+
+then the long insight should show:
+- Profit Rate = 22.00 ÷ (7.97 + 1.67) = 2.28 profit/hr
+
+And if master data match fails:
+- explain margin data unavailable
+- do not misleadingly imply a true zero-profit product
+
+--------------------------------------------------
+VERIFICATION
+--------------------------------------------------
+
+1. Profit insight uses the actual row production time
+2. Profit insight uses the actual row changeover value
+3. Margin is looked up correctly from master data using material code
+4. Material code matching is normalized (string trim / field variations)
+5. If margin exists in master data, it is no longer shown as 0
+6. If margin is missing, insight clearly says margin data unavailable
+7. Profit rate is calculated as Margin ÷ (Production Hours + Changeover Hours)
+8. Row values and insight values now match exactly
+9. No more cases where row shows CO 0.83 but insight uses 0.17
+10. No more cases where margin exists but insight shows 0
+```

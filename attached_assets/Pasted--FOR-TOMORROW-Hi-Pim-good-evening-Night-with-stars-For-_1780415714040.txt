@@ -1,0 +1,67 @@
+[FOR TOMORROW]
+
+
+
+Hi Pim, good evening. ⁠
+
+Night with stars
+
+ For Nuevo, sharing here an update regarding the auto-sequence feature. 
+
+
+
+We added a section called “AI vs Final Sequence” in the preview to show what is happening in the backend and how the AI ranks the orders. The AI is able to rank the orders while considering multiple factors such as changeover costs, materials, dates, and other production constraints. However, there is a second phase where deterministic refinement is applied to the orders. 
+
+
+
+Here is an example table from the preview:
+
+image
+
+
+
+The AI evaluates each order holistically, factoring in changeover costs between products, material availability, target and availability dates, and production constraints, then proposes an initial ranked sequence. This is referred to as the AI Rank.
+
+
+
+After the AI produces its initial ranking, the system applies a structured, multi-pass refinement process to ensure every order complies with operational constraints. The AI Rank is the starting point, while the Final Rank is what ultimately gets scheduled after these rules are applied.
+
+
+
+The refinement runs in the following order:
+
+
+
+1. Date Clamping - Each order's suggested start date is locked within its allowed window. Make-to-Order (MTO) orders are pinned to their availability date; mash orders are pulled to within 3 days before availability; Make-to-Stock (MTS) orders are checked against their planning ceiling.
+
+Example: If an MTO order has an availability date of June 5, the system will not allow it to be pushed later than June 5.
+
+2. Feasibility Simulation - The system simulates the full production sequence hour by hour. Any order projected to complete after its deadline is shifted earlier to ensure on-time delivery.
+
+Example: If an order is initially placed at Rank 6 but would finish past its June 4 deadline, it may be moved up to Rank 4.
+
+3. Gap Filling (Packing Pass) - Underloaded production days are identified, and flexible MTS orders are pulled forward to fill them. Protected orders (MTO, mash, and firm-status orders) are never moved during this pass.
+
+Example: If June 2 has several unused production hours, a flexible MTS order originally planned for June 4 may be advanced to June 2 to improve utilization. This is based from the 3-dimensional analysis.
+
+4. Second Gap-Fill Pass - A follow-up pass catches any remaining gaps that the first pass didn't address.
+
+⁠Example: If a small idle window remains after the first adjustment, another flexible order may be pulled forward to make better use of the day.
+
+5. Final Mash Clamp - A final safety check guarantees that every mash order falls within its required window, regardless of adjustments made by any earlier pass.
+
+⁠Example: If a mash order is accidentally moved too early during gap filling, this final check brings it back within its allowable 3-day pre-availability range.
+
+What This Means in Practice
+
+The AI provides intelligent, context-aware ordering; the deterministic refinement ensures that what gets scheduled is always operationally valid. The "AI vs Final Sequence" preview now makes this two-phase process transparent, so the users can see exactly where and why the AI's suggestions were adjusted before accepting the sequence.
+
+
+
+Happy to walk through, lemme know if you have any suggestions. For tomorrow, will work on the suggested re-order feature.
+
+
+
+Thank you! ⁠
+
+Grinning face with smiling eyes

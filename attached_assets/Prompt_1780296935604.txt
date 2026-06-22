@@ -1,0 +1,179 @@
+Please fix the **Suggested Re-order approval insertion mismatch** in the **Fulfillment (Demo)** workspace so that the final inserted position exactly matches the insertion position shown in the approval modal.
+
+---
+
+## 1. MAKE `CONFIRM & INSERT` USE THE EXACT INSERTION POSITION SHOWN IN THE APPROVAL MODAL
+
+There is currently a mismatch between:
+- the insertion position shown in the **Approve Re-order** modal
+- and the final priority where the re-order is actually inserted
+
+### Current issue
+The modal may say:
+- `Insertion Position: Priority 7`
+
+but after the user clicks **Confirm & Insert**, the re-order is actually inserted at:
+- `Priority 8`
+
+### Required rule
+The final inserted position must exactly match the position shown and reviewed in the approval modal.
+
+### Expected result
+If the modal says:
+- `Priority 7`
+
+then the inserted re-order must appear at:
+- `Prio 7`
+
+not:
+- `Prio 8`
+
+---
+
+## 2. DO NOT RECALCULATE A DIFFERENT INSERTION POSITION AFTER THE USER CONFIRMS
+
+Please make sure the app does not silently recompute or shift the insertion slot after the user has already reviewed and confirmed the modal.
+
+### Important
+The user is reviewing:
+- the insertion position
+- the impact analysis
+- the downstream shift count
+- and the target placement context
+
+So after confirmation, the app should commit that same reviewed insertion result.
+
+### Expected result
+The final insertion should not drift by +1 or otherwise land in a different slot than what the modal presented.
+
+---
+
+## 3. USE THE SAME SOURCE-OF-TRUTH INSERTION RESULT FOR:
+- MODAL DISPLAY
+- IMPACT ANALYSIS
+- FINAL INSERTION
+
+Please make sure these three things all use the same final insertion result:
+
+1. `Proposed Insertion` section in the modal
+2. `Impact Analysis` section in the modal
+3. actual inserted row priority in the table after approval
+
+### Goal
+The modal and the applied result must stay consistent.
+
+### Expected result
+There should be only one final insertion position, and all parts of the UI should reflect that same position.
+
+---
+
+## 4. PRESERVE DOWNSTREAM SHIFT COUNTS CONSISTENTLY WITH THE FINAL INSERTED POSITION
+
+If the modal says something like:
+- `Priority 7 (1 shifted)`
+
+then the final insertion should also reflect that same downstream shift logic.
+
+### Expected result
+The final applied row placement and the actual row shifts in the table should match the reviewed modal analysis.
+
+### Goal
+Avoid a situation where:
+- modal analysis is based on one insertion point
+- actual insertion uses a different one
+
+---
+
+## 5. REVIEW WHETHER THERE IS AN OFF-BY-ONE INSERTION BUG
+
+Because the observed mismatch is:
+- modal = `Prio 7`
+- actual = `Prio 8`
+
+please specifically check whether there is an off-by-one error in the final insertion logic.
+
+### Possible causes to review
+- one-based vs zero-based priority conversion
+- reindexing after insertion
+- extra shift after applying the insertion
+- recomputing “insert after source” and then shifting again
+- stale queue snapshot during final insert
+
+### Expected result
+The final committed priority should no longer drift by one row.
+
+---
+
+## 6. APPLY THIS TO THE FULFILLMENT (DEMO) RE-ORDER APPROVAL FLOW
+
+This fix should apply specifically to:
+- the **Approve Re-order** modal
+- the **Confirm & Insert** action
+- the resulting re-order insertion in the **Fulfillment (Demo)** order table
+
+### Expected result
+Users can trust that the insertion slot they reviewed in the modal is exactly what gets committed into the schedule.
+
+---
+
+## IMPORTANT
+
+Please enforce this rule in **Fulfillment (Demo)**:
+
+> The final inserted re-order position must exactly match the position shown in the approval modal.
+
+If the modal says:
+- `Priority 7`
+
+then after clicking **Confirm & Insert**, the re-order must be inserted at:
+- `Prio 7`
+
+Do not let the insertion shift to:
+- `Prio 8`
+or any other different value after confirmation.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log reviewed insertion vs final applied insertion.
+
+```javascript
+console.debug('[Demo Re-Order Modal vs Final Insert]', {
+  reorderId,
+  modalProposedPriority,
+  impactAnalysisPriority,
+  finalInsertedPriority,
+  exactMatch:
+    modalProposedPriority === finalInsertedPriority &&
+    impactAnalysisPriority === finalInsertedPriority,
+});
+```
+
+```javascript
+console.debug('[Demo Re-Order Off-By-One Check]', {
+  reorderId,
+  modalPriority,
+  finalInsertedPriority,
+  priorityDrift: finalInsertedPriority - modalPriority,
+});
+```
+
+```javascript
+console.debug('[Demo Re-Order Insertion Source Of Truth]', {
+  reorderId,
+  modalUsedSameInsertionSnapshotAsApply: true,
+  recomputedAfterConfirm: false,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ The approval modal’s displayed insertion priority matches the actual inserted priority
+2. ✅ Impact Analysis insertion position matches the actual inserted priority
+3. ✅ `Confirm & Insert` no longer applies a different slot than the one reviewed
+4. ✅ Off-by-one priority drift is removed
+5. ✅ Downstream shift behavior remains consistent with the reviewed insertion position
+6. ✅ No UI errors or console errors are introduced

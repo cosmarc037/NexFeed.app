@@ -1,0 +1,246 @@
+Please fix the **auto-sequence preview vs applied schedule mismatch** so that the final applied schedule uses the **same production times and avail dates** shown in the selected auto-sequence preview, and make sure this is applied consistently across **all lines / feedmills**.
+
+---
+
+# 1. KEEP THE APPLIED SCHEDULE CONSISTENT WITH THE AUTO-SEQUENCE PREVIEW
+
+There is currently a mismatch between:
+- the selected **auto-sequence preview**
+- and the final values shown after **Apply to Schedule**
+
+### Current issue
+The preview may show one set of:
+- production times
+- avail dates
+
+but after applying the schedule, some rows end up with different values.
+
+### Expected result
+Once a strategy is selected and the user clicks **Apply to Schedule**, the resulting schedule should preserve the same:
+- order sequence
+- production times
+- avail dates
+- other derived schedule values shown in the preview
+
+Formatting differences are acceptable, but the actual business values must remain aligned.
+
+---
+
+# 2. FIX AVAIL DATE MISMATCHES BETWEEN PREVIEW AND APPLIED SCHEDULE
+
+Please ensure the **Avail Date** shown in the auto-sequence preview is the same Avail Date applied to the final schedule for that selected strategy.
+
+### Example from the issue
+A row may show in preview:
+- `Avail Date = 06 Jun 2026`
+
+but after applying the schedule it becomes:
+- `June 07, 2026`
+
+Or vice versa.
+
+### Expected result
+The final applied row should retain the same Avail Date outcome that the user reviewed in the preview.
+
+---
+
+# 3. FIX PRODUCTION TIME MISMATCHES BETWEEN PREVIEW AND APPLIED SCHEDULE
+
+Please ensure the **Production Time** shown in the auto-sequence preview is the same Production Time applied after scheduling.
+
+### Example from the issue
+A row may show in preview:
+- `7.48 hours`
+
+but after apply becomes:
+- `7.56 hrs`
+
+### Expected result
+The applied schedule should not recalculate a different production time after the user has already reviewed the preview, unless there is a clearly intentional and documented reason.
+
+Minor formatting/rounding is acceptable, but the underlying time basis must remain the same.
+
+---
+
+# 4. USE THE SAME SOURCE-OF-TRUTH VALUES FOR PREVIEW AND APPLY-TO-SCHEDULE
+
+Please make sure the **apply-to-schedule** flow uses the same calculated values that were used to render the selected preview.
+
+### Important
+Do not let the apply step silently recompute different:
+- production times
+- avail dates
+- derived schedule values
+using a separate or inconsistent code path
+
+### Goal
+The user should be able to trust that the preview they selected is the schedule that gets applied.
+
+### Expected result
+Preview and apply must share the same schedule result source of truth.
+
+---
+
+# 5. DO NOT REORDER OR REASSIGN DERIVED DATES DIFFERENTLY AFTER APPLY
+
+Please ensure the final apply process does not:
+- reshuffle derived avail-date interpretation
+- recompute values using stale row order
+- use a different ordering snapshot
+- apply alternate logic that changes the previewed outcome
+
+### Expected result
+The final schedule should reflect the exact selected preview outcome, not a slightly different recomputed version.
+
+---
+
+# 6. IF ROUNDING IS NEEDED, KEEP IT HARMLESS AND CONSISTENT
+
+If there is unavoidable formatting/rounding between preview and applied table, please keep it consistent and harmless.
+
+### Acceptable example
+- `12.62 hours` in preview
+- `12.63 hrs` in applied schedule
+
+That is acceptable if it is only display formatting/rounding.
+
+### Not acceptable
+- materially different production times
+- changed avail dates
+- or business-meaningful derived value shifts
+
+### Expected result
+Only harmless formatting differences may remain, not actual schedule logic changes.
+
+---
+
+# 7. APPLY THIS TO THE SELECTED AUTO-SEQUENCE STRATEGY RESULT ACROSS ALL LINES
+
+Please ensure this consistency applies specifically when:
+- the user selects an auto-sequence strategy
+- previews the result
+- and then clicks **Apply to Schedule**
+
+### Important
+This must be applied consistently across **all production lines / feedmills**, including:
+
+#### Feedmill 1
+- `Line 1`
+- `Line 2`
+
+#### Feedmill 2
+- `Line 3`
+- `Line 4`
+
+#### Feedmill 3
+- `Line 6`
+- `Line 7`
+
+#### Powermix
+- `Line 5`
+
+### In short
+Please make sure the fix applies to:
+- `FM1`
+- `FM2`
+- `FM3`
+- `PMX`
+- and all individual lines from `Line 1` through `Line 7`
+
+### Expected result
+The selected preview becomes the committed schedule consistently for every line/feedmill, not just one specific line.
+
+---
+
+# IMPORTANT
+
+Please fix the mismatch so that the final applied schedule reflects the same values shown in the selected auto-sequence preview.
+
+This includes:
+- **Avail Date**
+- **Production Time**
+- and other derived schedule values if applicable
+
+### This must apply across:
+- `Line 1`
+- `Line 2`
+- `Line 3`
+- `Line 4`
+- `Line 5`
+- `Line 6`
+- `Line 7`
+- `FM1`
+- `FM2`
+- `FM3`
+- `PMX`
+
+### Example
+If preview shows:
+- `200 MT` → `9.94 hours` → `06 Jun 2026`
+
+then after Apply to Schedule, the final table should still show that same schedule result, not:
+- `9.94 hrs` → `07 Jun 2026`
+
+Similarly, if preview shows:
+- `152 MT` → `7.48 hours`
+
+then apply should not become:
+- `7.56 hrs`
+
+unless there is only harmless formatting/rounding with no underlying value change.
+
+---
+
+# DEBUG LOGGING
+
+Temporarily log preview-vs-apply value consistency.
+
+```javascript
+console.debug('[Auto-Sequence Preview vs Apply]', {
+  line,
+  feedmill,
+  orderId,
+  previewProductionTime,
+  appliedProductionTime,
+  previewAvailDate,
+  appliedAvailDate,
+  productionTimeMatches:
+    Math.abs(previewProductionTime - appliedProductionTime) < 0.01,
+  availDateMatches: String(previewAvailDate) === String(appliedAvailDate),
+});
+```
+
+```javascript
+console.debug('[Auto-Sequence Apply Source Of Truth]', {
+  line,
+  feedmill,
+  strategyId,
+  previewSnapshotUsedForApply: true,
+  recalculatedDuringApply: false,
+});
+```
+
+```javascript
+console.debug('[Auto-Sequence Value Drift Detection]', {
+  line,
+  feedmill,
+  orderId,
+  driftDetected:
+    Math.abs(previewProductionTime - appliedProductionTime) >= 0.01 ||
+    String(previewAvailDate) !== String(appliedAvailDate),
+});
+```
+
+---
+
+# VERIFICATION
+
+1. ✅ Applied schedule preserves the selected preview’s production times
+2. ✅ Applied schedule preserves the selected preview’s avail dates
+3. ✅ No business-meaningful value drift occurs between preview and apply
+4. ✅ Only harmless formatting/rounding differences may remain
+5. ✅ Apply-to-schedule uses the same preview-calculated schedule result
+6. ✅ Users can trust that the selected preview is what actually gets applied
+7. ✅ The fix works for `Line 1` to `Line 7`
+8. ✅ The fix works across `FM1`, `FM2`, `FM3`, and `PMX`
+9. ✅ No UI errors or console errors are introduced

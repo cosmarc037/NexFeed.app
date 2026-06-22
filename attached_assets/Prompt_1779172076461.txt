@@ -1,0 +1,181 @@
+Please revise the Demand Profile calculation and table logic based on the clarified business requirement.
+
+The current Detailed Demand View uses inventory-style logic, but the intended requirement is different.
+
+---
+
+## BUSINESS REQUIREMENT
+
+For a selected demand period, we want to compare:
+
+- the **historical demand benchmark**
+against
+- the **current fulfilled volume**
+- the **current planned / in-line / pipeline volume**
+- and determine the **remaining gap**
+
+Example:
+- Historical reference = January 2024 demand
+- Current period = January 2025 as of today
+- Then show:
+  - how much is already fulfilled
+  - how much is already planned / in pipeline
+  - how much is still lacking
+
+This is not mainly an inventory coverage calculation.
+
+---
+
+## IMPORTANT CHANGE
+
+Please do **not** use Future Dispatch / current inventory as the main comparison basis for this demand coverage logic.
+
+Instead, use operational order volumes from the application.
+
+### Use:
+- Done orders = fulfilled volume
+- Active / in-line / planned / ongoing orders = pipeline volume
+- Cancelled orders should not count
+
+---
+
+## REQUIRED COLUMN / LOGIC REVISION
+
+Please update the Detailed Demand View so it aligns with this model.
+
+Recommended columns:
+
+- FG Code
+- Item Description
+- Comparison Period
+- Historical Demand (MT)
+- Fulfilled / Done (MT)
+- Planned / In-Line / Pipeline (MT)
+- Remaining Gap (MT)
+- Coverage %
+- Insight
+
+---
+
+## CALCULATION LOGIC
+
+### Historical Demand (MT)
+Use the historical demand dataset as the benchmark.
+
+Example:
+- January 2024 demand for SKU X
+
+### Fulfilled / Done (MT)
+Sum of order volumes with status = Done for the current comparison period.
+
+### Planned / In-Line / Pipeline (MT)
+Sum of order volumes currently in the active pipeline for the current comparison period.
+
+Use relevant non-cancelled active statuses such as:
+- Planned
+- Queued
+- In line
+- On-going
+or the app’s equivalent status set
+
+Please use the existing operational status definitions carefully and avoid double counting.
+
+### Remaining Gap (MT)
+```text
+Remaining Gap = Historical Demand - (Fulfilled + Planned/In-Line)
+```
+
+If this becomes negative, it is acceptable to:
+- show 0 remaining
+or
+- show an exceeded state if preferred
+
+### Coverage %
+```text
+Coverage % = (Fulfilled + Planned/In-Line) / Historical Demand * 100
+```
+
+---
+
+## REMOVE INVENTORY-STYLE ASSUMPTION
+
+The current demand view should no longer imply that “Current Inventory” is the main basis for whether demand is covered.
+
+For this requirement, the focus is:
+- what has already been produced / fulfilled
+- what is already planned / in line
+- what is still missing
+
+---
+
+## PERIOD COMPARISON EXPECTATION
+
+Example logic:
+- historical benchmark month = January 2024
+- current month under review = January 2025
+- compare the current order fulfillment + active pipeline against that historical January benchmark
+
+Please align the period labeling and comparison logic clearly so users understand what is being compared.
+
+---
+
+## INSIGHT EXAMPLES
+
+Use insights such as:
+- Historical demand already covered
+- Still below historical demand
+- Large remaining gap
+- Fulfilled but low pipeline buffer
+- Exceeds historical benchmark
+
+These are better aligned than inventory-style insights.
+
+---
+
+## HEATMAP TABLE
+
+The monthly heatmap / demand seasonality table can remain as the historical pattern view.
+
+This change mainly applies to the **Detailed Demand View** and any coverage calculations that currently depend on inventory.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log:
+
+```javascript
+console.debug('[Demand Profile Fulfillment Comparison]', {
+  fgMaterialCode,
+  benchmarkPeriod,
+  historicalDemandMT,
+  fulfilledDoneMT,
+  pipelineMT,
+  remainingGapMT,
+  coveragePct,
+});
+```
+
+```javascript
+console.debug('[Demand Profile Order Volume Sources]', {
+  fgMaterialCode,
+  doneOrderIds,
+  pipelineOrderIds,
+  excludedCancelledOrderIds,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Detailed Demand View no longer uses Future Dispatch / current inventory as the main coverage basis
+2. ✅ Historical demand is compared against actual order fulfillment and pipeline volumes
+3. ✅ Done orders are counted as fulfilled volume
+4. ✅ Active in-line / planned / ongoing orders are counted as pipeline volume
+5. ✅ Cancelled orders are excluded
+6. ✅ Remaining Gap is calculated correctly
+7. ✅ Coverage % is based on fulfilled + pipeline vs historical demand
+8. ✅ Insights reflect fulfillment status relative to historical demand
+9. ✅ Heatmap table remains intact as a separate historical pattern view
+10. ✅ No existing routing or page rendering breaks

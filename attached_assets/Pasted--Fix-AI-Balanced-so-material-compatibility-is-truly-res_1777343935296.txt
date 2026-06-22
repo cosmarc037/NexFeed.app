@@ -1,0 +1,485 @@
+```
+Fix AI Balanced so material compatibility is truly respected and final chronological sorting does not undo the grouping logic.
+
+---
+
+## OBJECTIVE
+
+Update AI Balanced sequence so that:
+- protected orders still follow hard rules
+- flexible / sufficient orders are grouped by material compatibility
+- AI-suggested dates support the grouping
+- the final result does NOT scatter compatible materials just because of a naive chronological sort
+
+The current issue is that the final sorting step is overpowering the AI grouping logic, causing:
+- Gamefowl / Yellow / 3.00mm orders to be split apart
+- Poultry / Yellow / 4.00mm orders to be split apart
+- AI Balanced to look only slightly different from Standard
+
+This must be fixed.
+
+---
+
+## 1. SPLIT ORDERS INTO PROTECTED VS FLEXIBLE BLOCKS
+
+Protected orders must preserve hard constraints.
+Flexible orders may be grouped and moved.
+
+```javascript
+function splitOrdersForBalancedSequence(orders) {
+  const protectedOrders = [];
+  const flexibleOrders = [];
+
+  orders.forEach(order => {
+    if (isProtectedOrder(order)) {
+      protectedOrders.push(order);
+    } else {
+      flexibleOrders.push(order);
+    }
+  });
+
+  return { protectedOrders, flexibleOrders };
+}
+
+function isProtectedOrder(order) {
+  if (isMTOOrder(order)) return true;
+
+  const status = String(order._n10dStatus || order.inferred_target_label || '').toLowerCase();
+
+  if (status === 'critical') return true;
+  if (status === 'urgent') return true;
+  if (status === 'monitor') return true;
+  if (status.includes('prio replenish')) return true;
+
+  return false;
+}
+
+function isFlexibleOrder(order) {
+  return !isProtectedOrder(order);
+}
+```
+
+---
+
+## 2. MATERIAL SIGNATURE FOR GROUPING
+
+Flexible orders must be grouped by material similarity using:
+- category
+- color
+- diameter
+- form
+
+```javascript
+function getMaterialSignature(order) {
+  const category = String(order.category || '').trim().toLowerCase();
+  const color = String(order.color || '').trim().toLowerCase();
+  const diameter = String(order.diameter || '').trim().toLowerCase();
+  const form = String(order.form || '').trim().toLowerCase();
+
+  return `${category}|${color}|${diameter}|${form}`;
+}
+```
+
+---
+
+## 3. GROUP FLEXIBLE ORDERS BY MATERIAL SIGNATURE
+
+```javascript
+function groupFlexibleOrdersByMaterial(flexibleOrders) {
+  const groups = new Map();
+
+  flexibleOrders.forEach(order => {
+    const signature = getMaterialSignature(order);
+    if (!groups.has(signature)) {
+      groups.set(signature, []);
+    }
+    groups.get(signature).push(order);
+  });
+
+  return groups;
+}
+```
+
+---
+
+## 4. SCORE MATERIAL GROUPS BY INTERNAL COHESION + EARLIEST SAFE DATE
+
+We want AI Balanced to prefer groups that:
+- reduce changeovers
+- can be scheduled safely
+- fit earlier if operationally beneficial
+
+```javascript
+function scoreMaterialGroup(groupOrders, n10dData) {
+  const safeDates = groupOrders.map(order => {
+    const window = getBalancedSafeWindow(order, n10dData);
+    return window.start;
+  });
+
+  const earliestSafeDate = safeDates.sort()[0];
+
+  const totalVolume = groupOrders.reduce((sum, o) => {
+    return sum + (parseFloat(o.volume_override || o.volume || o.total_volume_mt || 0) || 0);
+  }, 0);
+
+  return {
+    earliestSafeDate,
+    totalVolume,
+    size: groupOrders.length,
+  };
+}
+```
+
+---
+
+## 5. ORDER FLEXIBLE GROUPS AS BLOCKS INSTEAD OF INDIVIDUAL CHRONO SORT
+
+Instead of sorting every flexible order purely by date, sort material groups as blocks.
+
+```javascript
+function buildBalancedFlexibleBlocks(flexibleOrders, n10dData) {
+  const grouped = groupFlexibleOrdersByMaterial(flexibleOrders);
+
+  const blocks = Array.from(grouped.entries()).map(([signature, orders]) => {
+    const meta = scoreMaterialGroup(orders, n10dData);
+
+    return {
+      signature,
+      orders,
+      earliestSafeDate: meta.earliestSafeDate,
+      totalVolume: meta.totalVolume,
+      size: meta.size,
+    };
+  });
+
+  // Sort blocks by earliest safe date first, then by larger groups first
+  blocks.sort((a, b) => {
+    if (a.earliestSafeDate !== b.earliestSafeDate) {
+      return new Date(a.earliestSafeDate) - new Date(b.earliestSafeDate);
+    }
+
+    return b.size - a.size;
+  });
+
+  return blocks;
+}
+```
+
+---
+
+## 6. WITHIN EACH FLEXIBLE BLOCK, ORDER BY LOWEST INTERNAL CHANGEOVER
+
+```javascript
+function orderWithinFlexibleBlock(blockOrders, changeoverRules) {
+  if (blockOrders.length <= 1) return [...blockOrders];
+
+  const remaining = [...blockOrders];
+  const ordered = [];
+
+  // Start with the order having earliest current date
+  remaining.sort((a, b) => {
+    const da = normalizeDate(a.target_avail_date) || '9999-12-31';
+    const db = normalizeDate(b.target_avail_date) || '9999-12-31';
+    return new Date(da) - new Date(db);
+  });
+
+  ordered.push(remaining.shift());
+
+  while (remaining.length > 0) {
+    const last = ordered[ordered.length - 1];
+
+    let bestIndex = 0;
+    let bestCost = Infinity;
+
+    remaining.forEach((candidate, idx) => {
+      const co = calculateChangeoverBetween(last, candidate, changeoverRules);
+      if (co < bestCost) {
+        bestCost = co;
+        bestIndex = idx;
+      }
+    });
+
+    ordered.push(remaining.splice(bestIndex, 1)[0]);
+  }
+
+  return ordered;
+}
+```
+
+---
+
+## 7. BUILD PROTECTED BLOCK IN HARD-CONSTRAINT ORDER
+
+Protected orders should still be ordered safely, but not mixed naively with flexible orders.
+
+```javascript
+function buildProtectedBlock(protectedOrders) {
+  return [...protectedOrders].sort((a, b) => {
+    const rankA = getProtectedRank(a);
+    const rankB = getProtectedRank(b);
+
+    if (rankA !== rankB) return rankA - rankB;
+
+    const dateA = normalizeDate(a.target_avail_date) || '9999-12-31';
+    const dateB = normalizeDate(b.target_avail_date) || '9999-12-31';
+
+    return new Date(dateA) - new Date(dateB);
+  });
+}
+
+function getProtectedRank(order) {
+  if (isMTOOrder(order)) return 0;
+
+  const status = String(order._n10dStatus || order.inferred_target_label || '').toLowerCase();
+
+  if (status === 'critical') return 1;
+  if (status === 'urgent' || status.includes('prio replenish')) return 2;
+  if (status === 'monitor') return 3;
+
+  return 4;
+}
+```
+
+---
+
+## 8. BUILD FINAL AI BALANCED ORDER WITHOUT DESTROYING GROUPING
+
+This is the key fix:
+- protected block ordered by hard rules
+- flexible blocks ordered by material grouping
+- no final naive date sort across everything
+
+```javascript
+function buildBalancedSequenceForLine(orders, n10dData, changeoverRules) {
+  const { protectedOrders, flexibleOrders } = splitOrdersForBalancedSequence(orders);
+
+  const protectedBlock = buildProtectedBlock(protectedOrders);
+
+  const flexibleBlocks = buildBalancedFlexibleBlocks(flexibleOrders, n10dData);
+
+  const orderedFlexible = flexibleBlocks.flatMap(block =>
+    orderWithinFlexibleBlock(block.orders, changeoverRules)
+  );
+
+  // Protected first, then grouped flexible block
+  return [...protectedBlock, ...orderedFlexible];
+}
+```
+
+---
+
+## 9. ASSIGN AI DATES TO SUPPORT THE BLOCKED ORDERING
+
+Flexible orders should get dates that:
+- remain within safe window
+- support grouped block execution
+- avoid scattering material-compatible orders
+
+```javascript
+function assignBalancedDatesToSequence(lineOrders, line, n10dData, changeoverRules) {
+  const result = [];
+  let currentDateCursor = addDays(startOfDay(new Date()), 2);
+
+  lineOrders.forEach((order, index) => {
+    const cloned = { ...order };
+
+    if (isProtectedOrder(cloned)) {
+      cloned._aiSuggestedDate = normalizeDate(cloned.target_avail_date) || formatISODate(currentDateCursor);
+      cloned._aiDateReason = 'Protected order — fixed by hard rule';
+      result.push(cloned);
+
+      // Move cursor forward only if needed
+      const protectedDate = new Date(cloned._aiSuggestedDate);
+      if (protectedDate > currentDateCursor) {
+        currentDateCursor = protectedDate;
+      }
+      return;
+    }
+
+    const safeWindow = getBalancedSafeWindow(cloned, n10dData);
+    const candidateDate = clampDateToWindow(formatISODate(currentDateCursor), safeWindow);
+
+    cloned._originalAvailDate = normalizeDate(cloned.target_avail_date);
+    cloned.target_avail_date = candidateDate;
+    cloned._aiSuggestedDate = candidateDate;
+    cloned._dateAdjustedByAI = cloned._originalAvailDate !== candidateDate;
+    cloned._aiDateReason = 'Date aligned to grouped material block while staying in safe window';
+
+    result.push(cloned);
+
+    // Advance cursor modestly only when accumulated load gets too dense
+    currentDateCursor = maybeAdvanceCursorByLoad(result, line, currentDateCursor);
+  });
+
+  return result.map((o, i) => ({
+    ...o,
+    prio: i + 1,
+  }));
+}
+
+function clampDateToWindow(candidateDate, safeWindow) {
+  const candidate = new Date(candidateDate);
+  const start = new Date(safeWindow.start);
+  const end = new Date(safeWindow.end);
+
+  if (candidate < start) return formatISODate(start);
+  if (candidate > end) return formatISODate(end);
+  return formatISODate(candidate);
+}
+
+function maybeAdvanceCursorByLoad(orderedSoFar, line, currentDateCursor) {
+  const currentDay = formatISODate(currentDateCursor);
+
+  const sameDayOrders = orderedSoFar.filter(o =>
+    normalizeDate(o._aiSuggestedDate || o.target_avail_date) === currentDay
+  );
+
+  const totalHours = sameDayOrders.reduce((sum, o) => {
+    const volume = parseFloat(o.volume_override || o.volume || o.total_volume_mt || 0) || 0;
+    const runRate = getLineRunRate(normalizeLine(line));
+    const prod = runRate > 0 ? volume / runRate : 0;
+    const co = parseFloat(o.changeover || 0) || 0;
+    return sum + prod + co;
+  }, 0);
+
+  if (totalHours >= 14) {
+    return addDays(currentDateCursor, 1);
+  }
+
+  return currentDateCursor;
+}
+```
+
+---
+
+## 10. UPDATE AI BALANCED GENERATOR TO USE BLOCK-BASED ORDERING
+
+```javascript
+async function generateAIBalancedSequence(enrichedByLine, n10dData, masterData, changeoverRules) {
+  const prompt = buildAIBalancedPrompt(enrichedByLine, changeoverRules);
+
+  let aiResult = { strategy: {}, reasoning: '', dateAdjustments: [] };
+
+  try {
+    const response = await callAzureOpenAI(prompt);
+    aiResult = parseAIResponse(response);
+  } catch (error) {
+    console.error('AI Balanced generation failed:', error);
+  }
+
+  const result = {};
+
+  Object.entries(enrichedByLine).forEach(([line, orders]) => {
+    // Step 1: use AI-proposed ordering if available, otherwise original line orders
+    const aiOrdered = applyAIReorderingForLine(orders, aiResult.strategy?.[line] || []);
+
+    // Step 2: enforce block-based balanced ordering so compatibility is preserved
+    const balancedOrdered = buildBalancedSequenceForLine(aiOrdered, n10dData, changeoverRules);
+
+    // Step 3: assign dates that support the grouping
+    const withDates = assignBalancedDatesToSequence(balancedOrdered, line, n10dData, changeoverRules);
+
+    result[line] = withDates;
+  });
+
+  return {
+    id: 'ai_balanced',
+    name: 'AI Balanced',
+    theme: 'AI-Powered (Balanced)',
+    description: 'AI groups flexible orders by material compatibility and assigns dates that reduce changeovers while protecting hard constraints',
+    icon: '🤖',
+    color: 'purple',
+    orders: result,
+    metrics: calculateStrategyMetrics(result),
+    aiReasoning: aiResult.reasoning || '',
+    dateAdjustments: collectDateAdjustments(result),
+    isAIRecommended: false,
+  };
+}
+```
+
+---
+
+## 11. DO NOT APPLY A FINAL GLOBAL CHRONOLOGICAL SORT TO AI BALANCED
+
+Important:
+- remove any final step that re-sorts all AI Balanced orders purely by date
+- that final sort is what is breaking material-group blocks
+
+Protected orders already preserve deadline ordering.
+Flexible orders are intentionally grouped.
+
+If you currently have something like this after AI Balanced:
+
+```javascript
+const sorted = sortOrdersChronologically(ordersWithAISuggestions);
+```
+
+remove it from AI Balanced flow.
+
+Keep chronological sorting only for:
+- Standard Sequence
+- strict rule-based flows
+
+Not for AI Balanced block output.
+
+---
+
+## 12. OPTIONAL: SHOW BLOCK GROUPING INSIGHT IN UI
+
+Add clearer explanation in Sequence Insight so users understand why grouping happened.
+
+```javascript
+function buildBalancedInsight(order, prevOrder) {
+  if (!prevOrder) return 'Placed first due to protected priority or balanced scheduling.';
+
+  const sameSignature = getMaterialSignature(order) === getMaterialSignature(prevOrder);
+
+  if (sameSignature) {
+    return 'Grouped with previous order due to matching material profile, reducing changeover.';
+  }
+
+  return order._aiDateReason || 'Position selected by AI balanced scheduling logic.';
+}
+```
+
+---
+
+## VERIFICATION
+
+### Protected vs flexible logic
+1. ✅ MTO orders stay protected and keep their hard dates
+2. ✅ Critical orders stay protected and remain at top priority
+3. ✅ Urgent / Monitor remain protected from unsafe delays
+4. ✅ Sufficient orders are treated as flexible and can be grouped
+
+### Material grouping
+5. ✅ Flexible orders are grouped by category + color + diameter + form
+6. ✅ Poultry / Yellow / 4.00mm orders are no longer split apart unnecessarily
+7. ✅ Gamefowl / Yellow / 3.00mm orders are no longer scattered across the sequence
+8. ✅ Similar materials stay adjacent whenever constraints allow
+
+### Changeover minimization
+9. ✅ AI Balanced minimizes total changeover by block grouping
+10. ✅ Orders within a block are arranged to reduce internal changeover further
+11. ✅ Grouping survives final rendering and is not undone by naive date sorting
+
+### Date assignment
+12. ✅ Protected orders keep their required dates
+13. ✅ Flexible orders receive AI-suggested dates that support grouped execution
+14. ✅ Suggested dates remain inside safe windows
+15. ✅ Sufficient orders can extend to N10D threshold + 14 days
+16. ✅ Dates are no longer assigned blindly day-by-day without considering grouping
+
+### Final ordering behavior
+17. ✅ No final pure chronological sort is applied to AI Balanced
+18. ✅ Protected block remains first
+19. ✅ Flexible grouped block remains intact after date assignment
+20. ✅ AI Balanced is visibly different from Standard Sequence
+
+### Expected visible outcome
+21. ✅ Users can see grouped material families in the After table
+22. ✅ AI Balanced no longer looks like Standard with only purple dates
+23. ✅ Sequence Insight can explain that grouping was done to reduce changeovers
+24. ✅ Material compatibility is now clearly reflected in the final sequence
+```

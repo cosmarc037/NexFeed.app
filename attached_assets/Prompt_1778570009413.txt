@@ -1,0 +1,492 @@
+Please refine the auto-sequence feature so the AI becomes more schedule-feasibility-aware and more operationally useful in the following areas:
+
+1. Better filling of underutilized days
+2. Better advancement of long-running orders that would otherwise complete late
+3. Better sequence insight that explains why the AI suggested a date
+4. Better AI-suggested start date/time logic, while preserving user manual edits
+5. Most importantly: preserve the intended behavior of the 3-Dimension Analysis so each AI strategy remains aligned to its primary objective
+
+IMPORTANT:
+Do not rewrite the entire auto-sequence system. Improve the existing AI-generated strategy behavior in a targeted way, while preserving the current architecture, user-editable workflow, and strategy differentiation.
+
+---
+
+# CORE PRINCIPLE — PRESERVE 3-DIMENSION ANALYSIS INTENT
+
+The AI must not behave as if “advance orders earlier” is always the answer.
+
+The sequence behavior must remain aligned with the selected strategy objective.
+
+That means:
+
+## If the strategy emphasizes MTS advancement:
+The AI should analyze orders and provide the best suggested dates and placements to safely advance eligible orders earlier, fill useful gaps, and reduce risk of future stockout or delay.
+
+## If the strategy emphasizes changeover reduction:
+The AI should analyze orders and sequence them primarily to lower changeover time by grouping compatible orders, minimizing disruptive transitions, and reducing unnecessary sequencing breaks.
+
+## If the strategy emphasizes profitability:
+The AI should analyze orders and sequence them so higher-margin orders are prioritized earlier where feasible, as long as this does not violate hard date/feasibility constraints.
+
+This is critical.
+
+The AI should still be multi-constraint aware in all strategies, but the selected strategy must drive the primary optimization behavior.
+
+---
+
+# HARD CONSTRAINTS ALWAYS APPLY
+
+Regardless of strategy, the following are hard constraints and must always be respected:
+
+- due-date / avail-date safety
+- realistic projected completion timing
+- start time feasibility
+- changeover-aware sequencing feasibility
+- user manual start date/time overrides
+- existing cascade logic
+- completion must not be treated as “on time” if it spills beyond the required date
+
+So while profitability or changeover reduction can drive prioritization, the AI must still avoid creating clearly late or infeasible sequences.
+
+---
+
+# STRATEGY-SPECIFIC BEHAVIOR
+
+## 1. MTS ADVANCEMENT STRATEGY
+
+Primary objective:
+- advance eligible orders earlier where safe
+- fill underutilized days
+- avoid future stockout / lateness
+- improve useful line utilization
+
+Secondary objectives:
+- keep changeovers reasonable
+- avoid unnecessary disruption
+- preserve profitability where possible
+
+This is the strategy where the AI is expected to most actively suggest earlier dates.
+
+If this strategy is selected, the AI should evaluate:
+- underloaded earlier days
+- movable orders from later days
+- completion safety if moved earlier
+- whether advancement reduces stockout/delay risk
+
+---
+
+## 2. CHANGEOVER REDUCTION STRATEGY
+
+Primary objective:
+- lower total changeover time
+- group compatible orders
+- reduce costly category/form/material transitions
+- avoid avoidable sequence fragmentation
+
+Secondary objectives:
+- still avoid lateness
+- still preserve feasibility
+- still make reasonable use of day capacity
+
+If this strategy is selected, the AI should not aggressively advance orders just for utilization unless doing so also supports better changeover outcomes.
+
+This is important:
+- if MTS advancement is deprioritized in the strategy,
+- then not every sequence should still advance orders.
+
+The resulting sequence should visibly reflect reduced changeover intent.
+
+---
+
+## 3. PROFITABILITY STRATEGY
+
+Primary objective:
+- prioritize higher-margin orders earlier
+- improve economic value of the schedule
+- prefer more profitable orders when there is sequencing flexibility
+
+Secondary objectives:
+- avoid lateness
+- preserve feasibility
+- keep changeovers acceptable
+
+This means that if the strategy is focused on profitability, the sequence should actually reflect margin-aware prioritization.
+
+It should not claim to focus on profitability while making no meaningful priority changes.
+
+However, profitability must still remain bounded by hard constraints:
+- do not prioritize high-margin orders in a way that causes hard-deadline urgent orders to become late.
+
+---
+
+# OVERALL PRIORITY ORDER WITHIN ANY STRATEGY
+
+Within each strategy, use this logic:
+
+### Hard constraints first
+1. avoid lateness / infeasible completion
+2. respect user manual anchors / overrides
+
+### Then apply strategy objective
+3. optimize according to the selected strategy:
+   - MTS advancement
+   - changeover reduction
+   - profitability
+
+### Then secondary improvements
+4. improve utilization where safe
+5. reduce unnecessary inefficiency
+
+This means:
+- strategy intent matters
+- but not above hard scheduling feasibility
+
+---
+
+# PART 1 — IMPROVE GAP FILLING / DAILY UTILIZATION
+
+## OBJECTIVE
+
+There is still room to improve how the AI advances orders into underutilized days, especially under MTS-focused strategies.
+
+Example Daily Utilization:
+- May 12, 2026 → 1 order → 2.2 hrs → 9.0%
+- May 14, 2026 → 3 orders → 15.5 hrs → 64.5%
+- May 15, 2026 → 1 order → 5.3 hrs → 22.1%
+- May 22, 2026 → 1 order → 0.2 hrs → 0.7%
+
+In cases like this, the AI should do a better job of filling available gaps on earlier underloaded days, especially if only a small number of orders are anchored by true MTO/fixed timing and other orders are movable.
+
+But this should be strongest when the selected strategy is MTS-oriented, not forced equally in all strategies.
+
+---
+
+## REQUIRED BEHAVIOR
+
+When building AI sequence strategies, the AI should actively look for underutilized days and attempt to pull eligible orders into those days if all of the following are true:
+
+- the selected strategy supports advancement behavior (especially MTS-focused strategy)
+- the order is flexible enough to move earlier
+- moving it earlier does not cause lateness for another order
+- moving it earlier does not violate existing constraints
+- moving it earlier does not create unacceptable changeover penalties
+- moving it earlier does not compromise user-set/fixed anchors
+
+The AI should not stop at the first acceptable sequence if obvious underutilized gaps could still be safely filled under an advancement-oriented strategy.
+
+---
+
+## IMPORTANT CONSTRAINT
+
+Do not force utilization to 100% if that would:
+- create lateness
+- increase risk
+- break feasibility
+- create highly inefficient changeovers
+- conflict with the active strategy’s true objective
+
+This is smart filling, not brute-force packing.
+
+---
+
+# PART 2 — IMPROVE DELAY-AWARE ADVANCEMENT OF LONGER ORDERS
+
+## OBJECTIVE
+
+The AI must become aware that an order can still be “on its target date” in name, but actually finish late because of its production duration and actual start time.
+
+Example:
+- Order target date from Future Dispatches = May 13
+- Prior order finishes, so this order can only start at 12:00 PM on May 13
+- This order has 18.0 production hours
+- Completion becomes 6:00 AM on May 14
+- That means the order is effectively late relative to its May 13 target date
+
+The AI should detect this and avoid keeping the order on May 13 if it cannot actually complete by end-of-day May 13.
+
+Instead, the AI should consider advancing it earlier, such as May 12, so it can finish by May 13.
+
+This behavior is especially relevant for MTS-oriented strategies and any strategy trying to preserve due-date safety.
+
+---
+
+## REQUIRED BEHAVIOR
+
+When evaluating a candidate date for an order, the AI must not only check the target date from Future Dispatches.
+
+It must also evaluate:
+- actual start time on that date
+- production hours
+- changeover from the previous order
+- projected completion time
+- whether projected completion stays within the required date window
+
+If projected completion goes beyond 11:59 PM of the order’s target/required avail date, then the AI should treat that assignment as unsafe / late-risk.
+
+If feasible, it should advance the order to an earlier day so completion happens on or before the target date.
+
+---
+
+# PART 3 — IMPROVE SEQUENCE INSIGHT EXPLANATIONS
+
+## OBJECTIVE
+
+The sequence insight should become more specific and explain the actual scheduling reason for the AI’s suggestion.
+
+The insight should also reflect the selected strategy intent.
+
+Examples:
+- under MTS strategy: explain why the order was advanced
+- under changeover strategy: explain why the order was grouped near compatible neighbors
+- under profitability strategy: explain why the order was prioritized due to higher margin
+
+---
+
+## REQUIRED BEHAVIOR
+
+For each AI-suggested order placement, the sequence insight should mention the primary reason why that date/position was suggested.
+
+Possible reasoning themes:
+- delay avoidance
+- stockout prevention
+- underutilized day filling
+- same-category grouping
+- changeover minimization
+- higher-margin prioritization
+- preservation of due-date safety
+- user-set anchor respect
+
+The explanation should match the actual strategy.
+
+---
+
+## EXAMPLE FOR LONG-RUN DELAY AVOIDANCE
+
+“This order was advanced because keeping it on May 13 would result in a 12:00 PM start and an estimated 6:00 AM completion on May 14, which exceeds the original target date from Future Dispatches.”
+
+## EXAMPLE FOR CHANGEOVER STRATEGY
+
+“This order was placed after a compatible order to reduce transition cost and minimize sequence disruption while keeping completion within its required date.”
+
+## EXAMPLE FOR PROFITABILITY STRATEGY
+
+“This higher-margin order was prioritized earlier in the sequence where feasible, while still preserving due-date safety for urgent orders.”
+
+---
+
+# PART 4 — IMPROVE AI-SUGGESTED START DATE / START TIME
+
+## OBJECTIVE
+
+The AI should not only suggest a better sequence and effective avail date; it should also suggest a better start date and start time when possible.
+
+This should be informed by:
+- avail date
+- estimated completion target
+- production hours
+- prior order completion
+- changeovers
+- current anchor logic
+- the one-day planning gap logic when applicable
+- the selected strategy’s objective
+
+---
+
+## REQUIRED BEHAVIOR
+
+When generating an AI preview, the AI should analyze:
+- order avail date
+- prior order completion
+- prior order changeover
+- production duration
+- line position
+- whether a manual start already exists
+- whether this strategy intends advancement, grouping, or margin prioritization
+
+Then it should suggest a realistic:
+- start date
+- start time
+
+for orders where suggestion is appropriate.
+
+The AI should not simply leave these blank if a meaningful suggestion can be inferred.
+
+---
+
+# PART 5 — USER EDITS TO START DATE / TIME MUST BE RETAINED
+
+## OBJECTIVE
+
+User-edited Start Date / Start Time in the auto-sequence preview must persist.
+
+If the user edits the start date/time, switches to another line, and comes back, the preview must not revert to the AI’s original suggestion.
+
+---
+
+## REQUIRED BEHAVIOR
+
+If a user manually edits:
+- Start Date
+- Start Time
+
+for an order in the auto-sequence preview, that edit must be retained while navigating across:
+- lines
+- strategy cards
+- tabs or other preview views
+
+The app should preserve the user’s override state in the preview session.
+
+Do not revert back to the original AI suggestion unless the user explicitly:
+- resets
+- re-analyzes
+- or discards changes
+
+---
+
+## USER OVERRIDE RULE
+
+Once Start Date / Start Time is edited by the user:
+- mark that order as manually overridden in preview state
+- use the user value as the active anchor for that order
+- re-anchor downstream calculations from that value if needed
+- keep the override when navigating away and back
+
+This must be true even if the AI originally suggested something else.
+
+---
+
+# PART 6 — VALIDATE THAT STRATEGY OUTPUTS ARE ACTUALLY DIFFERENT
+
+## OBJECTIVE
+
+Right now, there are cases where:
+- MTS advancement is deprioritized, but orders are still advanced
+- profitability is emphasized, but nothing visibly changes
+- changeover reduction is selected, but grouping improvements are weak
+
+This must be corrected.
+
+The strategies should produce meaningfully different sequence behavior and different reasoning.
+
+---
+
+## REQUIRED VALIDATION
+
+Please verify that:
+
+### MTS-focused strategies
+- visibly attempt safe earlier advancement
+- fill underutilized early days when appropriate
+- reduce lateness risk through earlier placement
+
+### Changeover-focused strategies
+- visibly improve grouping and reduce transition cost
+- do not advance orders unnecessarily unless required for hard deadline safety
+
+### Profitability-focused strategies
+- visibly prioritize higher-margin orders earlier where feasible
+- still respect urgent hard-deadline orders
+- do not remain unchanged if margin-driven resequencing opportunities exist
+
+---
+
+# PART 7 — DEBUG LOGGING
+
+Temporarily log the following.
+
+## A. Strategy intent
+```javascript
+console.debug('[AI Strategy Objective]', {
+  strategyId,
+  strategyTitle,
+  primaryObjective, // mts_advancement | changeover_reduction | profitability
+  secondaryObjectives,
+});
+```
+
+## B. Gap filling
+```javascript
+console.debug('[AI Gap Fill Evaluation]', {
+  strategyId,
+  underutilizedDate,
+  remainingHours,
+  candidateOrders: candidateOrders.map(o => ({
+    orderId: o.id,
+    availDate: o.availDate,
+    productionHours: o.productionHours,
+    changeoverHours: o.changeoverHours,
+    movable: o.movable,
+  })),
+  selectedOrderIds,
+});
+```
+
+## C. Delay-aware advancement
+```javascript
+console.debug('[AI Delay-Aware Advancement]', {
+  orderId,
+  targetAvailDate,
+  candidateStart,
+  productionHours,
+  projectedCompletion,
+  completesWithinTargetDate,
+  advancedEarlier: suggestedDate !== targetAvailDate,
+  suggestedDate,
+});
+```
+
+## D. Profitability prioritization
+```javascript
+console.debug('[AI Profitability Prioritization]', {
+  orderId,
+  marginPercent,
+  priorityScore,
+  hardDeadlineRisk,
+  scheduledPosition,
+});
+```
+
+## E. Changeover sequencing
+```javascript
+console.debug('[AI Changeover Optimization]', {
+  orderId,
+  previousOrderId,
+  previousAttributes,
+  currentAttributes,
+  projectedChangeover,
+  groupingReason,
+});
+```
+
+## F. Start override retention
+```javascript
+console.debug('[AI Start Override Retention]', {
+  orderId,
+  aiSuggestedStartDate,
+  aiSuggestedStartTime,
+  userOverrideStartDate,
+  userOverrideStartTime,
+  usingUserOverride,
+  currentLineId,
+  currentStrategyId,
+});
+```
+
+---
+
+# PART 8 — VERIFICATION
+
+1. ✅ The AI preserves the selected strategy’s primary objective
+2. ✅ MTS strategies actively advance eligible orders where safe and useful
+3. ✅ Changeover strategies primarily optimize grouping and transition reduction
+4. ✅ Profitability strategies visibly prioritize higher-margin orders where feasible
+5. ✅ None of the strategies violate hard due-date / feasibility constraints
+6. ✅ The AI no longer behaves as if “advance orders” is always the answer
+7. ✅ Underutilized days are better filled when strategy intent supports advancement
+8. ✅ Long-running orders are checked against actual start + duration + completion timing
+9. ✅ Orders that would complete after their Future Dispatch target date are advanced earlier when feasible
+10. ✅ Sequence insight explains the actual strategy-specific reason for the suggestion
+11. ✅ AI-suggested start date/time remains editable by the user
+12. ✅ User edits to start date/time are retained when navigating away and back
+13. ✅ Manual start-date overrides become the active anchor for downstream recalculation
+14. ✅ Existing scheduling / cascade logic remains intact

@@ -1,0 +1,116 @@
+Please remove the **“Consider Combining”** insight from the **Production Insights** section, and ensure this change is reflected consistently across all relevant order views.
+
+---
+
+## 1. REMOVE THE `CONSIDER COMBINING` INSIGHT FROM PRODUCTION INSIGHTS
+
+The **Production Insights** panel currently shows an insight such as:
+
+- `Consider Combining`
+
+This is now redundant because order combining is already being handled within the **Auto-Sequence** feature.
+
+### Goal
+Avoid duplication and reduce confusing or unnecessary recommendations in the Production Insights panel.
+
+### Expected result
+The Production Insights section should no longer display:
+- `Consider Combining`
+
+---
+
+## 2. APPLY THIS CHANGE ACROSS ALL RELEVANT ORDER TABS
+
+Please ensure this removal is reflected consistently in all tabs/views where the **Production Insights** section appears or is reused.
+
+### This should apply to:
+#### Main order tabs
+- `All Feedmills`
+- `Feedmill 1`
+- `Feedmill 2`
+- `Feedmill 3`
+- `Powermix`
+
+#### Demo order tab
+- `Fulfillment (Demo) > All Feedmills`
+
+### Expected result
+Users should no longer see the `Consider Combining` Production Insight in any of the above tabs.
+
+---
+
+## 3. KEEP OTHER PRODUCTION INSIGHTS INTACT
+
+Please preserve the other Production Insights items such as:
+- `Prioritize Order`
+- `Consider Cutting`
+- `Sequence Optimization`
+- and other currently valid insight types
+
+### Expected result
+Only the `Consider Combining` insight is removed, while the rest of the Production Insights behavior remains unchanged.
+
+---
+
+## 4. DO NOT BREAK AUTO-SEQUENCE COMBINATION LOGIC
+
+This request is only to remove the **displayed Production Insight** related to combining.
+
+### Important
+Do **not** remove or weaken:
+- auto-sequence combine logic
+- combination recommendations inside auto-sequence
+- actual order combine behavior
+
+### Expected result
+Combining continues to function in Auto-Sequence as normal; it is simply no longer duplicated in Production Insights.
+
+---
+
+## IMPORTANT
+
+Please remove the **“Consider Combining”** item from the **Production Insights** section because combining is already handled by the **Auto-Sequence** feature.
+
+### This change must be reflected consistently across:
+- `All Feedmills`
+- `Feedmill 1`
+- `Feedmill 2`
+- `Feedmill 3`
+- `Powermix`
+- `Fulfillment (Demo) > All Feedmills`
+
+This should affect only the insight display, not the underlying combine functionality.
+
+---
+
+## DEBUG LOGGING
+
+```javascript
+console.debug('[Production Insights Filter]', {
+  removedInsightType: 'consider_combining',
+  appliedToTabs: [
+    'all_feedmills',
+    'feedmill_1',
+    'feedmill_2',
+    'feedmill_3',
+    'powermix',
+    'fulfillment_demo_all_feedmills',
+  ],
+  productionInsightsStillActive: true,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ `Consider Combining` no longer appears in Production Insights
+2. ✅ The removal is reflected in `All Feedmills`
+3. ✅ The removal is reflected in `Feedmill 1`
+4. ✅ The removal is reflected in `Feedmill 2`
+5. ✅ The removal is reflected in `Feedmill 3`
+6. ✅ The removal is reflected in `Powermix`
+7. ✅ The removal is reflected in `Fulfillment (Demo) > All Feedmills`
+8. ✅ Other Production Insights still appear normally
+9. ✅ Auto-Sequence combine behavior remains unchanged
+10. ✅ No UI errors or console errors are introduced

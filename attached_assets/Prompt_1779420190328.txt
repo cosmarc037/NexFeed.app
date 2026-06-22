@@ -1,0 +1,241 @@
+Please update the **Powermix Split Rules / auto-generated linked order logic** with the following routing and planned-order mapping changes.
+
+---
+
+## 1. UPDATE THE SOURCE-LINE-TO-TARGET-LINE ROUTING RULE
+
+The application currently assumes that qualifying Powermix orders are handled as if they all come from **Line 5** and therefore generate linked orders into **Line 2**.
+
+This is no longer correct.
+
+Please update the logic so that the destination line depends on the **actual source line** of the qualifying order.
+
+### New routing behavior
+- If the qualifying source order is in **Line 5**, generate the linked order in **Line 2**
+- If the qualifying source order is in **Line 7**, generate the linked order in **Line 6**
+
+### Apply this to the following known qualifying orders
+
+#### Source Line 5 → Target Line 2
+- `1000000000039`
+- `1000000000041`
+- `1000000000543`
+- `1000000001387`
+- `1000000000565`
+
+#### Source Line 7 → Target Line 6
+- `1000000001121`
+
+### Expected result
+The system should no longer assume that all Powermix-linked generated orders come from the same source line.
+
+Instead, it must:
+- detect that the source order qualifies under Powermix split rules
+- check which source line the order is currently scheduled in
+- create the linked/generated order in the correct destination line based on that source line
+
+---
+
+## 2. UPDATE THE PLANNED ORDER COPY LOGIC FOR LINE 5 SOURCE ORDERS
+
+Please update the auto-generated order logic for **Line 5** source orders.
+
+For qualifying source orders in **Line 5**, the source row contains:
+- `FG`
+- `SFG`
+- `SFG1`
+
+When the linked/generated order is created from a **Line 5** source order, do **not** copy:
+- `FG + SFG`
+
+Instead, use:
+- source `FG` → generated order `FG`
+- source `SFG1` → generated order `SFG`
+
+### New Line 5 mapping
+- Generated Planned Order FG = **Source FG**
+- Generated Planned Order SFG = **Source SFG1**
+
+### Example
+If the source order planned-order values are:
+- FG = `5925179`
+- SFG = `5881724`
+- SFG1 = `5924991`
+
+Then the generated order must use:
+- FG = `5925179`
+- SFG = `5924991`
+
+### Expected result
+For **Line 5 → Line 2** generated orders, the app should copy:
+- **FG**
+- **SFG1**
+
+and should **not** use the source `SFG` value as the generated order’s `SFG`.
+
+---
+
+## 3. KEEP STANDARD FG + SFG COPYING FOR LINE 7 SOURCE ORDERS
+
+Please keep a different mapping rule for **Line 7** source orders.
+
+For qualifying source orders in **Line 7**, the source row only contains:
+- `FG`
+- `SFG`
+
+When the linked/generated order is created from a **Line 7** source order, use:
+- source `FG` → generated order `FG`
+- source `SFG` → generated order `SFG`
+
+### Line 7 mapping
+- Generated Planned Order FG = **Source FG**
+- Generated Planned Order SFG = **Source SFG**
+
+### Expected result
+For **Line 7 → Line 6** generated orders, the app should continue using:
+- **FG + SFG**
+
+No `SFG1` logic should be applied to Line 7 source orders.
+
+---
+
+## 4. APPLY THE MAPPING RULE BASED ON THE SOURCE LINE
+
+Please make the planned-order mapping dependent on the **source line**, not just the fact that the row is auto-generated.
+
+### Combined rule behavior
+
+#### If source line = Line 5
+- generate linked order in **Line 2**
+- generated FG = source FG
+- generated SFG = source SFG1
+
+#### If source line = Line 7
+- generate linked order in **Line 6**
+- generated FG = source FG
+- generated SFG = source SFG
+
+### Important
+Do not apply the same copy behavior to all generated orders universally.
+
+This update should be specific to the **Powermix split-rule linked-order generation flow**.
+
+---
+
+## 5. UPDATE THE RULE INTERPRETATION / CONFIGURATION MODEL IF NEEDED
+
+If the current Powermix Split Rules setup only stores or displays a **Target Line**, please update the logic so the system can also correctly identify or support the **Source Line**.
+
+### Goal
+Avoid ambiguity in rule execution.
+
+The rule processing should clearly support:
+- qualifying FG / source material code
+- source line
+- target line
+- split %
+- batch size
+- active status
+- remarks
+
+### Expected result
+The app should not generate linked orders solely based on item match.
+It should also validate that the order is coming from the correct source line before creating the linked order in the intended destination line.
+
+---
+
+## 6. DO NOT CHANGE UNRELATED ORDER GENERATION LOGIC
+
+Please apply this update only to the **Powermix Split Rules auto-generation workflow**.
+
+Do not unintentionally change:
+- other linked-order logic
+- manual order entry behavior
+- non-Powermix generation rules
+- unrelated planned-order copy logic outside this flow
+
+### Important
+This request is specifically about correcting:
+- source-line routing
+- planned-order copying behavior
+for the Powermix-linked generated orders.
+
+---
+
+## 7. BUSINESS RULE SUMMARY
+
+Please implement the following final business rules:
+
+### For qualifying Line 5 source orders
+- Source line = **Line 5**
+- Target line = **Line 2**
+- Generated planned order values = **source FG + source SFG1**
+
+### For qualifying Line 7 source orders
+- Source line = **Line 7**
+- Target line = **Line 6**
+- Generated planned order values = **source FG + source SFG**
+
+This rule should override the previous simplified assumption that all Powermix-generated orders:
+- originate from Line 5
+- generate only into Line 2
+- always copy FG + SFG
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log the detected source line, target line, and planned-order mapping used during Powermix auto-generation.
+
+```javascript
+console.debug('[Powermix Split Routing]', {
+  sourceMaterialCode,
+  sourceLine,
+  targetLine,
+  matchedRule: true,
+});
+```
+
+```javascript
+console.debug('[Powermix Planned Order Mapping]', {
+  sourceLine,
+  sourceFG,
+  sourceSFG,
+  sourceSFG1,
+  generatedFG,
+  generatedSFG,
+  mappingRule:
+    sourceLine === 'Line 5' ? 'FG + SFG1' :
+    sourceLine === 'Line 7' ? 'FG + SFG' :
+    'UNKNOWN',
+});
+```
+
+```javascript
+console.debug('[Powermix Linked Order Created]', {
+  sourceMaterialCode,
+  sourceLine,
+  targetLine,
+  generatedFG,
+  generatedSFG,
+  splitPercent,
+  batchSize,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ A qualifying source order in `Line 5` generates a linked order in `Line 2`
+2. ✅ A qualifying source order in `Line 7` generates a linked order in `Line 6`
+3. ✅ `1000000000039` follows the `Line 5 → Line 2` routing rule
+4. ✅ `1000000001121` follows the `Line 7 → Line 6` routing rule
+5. ✅ For `Line 5` source orders, generated planned-order values use `FG + SFG1`
+6. ✅ For `Line 5` source orders, source `SFG` is not used as the generated order `SFG`
+7. ✅ For `Line 7` source orders, generated planned-order values use `FG + SFG`
+8. ✅ No `SFG1` mapping is incorrectly applied to `Line 7` orders
+9. ✅ Existing split %, batch size, active rule, and linked-order creation logic still work
+10. ✅ Unrelated order generation behavior remains unchanged
+11. ✅ No UI errors or console errors are introduced
+12. ✅ Debug logs confirm the correct source line, target line, and planned-order mapping during generation

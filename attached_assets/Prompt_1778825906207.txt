@@ -1,0 +1,99 @@
+Please add a rule in the auto-sequence feature so that Powermix-generated orders are not considered for cross-line movement.
+
+These generated orders should remain fixed to the destination line assigned by the Powermix rule.
+
+---
+
+## REQUIRED RULE
+
+If an order was auto-generated from Line 5 / Powermix Split, then it must **not** be included in the pool of orders that the AI may move to other lines during auto-sequencing.
+
+### Meaning
+- if a generated order is assigned to Line 2, it must stay in Line 2
+- if a generated order is assigned to Line 6, it must stay in Line 6
+
+Do not allow the auto-sequence logic to move these generated orders to a different line, even if the queue time is low or another line looks feasible.
+
+---
+
+## IMPORTANT DISTINCTION
+
+These generated orders should still be included in sequencing logic **within their assigned line**.
+
+So:
+- they can still participate in AI sequencing
+- they can still be re-sorted within the same line
+- they can still be considered in sequence strategy analysis
+- they can still affect changeover and queue sequencing
+
+But:
+- they must not be transferred to another line
+- they must not be considered for cross-line reassignment
+
+---
+
+## ALIGNMENT WITH EXISTING LINE 5 RULE
+
+This should follow the same concept as the current Line 5 source-order restriction:
+- Line 5 source orders should not be moved to other lines
+- generated Powermix orders should also not be moved away from their assigned destination line
+
+So both source and generated Powermix-related orders are line-locked.
+
+---
+
+## SCOPE
+
+Apply this rule specifically to:
+- orders auto-generated from Line 5 / Powermix Split
+- identified using the existing generated-order linkage / metadata
+
+Do not apply this restriction to unrelated regular orders.
+
+---
+
+## AI BEHAVIOR EXPECTATION
+
+During auto-sequence:
+- generated orders may still be included in the strategy output
+- the AI may still suggest how to sort them relative to other orders in the same line
+- but the AI should not suggest moving them out of their assigned line
+
+This means they are:
+- sequenceable
+- but not movable across lines
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log:
+
+```javascript
+console.debug('[AutoSequence Generated Order Line Lock]', {
+  orderId,
+  isPowermixGenerated,
+  assignedLine,
+  consideredForCrossLineMove,
+  allowedToMoveCrossLine: false,
+});
+```
+
+```javascript
+console.debug('[AutoSequence InLineSequencingForGeneratedOrder]', {
+  orderId,
+  assignedLine,
+  includedInSameLineSorting: true,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Powermix-generated orders are excluded from cross-line movement during auto-sequence
+2. ✅ Generated orders remain fixed to their assigned destination line
+3. ✅ Generated orders can still be re-ordered within their own line
+4. ✅ AI still includes generated orders in in-line sequencing analysis
+5. ✅ Line 5 source-order lock rule remains intact
+6. ✅ Powermix source and generated orders are both treated as line-locked

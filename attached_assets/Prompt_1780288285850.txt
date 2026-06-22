@@ -1,0 +1,253 @@
+Please fix the **auto-sequence preview vs applied schedule consistency** so that the previewed date/placement is faithfully applied, the preview production time is calculated correctly, and the final applied schedule is sorted chronologically by avail date once dates are already placed.
+
+---
+
+# 1. MAKE SURE THE PREVIEWED AI / AUTO-SEQUENCE DATE IS THE SAME DATE APPLIED TO THE SCHEDULE
+
+The current auto-sequence preview is still not reliably matching the final schedule after **Apply to Schedule**.
+
+### Required rule
+Whatever date/placement the preview shows for an order must be the same one that gets applied to the final schedule.
+
+### Important
+If the preview shows that the order is placed on a certain:
+- `Avail Date`
+- or schedule position/date context
+
+then that same result must be reflected in the schedule after applying.
+
+### Expected result
+There should be no case where the preview shows one date/placement and the applied schedule silently uses another one.
+
+---
+
+# 2. FIX THE PRODUCTION TIME CALCULATION IN THE AUTO-SEQUENCE PREVIEW
+
+The production time shown in the **final applied schedule** is already correct.
+
+The issue is in the **auto-sequence preview**, where some production times are being calculated/displayed incorrectly.
+
+### Important clarification
+This request is **not** saying the final schedule production time is wrong.
+
+The problem is:
+- the preview sometimes shows incorrect production-time values
+- and that creates confusion before the user applies the sequence
+
+### Expected result
+Please make sure the **preview** calculates production time correctly before the user applies the schedule.
+
+---
+
+# 3. PREVIEW PRODUCTION TIME MUST BE CALCULATED USING `VOLUME / RUN RATE`
+
+Please verify that the auto-sequence preview uses the correct formula:
+
+- `Production Time = Volume / Run Rate`
+
+### Important
+This should use:
+- the actual row/order volume shown in the preview
+- the actual valid run rate for that line/order
+
+### Expected result
+The previewed production time should match the correct expected value based on the order’s volume and run rate.
+
+---
+
+# 4. DO NOT ALLOW INVALID PREVIEW VALUES SUCH AS `0.00 HOURS` FOR NONZERO VOLUME ORDERS
+
+There are preview rows where:
+- the volume is nonzero
+- but production time shows as `0.00 hours`
+
+This is incorrect if a valid run rate exists.
+
+### Expected result
+Any nonzero-volume preview row with a valid run rate should display a meaningful production time calculated from:
+- `Volume / Run Rate`
+
+### Goal
+Prevent obviously incorrect values from appearing in the preview.
+
+---
+
+# 5. KEEP THE FINAL APPLIED SCHEDULE PRODUCTION TIME AS-IS IF IT IS ALREADY CORRECT
+
+Since the schedule-side production time is already correct, please do not break or regress that logic.
+
+### Goal
+Only fix the preview-side miscalculation while preserving the correct production-time behavior in the final schedule.
+
+### Expected result
+The schedule remains correct, and the preview becomes aligned with it.
+
+---
+
+# 6. WHEN APPLYING TO SCHEDULE, SORT ORDERS CHRONOLOGICALLY BY AVAIL DATE ONCE DATES ARE PLACED
+
+Please ensure that after applying the selected sequence to the schedule, if the orders now have avail dates assigned/placed, the resulting rows are sorted chronologically by **Avail Date**.
+
+### Goal
+Once the final dates are already present in the schedule, the rows should appear in proper chronological avail-date order.
+
+### Expected result
+The applied schedule should be sorted based on the placed avail dates so the visual order matches the actual date sequence.
+
+---
+
+# 7. USE THE FINAL PLACED AVAIL DATES AS THE BASIS FOR SORTING
+
+The chronological sort should use the actual avail dates that exist after applying the schedule.
+
+### Expected result
+If the schedule has placed dates such as:
+- June 03
+- June 04
+- June 06
+- June 07
+
+then the rows should appear in that chronological order in the table.
+
+### Goal
+Avoid rows appearing out of order after apply even though their avail dates are already known.
+
+---
+
+# 8. APPLY THIS ACROSS ALL LINES / FEEDMILLS
+
+Please make sure these fixes apply consistently across:
+
+### FM1
+- `Line 1`
+- `Line 2`
+
+### FM2
+- `Line 3`
+- `Line 4`
+
+### FM3
+- `Line 6`
+- `Line 7`
+
+### PMX
+- `Line 5`
+
+### In short
+Apply this across:
+- `Line 1` to `Line 7`
+- `FM1`
+- `FM2`
+- `FM3`
+- `PMX`
+
+### Expected result
+The following should work consistently across all lines/feedmills:
+- previewed date/placement matches applied schedule
+- preview production time is correct
+- final applied schedule is sorted chronologically by avail date
+
+---
+
+# IMPORTANT
+
+Please implement these clarifications:
+
+## Preview/apply consistency
+- whatever date/placement the preview shows must be the same one applied to the schedule
+
+## Preview production time
+- fix the **preview production time**
+- ensure the preview uses:
+  - `Volume / Run Rate`
+- prevent incorrect values like `0.00 hours` for nonzero-volume orders when a valid run rate exists
+
+## Applied schedule
+- keep the current correct production-time logic
+- and once avail dates are already placed, sort the applied schedule **chronologically by avail date**
+
+This must apply across:
+- `Line 1`
+- `Line 2`
+- `Line 3`
+- `Line 4`
+- `Line 5`
+- `Line 6`
+- `Line 7`
+- `FM1`
+- `FM2`
+- `FM3`
+- `PMX`
+
+---
+
+# DEBUG LOGGING
+
+Temporarily log preview date consistency, preview production-time calculation, and final avail-date sorting.
+
+```javascript
+console.debug('[Auto-Sequence Preview vs Apply Date Consistency]', {
+  line,
+  feedmill,
+  orderId,
+  previewAvailDate,
+  appliedAvailDate,
+  previewPlacement,
+  appliedPlacement,
+  availDateMatches: String(previewAvailDate) === String(appliedAvailDate),
+});
+```
+
+```javascript
+console.debug('[Auto-Sequence Preview Production Time Check]', {
+  line,
+  feedmill,
+  orderId,
+  volume,
+  runRate,
+  expectedProductionTime: runRate > 0 ? volume / runRate : null,
+  previewProductionTime,
+  previewMatchesExpected:
+    runRate > 0
+      ? Math.abs(previewProductionTime - (volume / runRate)) < 0.01
+      : false,
+});
+```
+
+```javascript
+console.debug('[Auto-Sequence Preview Invalid Time Detection]', {
+  line,
+  feedmill,
+  orderId,
+  volume,
+  runRate,
+  previewProductionTime,
+  invalidZeroTimeForNonzeroVolume:
+    volume > 0 && runRate > 0 && previewProductionTime === 0,
+});
+```
+
+```javascript
+console.debug('[Applied Schedule Avail Date Sort]', {
+  line,
+  feedmill,
+  appliedOrderIds,
+  appliedAvailDates,
+  sortedChronologicallyByAvailDate: true,
+});
+```
+
+---
+
+# VERIFICATION
+
+1. ✅ Previewed avail dates match the applied schedule
+2. ✅ Previewed placement/date context is preserved after apply
+3. ✅ Preview production time is calculated correctly
+4. ✅ Preview uses `Volume / Run Rate`
+5. ✅ Preview no longer shows `0.00 hours` for nonzero-volume rows with valid run rate
+6. ✅ Final schedule production-time logic remains intact
+7. ✅ After apply, rows are sorted chronologically by avail date when dates are already present
+8. ✅ The fix works across `Line 1` to `Line 7`
+9. ✅ The fix works across `FM1`, `FM2`, `FM3`, and `PMX`
+10. ✅ No UI errors or console errors are introduced

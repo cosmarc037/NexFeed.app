@@ -1,0 +1,117 @@
+```
+Implement the following fixes to the N10D table:
+
+---
+
+## 1. STATUS COLUMN — COLORED TEXT ONLY, NO BADGES
+
+Remove the badge styling (background, border, padding, border-radius) from the status column. Use plain colored text only.
+
+### REMOVE
+
+```css
+/* DELETE all of these */
+.status-badge-critical { ... }
+.status-badge-urgent { ... }
+.status-badge-monitor { ... }
+.status-badge-sufficient { ... }
+```
+
+### REPLACE WITH
+
+```css
+.status-critical {
+  color: #dc2626;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.status-urgent {
+  color: #ea580c;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.status-monitor {
+  color: #ca8a04;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.status-sufficient {
+  color: #16a34a;
+  font-size: 11px;
+  font-weight: 600;
+}
+```
+
+| Status | Color | Font weight |
+|---|---|---|
+| Critical | Red (#dc2626) | 600 |
+| Urgent | Orange (#ea580c) | 600 |
+| Monitor | Yellow/gold (#ca8a04) | 600 |
+| Sufficient | Green (#16a34a) | 600 |
+
+No background. No border. No padding. No border-radius. Just colored text.
+
+---
+
+## 2. STATUS COLUMN — ENSURE UNDER TRACKING HEADER
+
+The Status column is cut off or not aligned under the "TRACKING" header group. Fix the table structure so the Status column is properly included under the Tracking header.
+
+### TABLE STRUCTURE
+
+```
+┌────────────────────────────┬──────────────────┬──────────────────────────────────────────────────┐
+│      PRODUCT DETAILS       │   NEXT 10 DAYS   │                     TRACKING                     │
+├────────┬──────┬────────────┼──────────────────┼─────────┬───────────┬────────────┬───────┬───────┤
+│Material│ Cat  │ Item Desc  │ Mar 18 ... Mar 28│INVENTORY│BAL.TO PROD│ COMPLETION │ AVAIL │STATUS │
+```
+
+The TRACKING header must span ALL 5 columns:
+- INVENTORY
+- BAL. TO PROD
+- COMPLETION
+- AVAIL
+- STATUS
+
+### FIX THE COLSPAN
+
+```jsx
+<thead>
+  <tr>
+    <th colSpan={3}>PRODUCT DETAILS</th>
+    <th colSpan={10}>NEXT 10 DAYS</th>
+    <th colSpan={5}>TRACKING</th>  {/* Must be 5, not 4 */}
+  </tr>
+  <tr>
+    {/* Product Details sub-headers */}
+    <th>MATERIAL CODE</th>
+    <th>CATEGORY</th>
+    <th>ITEM DESCRIPTION</th>
+    
+    {/* 10 day columns */}
+    <th>MAR 18</th>
+    <th>MAR 19</th>
+    {/* ... */}
+    <th>MAR 28</th>
+    
+    {/* Tracking sub-headers — all 5 must be here */}
+    <th>INVENTORY</th>
+    <th>BAL. TO PROD</th>
+    <th>COMPLETION</th>
+    <th>AVAIL</th>
+    <th>STATUS</th>  {/* This must be included under TRACKING */}
+  </tr>
+</thead>
+```
+
+### VERIFY
+
+After fix:
+- ✅ "TRACKING" header spans across INVENTORY, BAL. TO PROD, COMPLETION, AVAIL, and STATUS
+- ✅ STATUS column is NOT cut off
+- ✅ STATUS column shows plain colored text (no badges)
+- ✅ All 5 tracking columns are visible and properly aligned
+```

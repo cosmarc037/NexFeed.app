@@ -1,0 +1,492 @@
+I see the issues — the dark mode is too dark and creating poor contrast. The main content area is still light while the navbar is dark, and some elements aren't styled properly. Let me fix this:
+
+```
+Fix dark mode to be cohesive and readable:
+
+---
+
+## 1. COMPLETE DARK MODE CSS OVERHAUL
+
+```css
+:root {
+  --color-primary: #EA580C;
+  --color-primary-dark: #C2410C;
+  --color-primary-light: #FED7AA;
+  --color-bg: #FFFFFF;
+  --color-bg-secondary: #F9FAFB;
+  --color-text: #1F2937;
+  --color-text-secondary: #6B7280;
+  --color-border: #E5E7EB;
+  --color-hover-bg: #F3F4F6;
+  --color-input-bg: #FFFFFF;
+}
+
+html.dark-mode {
+  --color-bg: #0F1419;
+  --color-bg-secondary: #1A202C;
+  --color-bg-tertiary: #2D3748;
+  --color-text: #E5E7EB;
+  --color-text-secondary: #9CA3AF;
+  --color-border: #374151;
+  --color-hover-bg: #2D3748;
+  --color-input-bg: #1A202C;
+}
+
+/* Apply to all elements */
+* {
+  transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+
+/* Main content area */
+.main-content,
+.content-area,
+.page-wrapper {
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+
+/* Sidebar */
+.sidebar,
+.nav-sidebar {
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
+  border-right: 1px solid var(--color-border);
+}
+
+/* Navbar */
+.navbar,
+.header,
+nav {
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.navbar-btn {
+  color: var(--color-text);
+}
+
+.navbar-btn:hover {
+  background: var(--color-hover-bg);
+}
+
+/* Cards and panels */
+.card,
+.panel,
+.modal,
+.modal-content,
+[role="dialog"] {
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+}
+
+/* Tables */
+table {
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+
+table thead {
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
+  border-bottom: 1px solid var(--color-border);
+}
+
+table tbody tr {
+  border-bottom: 1px solid var(--color-border);
+}
+
+table tbody tr:hover {
+  background: var(--color-hover-bg);
+}
+
+table td,
+table th {
+  color: var(--color-text);
+  border-color: var(--color-border);
+}
+
+/* Inputs and form elements */
+input,
+textarea,
+select,
+.form-control {
+  background: var(--color-input-bg);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+}
+
+input:focus,
+textarea:focus,
+select:focus,
+.form-control:focus {
+  background: var(--color-bg);
+  border-color: var(--color-primary);
+  outline: none;
+}
+
+input::placeholder {
+  color: var(--color-text-secondary);
+}
+
+/* Buttons */
+button {
+  color: var(--color-text);
+  border-color: var(--color-border);
+}
+
+button:hover {
+  background: var(--color-hover-bg);
+}
+
+/* Links */
+a {
+  color: var(--color-primary);
+}
+
+a:hover {
+  opacity: 0.8;
+}
+
+/* Badges */
+.badge,
+.stat-badge {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+}
+
+/* Dropdowns */
+.dropdown,
+.dropdown-menu,
+[role="menu"] {
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+}
+
+.dropdown-item,
+[role="menuitem"] {
+  color: var(--color-text);
+}
+
+.dropdown-item:hover,
+[role="menuitem"]:hover {
+  background: var(--color-hover-bg);
+}
+
+/* Alerts and messages */
+.alert,
+.notification,
+.toast {
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+}
+
+/* Charts and SVG */
+.chart-container,
+svg {
+  background: transparent;
+}
+
+.recharts-surface,
+.recharts-wrapper {
+  background: transparent;
+}
+
+.recharts-text {
+  fill: var(--color-text);
+}
+
+.recharts-cartesian-grid line {
+  stroke: var(--color-border);
+}
+
+.recharts-legend-wrapper {
+  color: var(--color-text);
+}
+
+/* Scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-bg-secondary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-secondary);
+}
+
+/* Specific component overrides */
+.stat-badge {
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+}
+
+.filter-dropdown-panel,
+.theme-switcher-dropdown {
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.5);
+}
+
+.order-edit-input {
+  background: var(--color-input-bg);
+  color: var(--color-text);
+  border: 2px solid var(--color-primary);
+}
+
+.order-editable-field:hover {
+  background: var(--color-hover-bg);
+  border: 1px dashed var(--color-primary);
+}
+
+/* Search input */
+.filter-search,
+input[placeholder*="Search"] {
+  background: var(--color-input-bg);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+}
+
+/* Code blocks and pre */
+pre,
+code {
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+}
+
+/* Ensure text is always readable */
+.dark-mode .text-muted {
+  color: var(--color-text-secondary);
+}
+
+.dark-mode .text-secondary {
+  color: var(--color-text-secondary);
+}
+
+.dark-mode .text-light {
+  color: var(--color-text);
+}
+
+/* Labels and legends */
+label {
+  color: var(--color-text);
+}
+
+legend {
+  color: var(--color-text);
+}
+
+/* Disable transitions on initial load */
+html.dark-mode * {
+  transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
+}
+```
+
+---
+
+## 2. FIX THE THEME SWITCHER CSS — ENSURE VISIBILITY IN DARK MODE
+
+```css
+.theme-switcher-dropdown {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 8px;
+  width: 200px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.3);
+  padding: 12px;
+  z-index: 1000;
+}
+
+.theme-dropdown-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.theme-dropdown-divider {
+  height: 1px;
+  background: var(--color-border);
+  margin: 10px 0;
+}
+
+.theme-toggle {
+  position: relative;
+  width: 36px;
+  height: 18px;
+  border: none;
+  border-radius: 10px;
+  background: var(--color-border);
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.3s;
+}
+
+.theme-toggle.active {
+  background: var(--color-primary);
+}
+
+.theme-toggle-thumb {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  background: white;
+  border-radius: 50%;
+  top: 2px;
+  left: 2px;
+  transition: left 0.3s;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.theme-toggle.active .theme-toggle-thumb {
+  left: 20px;
+}
+
+.theme-circles {
+  display: flex;
+  gap: 10px;
+}
+
+.theme-circle {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: all 0.2s;
+  padding: 0;
+}
+
+.theme-circle:hover {
+  transform: scale(1.1);
+}
+
+.theme-circle.active {
+  border-color: var(--color-text);
+  box-shadow: 0 0 0 2px var(--color-bg-secondary), 0 0 0 4px var(--color-text);
+}
+```
+
+---
+
+## 3. UPDATE DARK MODE TOGGLE HANDLER — BETTER CLASS MANAGEMENT
+
+```javascript
+function toggleDarkMode() {
+  const newValue = !isDarkMode;
+  setIsDarkMode(newValue);
+  
+  // Use html element, not documentElement
+  const htmlElement = document.documentElement;
+  
+  if (newValue) {
+    htmlElement.classList.add('dark-mode');
+    htmlElement.style.colorScheme = 'dark';
+  } else {
+    htmlElement.classList.remove('dark-mode');
+    htmlElement.style.colorScheme = 'light';
+  }
+}
+
+// On app mount, apply saved dark mode
+useEffect(() => {
+  const savedTheme = localStorage.getItem('app-theme') || 'default';
+  const savedDarkMode = localStorage.getItem('app-dark-mode') === 'true';
+  
+  applyTheme(savedTheme);
+  
+  if (savedDarkMode) {
+    const htmlElement = document.documentElement;
+    htmlElement.classList.add('dark-mode');
+    htmlElement.style.colorScheme = 'dark';
+  }
+}, []);
+```
+
+---
+
+## 4. ENSURE MAIN CONTENT AREA IS STYLED
+
+Make sure the main content wrapper has these classes:
+
+```jsx
+// In your main layout/app component:
+<div className={`app-wrapper ${isDarkMode ? 'dark-mode' : ''}`}>
+  <Navbar />
+  <Sidebar />
+  <main className="main-content">
+    {/* Your page content */}
+  </main>
+</div>
+```
+
+CSS for main wrapper:
+
+```css
+.app-wrapper {
+  background: var(--color-bg);
+  color: var(--color-text);
+  min-height: 100vh;
+}
+
+.main-content {
+  background: var(--color-bg);
+  color: var(--color-text);
+  flex: 1;
+  padding: 16px;
+  overflow-y: auto;
+}
+```
+
+---
+
+## VERIFICATION
+
+### Dark mode appearance
+1. ✅ Navbar dark (not light)
+2. ✅ Sidebar dark
+3. ✅ Main content area dark (not white)
+4. ✅ Tables have good contrast
+5. ✅ Text readable (E5E7EB on dark background)
+6. ✅ All UI elements styled consistently
+
+### Colors in dark mode
+7. ✅ Background: #0F1419 (very dark)
+8. ✅ Secondary (cards, panels): #1A202C (dark)
+9. ✅ Tertiary (badges): #2D3748 (slightly lighter)
+10. ✅ Text: #E5E7EB (light gray)
+11. ✅ Secondary text: #9CA3AF (muted gray)
+12. ✅ Borders: #374151 (dark gray)
+
+### Contrast
+13. ✅ #E5E7EB text on #0F1419 background ✓ (good contrast)
+14. ✅ #E5E7EB text on #1A202C background ✓ (good contrast)
+15. ✅ #9CA3AF secondary text readable
+
+### Transitions
+16. ✅ Smooth color transitions (0.3s)
+17. ✅ No jarring flashes
+18. ✅ Theme switcher fully visible in dark mode
+19. ✅ Active theme circles have proper ring in dark mode
+```

@@ -1,0 +1,713 @@
+Clear! Here's the implementation:
+
+```
+Fix: Make auto-sequence preview table match order table functionality exactly:
+
+---
+
+## 1. INITIALIZE START DATE/TIME — ONLY FIRST ORDER GETS AUTO-GENERATED
+
+```javascript
+function calculateCompletionDates(lineOrders, line) {
+  if (!lineOrders || lineOrders.length === 0) return [];
+  
+  const result = [];
+  let previousCompletionTime = null;
+  
+  for (let i = 0; i < lineOrders.length; i++) {
+    const order = { ...lineOrders[i] };
+    
+    // Determine start datetime for THIS order
+    let orderStartTime = null;
+    
+    // For FIRST order — auto-generate if missing
+    if (i === 0) {
+      const hasStartDate = !!order.start_date;
+      const hasStartTime = !!order.start_time;
+      
+      if (hasStartDate && hasStartTime) {
+        // Both set — use them
+        orderStartTime = combineDateTime(order.start_date, order.start_time);
+      } else if (hasStartDate && !hasStartTime) {
+        // Date only — use 08:00 AM
+        order.start_time = '08:00';
+        orderStartTime = combineDateTime(order.start_date, '08:00');
+      } else if (!hasStartDate && hasStartTime) {
+        // Time only — use today's date
+        const todayStr = new Date().toISOString().split('T')[0];
+        order.start_date = todayStr;
+        orderStartTime = combineDateTime(todayStr, order.start_time);
+      } else {
+        // Neither — default to today 08:00 AM
+        const todayStr = new Date().toISOString().split('T')[0];
+        order.start_date = todayStr;
+        order.start_time = '08:00';
+        orderStartTime = combineDateTime(todayStr, '08:00');
+      }
+    } else {
+      // For SUBSEQUENT orders
+      const hasStartDate = !!order.start_date;
+      const hasStartTime = !!order.start_time;
+      
+      if (hasStartDate && hasStartTime) {
+        // User manually set both — use them
+        orderStartTime = combineDateTime(order.start_date, order.start_time);
+      } else if (hasStartDate && !hasStartTime) {
+        // Date only — use 08:00 AM
+        orderStartTime = combineDateTime(order.start_date, '08:00');
+      } else if (!hasStartDate && hasStartTime) {
+        // Time only — use previous completion date (just date part)
+        const prevDate = previousCompletionTime 
+          ? new Date(previousCompletionTime).toISOString().split('T')[0]
+          : new Date().toISOString().split('T')[0];
+        orderStartTime = combineDateTime(prevDate, order.start_time);
+      } else {
+        // Neither set — cascade from previous order's completion
+        orderStartTime = previousCompletionTime || combineDateTime(new Date().toISOString().split('T')[0], '08:00');
+      }
+      
+      // Keep start_date and start_time blank if user hasn't set them (display)
+    }
+    
+    // Calculate production time
+    const volume = parseFloat(order.volume_override || order.volume || order.total_volume_mt) || 0;
+    const runRate = getLineRunRate(normalizeLine(line));
+    const productionTime = runRate > 0 ? volume / runRate : 0;
+    order.production_time = productionTime;
+    order._productionTimeHrs = productionTime.toFixed(2);
+    
+    // Get changeover
+    const changeover = order.changeover || 0;
+    order._changeoverHrs = changeover.toFixed(2);
+    
+    // Calculate completion time = start + production + changeover
+    const totalHours = productionTime + changeover;
+    const completionTime = new Date(orderStartTime.getTime() + totalHours * 60 * 60 * 1000);
+    
+    order._actualStartTime = orderStartTime.toISOString();
+    order.estimated_completion_date = completionTime.toISOString();
+    order._estimatedCompletionDisplay = formatDateTime(completionTime);
+    
+    // Save for next order's cascade
+    previousCompletionTime = completionTime;
+    
+    result.push(order);
+  }
+  
+  return result;
+}
+
+function combineDateTime(dateStr, timeStr) {
+  if (!dateStr) return new Date();
+  if (!timeStr) timeStr = '08:00';
+  
+  const [hours, minutes] = timeStr.split(':').map(Number);
+  const date = new Date(dateStr);
+  date.setHours(hours || 0, minutes || 0, 0, 0);
+  return date;
+}
+
+function formatDateTime(date) {
+  if (!date) return '—';
+  const d = new Date(date);
+  const dateStr = d.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
+  const timeStr = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+  return `${dateStr} - ${timeStr}`;
+}
+```
+
+---
+
+## 2. BUILD PREVIEW RESULTS WITH PROPER DATES
+
+```javascript
+async function handlePlantLevelAutoSequence() {
+  try {
+    // ... existing code ...
+    
+    const { lineOrdersMap, combinedOrders, placementLog } = await runAutoSequenceWithProgress(...);
+    
+    // Build results with proper completion dates
+    const results = {};
+    ALL_LINES_ORDERED.forEach(line => {
+      const lineOrders = lineOrdersMap[line] || [];
+      if (lineOrders.length === 0) {
+        results[line] = [];
+        return;
+      }
+      
+      // Clear auto-populated start dates/times for NON-first orders
+      const cleanedOrders = lineOrders.map((order, i) => {
+        if (i === 0) {
+          return order;  // Keep first order's start date/time
+        } else {
+          // Clear auto-populated values for subsequent orders
+          return {
+            ...order,
+            start_date: order._userSetStartDate ? order.start_date : null,
+            start_time: order._userSetStartTime ? order.start_time : null,
+          };
+        }
+      });
+      
+      // Calculate completion dates (cascades through all orders)
+      results[line] = calculateCompletionDates(cleanedOrders, line);
+    });
+    
+    setSequencedResults(results);
+    // ... rest of code ...
+  } catch (error) {
+    // ...
+  }
+}
+```
+
+---
+
+## 3. EDITABLE ROW COMPONENT WITH VALIDATION AND CASCADE
+
+```jsx
+function PlantAfterRow({ 
+  order, 
+  lineIndex, 
+  lineOrders, 
+  line,
+  onOrderUpdate 
+}) {
+  const [editingField, setEditingField] = useState(null);
+  const [editValue, setEditValue] = useState('');
+  const inputRef = useRef(null);
+  
+  const isFirstOrder = lineIndex === 0;
+  const previousOrder = lineIndex > 0 ? lineOrders[lineIndex - 1] : null;
+  
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (inputRef.current && !inputRef.current.contains(e.target) && 
+          !e.target.closest('.edit-cell-actions')) {
+        // Don't close if clicking on action buttons
+        setEditingField(null);
+      }
+    }
+    if (editingField) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [editingField]);
+  
+  function startEdit(fieldKey) {
+    setEditingField(fieldKey);
+    
+    if (fieldKey === 'start_date') {
+      setEditValue(order.start_date || '');
+    } else if (fieldKey === 'start_time') {
+      setEditValue(order.start_time || '');
+    }
+    
+    setTimeout(() => inputRef.current?.focus(), 0);
+  }
+  
+  function validateStartDate(dateStr) {
+    if (!dateStr) return { valid: true };  // Empty is valid (will cascade)
+    
+    const selectedDate = new Date(dateStr);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    // Rule 1: Can't set past dates
+    if (selectedDate < today) {
+      return { valid: false, error: 'Cannot set past dates' };
+    }
+    
+    // Rule 2: Can't set beyond avail date
+    if (order.target_avail_date && /^\d{4}-\d{2}-\d{2}/.test(String(order.target_avail_date))) {
+      const availDate = new Date(order.target_avail_date);
+      availDate.setHours(23, 59, 59, 999);
+      
+      if (selectedDate > availDate) {
+        return { 
+          valid: false, 
+          error: `Cannot set date beyond avail date (${formatDate(order.target_avail_date)})` 
+        };
+      }
+    }
+    
+    return { valid: true };
+  }
+  
+  function validateStartTime(timeStr, dateStr) {
+    if (!timeStr) return { valid: true };
+    
+    // Check if this start time would cause a delay
+    const startDate = dateStr || order.start_date || new Date().toISOString().split('T')[0];
+    const startDateTime = combineDateTime(startDate, timeStr);
+    
+    const productionTime = order.production_time || 0;
+    const changeover = order.changeover || 0;
+    const completionTime = new Date(startDateTime.getTime() + (productionTime + changeover) * 60 * 60 * 1000);
+    
+    // Check against avail date
+    if (order.target_avail_date && /^\d{4}-\d{2}-\d{2}/.test(String(order.target_avail_date))) {
+      const availDate = new Date(order.target_avail_date);
+      availDate.setHours(23, 59, 59, 999);
+      
+      if (completionTime > availDate) {
+        return {
+          valid: true,  // Allow it, but warn
+          warning: `Setting this start time will cause the order to complete after the avail date (${formatDate(order.target_avail_date)}). This will cause a delay.`
+        };
+      }
+    }
+    
+    return { valid: true };
+  }
+  
+  function saveEdit(fieldKey) {
+    if (!editingField) return;
+    
+    try {
+      if (fieldKey === 'start_date') {
+        const validation = validateStartDate(editValue);
+        if (!validation.valid) {
+          toast.error(validation.error);
+          return;
+        }
+        
+        onOrderUpdate?.(order.id, { 
+          start_date: editValue, 
+          _userSetStartDate: true 
+        }, line);
+        toast.success('Start date updated');
+        
+      } else if (fieldKey === 'start_time') {
+        const validation = validateStartTime(editValue, order.start_date);
+        
+        if (!validation.valid) {
+          toast.error(validation.error);
+          return;
+        }
+        
+        if (validation.warning) {
+          // Show confirmation dialog
+          const confirmed = window.confirm(`Warning: ${validation.warning}\n\nDo you want to continue?`);
+          if (!confirmed) return;
+        }
+        
+        onOrderUpdate?.(order.id, { 
+          start_time: editValue, 
+          _userSetStartTime: true 
+        }, line);
+        toast.success('Start time updated');
+      }
+      
+      setEditingField(null);
+      setEditValue('');
+      
+    } catch (error) {
+      toast.error(`Update failed: ${error.message}`);
+    }
+  }
+  
+  function clearEdit(fieldKey) {
+    if (isFirstOrder) {
+      // First order can't be cleared
+      toast.info('First order must have a start date/time for completion calculation');
+      return;
+    }
+    
+    if (fieldKey === 'start_date') {
+      onOrderUpdate?.(order.id, { 
+        start_date: null, 
+        _userSetStartDate: false 
+      }, line);
+    } else if (fieldKey === 'start_time') {
+      onOrderUpdate?.(order.id, { 
+        start_time: null, 
+        _userSetStartTime: false 
+      }, line);
+    }
+    
+    setEditingField(null);
+    setEditValue('');
+    toast.success('Cleared — will cascade from previous order');
+  }
+  
+  function cancelEdit() {
+    setEditingField(null);
+    setEditValue('');
+  }
+  
+  // Display values
+  const startDateDisplay = order.start_date 
+    ? new Date(order.start_date).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })
+    : '—';
+  
+  const startTimeDisplay = order.start_time 
+    ? new Date(`2026-01-01T${order.start_time}:00`).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })
+    : '—';
+  
+  const minDate = new Date().toISOString().split('T')[0];
+  const maxDate = order.target_avail_date && /^\d{4}-\d{2}-\d{2}/.test(String(order.target_avail_date)) 
+    ? String(order.target_avail_date).substring(0, 10) 
+    : undefined;
+  
+  return (
+    <tr className={`auto-sequence-row-after ${order._movement === 'new_to_line' ? 'as-movement-new' : ''}`}>
+      <td className="as-col-prio">{order.prio}</td>
+      <td className="as-col-fpr">{order.fpr}</td>
+      <td className="as-col-planned">
+        <div>{order.planned_order_fg || '—'}</div>
+        <div className="as-sub-text">{order.planned_order_sfg || '—'}</div>
+      </td>
+      <td className="as-col-material">{order.material_code_fg}</td>
+      <td className="as-col-desc">
+        <span className="as-desc-main">{order.item_description}</span>
+        <div className="as-sub-text">{order.category}</div>
+      </td>
+      <td className="as-col-form">{order.form}</td>
+      <td className="as-col-volume">{(order.volume_override || order.volume || order.total_volume_mt || 0).toFixed(1)} MT</td>
+      <td className="as-col-batches">{order.batches || '—'}</td>
+      <td className="as-col-production">
+        <span className="production-time-value">{order._productionTimeHrs || '0.00'} hrs</span>
+        <span className="production-time-co">CO: {order._changeoverHrs || '0.00'}</span>
+      </td>
+      
+      {/* EDITABLE: Start Date */}
+      <td className="as-col-start-date">
+        {editingField === 'start_date' ? (
+          <div className="edit-cell-container">
+            <input
+              ref={inputRef}
+              type="date"
+              value={editValue}
+              onChange={(e) => setEditValue(e.target.value)}
+              className="as-edit-input as-edit-date"
+              min={minDate}
+              max={maxDate}
+            />
+            <div className="edit-cell-actions">
+              <button 
+                className="edit-btn-save" 
+                onClick={() => saveEdit('start_date')} 
+                title="Save"
+              >
+                ✓
+              </button>
+              <button 
+                className={`edit-btn-clear ${isFirstOrder ? 'edit-btn-disabled' : ''}`}
+                onClick={() => clearEdit('start_date')}
+                disabled={isFirstOrder}
+                title={isFirstOrder ? 'First order must have a start date' : 'Clear'}
+              >
+                ✗
+              </button>
+              <button 
+                className="edit-btn-cancel" 
+                onClick={cancelEdit} 
+                title="Cancel"
+              >
+                ⟲
+              </button>
+            </div>
+          </div>
+        ) : (
+          <span
+            className="as-editable-field"
+            onClick={() => startEdit('start_date')}
+            title="Click to edit start date"
+          >
+            {startDateDisplay}
+          </span>
+        )}
+      </td>
+      
+      {/* EDITABLE: Start Time */}
+      <td className="as-col-start-time">
+        {editingField === 'start_time' ? (
+          <div className="edit-cell-container">
+            <input
+              ref={inputRef}
+              type="time"
+              value={editValue}
+              onChange={(e) => setEditValue(e.target.value)}
+              className="as-edit-input as-edit-time"
+            />
+            <div className="edit-cell-actions">
+              <button 
+                className="edit-btn-save" 
+                onClick={() => saveEdit('start_time')} 
+                title="Save"
+              >
+                ✓
+              </button>
+              <button 
+                className={`edit-btn-clear ${isFirstOrder ? 'edit-btn-disabled' : ''}`}
+                onClick={() => clearEdit('start_time')}
+                disabled={isFirstOrder}
+                title={isFirstOrder ? 'First order must have a start time' : 'Clear'}
+              >
+                ✗
+              </button>
+              <button 
+                className="edit-btn-cancel" 
+                onClick={cancelEdit} 
+                title="Cancel"
+              >
+                ⟲
+              </button>
+            </div>
+          </div>
+        ) : (
+          <span
+            className="as-editable-field"
+            onClick={() => startEdit('start_time')}
+            title="Click to edit start time"
+          >
+            {startTimeDisplay}
+          </span>
+        )}
+      </td>
+      
+      <td className="as-col-avail-date">
+        {order.target_avail_date && /^\d{4}-\d{2}-\d{2}/.test(String(order.target_avail_date)) ? (
+          <>
+            <span className="avail-date-value">{formatDate(order.target_avail_date)}</span>
+            {order.inferred_target_label && (
+              <span className="avail-date-label">{order.inferred_target_label}</span>
+            )}
+          </>
+        ) : (
+          <span className="avail-date-label">{order.inferred_target_label || '—'}</span>
+        )}
+      </td>
+      
+      {/* CALCULATED: Estimated Completion Date */}
+      <td className="as-col-completion-date">
+        <span className="completion-date-value">
+          {order._estimatedCompletionDisplay || '—'}
+        </span>
+      </td>
+      
+      <td className="as-col-insight">
+        {order._sequenceInsight && (
+          <span className="sequence-insight-badge">
+            💡 {order._sequenceInsight.substring(0, 50)}...
+          </span>
+        )}
+      </td>
+    </tr>
+  );
+}
+```
+
+---
+
+## 4. UPDATE HANDLER — CASCADE COMPLETION DATES
+
+```javascript
+function handleLineOrderUpdate(line, orderId, updates) {
+  setSequencedResults(prev => {
+    const updated = { ...prev };
+    const lineOrders = [...(updated[line] || [])];
+    
+    const orderIndex = lineOrders.findIndex(o => o.id === orderId);
+    if (orderIndex === -1) return prev;
+    
+    // Apply updates to the specific order
+    lineOrders[orderIndex] = { ...lineOrders[orderIndex], ...updates };
+    
+    // Recalculate completion dates — cascades from updated order onwards
+    const recalculated = calculateCompletionDates(lineOrders, line);
+    
+    updated[line] = recalculated;
+    return updated;
+  });
+}
+```
+
+---
+
+## 5. STYLING WITH DISABLED BUTTON
+
+```css
+.as-editable-field {
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all 0.15s;
+  border: 1px solid transparent;
+  min-height: 22px;
+}
+
+.as-editable-field:hover {
+  background: var(--color-hover-bg, #fef3c7);
+  border: 1px dashed var(--color-primary, #f59e0b);
+}
+
+.edit-cell-container {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.as-edit-input {
+  padding: 4px 6px;
+  border: 2px solid var(--color-primary, #3b82f6);
+  border-radius: 3px;
+  font-size: 11px;
+  font-family: inherit;
+  background: var(--color-input-bg, #ffffff);
+  color: var(--color-text, #1f2937);
+}
+
+.as-edit-date {
+  width: 110px;
+}
+
+.as-edit-time {
+  width: 80px;
+}
+
+.as-edit-input:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+}
+
+.edit-cell-actions {
+  display: flex;
+  gap: 2px;
+}
+
+.edit-btn-save,
+.edit-btn-clear,
+.edit-btn-cancel {
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+}
+
+.edit-btn-save {
+  background: #dcfce7;
+  color: #16a34a;
+}
+
+.edit-btn-save:hover {
+  background: #bbf7d0;
+}
+
+.edit-btn-clear {
+  background: #fecaca;
+  color: #dc2626;
+}
+
+.edit-btn-clear:hover:not(:disabled) {
+  background: #fca5a5;
+}
+
+.edit-btn-clear:disabled,
+.edit-btn-disabled {
+  background: #e5e7eb;
+  color: #9ca3af;
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.edit-btn-cancel {
+  background: #e5e7eb;
+  color: #374151;
+}
+
+.edit-btn-cancel:hover {
+  background: #d1d5db;
+}
+
+.as-col-start-date,
+.as-col-start-time,
+.as-col-completion-date {
+  min-width: 110px;
+  padding: 6px 8px;
+}
+
+.production-time-value {
+  display: block;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.production-time-co {
+  display: block;
+  font-size: 10px;
+  color: var(--color-text-secondary);
+}
+
+.completion-date-value {
+  display: block;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-text);
+}
+```
+
+---
+
+## 6. PASS REQUIRED PROPS
+
+```jsx
+{sequencedResults[line]?.map((order, index) => (
+  <PlantAfterRow
+    key={order.id}
+    order={order}
+    lineIndex={index}
+    lineOrders={sequencedResults[line]}
+    line={line}
+    onOrderUpdate={(orderId, updates) => 
+      handleLineOrderUpdate(line, orderId, updates)
+    }
+  />
+))}
+```
+
+---
+
+## VERIFICATION
+
+### First order behavior
+1. ✅ If no date/time set → auto-generate (today 08:00 AM)
+2. ✅ If date only → auto-add time 08:00
+3. ✅ If time only → auto-add today's date
+4. ✅ If both set → use as-is
+5. ✅ Clear buttons DISABLED with tooltip explaining why
+
+### Subsequent orders
+6. ✅ Start date/time blank by default
+7. ✅ Completion date cascades from previous order's completion
+8. ✅ If user sets date/time → use manual values
+9. ✅ If user sets only date → use 08:00 time
+10. ✅ If user sets only time → use previous completion's date
+11. ✅ Clear buttons enabled — resets to blank/cascade
+
+### Validation
+12. ✅ Can't set past dates
+13. ✅ Can't set beyond avail date
+14. ✅ Warning dialog if start time would cause delay
+15. ✅ Allow user to proceed after warning
+
+### Cascade
+16. ✅ Change start date/time → all following orders recalculate
+17. ✅ Clear date/time → cascades from previous order
+18. ✅ Production hours + changeover considered in calculation
+
+### Completion date
+19. ✅ Auto-calculated: start + production + changeover
+20. ✅ Updates immediately when start date/time changes
+21. ✅ Format: "MM/DD/YYYY - HH:MM AM/PM"
+```

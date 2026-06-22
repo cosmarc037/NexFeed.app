@@ -1,0 +1,277 @@
+Please update and correct the Powermix-generated order logic based on the following refinements.
+
+IMPORTANT:
+The generated orders created from Line 5 / Powermix rules must preserve the correct FG/SFG identity, volume calculation, visual labeling, status, and source-order planning metadata.
+
+---
+
+## 1. CORRECT FG/SFG MAPPING IN GENERATED ORDERS
+
+Use the following configuration table exactly:
+
+| FG Material | SFG Material | Description | Target Line | Percentage | Batch |
+|---|---|---|---|---:|---:|
+| 1000000000039 | 3000000000248 | Gallimax 2 plus | Line 2 | 85 | 4 |
+| 1000000000041 | 3000000000033 | Salto Stag Developer | Line 2 | 80 | 4 |
+| 1000000000543 | 3000000000033 | Salto Stag Developer | Line 2 | 80 | 4 |
+| 1000000001387 | 3000000000480 | Gallimax 2 Plus red | Line 2 | 85 | 4 |
+| 1000000000565 | 3000000000057 | Gallimax PMP | Line 2 | 40 | 4 |
+| 1000000001121 | 3000000001289 | Pork Solution Booster Plus (Cooked Mash)-1st pass | Line 6 | 81 | 2 |
+
+### Critical correction
+The app is currently placing the SFG code into the **Material Code (FG)** field in generated orders, which is wrong.
+
+Please fix this.
+
+### Correct behavior
+For generated orders:
+- **Material Code (FG)** must remain the original FG from the Line 5 source order
+- **Material Code (SFG)** must use the mapped SFG from the Powermix Split Rule
+
+Example:
+If source order FG is:
+- `1000000001121`
+
+and mapped SFG is:
+- `3000000001289`
+
+then generated order should show:
+- Material Code (FG) = `1000000001121`
+- Material Code (SFG) = `3000000001289`
+
+Do not place the SFG into the FG field.
+
+This is likely causing empty fields and lookup failures.
+
+---
+
+## 2. FIX GENERATED VOLUME CALCULATION AND DISPLAY
+
+### Problem
+The generated volume logic appears incorrect.
+
+Example:
+- Source Line 5 order volume = `72 MT`
+- Rule percentage = `81%`
+- Correct raw computed quantity = `58.32 MT`
+
+If batch divisibility rule is 2, then the adjusted usable quantity should be:
+- `58 MT`
+
+But the app currently shows:
+- `57 MT`
+
+This is wrong.
+
+### Required logic
+1. Compute raw split quantity:
+   `raw_qty = source_qty * percentage / 100`
+
+2. If batch divisibility is required, adjust properly according to configured batch size
+
+3. For the example:
+   - 72 × 81% = 58.32
+   - if divisible by 2 is required
+   - final adjusted qty should be 58
+
+Please audit the batch normalization logic and ensure it does not incorrectly reduce the value to 57.
+
+### Display text improvement
+The text should not just say `Original` if it is not informative.
+
+Use clearer text such as:
+
+#### If not adjusted:
+`81% of 72 MT = 58.32 MT`
+
+#### If adjusted to batch-compatible quantity:
+`Adjusted: 58 MT (81% of 72 MT = 58.32 MT, aligned to batch size 2)`
+
+Or a concise equivalent.
+
+The goal is to clearly explain:
+- original percentage-derived quantity
+- final adjusted quantity if batch logic modified it
+
+---
+
+## 3. ADD VISUAL LABEL AND THIRD SUBTEXT FOR GENERATED ORDERS
+
+For generated orders, update the item description block so that it includes an additional third sub-text indicating that the order was created from a Line 5 source order.
+
+Example:
+
+Pork Solution Booster Plus SFG  
+Swine · Brown · 4.00mm  
+(icon) Line 5 - Order Created
+
+Please add this third sub-text to all Powermix-generated orders.
+
+### Visual highlight
+Also highlight these generated orders in **purple** so users can easily identify that:
+- this order was app-created
+- this order came from a Line 5 split rule
+
+This should be visually consistent and distinct from regular manually plotted orders.
+
+---
+
+## 4. GENERATED ORDERS SHOULD ALWAYS HAVE STATUS = PLOTTED
+
+Generated orders created from Line 5 rules should always default to:
+
+## Status = Plotted
+
+Do not leave them as:
+- normal
+- blank
+- or any other default status
+
+This should match how actively created plotted orders behave elsewhere in the app.
+
+---
+
+## 5. COPY AVAIL DATE AND SOURCE PLANNING LINEAGE FROM LINE 5 ORDER
+
+Generated orders currently have missing avail dates and missing planning metadata.
+
+Please fix this by copying the relevant values directly from the source Line 5 order.
+
+### Required behavior
+For every Powermix-generated order:
+- copy the **Avail Date** from the source Line 5 order
+- copy source order planning lineage fields from the source Line 5 order
+
+This is required because lookup by material code alone is not reliable when multiple orders share the same material code.
+
+### Important clarification
+Do not try to derive the generated order’s avail date only from the generated SFG code.
+
+Instead, the generated order must inherit the same source order context from the original Line 5 order that created it.
+
+---
+
+## 6. COPY PLANNED ORDER REFERENCES FROM SOURCE LINE 5 ORDER
+
+Generated orders should copy the relevant planned order values from the source Line 5 order.
+
+If the source order contains:
+- Planned Order (FG)
+- Planned Order (SFG)
+- Planned Order (PMX)
+
+then the generated order should at minimum inherit:
+- the original **Planned Order (FG)**
+- the original **Planned Order (SFG)**
+
+### Example
+If the source Line 5 order for:
+- Gallimax 2 Plus Ready Mix (Natural) 50kg
+
+has planned orders:
+- FG = `5925179`
+- SFG = `5881724`
+- PMX = `5924991`
+
+then the generated order in Line 2 should carry:
+- Planned Order (FG) = `5925179`
+- Planned Order (SFG) = `5881724`
+
+This should not rely on material-code-only lookup.
+
+It should be copied directly from the source Line 5 order that triggered the generated order.
+
+---
+
+## 7. DATA MODEL / TRACEABILITY EXPECTATION
+
+Each generated order should remain linked to its source Line 5 order and store enough metadata to preserve source lineage.
+
+Please ensure generated orders can retain fields such as:
+- source_order_id
+- source_line = Line 5
+- source_fg_material_code
+- generated_sfg_material_code
+- source_planned_order_fg
+- source_planned_order_sfg
+- source_avail_date
+- generation_rule_id
+- auto_generated = true
+- generated_from_powermix = true
+
+This will improve reliability and prevent bad lookups.
+
+---
+
+## 8. DUPLICATE / UPDATE SAFETY
+
+When generated orders are recalculated:
+- do not duplicate rows
+- update the existing generated row tied to the same source order + rule
+- preserve copied lineage fields properly
+
+---
+
+## 9. DEBUG LOGGING
+
+Temporarily log the following:
+
+```javascript
+console.debug('[Powermix FG/SFG Mapping Check]', {
+  sourceOrderId,
+  sourceFgCode,
+  mappedSfgCode,
+  generatedMaterialCodeFg,
+  generatedMaterialCodeSfg,
+  isFgCorrect: generatedMaterialCodeFg === sourceFgCode,
+  isSfgCorrect: generatedMaterialCodeSfg === mappedSfgCode,
+});
+```
+
+```javascript
+console.debug('[Powermix Volume Calculation]', {
+  sourceOrderId,
+  sourceQty,
+  percentage,
+  rawQty,
+  batchSize,
+  adjustedQty,
+});
+```
+
+```javascript
+console.debug('[Powermix Source Metadata Copy]', {
+  sourceOrderId,
+  copiedAvailDate,
+  copiedPlannedOrderFg,
+  copiedPlannedOrderSfg,
+  generatedOrderId,
+});
+```
+
+```javascript
+console.debug('[Powermix Generated Order UI Flags]', {
+  generatedOrderId,
+  status,
+  isPurpleHighlighted,
+  line5CreatedLabelVisible,
+});
+```
+
+---
+
+## 10. VERIFICATION
+
+1. ✅ Material Code (FG) in generated orders remains the original FG from the Line 5 source order
+2. ✅ Material Code (SFG) uses the mapped SFG from the Powermix rule
+3. ✅ The app no longer places the SFG code into the FG field
+4. ✅ Generated quantity is computed correctly from source volume × percentage
+5. ✅ Batch divisibility adjustment is correct (example: 72 × 81% = 58.32 → adjusted to 58, not 57)
+6. ✅ Volume helper text clearly explains the percentage-derived quantity and any adjustment
+7. ✅ Generated orders show a third sub-text like “Line 5 - Order Created”
+8. ✅ Generated orders are visually highlighted in purple
+9. ✅ Generated orders always have status = Plotted
+10. ✅ Generated orders inherit the source Line 5 order’s avail date
+11. ✅ Generated orders inherit the source Line 5 order’s Planned Order (FG) and Planned Order (SFG)
+12. ✅ Source lookup no longer depends only on material code
+13. ✅ Generated orders remain traceable to their exact source Line 5 order

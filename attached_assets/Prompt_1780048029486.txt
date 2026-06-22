@@ -1,0 +1,195 @@
+Please make the **Suggested Pre-orders** container scrollable in the **Fulfillment (Demo)** workspace, update the avail-date field label and formatting, and keep the container **collapsed by default on initial load**.
+
+---
+
+## 1. MAKE THE SUGGESTED PRE-ORDERS CONTAINER SCROLLABLE
+
+The current **Suggested Pre-orders** section expands vertically as more suggested orders are added.
+
+Please make this container scrollable so that it stays within a reasonable fixed/max height and users can scroll inside the container to view additional suggested pre-orders.
+
+### Goal
+Prevent the page from becoming too long when many suggested pre-orders are generated.
+
+### Expected result
+- The **Suggested Pre-orders** section has a fixed or max height
+- If the content exceeds that height, a vertical scrollbar appears inside the container
+- Users can scroll within the container to review all suggestions
+
+---
+
+## 2. KEEP THE CONTAINER COLLAPSED BY DEFAULT ON INITIAL LOAD
+
+Right now, when the app/page loads, the **Suggested Pre-orders** container is already expanded.
+
+Please change this behavior so that the container is **closed/collapsed by default** when the page first loads.
+
+### Goal
+Avoid automatically expanding the pre-order section every time the app opens or the page loads.
+
+### Expected result
+- On initial load, the **Suggested Pre-orders** section starts collapsed
+- The user can manually expand it when they want to review the suggested orders
+
+---
+
+## 3. KEEP THE SUGGESTED PRE-ORDERS HEADER VISIBLE AND CLICKABLE
+
+Please keep the **Suggested Pre-orders** header visible and make sure it clearly acts as the control for expanding/collapsing the section.
+
+### Example header
+- `Suggested Pre-orders (3) — these orders can be fulfilled from on-hand inventory`
+
+### Goal
+Users should immediately see that suggestions exist, but the section should remain collapsed until they choose to open it.
+
+### Expected result
+- The header remains visible even when collapsed
+- Clicking the header expands/collapses the section
+- If possible, keep the header sticky/visible while scrolling inside the expanded container
+
+---
+
+## 4. PRESERVE THE CURRENT SUGGESTION CARD LAYOUT INSIDE THE SCROLLABLE AREA
+
+Please keep the current suggestion-card layout intact, including:
+- pre-order badge
+- product/item name
+- material code
+- detailed fields
+- approve / dismiss buttons
+
+The requested change is only:
+- the container becomes collapsible
+- it starts collapsed by default
+- and the expanded content becomes scrollable when long
+
+### Expected result
+The card content remains the same, but the section becomes easier to manage.
+
+---
+
+## 5. ENSURE APPROVE / DISMISS BUTTONS REMAIN ACCESSIBLE
+
+Please make sure the scrollable and collapsible behavior does not make:
+- `Approve`
+- `Dismiss`
+
+harder to use.
+
+### Goal
+Users should still be able to review and act on each suggestion comfortably once they expand the section.
+
+---
+
+## 6. RENAME `SUGGESTED AVAIL DATE` TO `AI-SUGGESTED AVAIL DATE`
+
+Please update the field label currently shown as:
+
+- `Suggested Avail Date`
+
+and rename it to:
+
+- `AI-Suggested Avail Date`
+
+### Goal
+Make it clearer that this date is AI-generated / system-suggested rather than manually entered or fixed.
+
+### Expected result
+All relevant pre-order suggestion cards should display the updated label:
+- `AI-Suggested Avail Date`
+
+---
+
+## 7. FORMAT THE AI-SUGGESTED AVAIL DATE AS `MMMM DD, YYYY`
+
+Please change the displayed date format for the AI-suggested avail date.
+
+### Current example
+- `2026-06-01`
+
+### New required format
+- `June 01, 2026`
+
+### Format rule
+Use:
+- `MMMM DD, YYYY`
+
+### Expected result
+The AI-suggested avail date should be displayed in a more readable user-friendly format.
+
+---
+
+## 8. APPLY THESE CHANGES TO THE DEMO PRE-ORDER SUGGESTION SECTION ONLY
+
+These updates should apply specifically to the **Suggested Pre-orders** section in the **Fulfillment (Demo)** workspace.
+
+### Scope
+This includes:
+- collapsed-by-default behavior
+- scrollable container behavior
+- the label rename to `AI-Suggested Avail Date`
+- the new date display format
+
+### Expected result
+Only the demo pre-order suggestion section is updated unless explicitly reused elsewhere.
+
+---
+
+## IMPORTANT
+
+Please update the **Suggested Pre-orders** section in the **Fulfillment (Demo)** workspace as follows:
+
+- the container should be **collapsed by default** on initial load
+- users can manually expand/collapse it from the header
+- when expanded, it should be scrollable with a reasonable fixed/max height
+- keep the current card layout intact
+- rename `Suggested Avail Date` to `AI-Suggested Avail Date`
+- format the date as `MMMM DD, YYYY` (example: `June 01, 2026`)
+
+---
+
+## DEBUG LOGGING
+
+```javascript
+console.debug('[Suggested Pre-Orders Container State]', {
+  defaultCollapsed: true,
+  expanded,
+  suggestionCount,
+});
+```
+
+```javascript
+console.debug('[Suggested Pre-Orders Scroll Container]', {
+  enabled: true,
+  maxHeight,
+  scrollable: true,
+  suggestionCount,
+});
+```
+
+```javascript
+console.debug('[AI-Suggested Avail Date Formatting]', {
+  suggestionId,
+  rawDateValue,
+  formattedDateValue,
+  label: 'AI-Suggested Avail Date',
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ On initial load, the Suggested Pre-orders section is collapsed
+2. ✅ The section can be manually expanded/collapsed by the user
+3. ✅ The header remains visible when the section is collapsed
+4. ✅ The expanded section has a fixed or max height
+5. ✅ A vertical scrollbar appears when the suggestion list exceeds the container height
+6. ✅ Users can scroll through all suggested pre-orders inside the container
+7. ✅ The current suggestion-card layout remains intact
+8. ✅ Approve / Dismiss buttons remain accessible
+9. ✅ `Suggested Avail Date` is renamed to `AI-Suggested Avail Date`
+10. ✅ The AI-suggested avail date is formatted as `MMMM DD, YYYY`
+11. ✅ Example date displays like `June 01, 2026`
+12. ✅ No UI errors or layout regressions are introduced

@@ -1,0 +1,285 @@
+## SMART COMBINE — RIGHT-SIDE PANEL WITH AI RECOMMENDATIONS
+
+Add a Smart Combine feature with a right-side slide-out panel that provides AI-powered combine recommendations and handles the full combine workflow including conflict detection.
+
+---
+
+### TOGGLE BUTTON
+
+- A fixed vertical tab button on the right edge of the screen, labeled "Smart Combine" (text rotated vertically or displayed as a vertical tab).
+- Icon: A merge/combine icon next to the label.
+- Color: Orange (#fd5108) background, White (#ffffff) text.
+- Always visible on feedmill order tabs (Feedmill 1, 2, 3, Powermix). Hidden on Overview, Analytics, and Configurations tabs.
+- Clicking the tab toggles the right panel open/closed.
+
+---
+
+### RIGHT PANEL — LAYOUT AND BEHAVIOR
+
+**Panel behavior:**
+- Slides out from the right edge as an overlay on top of the table. Does NOT push the table to the left.
+- Width: approximately 380–420px.
+- Semi-transparent backdrop or subtle shadow on the left edge to visually separate from the table beneath.
+- Dismissible by clicking the toggle button again, or clicking outside the panel.
+
+**Panel header:**
+- Title: "Smart Combine"
+- Subtitle: "Recommendations for [current feedmill/line tab name]" (e.g., "Recommendations for Feedmill 1 — Line 1")
+- Refresh button (circular arrow icon) to manually regenerate recommendations.
+- Close button (X icon) to dismiss the panel.
+
+**Panel content — Recommendations list:**
+- The AI scans orders within the CURRENT feedmill line tab only and identifies groups of orders that can be combined.
+- Combining criteria (ALL must match):
+  • Same Material Code (FG)
+  • Same Feedmill Line number
+  • Same Form
+  • Same Batch Size
+  • Same Category
+
+**Empty state:**
+- If no combine-eligible groups are found, display:
+  "No orders available for combining in this view. Orders must share the same Material Code, Line, Form, Batch Size, and Category to be eligible."
+
+**Auto-refresh:**
+- Recommendations auto-refresh when orders change (status change, new upload, cut, un-combine, drag-and-drop reorder).
+- The manual refresh button is also available for on-demand regeneration.
+
+---
+
+### RECOMMENDATION CARD DESIGN
+
+Each recommendation is displayed as a card in the panel. Multiple recommendation cards are listed vertically and scrollable.
+
+**Card content:**
+- **Group header:** "Combine Group [#]" (e.g., "Combine Group 1")
+- **Shared details (displayed once at the top of the card):**
+  • Material Code (FG): [value] — highlighted/bold
+  • Item Description: [value]
+  • Form: [value]
+  • Line: [line number]
+
+- **Orders in the group (listed below shared details):**
+  Each order shows:
+  • FPR: [value]
+  • Planned Order FG: [value]
+  • Volume: [X] MT
+  • Avail Date: [date or text]
+
+- **Combined total:**
+  "Combined Volume: [total] MT" — displayed prominently below the order list.
+
+- **Action buttons at the bottom of each card:**
+  • [Approve] — Orange (#fd5108) background, White text
+  • [Dismiss] — Subtle grey outline button
+
+**Dismiss behavior:**
+- When the user clicks Dismiss, the recommendation card is removed from the panel.
+- The dismissed recommendation does NOT reappear until the next manual refresh (clicking the refresh button) or until order data changes trigger an auto-refresh.
+
+---
+
+### APPROVAL FLOW — CONFIRMATION DIALOG WITH CONFLICT DETECTION
+
+When the user clicks [Approve] on a recommendation card, the following flow occurs:
+
+**Step 1 — Conflict Detection:**
+
+Before showing the confirmation dialog, the system calculates the impact of combining:
+
+1. Calculate the new combined total volume.
+2. Calculate the new Production Hours based on the combined volume: Combined Volume / Run Rate.
+3. Determine the lead row's position in the scheduling cascade (it takes the position of the earliest order in the group by current Prio).
+4. Calculate the new Completion Date for the lead row: Start Date/Time + new Production Hours + Changeover Time.
+5. Cascade downstream: Recalculate Start Date/Time and Completion Date for ALL subsequent orders in the same feedmill line.
+6. Check each downstream order: Does its new Completion Date exceed its Avail Date?
+
+**Step 2 — Confirmation Dialog (No Conflicts):**
+
+If NO downstream orders would miss their Avail Date deadline, show:
+
+Title: "Combine Orders"
+Message: "You are about to combine the following orders:"
+
+Order list:
+• FPR: [value] — [Item Description] — [X] MT
+• FPR: [value] — [Item Description] — [X] MT
+(list all orders in the group)
+
+"Combined Volume: [total] MT"
+"Estimated Production Hours: [X.XX] hrs"
+"Estimated Completion Date: [MMMM DD, YYYY HH:MM AM/PM]"
+
+Buttons: [Confirm Combine] [Cancel]
+
+**Step 3 — Confirmation Dialog (With Conflicts):**
+
+If downstream orders WOULD miss their Avail Date deadline, show:
+
+Title: "Combine Orders — Scheduling Conflict Detected"
+Message: "Combining these orders will cause the following downstream orders to exceed their Avail Date deadline:"
+
+Conflict list (only affected orders):
+• ⚠ FPR: [value] — [Item Description]
+  New Completion Date: [MMMM DD, YYYY] → Avail Date: [MMMM DD, YYYY]
+  Exceeds deadline by [X] hours/days
+
+• ⚠ FPR: [value] — [Item Description]
+  New Completion Date: [MMMM DD, YYYY] → Avail Date: [MMMM DD, YYYY]
+  Exceeds deadline by [X] hours/days
+
+"This combine action is blocked until the scheduling conflict is resolved. Consider reordering orders, adjusting volumes, or changing Start Dates to free up capacity."
+
+Buttons: [Go Back] (only option — combine is blocked)
+
+The combine is BLOCKED when there are downstream deadline conflicts. The user must resolve the conflicts first (reorder, adjust volumes, change dates) before the combine can proceed.
+
+---
+
+### COMBINED ORDER — NEW LEAD ROW BEHAVIOR
+
+When the user confirms the combine (no conflicts), the following happens:
+
+**New Lead Row Creation:**
+- A NEW row is created as the lead order for the combined group.
+- This lead row is placed at the position of the earliest order in the group (by current Prio).
+
+**Lead row field values:**
+
+• FPR: Auto-generated based on the date of combining in YYMMDD format.
+  Example: Combined on March 09, 2026 → FPR = "260309"
+
+• Material Code (FG): Shared value from the group.
+
+• Item Description: Determined by the following priority criteria:
+  1. If all orders have the SAME FPR, use the Item Description from the order with the LARGEST volume.
+  2. If orders have DIFFERENT FPRs (but same Material Code), use the Item Description from the order with the MOST RECENT FPR (most recent date), regardless of volume.
+  
+  Category: Same shared value.
+
+• Form: Shared value from the group.
+• Batch Size: Shared value from the group.
+• Category: Shared value from the group.
+
+• Planned Order (FG, SFG): Blank.
+• Production Order (FG1, SFG1): Blank.
+• Material Code (SFG): Auto-populated from Knowledge Base (same as original orders since Material Code FG is the same).
+
+• Volume (MT):
+  - Suggested Volume: Sum of all individual order Suggested Volumes.
+  - Original Volume: Sum of all individual order Original Volumes.
+  - Display Line 1: "[Combined Total] MT"
+  - Display Line 2: "Original: [Combined Original Total] MT"
+
+• Number of Batches: Combined Suggested Volume / Batch Size (whole number, no decimals).
+• Number of Bags: Combined Suggested Volume / 50 * 1000 (whole number, no decimals).
+• Production Hours: Combined Suggested Volume / Run Rate (2 decimal places). Blank if Form = "M" or no Run Rate.
+• Changeover Time: 0.17 (default).
+• Run Rate: From Knowledge Base based on the line number.
+
+• HA Available: Blank (user fills in).
+• SCADA: Blank (user fills in).
+• PV: Blank (user fills in).
+• HA Prep: Blank (user selects from dropdown).
+
+• Status: "Combine with other PO"
+• Start Date: Inherited from the scheduling cascade (based on previous order's Completion Date, or user-defined if first order).
+• Start Time: Inherited from the scheduling cascade.
+• Avail Date: Retains original values from each child order independently (see child rows below). The lead row's Avail Date can be blank or set by the user.
+• Completion Date: Calculated from Start Date/Time + Production Hours + Changeover Time.
+
+• FPR Notes: Auto-populated: "Combined orders: FPR [A], FPR [B], FPR [C] — [MMMM DD, YYYY HH:MM AM/PM]"
+• Special Remarks: Blank.
+• Threads, Sacks, Markings, Tags: Auto-populated from Knowledge Base.
+• End Date: Blank.
+
+• Readiness: Evaluated on the lead row only.
+
+**Lead row visual indicator:**
+- "Lead" badge displayed next to the FPR.
+- Row highlighted with light blue tint (#e0f2f8).
+
+---
+
+### CHILD ROWS (ORIGINAL ORDERS) — DISPLAY BELOW LEAD ROW
+
+The original individual orders (Order A, Order B, etc.) are displayed directly below the lead row.
+
+**Child row behavior:**
+- ALL fields are read-only. No editing allowed on child rows.
+- All original values are preserved exactly as they were before combining (Volume, FPR, Planned Order, Status before combine, Start Date, Start Time, Avail Date, Completion Date, FPR Notes, etc.).
+- FPR Notes is appended with: "Combined into lead order FPR: [lead FPR] — [MMMM DD, YYYY HH:MM AM/PM]"
+
+**Child row visual treatment:**
+- Highlighted with light blue tint (#e0f2f8) matching the lead row.
+- Slightly indented (left padding offset) to visually indicate they are children of the lead row.
+- A subtle vertical connector line on the left side linking child rows to the lead row, indicating the group relationship.
+- Status badge shows "Combine with other PO" for all child rows.
+
+**Sticky grouping:**
+- Lead row and all child rows always remain adjacent.
+- When the lead row is dragged to a new position, all child rows move together.
+- Child rows CANNOT be individually dragged or reordered.
+
+**Child row Avail Date:**
+- Each child row retains its own original Avail Date for audit trail purposes.
+- If Order A had "prio replenish" and Order B had "January 10, 2026", those values are preserved on their respective child rows.
+
+---
+
+### UN-COMBINING (BREAKING OUT)
+
+When a user changes the lead row's status away from "Combine with other PO" (e.g., to "Plotted", "Cancel PO", etc.):
+
+1. The lead row is DELETED entirely.
+2. All child rows return to independent order status.
+3. Each child row:
+   - Regains its original values (already preserved).
+   - Status reverts to "Plotted" (or the status before combining, if tracked).
+   - Becomes fully editable per the editability matrix.
+   - FPR Notes is appended: "Un-combined from lead order FPR: [lead FPR] — [MMMM DD, YYYY HH:MM AM/PM]"
+4. The scheduling cascade recalculates for all affected orders in the feedmill line.
+5. Order History logs the un-combine action on all involved orders.
+
+---
+
+### STATUS SYNC FOR COMBINED ORDERS
+
+- When the lead row's status changes to "In production", "On-going *", "Hold", or "Done":
+  • All child rows' status badges update to match (visual sync only — child rows remain read-only).
+  • The lead row drives all scheduling and capacity calculations.
+
+- When the lead row's status changes to "Done":
+  • End Date is auto-populated on the lead row with current date/time.
+  • All child rows' status badges update to "Done".
+  • The combined group moves to the "Recently Completed" section.
+
+- When the lead row's status changes to "Cancel PO":
+  • Cancellation confirmation dialog appears (with reason — same as existing Cancel PO flow).
+  • Upon confirmation, the lead row is DELETED (same as un-combining).
+  • All child rows return to independent status with Status = "Cancel PO".
+  • FPR Notes appended with the cancellation reason on each child row.
+
+---
+
+### CAPACITY TRACKING
+
+- ONLY the lead row's combined volume counts toward feedmill line capacity.
+- Child rows do NOT count toward capacity (to avoid double-counting).
+- When the lead row's status is "In production" or any "On-going *", its combined Suggested Volume is included in the line's current MT total.
+
+---
+
+### ORDER HISTORY / AUDIT TRAIL
+
+The following history entries are generated for combine actions:
+
+**On combine:**
+- Lead row: "Created as combined lead order from FPR [A], FPR [B] — [timestamp]"
+- Each child row: "Combined into lead order FPR: [lead FPR] — [timestamp]"
+
+**On un-combine:**
+- Each child row: "Un-combined from lead order FPR: [lead FPR] — [timestamp]. Lead order deleted."
+
+**On cancel of lead:**
+- Each child row: "Lead order FPR: [lead FPR] cancelled. Reason: [reason]. Order returned to independent status with Cancel PO. — [timestamp]"

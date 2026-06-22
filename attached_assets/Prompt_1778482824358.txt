@@ -1,0 +1,313 @@
+```
+Please improve the AI’s order date suggestion logic only, without replacing or rewriting the current AI sequencing logic that is already working.
+
+---
+
+## IMPORTANT SCOPE
+
+This request is **not** to replace the current AI logic.
+
+Do **not** rewrite or overhaul:
+- the current AI strategy generation
+- the existing 3-Dimension Analysis flow
+- the current changeover reasoning engine
+- the overall sequencing engine that is already working in the app
+
+This is only an enhancement to one specific part of the AI behavior:
+
+## improve how the AI suggests / assigns dates to orders
+
+Especially when the AI has identified that MTS-related date flexibility is appropriate.
+
+The goal is to keep the current AI working as-is, and only make the date suggestion behavior smarter.
+
+---
+
+## OBJECTIVE
+
+Improve the AI’s date suggestion / date placement behavior so that when it decides to move orders due to MTS flexibility, it does so in a more capacity-aware and operationally realistic way.
+
+Right now, the AI can already:
+- move orders earlier
+- move some flexible orders while respecting constraints
+- avoid compromising orders
+
+But the date placement can still be improved.
+
+We want the AI to:
+1. pack flexible orders into feasible daily buckets under a 24-hour limit
+2. consider production hours + changeovers when placing orders on a day
+3. keep MTO dates protected
+4. allow only **MTS stock sufficient** orders to move later than their target date, up to **14 days**
+5. apply this only when the AI’s own 3-Dimension Analysis says MTS flexibility is actually appropriate
+
+---
+
+## 1. ONLY ENHANCE DATE SUGGESTION LOGIC — DO NOT CHANGE THE REST OF THE AI
+
+Keep the current AI logic intact.
+
+Do not replace:
+- AI strategy naming
+- AI strategy descriptions
+- current strategy generation behavior
+- existing clustering / changeover sequencing logic
+- overall recommended-card behavior
+
+Only improve the logic that decides:
+- what date the AI should assign/suggest to an order
+when the strategy allows date movement.
+
+This is an enhancement layer, not a rewrite.
+
+---
+
+## 2. ONLY APPLY DATE FLEXIBILITY IF MTS IS ACTUALLY JUSTIFIED BY THE 3-DIMENSION ANALYSIS
+
+The AI should not automatically advance or delay orders just because capacity is available.
+
+Only use this improved date movement behavior when the AI’s own 3-Dimension Analysis indicates that:
+- MTS advancement/flexibility is viable
+- MTS is not deprioritized
+- the strategy legitimately includes MTS movement
+
+If the 3-Dimension Analysis says MTS is deprioritized, then do not force this advancement/delay behavior.
+
+This avoids contradictions like:
+- analysis says MTS is not the focus
+- but execution still aggressively changes dates anyway
+
+---
+
+## 3. TREAT MTO AND MTS DIFFERENTLY
+
+### MTO orders
+MTO orders should remain date-protected.
+Their dates should not be casually edited or compromised.
+
+The AI should respect them as fixed/protected anchors unless an existing valid rule already allows otherwise.
+
+### MTS stock sufficient orders
+These are the flexible orders for this enhancement.
+
+MTS stock sufficient orders may:
+- be moved earlier when valid
+- or be moved later than their target date when helpful
+
+But later movement is only allowed:
+- up to **14 days after the target date**
+
+This later movement can help:
+- complement protected MTO orders
+- reduce changeovers
+- improve date packing
+- cluster compatible orders more efficiently
+
+---
+
+## 4. DO NOT ALLOW LATER-THAN-TARGET MOVEMENT FOR THESE GROUPS
+
+The AI should **not** use the +14-day flexibility for:
+- MTO orders
+- MTS Critical orders
+- MTS Urgent orders
+- MTS Monitor orders
+
+The “later than target date, up to 14 days” rule should only apply to:
+
+- **MTS + stock sufficient**
+
+This must be explicit.
+
+---
+
+## 5. USE CAPACITY-AWARE DAILY PACKING WHEN SUGGESTING DATES
+
+When the AI is assigning dates to flexible orders, it should stop placing dates too loosely/randomly across the calendar.
+
+Instead, it should use capacity-aware daily packing:
+
+### Rules
+- each day has a capacity of **24 hours**
+- used hours for a day include:
+  - production hours
+  - plus changeover hours assigned to that day
+- the AI should try to place orders into the **earliest feasible day** that still fits within the 24-hour cap
+- if the order does not fit in the remaining capacity of that day, move the whole order to the next feasible day
+
+This should produce more realistic date placement and better daily utilization.
+
+---
+
+## 6. DO NOT SPLIT ORDERS IN THIS DATE-SUGGESTION ENHANCEMENT
+
+If an order cannot fit in the remaining hours of a day:
+- do not split it just to make it fit
+- move the full order to the next feasible day
+
+This enhancement should keep order placement simple and preserve full-order integrity unless some other explicit app flow already handles split/cut orders separately.
+
+---
+
+## 7. FUTURE DISPATCHES MUST STILL GUIDE THE DATE DECISION
+
+The AI must use the Future Dispatches context as part of the date suggestion logic.
+
+That includes awareness of:
+- target dates
+- order urgency/status such as:
+  - critical
+  - urgent
+  - monitor
+  - stock sufficient
+- which orders are tightly protected
+- which orders have safe movement opportunity
+
+This means:
+- critical / urgent / monitor should remain tightly protected
+- stock sufficient may use the wider movement flexibility
+
+The AI should not ignore Future Dispatches when packing dates.
+
+---
+
+## 8. USE THE IMPROVED DATE SUGGESTION TO COMPLEMENT CHANGEOVER REDUCTION
+
+This enhancement should not be date movement for its own sake.
+
+The improved date assignment should still support the current AI’s goals, such as:
+- reducing changeover
+- grouping compatible orders
+- complementing protected MTO anchors
+- filling underutilized days
+- creating more efficient daily utilization
+
+So the AI should choose flexible date placement that works with, not against, the sequence strategy.
+
+---
+
+## 9. EXAMPLE OF EXPECTED BEHAVIOR
+
+### Scenario
+Current date context:
+- May 12
+
+Orders:
+- Order A — target May 20 — 10 hours — MTS stock sufficient
+- Order B — target May 23 — 18 hours — MTS stock sufficient
+- Order C — target May 23 — 5 hours — MTS stock sufficient
+- Order D — target May 27 — 20 hours — MTS stock sufficient
+- Order F — target May 30 — 19 hours — MTS stock sufficient
+
+If MTS advancement is justified, the AI should not just randomly assign earlier dates.
+
+Instead, it should try to pack them into feasible daily buckets such as:
+
+- May 12:
+  - Order A — 10 hours
+  - Order B — 13 additional hours if total still remains under 24 with changeover
+- May 13:
+  - remaining orders that fit under 24 hours
+- May 14:
+  - next full order that fits
+- etc.
+
+The key principle is:
+- fill the earliest feasible days up to 24 hours including changeovers
+- then move to the next day
+
+### MTO / MTS mixed case
+If there is:
+- Order A — May 14 — MTS stock sufficient
+- Order B — May 20 — MTO
+- Order C — May 29 — MTS stock sufficient
+
+The AI may produce a structure like:
+- Order B — May 20 — MTO (protected)
+- Order A — May 20 or later within allowed flex if it helps complement the run
+- Order C — May 21 through valid advancement logic
+
+This is valid if:
+- MTO remains protected
+- MTS stock sufficient is used flexibly
+- later movement does not exceed 14 days past target
+
+---
+
+## 10. DO NOT OVERWRITE THE ORIGINAL TARGET DATE DATA
+
+This improvement should affect:
+- the AI’s suggested/assigned sequencing date behavior
+
+Do not overwrite or destroy the underlying original target date data from Future Dispatches.
+
+The original target date remains part of the order record.
+
+The enhancement is about:
+- how AI schedules around that date
+- not about rewriting the source date itself
+
+---
+
+## 11. IMPROVE DAILY UTILIZATION NATURALLY THROUGH BETTER DATE ASSIGNMENT
+
+This change should improve the Daily utilization KPI as a consequence of smarter date placement.
+
+Do not fake the utilization metric.
+
+Instead:
+- improve how dates are assigned
+- let the utilization breakdown improve naturally because orders are packed into days more intelligently
+
+This is the preferred fix.
+
+---
+
+## 12. ADD DEBUG LOGGING FOR DATE ASSIGNMENT DECISIONS
+
+Temporarily log:
+
+```javascript
+console.debug('[AI Date Suggestion Enhancement]', {
+  orderId,
+  item: order.item_description,
+  originalTargetDate,
+  suggestedDate,
+  orderType: order.isMTO ? 'MTO' : 'MTS',
+  urgencyClass,
+  stockStatus,
+  mtsEligibleForFlex,
+  canMoveLaterUpTo14Days,
+  assignedDayUsedHours,
+  assignedDayCapacity: 24,
+  productionHours,
+  changeoverHoursAssigned,
+  fitStatus: 'fit_current_day_or_moved_to_next_day',
+  strategyTitle,
+});
+```
+
+This helps verify:
+- only appropriate orders are being flexed
+- MTO is protected
+- stock sufficient MTS orders are using the allowed later-than-target flexibility correctly
+- dates are packed under the 24-hour cap including changeovers
+
+---
+
+## 13. VERIFICATION
+
+1. ✅ The current AI sequencing logic remains intact and is not replaced
+2. ✅ Only the date suggestion / date assignment behavior is enhanced
+3. ✅ Improved date flexibility is only applied when the AI’s 3-Dimension Analysis indicates MTS flexibility is appropriate
+4. ✅ MTO orders remain protected and are not casually date-shifted
+5. ✅ Only MTS stock sufficient orders may be moved later than target date
+6. ✅ Later-than-target movement for MTS stock sufficient is capped at 14 days
+7. ✅ Critical / Urgent / Monitor orders are not given that wider later-than-target flexibility
+8. ✅ AI date placement uses daily capacity-aware packing
+9. ✅ Daily packing uses a 24-hour cap including production + changeover
+10. ✅ Orders are moved fully to the next feasible day if they do not fit; they are not split in this enhancement
+11. ✅ Future Dispatches context is still respected in date decisions
+12. ✅ Smarter date assignment improves Daily utilization naturally without changing the KPI definition
+13. ✅ Original target date data remains preserved in the underlying order data
+```

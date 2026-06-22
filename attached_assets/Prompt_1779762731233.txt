@@ -1,0 +1,376 @@
+Please update the **changeover calculation logic** in the order table and related sequencing logic so that changeover is no longer fully cumulative/stackable across all triggered rules.
+
+---
+
+## 1. REPLACE THE FULLY CUMULATIVE CHANGEOVER MODEL
+
+The application currently calculates changeover as:
+
+- `Base changeover + all triggered additional changeover penalties`
+
+This means multiple triggered rules stack together cumulatively.
+
+Please update this logic.
+
+### New intended model
+Changeover should now be calculated as:
+
+- **Cleaning**
+- plus **Change Die**
+
+It should **not** add every triggered rule cumulatively.
+
+### Expected result
+The app should no longer sum:
+- base changeover
+- plus all color/category/diameter penalties together
+
+Instead, it should use the new selective two-part model described below.
+
+---
+
+## 2. DEFINE THE NEW CHANGEOVER FORMULA
+
+Please use this formula:
+
+### New formula
+- If **no cleaning rule** and **no change die rule** applies:
+  - use **Base changeover** only
+
+- If **cleaning applies** but **no change die** applies:
+  - use the **highest applicable cleaning rule only**
+
+- If **change die applies** but **no cleaning** applies:
+  - use **Change Die** only
+
+- If **both cleaning and change die** apply:
+  - use:
+    - **highest applicable cleaning rule**
+    - **plus**
+    - **change die**
+
+### Important
+Do **not** add Base changeover on top of Cleaning or Change Die.
+
+Base changeover is only used when there is no cleaning and no die change.
+
+---
+
+## 3. TREAT DIAMETER CHANGE AS “CHANGE DIE”
+
+Please treat pellet diameter change as the **Change Die** component.
+
+### Rule
+If:
+- `A.diameter ≠ B.diameter`
+- and both diameters are set
+
+then add the configured **Change Die** value for that feedmill.
+
+### Example values from current rules
+- FM1 = `1.5 hr`
+- FM2 = `1.0 hr`
+- FM3 = `1.0 hr`
+
+### Expected result
+Diameter change contributes only the die-change value, not a stack of other diameter-related amounts.
+
+---
+
+## 4. TREAT COLOR / CATEGORY TRANSITIONS AS “CLEANING”
+
+Please group the following rules under the **Cleaning** component:
+
+- Yellow ↔ Brown
+- Red → Any
+- Green → Any
+- Any → Red/Green
+- Category change
+
+### Important
+If multiple cleaning-related rules are triggered at the same time, do **not** add them together.
+
+Instead:
+- evaluate all triggered cleaning rules
+- choose the **single highest cleaning value**
+- use only that one cleaning value
+
+### Expected result
+Cleaning is based on the **maximum applicable cleaning rule**, not the sum of all cleaning rules.
+
+---
+
+## 5. USE ONLY THE HIGHEST CLEANING RULE WHEN MULTIPLE CLEANING RULES APPLY
+
+Please explicitly update the logic so that among all triggered cleaning rules, only the rule with the **highest value** is used.
+
+### Example
+If a transition triggers:
+- Yellow → Red = `0.5 hr`
+- Category change = `0.33 hr`
+
+then Cleaning should be:
+- `0.5 hr`
+
+not:
+- `0.83 hr`
+
+### Expected result
+The cleaning component should always be:
+- `max(all triggered cleaning rule values)`
+
+---
+
+## 6. BASE CHANGEOVER SHOULD ONLY APPLY WHEN NO CLEANING OR CHANGE DIE IS NEEDED
+
+Please revise the role of **Base changeover**.
+
+### New rule
+Use the Base changeover only if:
+- there is **no cleaning trigger**
+- and there is **no diameter/change die trigger**
+
+### Example
+If two consecutive orders are identical in relevant changeover dimensions, then:
+- use Base changeover (e.g. `0.17 hr`)
+
+But if there is:
+- cleaning,
+- or change die,
+- or both,
+
+then do **not** add base on top.
+
+### Expected result
+Base changeover becomes the fallback/default only when there is no actual cleaning or die-change event.
+
+---
+
+## 7. EXAMPLES TO ENFORCE
+
+### Example A — Color change only
+FM1 Base = `0.17`
+
+Orders:
+- Order A: `Poultry · Yellow · 4.00mm`
+- Order B: `Poultry · Red · 4.00mm`
+
+Triggered cleaning:
+- Yellow → Red = `0.5`
+
+No diameter change.
+
+### Expected changeover
+- `0.5 hr`
+
+### Not expected
+- `0.17 + 0.5 = 0.67 hr`
+
+---
+
+### Example B — Red to Yellow + diameter change
+FM1 Base = `0.17`
+
+Orders:
+- Order A: `Poultry · Red · 4.00mm`
+- Order B: `Poultry · Yellow · 3.00mm`
+
+Triggered cleaning:
+- Red → Any = `1.0`
+
+Triggered change die:
+- 4.00mm → 3.00mm = `1.5`
+
+### Expected changeover
+- `1.0 + 1.5 = 2.5 hr`
+
+### Not expected
+- `0.17 + 1.0 + 1.5 = 2.67 hr`
+
+---
+
+### Example C — No meaningful change
+FM1 Base = `0.17`
+
+Orders:
+- Order C: `Poultry · Yellow · 3.00mm`
+- Order D: `Poultry · Yellow · 3.00mm`
+
+No cleaning.
+No diameter change.
+
+### Expected changeover
+- `0.17 hr`
+
+---
+
+### Example D — Category + color + diameter change
+FM1 Base = `0.17`
+
+Orders:
+- Order A: `Swine · Yellow · 3.00mm`
+- Order B: `Poultry · Red · 4.00mm`
+
+Triggered cleaning rules:
+- Yellow → Red = `0.5`
+- Category change = `0.33`
+
+Use highest cleaning only:
+- `0.5`
+
+Triggered change die:
+- 3.00mm → 4.00mm = `1.5`
+
+### Expected changeover
+- `0.5 + 1.5 = 2.0 hr`
+
+### Not expected
+- `0.5 + 0.33 + 1.5`
+- or `0.17 + 0.5 + 0.33 + 1.5`
+
+---
+
+## 8. APPLY THIS TO ALL CHANGEOVER CONSUMERS USING THE SAME SHARED LOGIC
+
+Please ensure this updated rule is applied consistently everywhere changeover is used, including:
+
+- order table live changeover display
+- dashboard enrichment / `_changeoverTotal`
+- AI sequencing logic
+- strategy scoring
+- GPT prompt generation for changeover reasoning
+- tooltips / breakdowns
+
+### Goal
+The application should still maintain a single source of truth for changeover logic, but with the new non-cumulative model.
+
+### Expected result
+All consumers of changeover logic should reflect:
+- highest cleaning rule only
+- plus change die if applicable
+- otherwise base only
+
+---
+
+## 9. UPDATE TOOLTIPS / BREAKDOWN EXPLANATIONS
+
+Please update the changeover tooltip/breakdown logic so the UI explains the new calculation clearly.
+
+### Goal
+Users should be able to see:
+- whether cleaning applied
+- which cleaning rule was selected as the highest one
+- whether change die applied
+- whether base was used instead
+
+### Example tooltip wording
+- `Cleaning: Red → Any = 1.0 hr`
+- `Change Die: 4.00mm → 3.00mm = 1.5 hr`
+- `Total Changeover = 2.5 hr`
+
+Or:
+- `No cleaning or die change detected; base changeover applied = 0.17 hr`
+
+### Expected result
+The tooltip should no longer imply that all triggered penalties stacked cumulatively.
+
+---
+
+## 10. KEEP FEEDMILL-SPECIFIC VALUES AND POWERMIX EXCLUSION INTACT
+
+Please preserve:
+- feedmill-specific changeover values
+- the same feedmill grouping logic:
+  - Line 1, 2 → FM1
+  - Line 3, 4 → FM2
+  - Line 6, 7 → FM3
+- Powermix exclusion:
+  - Line 5 should still not use additional changeover penalties beyond the existing intended behavior
+
+### Expected result
+This request changes the **calculation method**, not the feedmill structure or rule-value source.
+
+---
+
+## IMPORTANT
+
+Please replace the current **fully cumulative/stacking** changeover model with this rule:
+
+- use **Base changeover only if nothing changes**
+- otherwise calculate:
+  - **highest applicable Cleaning rule**
+  - plus **Change Die** if pellet diameter changes
+
+Do not add:
+- Base changeover on top of cleaning/die
+- multiple cleaning rules together
+
+This should apply across the order table, AI sequencing, strategy scoring, prompts, and tooltips.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log the new changeover selection logic.
+
+```javascript
+console.debug('[Changeover Calculation - New Model]', {
+  line,
+  feedmill,
+  orderA: {
+    color: prevColor,
+    category: prevCategory,
+    diameter: prevDiameter,
+  },
+  orderB: {
+    color: nextColor,
+    category: nextCategory,
+    diameter: nextDiameter,
+  },
+  baseChangeover,
+  triggeredCleaningRules,
+  selectedCleaningRule,
+  selectedCleaningValue,
+  changeDieApplied,
+  changeDieValue,
+  usedBaseOnly,
+  totalChangeover,
+});
+```
+
+```javascript
+console.debug('[Changeover Cleaning Rule Selection]', {
+  triggeredCleaningRules,
+  selectedHighestCleaningRule,
+  selectedHighestCleaningValue,
+});
+```
+
+```javascript
+console.debug('[Changeover Tooltip Breakdown]', {
+  selectedCleaningRule,
+  changeDieApplied,
+  totalChangeover,
+  breakdownMode: 'cleaning_plus_change_die',
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Base changeover is used only when no cleaning and no diameter change apply
+2. ✅ Color/category-related rules are treated as cleaning rules
+3. ✅ If multiple cleaning rules apply, only the highest cleaning value is used
+4. ✅ Diameter change is treated as the change-die component
+5. ✅ If both cleaning and diameter change apply, total = highest cleaning + change die
+6. ✅ Base changeover is no longer added on top of cleaning and/or change die
+7. ✅ `Poultry Yellow 4.00mm → Poultry Red 4.00mm` on FM1 results in `0.5 hr`
+8. ✅ `Poultry Red 4.00mm → Poultry Yellow 3.00mm` on FM1 results in `2.5 hr`
+9. ✅ Identical consecutive orders still use `0.17 hr` base changeover (or configured base)
+10. ✅ `Swine Yellow 3.00mm → Poultry Red 4.00mm` on FM1 results in `2.0 hr`
+11. ✅ Order table display uses the updated logic
+12. ✅ AI sequence scoring uses the updated logic
+13. ✅ Tooltips/breakdowns explain the updated logic clearly
+14. ✅ Powermix exclusion remains intact
+15. ✅ No UI errors or console errors are introduced

@@ -1,0 +1,180 @@
+Please revisit and fix the **Divert Order insertion logic**, with special attention to how **generated / linked orders** are being counted in the target line sequence.
+
+The current issue appears to be that the **reviewed insertion position in the modal** and the **final applied insertion position** are not using the same effective set of rows/entities.
+
+---
+
+## 1. MAKE THE DIVERT MODAL AND FINAL APPLY USE THE SAME COUNTED ENTITY SET
+
+There is still a mismatch where the **Divert Order** modal shows one reviewed insertion priority, but the final applied diversion lands at a very different priority.
+
+### Current issue example
+The modal shows:
+- target line = `Line 2`
+- `Insertion Position: Priority 2`
+
+But after confirmation, the diverted order is actually inserted at:
+- `Prio 7`
+
+### Likely cause
+The modal and the apply step may not be counting the same set of rows/entities on the target line.
+
+### Required rule
+The reviewed priority in the modal and the final inserted priority must be based on the **same exact target-line entity set**.
+
+### Expected result
+If the modal says:
+- `Priority 2`
+
+then the final applied diversion must also land at:
+- `Prio 2`
+
+---
+
+## 2. SPECIFICALLY REVIEW HOW GENERATED / LINKED ORDERS AFFECT DIVERT INSERTION POSITION
+
+Please investigate whether **generated orders**, **linked orders**, or other special sequence entities are causing the mismatch.
+
+### Possible issue
+Generated/linked orders may be:
+- included in one phase of the calculation
+- excluded in another
+- counted differently in the modal
+- or inserted differently during final apply
+
+### Goal
+Ensure generated/linked orders are handled consistently when determining target-line insertion position.
+
+### Expected result
+Generated/linked orders should no longer cause the reviewed diversion priority to drift from the final applied priority.
+
+---
+
+## 3. USE THE SAME TARGET-LINE SNAPSHOT FOR:
+- modal insertion summary
+- impact analysis
+- final diversion apply
+
+Please make sure all parts of the divert flow use the same target-line snapshot and the same entity-counting logic.
+
+### Important
+There should not be one snapshot for:
+- reviewed insertion position
+
+and another snapshot for:
+- actual insertion into the line
+
+### Expected result
+The modal and final apply should agree because they are using the same target-line sequence basis.
+
+---
+
+## 4. DO NOT LET GENERATED / SPECIAL ENTITIES SHIFT THE FINAL INSERTION UNEXPECTEDLY AFTER REVIEW
+
+If generated or special orders exist in the destination line, the app must already account for them in the reviewed insertion priority.
+
+### Goal
+Avoid a situation where:
+- modal says `Priority 2`
+because some entities were ignored or counted differently
+- but final apply inserts at `Priority 7`
+after those entities suddenly affect the actual sequence
+
+### Expected result
+Any generated/special rows that matter to final insertion must also be included consistently during review.
+
+---
+
+## 5. KEEP THE MODAL’S INTERNAL TEXT CONSISTENT WITH THE CORRECTED PRIORITY
+
+Once the reviewed insertion priority is corrected, make sure the following all agree:
+- insertion position summary
+- impact analysis writeup
+- final applied diversion
+
+### Expected result
+No more mismatch such as:
+- summary = `Priority 2`
+- writeup = `Priority 2`
+- applied result = `Prio 7`
+
+All three should match.
+
+---
+
+## 6. APPLY THIS FIX TO DIVERT ORDER ACROSS ALL LINES / FEEDMILLS
+
+Please ensure this consistency applies across:
+- `Line 1` to `Line 7`
+- `FM1`
+- `FM2`
+- `FM3`
+- `PMX`
+
+### Expected result
+Divert Order should use a stable and consistent insertion-position basis across all target lines.
+
+---
+
+## IMPORTANT
+
+Please enforce this rule for **Divert Order**:
+
+> The insertion position shown in the modal must be calculated using the same target-line entity set and counting logic as the final apply step.
+
+Please specifically investigate **generated / linked orders** as a likely cause of the mismatch.
+
+Example:
+- modal reviewed position = `Line 2, Priority 2`
+- final applied result must also be = `Line 2, Prio 2`
+
+Generated/linked orders should not cause the modal and final insertion to drift apart.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log target-line entity counting for divert review vs apply.
+
+```javascript
+console.debug('[Divert Order Target Line Entity Set]', {
+  orderId,
+  targetLine,
+  modalEntityIds,
+  applyEntityIds,
+  exactMatch:
+    JSON.stringify(modalEntityIds) === JSON.stringify(applyEntityIds),
+});
+```
+
+```javascript
+console.debug('[Divert Order Generated/Linked Entity Handling]', {
+  orderId,
+  targetLine,
+  generatedOrLinkedEntityIds,
+  countedInModal,
+  countedInApply,
+});
+```
+
+```javascript
+console.debug('[Divert Order Final Priority Consistency]', {
+  orderId,
+  targetLine,
+  reviewedPriority,
+  finalAppliedPriority,
+  exactMatch: reviewedPriority === finalAppliedPriority,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Modal-reviewed diversion priority uses the same counted entity set as final apply
+2. ✅ Generated/linked orders are handled consistently in divert insertion logic
+3. ✅ Target-line snapshot is the same for modal review and final apply
+4. ✅ Reviewed diversion priority matches final applied priority
+5. ✅ Modal summary, writeup, and final schedule all agree
+6. ✅ The fix works across all lines/feedmills
+7. ✅ No UI errors or console errors are introduced

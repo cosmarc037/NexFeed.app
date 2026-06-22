@@ -1,0 +1,704 @@
+```
+Implement the following fixes and changes to the shutdown and divert features:
+
+---
+
+## FIX 1: PER-LINE SHUTDOWN — ONLY AFFECT THE SHUTDOWN LINE, NOT BOTH LINES
+
+Currently, when Line 1 is shut down, both Line 1 and Line 2 orders show yellow highlights and divert hints in the All tab. Only Line 1 orders should be affected.
+
+### THE PROBLEM
+
+The shutdown marking logic is likely applying to all lines in the feedmill instead of just the specific shutdown line.
+
+### THE FIX
+
+When marking divertible orders, check if the ORDER's specific line is shutdown, not the feedmill:
+
+```javascript
+function markDivertibleOrders(allOrders, lineShutdowns, masterData) {
+  const shutdownLines = Object.entries(lineShutdowns)
+    .filter(([line, info]) => info.isShutdown)
+    .map(([line]) => line);
+  
+  allOrders.forEach(order => {
+    // Reset markers
+    order._isDivertible = false;
+    order._canDivertOutsideFeedmill = false;
+    order._canDivertWithinFeedmill = false;
+    order._divertNote = null;
+    
+    // Skip Done and Cancelled
+    if (order.status === 'Done' || order.status === 'Cancel PO') return;
+    
+    // Only mark orders on SHUTDOWN lines — not all lines in the feedmill
+    if (!shutdownLines.includes(order.line)) return;
+    
+    const orderFeedmill = LINE_TO_FEEDMILL_MAP[order.line];
+    const feedmillLines = FEEDMILL_LINE_MAP[orderFeedmill];
+    
+    // Check if ENTIRE feedmill is shutdown or just this line
+    const allFeedmillLinesShutdown = feedmillLines.every(l => shutdownLines.includes(l));
+    
+    // Get partner lines in same feedmill (not shutdown)
+    const partnerLines = feedmillLines.filter(
+      l => l !== order.line && !shutdownLines.includes(l)
+    );
+    
+    // Get lines outside feedmill (not shutdown)
+    const outsideLines = Object.keys(LINE_TO_FEEDMILL_MAP).filter(
+      l => !feedmillLines.includes(l) && !shutdownLines.includes(l)
+    );
+    
+    // Check run rates from master data for outside lines
+    const md = masterData.find(
+      m => String(m.fgMaterialCode) === String(order.material_code_fg)
+    );
+    
+    const lineRateMap = md ? {
+      'Line 1': parseFloat(md.l1Rate) || 0,
+      'Line 2': parseFloat(md.l2Rate) || 0,
+      'Line 3': parseFloat(md.l3Rate) || 0,
+      'Line 4': parseFloat(md.l4Rate) || 0,
+      'Line 5': parseFloat(md.l5Rate) || 0,
+      'Line 6': parseFloat(md.l6Rate) || 0,
+      'Line 7': parseFloat(md.l7Rate) || 0,
+    } : {};
+    
+    // Check if can divert outside feedmill (has run rate)
+    const divertibleOutsideLines = outsideLines.filter(l => lineRateMap[l] > 0);
+    const canDivertOutside = divertibleOutsideLines.length > 0;
+    
+    // Can always divert to partner line within same feedmill
+    // (Line 1 and 2 are generally the same, so they can switch)
+    const canDivertWithin = partnerLines.length > 0;
+    
+    if (allFeedmillLinesShutdown) {
+      // FEEDMILL SHUTDOWN — only yellow highlight for outside diversion
+      if (canDivertOutside) {
+        order._isDivertible = true;
+        order._canDivertOutsideFeedmill = true;
+        order._highlightType = 'yellow';
+        order._divertNote = 'Feedmill shutdown — right-click to divert';
+      }
+    } else {
+      // SINGLE LINE SHUTDOWN — differentiate yellow vs white
+      if (canDivertOutside) {
+        // Can divert to outside feedmill — YELLOW highlight
+        order._isDivertible = true;
+        order._canDivertOutsideFeedmill = true;
+        order._canDivertWithinFeedmill = canDivertWithin;
+        order._highlightType = 'yellow';
+        order._divertNote = 'Line shutdown — right-click to divert';
+      } else if (canDivertWithin) {
+        // Can ONLY divert within feedmill (partner line) — WHITE background
+        order._isDivertible = true;
+        order._canDivertOutsideFeedmill = false;
+        order._canDivertWithinFeedmill = true;
+        order._highlightType = 'white';
+        order._divertNote = 'Line shutdown — right-click to divert';
+      } else {
+        // Cannot divert anywhere
+        order._isDivertible = false;
+        order._highlightType = null;
+        order._divertNote = 'Cannot be diverted — awaiting line resume';
+      }
+    }
+    
+    // Store available lines for the divert dialog
+    order._availableDivertLines = {
+      partnerLines: partnerLines,
+      outsideLines: divertibleOutsideLines,
+      allLines: [...partnerLines, ...divertibleOutsideLines]
+    };
+  });
+}
+```
+
+---
+
+## FIX 2: ORDER ROW — CORRECT HIGHLIGHT BASED ON DIVERT TYPE
+
+```jsx
+function OrderRow({ order, isLineShutdown }) {
+  const isDivertible = order._isDivertible && isLineShutdown;
+  const highlightType = order._highlightType;
+  
+  let rowClass = 'order-row';
+  if (isDivertible && highlightType === 'yellow') {
+    rowClass += ' order-row-divertible-outside';
+  }
+  // White background orders — no extra class, just the note
+  
+  return (
+    <tr 
+      className={rowClass}
+      onContextMenu={(e) => {
+        if (isDivertible) {
+          e.preventDefault();
+          showDivertContextMenu(e, order);
+        }
+      }}
+    >
+      {/* ... cells ... */}
+      <td className="item-description-cell">
+        <div className="item-desc-name">{order.item_description}</div>
+        <div className="item-desc-meta">
+          <span className="item-desc-category">{order.category}</span>
+          {order.color && (
+            <>
+              <span className="item-desc-separator">|</span>
+              <span className="item-desc-color">{order.color}</span>
+            </>
+          )}
+          {order.diameter && (
+            <>
+              <span className="item-desc-separator">|</span>
+              <span className="item-desc-diameter">{order.diameter}mm</span>
+            </>
+          )}
+        </div>
+        
+        {/* Divert hint — shows for both yellow and white */}
+        {isDivertible && order._divertNote && (
+          <div className={`item-desc-divert-hint ${
+            highlightType === 'yellow' ? 'divert-hint-outside' : 'divert-hint-within'
+          }`}>
+            ⚠ {order._divertNote}
+          </div>
+        )}
+        
+        {/* Cannot divert hint */}
+        {isLineShutdown && !isDivertible && order._divertNote && (
+          <div className="item-desc-divert-hint divert-hint-stuck">
+            🔒 {order._divertNote}
+          </div>
+        )}
+      </td>
+    </tr>
+  );
+}
+```
+
+### STYLING
+
+```css
+/* Yellow highlight — can divert to outside feedmill */
+.order-row-divertible-outside {
+  background: #fefce8 !important;
+}
+
+/* White background — can only divert within feedmill */
+/* No extra class needed — default white row */
+
+/* Divert hint — outside feedmill (yellow row) */
+.divert-hint-outside {
+  color: #ca8a04;
+  font-size: 10px;
+  font-weight: 500;
+  margin-top: 2px;
+}
+
+/* Divert hint — within feedmill (white row) */
+.divert-hint-within {
+  color: #6b7280;
+  font-size: 10px;
+  font-weight: 500;
+  margin-top: 2px;
+}
+
+/* Cannot divert hint */
+.divert-hint-stuck {
+  color: #9ca3af;
+  font-size: 10px;
+  font-weight: 400;
+  font-style: italic;
+  margin-top: 2px;
+}
+```
+
+---
+
+## FIX 3: RED BORDERLINE — SHOW IN BOTH ALL TAB AND SPECIFIC LINE TAB
+
+The red borderline currently only shows in the All tab. It must also show when viewing the specific line tab.
+
+```jsx
+function OrderTable({ line, orders }) {
+  const shutdown = lineShutdowns[line];
+  const isShutdown = shutdown?.isShutdown;
+  
+  return (
+    <div className={`order-table-container ${isShutdown ? 'order-table-shutdown' : ''}`}>
+      {isShutdown && (
+        <div className="order-table-shutdown-banner">
+          🔴 {line} — SHUTDOWN since {formatDate(shutdown.since)}
+          {shutdown.reason && ` · ${shutdown.reason}`}
+        </div>
+      )}
+      <table className="order-table">
+        {/* ... */}
+      </table>
+    </div>
+  );
+}
+```
+
+### ENSURE THE SHUTDOWN STATE IS CHECKED PER LINE, NOT PER TAB
+
+The `isShutdown` check must work regardless of which tab the user is on:
+
+```javascript
+// This must work in:
+// 1. All tab — each LineTable checks its own line's shutdown state
+// 2. Line 1 tab — LineTable checks Line 1's shutdown state
+// 3. Line 2 tab — LineTable checks Line 2's shutdown state
+
+function isLineShutdown(line) {
+  const shutdown = lineShutdowns[line];
+  return shutdown?.isShutdown === true;
+}
+```
+
+### IN THE ALL TAB — EACH LINE TABLE INDEPENDENTLY CHECKS
+
+```jsx
+function AllOrdersTab({ feedmill }) {
+  const lines = FEEDMILL_LINE_MAP[feedmill];
+  
+  return (
+    <div>
+      {lines.map(line => (
+        <OrderTable
+          key={line}
+          line={line}
+          orders={getOrdersForLine(line)}
+          isShutdown={isLineShutdown(line)}  // Each line checks independently
+        />
+      ))}
+    </div>
+  );
+}
+```
+
+### IN SPECIFIC LINE TABS
+
+```jsx
+function LineTab({ line }) {
+  return (
+    <OrderTable
+      line={line}
+      orders={getOrdersForLine(line)}
+      isShutdown={isLineShutdown(line)}  // Same check
+    />
+  );
+}
+```
+
+---
+
+## FIX 4: DIVERT DIALOG — SHOW ALL LINES BUT HIGHLIGHT PARTNER LINE
+
+When right-clicking a white-background order (can only go to partner line), or any divertible order, the divert dialog should show ALL available lines but highlight/recommend the partner line.
+
+```jsx
+function DivertDialog({ order, onDivert, onClose }) {
+  const partnerLines = order._availableDivertLines?.partnerLines || [];
+  const outsideLines = order._availableDivertLines?.outsideLines || [];
+  const allAvailableLines = [...partnerLines, ...outsideLines];
+  
+  const [selectedLine, setSelectedLine] = useState(
+    partnerLines.length > 0 ? partnerLines[0] : (outsideLines.length > 0 ? outsideLines[0] : null)
+  );
+  
+  return (
+    <div className="dialog-overlay">
+      <div className="divert-dialog">
+        <div className="divert-dialog-header">
+          <span>🔄 Divert Order</span>
+          <button className="dialog-close" onClick={onClose}>✕</button>
+        </div>
+        
+        {/* Order Summary */}
+        <div className="divert-order-summary">
+          <div>Material Code: <strong>{order.material_code_fg}</strong></div>
+          <div>Item: <strong>{order.item_description}</strong></div>
+          <div>Volume: <strong>{order.volume} MT</strong></div>
+          <div>Current Line: <strong>{order.line}</strong> <span className="shutdown-badge-inline">SHUTDOWN</span></div>
+        </div>
+        
+        {/* Available Lines */}
+        <div className="divert-available-lines">
+          <h4>AVAILABLE LINES</h4>
+          
+          {/* Partner lines — recommended */}
+          {partnerLines.map(line => {
+            const rate = getRunRateForProduct(order.material_code_fg, line);
+            const isRecommended = true;
+            
+            return (
+              <label 
+                key={line}
+                className={`divert-line-option ${selectedLine === line ? 'selected' : ''} ${isRecommended ? 'recommended' : ''}`}
+              >
+                <input
+                  type="radio"
+                  name="divertLine"
+                  value={line}
+                  checked={selectedLine === line}
+                  onChange={() => setSelectedLine(line)}
+                />
+                <div className="divert-line-info">
+                  <span className="divert-line-name">
+                    ⭐ {line} (rate: {rate > 0 ? `${rate} MT/hr` : 'No historical rate'})
+                  </span>
+                  <span className="divert-line-feedmill">
+                    {LINE_TO_FEEDMILL_MAP[line]} · Same feedmill — recommended
+                  </span>
+                </div>
+              </label>
+            );
+          })}
+          
+          {/* Outside lines */}
+          {outsideLines.map(line => {
+            const rate = getRunRateForProduct(order.material_code_fg, line);
+            
+            return (
+              <label 
+                key={line}
+                className={`divert-line-option ${selectedLine === line ? 'selected' : ''}`}
+              >
+                <input
+                  type="radio"
+                  name="divertLine"
+                  value={line}
+                  checked={selectedLine === line}
+                  onChange={() => setSelectedLine(line)}
+                />
+                <div className="divert-line-info">
+                  <span className="divert-line-name">
+                    {line} (rate: {rate} MT/hr)
+                  </span>
+                  <span className="divert-line-feedmill">
+                    {LINE_TO_FEEDMILL_MAP[line]}
+                  </span>
+                </div>
+              </label>
+            );
+          })}
+          
+          {/* If partner line has no run rate — still show with note */}
+          {partnerLines.length > 0 && allAvailableLines.length === 0 && (
+            <div className="divert-no-rate-note">
+              ℹ No historical run rate found for the partner line, 
+              but since lines in the same feedmill are generally compatible, 
+              diversion is still possible.
+            </div>
+          )}
+        </div>
+        
+        {/* Impact Analysis */}
+        <DivertImpactAnalysis order={order} targetLine={selectedLine} />
+        
+        {/* Footer */}
+        <div className="divert-dialog-footer">
+          <button className="divert-cancel-btn" onClick={onClose}>Cancel</button>
+          <button 
+            className="divert-confirm-btn"
+            onClick={() => onDivert(order, selectedLine)}
+            disabled={!selectedLine}
+          >
+            Divert to {selectedLine}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+```
+
+### STYLING FOR RECOMMENDED LINE
+
+```css
+.divert-line-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  margin-bottom: 8px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.divert-line-option:hover {
+  border-color: #fd5108;
+  background: #fff7ed;
+}
+
+.divert-line-option.selected {
+  border-color: #fd5108;
+  background: #fff7ed;
+}
+
+.divert-line-option.recommended {
+  border-left: 3px solid #f59e0b;
+  background: #fffbeb;
+}
+
+.divert-line-option.recommended.selected {
+  border-left: 3px solid #fd5108;
+  background: #fff7ed;
+}
+
+.divert-line-name {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: #1a1a1a;
+}
+
+.divert-line-feedmill {
+  display: block;
+  font-size: 11px;
+  color: #6b7280;
+  margin-top: 2px;
+}
+
+.divert-no-rate-note {
+  padding: 10px 14px;
+  background: #eff6ff;
+  border-radius: 6px;
+  font-size: 11px;
+  color: #1e40af;
+  line-height: 1.5;
+  margin-top: 8px;
+}
+
+.shutdown-badge-inline {
+  font-size: 10px;
+  font-weight: 600;
+  color: #dc2626;
+  background: #fef2f2;
+  padding: 2px 6px;
+  border-radius: 4px;
+  margin-left: 6px;
+}
+```
+
+---
+
+## FIX 5: AI INSIGHT IN PRODUCTION INSIGHTS — SHUTDOWN ANALYSIS
+
+When a specific line is shutdown, the AI Summary in Production Insights must analyze which orders can be diverted to the partner line and to outside lines.
+
+### UPDATE THE AI SUMMARY PROMPT
+
+```javascript
+function buildSummaryPrompt(type, context) {
+  if (type === 'production_insights') {
+    
+    let shutdownSection = '';
+    
+    if (context.shutdownLines && context.shutdownLines.length > 0) {
+      shutdownSection = `
+SHUTDOWN STATUS:
+${context.shutdownLines.map(s => {
+  const partnerLines = FEEDMILL_LINE_MAP[s.feedmill].filter(
+    l => l !== s.line && !context.shutdownLines.find(sl => sl.line === l)
+  );
+  
+  return `
+${s.line} is SHUTDOWN (${s.reason}) since ${s.since}
+- ${s.orderCount} orders affected (${s.totalVolume} MT)
+- ${s.divertibleOutsideCount} orders can be diverted to lines outside ${s.feedmill}
+- Partner line(s) still running: ${partnerLines.length > 0 ? partnerLines.join(', ') : 'None'}
+- ${s.divertibleWithinCount} orders can potentially move to ${partnerLines.join(', ')}
+
+Orders on ${s.line}:
+${s.orders.map(o => `  - ${o.name} (${o.volume} MT, ${o.form}, N10D: ${o.n10dStatus || 'N/A'}, can divert to: ${o.possibleLines.length > 0 ? o.possibleLines.join(', ') : 'partner line only'})`).join('\n')}
+`;
+}).join('\n')}
+
+IMPORTANT — SHUTDOWN ANALYSIS INSTRUCTIONS:
+- Analyze which orders on the shutdown line should be diverted FIRST based on urgency (Critical > Urgent > Monitor > Sufficient)
+- For orders that can go to the PARTNER LINE within the same feedmill, recommend those as the primary option
+- For orders that can also go to OUTSIDE lines, mention those as alternatives
+- Explain WHY certain orders should be prioritized for diversion (e.g., "Gall 21 is Critical and should be diverted to Line 2 immediately to prevent stockout")
+- Note orders that have no run rate on the partner line but can still be moved since lines in the same feedmill are generally compatible
+- Include specific diversion recommendations in your action items
+      `;
+    }
+    
+    return `
+You are a production planning advisor for a feed manufacturing plant.
+Generate a brief smart summary for the production insights panel.
+
+SCOPE: ${context.scope}
+
+CURRENT DATA:
+- Total orders: ${context.totalOrders} (${context.totalVolume} MT)
+- Plotted: ${context.plotted}, Planned: ${context.planned}, In Production: ${context.inProduction}
+- On Hold: ${context.onHold}, Done: ${context.done}, Cancelled: ${context.cancelled}
+- Critical products: ${context.criticalProducts.length > 0 
+    ? context.criticalProducts.map(p => `${p.name} (Prio ${p.prio})`).join('; ') 
+    : 'None'}
+- Urgent products: ${context.urgentProducts.length > 0 
+    ? context.urgentProducts.map(p => `${p.name} (Prio ${p.prio})`).join('; ') 
+    : 'None'}
+- Overdue orders: ${context.overdueOrders.length > 0 
+    ? context.overdueOrders.map(o => `${o.item_description} (Prio ${o.prio})`).join('; ') 
+    : 'None'}
+- Combinable groups: ${context.combinableGroups.length > 0 
+    ? context.combinableGroups.map(g => `${g.product} (${g.count} orders)`).join('; ') 
+    : 'None'}
+
+${shutdownSection}
+
+RULES:
+- Provide a 2-3 sentence summary of the current production situation
+- Then list 3-5 prioritized recommended actions
+${context.shutdownLines && context.shutdownLines.length > 0 
+  ? '- If a line is shutdown, prioritize diversion recommendations in your actions'
+  : ''}
+- Be specific — use product names, priorities, and volumes
+- Use full month names for dates
+- Do NOT use markdown formatting
+
+FORMAT:
+[2-3 sentence summary paragraph]
+
+Recommended actions:
+1. [Most important action]
+2. [Second action]
+3. [Third action]
+    `;
+  }
+  
+  // ... alerts_reminders prompt stays the same
+}
+```
+
+### UPDATE CONTEXT BUILDER — INCLUDE SHUTDOWN DETAILS
+
+```javascript
+function buildSummaryContext(type, data, scope) {
+  const context = { /* ... existing context ... */ };
+  
+  // Add shutdown info with detailed order data
+  const shutdownLines = [];
+  Object.entries(lineShutdowns).forEach(([line, info]) => {
+    if (info.isShutdown) {
+      const feedmill = LINE_TO_FEEDMILL_MAP[line];
+      const feedmillLines = FEEDMILL_LINE_MAP[feedmill];
+      const partnerLines = feedmillLines.filter(
+        l => l !== line && !lineShutdowns[l]?.isShutdown
+      );
+      
+      const lineOrders = data.filter(o => 
+        o.line === line && 
+        o.status !== 'Done' && 
+        o.status !== 'Cancel PO'
+      );
+      
+      const masterData = getMasterData();
+      
+      const ordersWithDivertInfo = lineOrders.map(o => {
+        const md = masterData.find(m => String(m.fgMaterialCode) === String(o.material_code_fg));
+        const lineRateMap = md ? {
+          'Line 1': parseFloat(md.l1Rate) || 0,
+          'Line 2': parseFloat(md.l2Rate) || 0,
+          'Line 3': parseFloat(md.l3Rate) || 0,
+          'Line 4': parseFloat(md.l4Rate) || 0,
+          'Line 5': parseFloat(md.l5Rate) || 0,
+          'Line 6': parseFloat(md.l6Rate) || 0,
+          'Line 7': parseFloat(md.l7Rate) || 0,
+        } : {};
+        
+        const outsideLines = Object.keys(LINE_TO_FEEDMILL_MAP).filter(
+          l => !feedmillLines.includes(l) && 
+               !lineShutdowns[l]?.isShutdown && 
+               lineRateMap[l] > 0
+        );
+        
+        const n10dProduct = getN10DProducts()?.find(
+          p => String(p.material_code_fg) === String(o.material_code_fg)
+        );
+        const n10dStatus = n10dProduct ? getProductStatus(
+          n10dProduct.due_for_loading, n10dProduct.inventory,
+          getDailyColumns(), n10dProduct, new Date()
+        ) : null;
+        
+        return {
+          name: o.item_description,
+          volume: o.volume,
+          form: o.form,
+          prio: o.prio,
+          n10dStatus,
+          possibleLines: [...partnerLines, ...outsideLines]
+        };
+      });
+      
+      shutdownLines.push({
+        line,
+        feedmill,
+        reason: info.reason,
+        since: info.since,
+        orderCount: lineOrders.length,
+        totalVolume: lineOrders.reduce((s, o) => s + (parseFloat(o.volume) || 0), 0),
+        divertibleOutsideCount: ordersWithDivertInfo.filter(o => 
+          o.possibleLines.some(l => !feedmillLines.includes(l))
+        ).length,
+        divertibleWithinCount: ordersWithDivertInfo.filter(o => 
+          o.possibleLines.some(l => partnerLines.includes(l))
+        ).length,
+        orders: ordersWithDivertInfo
+      });
+    }
+  });
+  
+  context.shutdownLines = shutdownLines;
+  
+  return context;
+}
+```
+
+---
+
+## VERIFICATION
+
+### Per-line shutdown — only affects shutdown line
+1. ✅ Shutdown Line 1 → only Line 1 orders show divert hints
+2. ✅ Line 2 orders remain completely normal (no highlights, no notes)
+3. ✅ In All tab, Line 1 table has red border, Line 2 table does not
+4. ✅ In Line 1 tab, red border shows
+5. ✅ In Line 2 tab, no red border
+
+### Yellow vs White highlights
+6. ✅ Orders that CAN divert outside feedmill → yellow highlight + note
+7. ✅ Orders that can ONLY divert within feedmill (partner line) → white background + note
+8. ✅ Orders that cannot divert anywhere → white background + "awaiting resume" note
+9. ✅ Feedmill shutdown → only yellow highlights (for outside diversion)
+
+### Divert dialog
+10. ✅ Shows ALL available lines (partner + outside)
+11. ✅ Partner line highlighted as recommended with ⭐ and amber border
+12. ✅ Partner line shown even if no historical run rate (with explanation note)
+13. ✅ Outside lines shown with their run rates
+14. ✅ Impact analysis updates when different line is selected
+
+### AI insight in Production Insights
+15. ✅ When Line 1 is shutdown, AI analyzes which orders can go to Line 2
+16. ✅ AI prioritizes Critical/Urgent orders for diversion
+17. ✅ AI mentions partner line as primary option, outside lines as alternatives
+18. ✅ AI includes specific diversion recommendations in action items
+19. ✅ When no shutdown, AI follows original behavior
+
+### Red borderline
+20. ✅ Shows in All tab for shutdown line only
+21. ✅ Shows in specific Line tab when that line is shutdown
+22. ✅ Both line tables get red border when feedmill is shutdown
+23. ✅ No red border on non-shutdown lines
+```

@@ -1,0 +1,248 @@
+Please simplify and correct the **Orders at risk** logic in the auto-sequence preview cards and AI reasoning so that it only counts orders that are truly overdue or delayed.
+
+---
+
+## OBJECTIVE
+
+The current Orders at risk logic appears too aggressive and misleading.
+
+Right now, the app may show results like:
+- `3 | Low`
+while the AI reasoning says:
+- `Orders at risk: 3 (1 overdue, 2 compromised)`
+
+This is confusing and does not align with how users interpret the dates shown in the preview table.
+
+We want to simplify the logic so that Orders at risk only reflects orders that are actually:
+- overdue
+or
+- delayed
+
+Do not count future orders that are still within their allowed timing window.
+
+---
+
+## REQUIRED CHANGE
+
+Replace the current risk classification logic with a simpler two-level model:
+
+### High
+If there are any orders already:
+- past due
+or
+- delayed
+
+### Low
+If there are no orders already:
+- past due
+or
+- delayed
+
+Remove the “Moderate” state entirely.
+
+Also stop using “compromised” as part of the card-level risk count if those orders are not actually late yet.
+
+---
+
+## 1. COUNT ONLY TRULY OVERDUE OR DELAYED ORDERS
+
+The numeric count in `Orders at risk` must only include orders that are actually:
+- overdue
+- delayed
+- already missed relative to the relevant timing requirement
+
+Do **not** include orders that are merely:
+- monitor
+- upcoming
+- due in the future
+- near their threshold but not yet late
+- “compromised” in an internal heuristic sense if they have not actually missed the date yet
+
+This is the most important correction.
+
+---
+
+## 2. REMOVE “COMPROMISED” FROM THE CARD-LEVEL RISK MODEL
+
+The current reasoning may say things like:
+- `1 overdue, 2 compromised`
+
+This should no longer drive the visible `Orders at risk` card count.
+
+If those 2 “compromised” orders are still not actually overdue or delayed, they must not be counted in Orders at risk.
+
+### Example
+If:
+- 1 order is overdue
+- 2 orders are future-dated but monitored / at warning level
+
+Then Orders at risk should show:
+- `1 | High`
+
+not:
+- `3 | High`
+and not:
+- `3 | Low`
+
+---
+
+## 3. REMOVE “MODERATE” COMPLETELY
+
+Do not use a Moderate risk level anymore.
+
+Use only:
+
+- `High`
+- `Low`
+
+### High
+At least one overdue or delayed order exists
+
+### Low
+No overdue or delayed orders exist
+
+This is the complete severity model.
+
+---
+
+## 4. UPDATE THE CARD DISPLAY FORMAT
+
+Use the simplified inline display format:
+
+- `2 | High`
+- `3 | High`
+- `0 | Low`
+- `1 | High`
+
+Do not use badge/pill UI for risk anymore.
+
+Keep it simple.
+
+### Color behavior
+Keep font-color styling:
+- `High` = red
+- `Low` = green (or success/positive style)
+
+If preferred for cleaner UI:
+- keep the count neutral
+- color only the severity word
+
+Example:
+- `1 | High` where only `High` is red
+- `0 | Low` where only `Low` is green
+
+---
+
+## 5. ALIGN THE COUNT WITH THE ACTUAL TABLE DATES
+
+The Orders at risk count must align with what the user can reasonably infer from the preview table.
+
+If the visible relevant dates are:
+- May 15
+- May 16
+
+and those are not yet overdue/delayed, then they must not be counted as at risk.
+
+Only orders that are already missed / late should count.
+
+This is critical for trust.
+
+---
+
+## 6. UPDATE AI REASONING TO MATCH THE SAME SIMPLIFIED LOGIC
+
+The AI reasoning should no longer say:
+- `Orders at risk: 3 (1 overdue, 2 compromised)`
+
+if only 1 order is truly overdue/delayed.
+
+Instead, it should reflect the same simplified logic.
+
+### Example
+- `Orders at risk: 1 overdue/delayed order`
+or
+- `Orders at risk: 1`
+or
+- `Orders at risk: 0`
+
+The wording can vary, but the count must match the same rule used by the card.
+
+Do not include non-late “compromised” orders in the visible reasoning count.
+
+---
+
+## 7. KEEP THE ORIGINAL DATE DATA / TABLE LOGIC INTACT
+
+Do not change:
+- the original dates shown in the table
+- the Future Dispatch source data
+- the visible Avail Date logic
+
+This request is only about:
+- how Orders at risk is counted
+- how severity is assigned
+- how the count is presented
+
+---
+
+## 8. REVIEW THE SPECIFIC CASE SHOWN
+
+Please inspect the case where:
+- the card shows `3 | Low`
+- but the reasoning says `3 (1 overdue, 2 compromised)`
+
+This is likely wrong.
+
+If only one order is actually overdue or delayed, then the correct visible result should be:
+- `1 | High`
+
+Please update the logic so this kind of mismatch no longer happens.
+
+---
+
+## 9. ADD DEBUG LOGGING FOR RISK COUNT SOURCES
+
+Temporarily log:
+
+```javascript
+console.debug('[Orders At Risk Logic]', {
+  strategyId,
+  title: strategy.title,
+  overdueOrders: overdueOrders.map(o => ({
+    orderId: o.id,
+    availDate: o.availDate,
+    status: o.status,
+  })),
+  delayedOrders: delayedOrders.map(o => ({
+    orderId: o.id,
+    availDate: o.availDate,
+    status: o.status,
+  })),
+  nonLateCompromisedOrders: compromisedOrders.map(o => ({
+    orderId: o.id,
+    availDate: o.availDate,
+    status: o.status,
+  })),
+  visibleRiskCount: visibleRiskCount,
+  visibleRiskSeverity: visibleRiskSeverity,
+});
+This helps verify:
+
+only overdue/delayed orders contribute to the visible risk count
+compromised-but-not-late orders are excluded
+the card and reasoning use the same final count
+10. VERIFICATION
+✅ Orders at risk now counts only orders that are actually overdue or delayed
+✅ Monitor / upcoming / not-yet-late / non-delayed “compromised” orders are no longer counted
+✅ The risk model now uses only two levels:
+High
+Low
+✅ Moderate is removed completely
+✅ The visible card format is simplified to:
+count | severity
+✅ The card severity is:
+High if any overdue/delayed order exists
+Low otherwise
+✅ AI reasoning uses the same simplified count logic as the card
+✅ Cases like 3 | Low with 1 overdue, 2 compromised no longer occur
+✅ The risk count now aligns better with what users see in the preview table

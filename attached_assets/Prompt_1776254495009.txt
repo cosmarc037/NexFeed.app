@@ -1,0 +1,424 @@
+```
+Fix the plant-level Apply to Schedule to use the actual DB mutation pattern:
+
+---
+
+## 1. REPLACE THE ENTIRE handlePlantApply FUNCTION
+
+```javascript
+async function handlePlantApply(sequencedResults) {
+  setIsApplying(true);
+  
+  try {
+    const mutations = [];
+    
+    // Process each line's sequenced orders
+    for (const [line, lineOrders] of Object.entries(sequencedResults)) {
+      if (!lineOrders || lineOrders.length === 0) continue;
+      
+      let prioCounter = 1;
+      
+      for (const order of lineOrders) {
+        
+        if (order._isCombined && order._combinedFrom && order._combinedFrom.length > 1) {
+          // === COMBINED ORDER ===
+          // The first sub-order becomes the lead
+          const leadId = order.id;
+          const childOrders = order._combinedFrom.filter(sub => sub.id !== leadId);
+          const childIds = order._combinedFrom.map(sub => sub.id);
+          const combinedVolume = parseFloat(order.volume) || 0;
+          
+          // Recalculate batches
+          const batchSize = parseFloat(order.batch_size) || 1;
+          const combinedBatches = Math.ceil(combinedVolume / batchSize);
+          
+          // Update LEAD order — set volume_override, original_order_ids, new line, new prio
+          mutations.push(
+            updateOrderMutation.mutateAsync({
+              id: leadId,
+              data: {
+                feedmill_line: line,
+                priority_seq: prioCounter,
+                volume_override: combinedVolume,
+                original_order_ids: childIds,
+                parent_id: null, // Lead has no parent
+              }
+            })
+          );
+          
+          // Update CHILD orders — set parent_id pointing to lead
+          for (const child of childOrders) {
+            mutations.push(
+              updateOrderMutation.mutateAsync({
+                id: child.id,
+                data: {
+                  parent_id: leadId,
+                  feedmill_line: line,
+                  priority_seq: null, // Children don't have their own prio
+                }
+              })
+            );
+          }
+          
+          prioCounter++;
+          
+        } else {
+          // === REGULAR ORDER (not combined) ===
+          const updateData = {
+            feedmill_line: line,
+            priority_seq: prioCounter,
+          };
+          
+          // If this order WAS previously combined (has parent_id), uncombine it
+          // by clearing parent_id and volume_override
+          if (order.parent_id) {
+            updateData.parent_id = null;
+          }
+          if (order.volume_override) {
+            updateData.volume_override = null;
+            updateData.original_order_ids = null;
+          }
+          
+          // Update avail date if order has a target date from sequencing
+          if (order._targetDate && (order._category === 'B' || order._category === 'D')) {
+            updateData.target_avail_date = order._targetDate || 'stock_sufficient';
+            updateData.last_target_date = order._targetDate || 'stock_sufficient';
+            updateData.avail_date_source = 'auto_sequence';
+          }
+          
+          mutations.push(
+            updateOrderMutation.mutateAsync({
+              id: order.id,
+              data: updateData
+            })
+          );
+          
+          prioCounter++;
+        }
+      }
+      
+      // Also handle orders that were REMOVED from this line
+      // (moved to another line or consumed by a combination)
+      // These are in the originalSnapshot but not in sequencedResults for this line
+      const originalLineOrders = originalPlantSnapshot[line] || [];
+      const sequencedIds = new Set();
+      
+      lineOrders.forEach(o => {
+        sequencedIds.add(o.id);
+        if (o._combinedFrom) {
+          o._combinedFrom.forEach(sub => sequencedIds.add(sub.id));
+        }
+      });
+      
+      // Check if any original order on this line is NOT in any line's results
+      // (meaning it was consumed by a combination on another line)
+      for (const origOrder of originalLineOrders) {
+        let foundAnywhere = false;
+        
+        for (const [otherLine, otherOrders] of Object.entries(sequencedResults)) {
+          for (const oo of otherOrders) {
+            if (oo.id === origOrder.id) { foundAnywhere = true; break; }
+            if (oo._combinedFrom?.some(sub => sub.id === origOrder.id)) { foundAnywhere = true; break; }
+          }
+          if (foundAnywhere) break;
+        }
+        
+        // If not found, it was consumed — parent_id should already be set above
+        // No additional action needed
+      }
+    }
+    
+    // Execute all mutations
+    // Batch in groups to avoid overwhelming the API
+    const BATCH_SIZE = 10;
+    for (let i = 0; i < mutations.length; i += BATCH_SIZE) {
+      const batch = mutations.slice(i, i + BATCH_SIZE);
+      await Promise.all(batch);
+    }
+    
+    // Cascade schedule for each affected line
+    for (const [line, lineOrders] of Object.entries(sequencedResults)) {
+      if (!lineOrders || lineOrders.length === 0) continue;
+      
+      // Get the updated orders for this line (refetch or use sequenced data)
+      const orderedForCascade = lineOrders
+        .filter(o => !o._isCombined || o._combinedFrom) // Include combined leads
+        .filter(o => {
+          // Exclude children (they have parent_id)
+          if (o._combinedFrom) return true; // This is a lead
+          return true; // Regular order
+        })
+        .sort((a, b) => {
+          const aPrio = a.prio || 0;
+          const bPrio = b.prio || 0;
+          return aPrio - bPrio;
+        });
+      
+      await cascadeSchedule(orderedForCascade, 0);
+    }
+    
+    // Invalidate React Query cache to trigger refetch
+    queryClient.invalidateQueries({ queryKey: ["orders"] });
+    
+    // Close preview
+    setShowPlantAutoSequencePreview(false);
+    setIsApplying(false);
+    
+    // Notification
+    const totalOrders = Object.values(sequencedResults).reduce((sum, lo) => sum + lo.length, 0);
+    const combinedCount = Object.values(sequencedResults).reduce((sum, lo) =>
+      sum + lo.filter(o => o._isCombined).length, 0
+    );
+    const affectedLineCount = Object.keys(sequencedResults).filter(line =>
+      (sequencedResults[line] || []).length > 0
+    ).length;
+    
+    toast.success(
+      `Plant-level auto-sequence applied: ${totalOrders} orders across ${affectedLineCount} lines.${combinedCount > 0 ? ` ${combinedCount} combined groups created.` : ''}`
+    );
+    
+  } catch (error) {
+    console.error('Error applying plant-level auto-sequence:', error);
+    setIsApplying(false);
+    toast.error('Failed to apply auto-sequence. Please try again.');
+  }
+}
+```
+
+---
+
+## 2. FIX: MUTATIONS SHOULD NOT BE PUSHED AS PROMISES IMMEDIATELY
+
+The code above pushes the mutation calls immediately. Instead, build the mutation data first, then execute:
+
+```javascript
+async function handlePlantApply(sequencedResults) {
+  setIsApplying(true);
+  
+  try {
+    // Step 1: Build all mutation payloads
+    const mutationPayloads = [];
+    
+    for (const [line, lineOrders] of Object.entries(sequencedResults)) {
+      if (!lineOrders || lineOrders.length === 0) continue;
+      
+      let prioCounter = 1;
+      
+      for (const order of lineOrders) {
+        
+        if (order._isCombined && order._combinedFrom && order._combinedFrom.length > 1) {
+          const leadId = order.id;
+          const childIds = order._combinedFrom.map(sub => sub.id);
+          const combinedVolume = parseFloat(order.volume) || 0;
+          
+          // Lead order
+          mutationPayloads.push({
+            id: leadId,
+            data: {
+              feedmill_line: line,
+              priority_seq: prioCounter,
+              volume_override: combinedVolume,
+              original_order_ids: childIds,
+              parent_id: null,
+            }
+          });
+          
+          // Child orders
+          const childOrders = order._combinedFrom.filter(sub => sub.id !== leadId);
+          for (const child of childOrders) {
+            mutationPayloads.push({
+              id: child.id,
+              data: {
+                parent_id: leadId,
+                feedmill_line: line,
+                priority_seq: null,
+              }
+            });
+          }
+          
+          prioCounter++;
+          
+        } else {
+          const updateData = {
+            feedmill_line: line,
+            priority_seq: prioCounter,
+          };
+          
+          // Clear any previous combine state
+          if (order.parent_id) {
+            updateData.parent_id = null;
+          }
+          if (order.volume_override) {
+            updateData.volume_override = null;
+            updateData.original_order_ids = null;
+          }
+          
+          // Update avail date if applicable
+          if (order._targetDate && (order._category === 'B' || order._category === 'D')) {
+            updateData.target_avail_date = order._targetDate || 'stock_sufficient';
+            updateData.last_target_date = order._targetDate || 'stock_sufficient';
+            updateData.avail_date_source = 'auto_sequence';
+          }
+          
+          mutationPayloads.push({
+            id: order.id,
+            data: updateData
+          });
+          
+          prioCounter++;
+        }
+      }
+    }
+    
+    console.log(`=== Applying ${mutationPayloads.length} mutations ===`);
+    mutationPayloads.forEach(mp => {
+      console.log(`  Order ${mp.id}:`, mp.data);
+    });
+    
+    // Step 2: Execute mutations in batches
+    const BATCH_SIZE = 10;
+    for (let i = 0; i < mutationPayloads.length; i += BATCH_SIZE) {
+      const batch = mutationPayloads.slice(i, i + BATCH_SIZE);
+      await Promise.all(
+        batch.map(payload => 
+          updateOrderMutation.mutateAsync({ id: payload.id, data: payload.data })
+        )
+      );
+    }
+    
+    // Step 3: Cascade schedule for each affected line
+    // Wait for React Query to refetch first
+    await queryClient.invalidateQueries({ queryKey: ["orders"] });
+    
+    // Small delay to ensure refetch completes
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
+    // Cascade each line
+    for (const [line, lineOrders] of Object.entries(sequencedResults)) {
+      if (!lineOrders || lineOrders.length === 0) continue;
+      
+      // Build cascade order — only top-level orders (not children)
+      const topLevelOrders = lineOrders.map((order, index) => ({
+        ...order,
+        id: order.id,
+        priority_seq: index + 1,
+        feedmill_line: line,
+      }));
+      
+      await cascadeSchedule(topLevelOrders, 0);
+    }
+    
+    // Step 4: Final refetch
+    await queryClient.invalidateQueries({ queryKey: ["orders"] });
+    
+    // Step 5: Close and notify
+    setShowPlantAutoSequencePreview(false);
+    setIsApplying(false);
+    
+    const totalOrders = Object.values(sequencedResults).reduce((sum, lo) => sum + lo.length, 0);
+    const combinedCount = Object.values(sequencedResults).reduce((sum, lo) =>
+      sum + lo.filter(o => o._isCombined).length, 0
+    );
+    const affectedLineCount = Object.keys(sequencedResults).filter(line =>
+      (sequencedResults[line] || []).length > 0
+    ).length;
+    
+    toast.success(
+      `Plant-level auto-sequence applied: ${totalOrders} orders across ${affectedLineCount} lines.${combinedCount > 0 ? ` ${combinedCount} combined groups created.` : ''}`
+    );
+    
+  } catch (error) {
+    console.error('Error applying plant-level auto-sequence:', error);
+    setIsApplying(false);
+    toast.error('Failed to apply auto-sequence. Please try again.');
+  }
+}
+```
+
+---
+
+## 3. ENSURE LINE NAME MAPS TO DB COLUMN feedmill_line
+
+```javascript
+// The DB uses feedmill_line, not line
+// Make sure the line names match what the DB expects
+
+function normalizeLineForDB(line) {
+  // If the DB stores "Line 1" format
+  return normalizeLine(line);
+  
+  // If the DB stores a different format, adjust here
+  // e.g., return `Feedmill 1 - Line 1`
+}
+```
+
+Check what format `feedmill_line` stores in the DB. If it stores the full name like "Feedmill 1 - Line 1" instead of just "Line 1", update the apply function:
+
+```javascript
+// In the mutation payload
+mutationPayloads.push({
+  id: order.id,
+  data: {
+    feedmill_line: normalizeLineForDB(line), // Match DB format
+    priority_seq: prioCounter,
+    // ...
+  }
+});
+```
+
+---
+
+## 4. ENSURE COMBINED ORDER ID EXISTS
+
+When the combine algorithm creates a combined order, it uses `combineGroup.orders[0]` as the base. Make sure the `id` on that base order is a REAL order ID from the DB, not a generated/temporary ID:
+
+```javascript
+// In plantLevelCombineAndPlace — when creating combined order
+const baseOrder = { ...combineGroup.orders[0] };
+
+// Verify the ID exists
+console.log(`Combined lead order ID: ${baseOrder.id}`);
+console.log(`Combined from IDs: ${combineGroup.orders.map(o => o.id).join(', ')}`);
+
+// The lead order ID must be a real DB order ID
+// combineGroup.orders[0] came from workingOrders which was deep-copied from allOrders
+// So baseOrder.id should be the real DB ID
+```
+
+---
+
+## VERIFICATION
+
+### DB mutations
+1. ✅ Uses updateOrderMutation.mutateAsync — not setAllOrders
+2. ✅ Each order gets feedmill_line and priority_seq updated
+3. ✅ Combined lead gets volume_override and original_order_ids
+4. ✅ Combined children get parent_id pointing to lead
+5. ✅ Children get priority_seq: null (hidden from main table)
+
+### Cascade
+6. ✅ After mutations, React Query cache invalidated
+7. ✅ cascadeSchedule called per line
+8. ✅ Completion dates recalculated
+
+### Combined orders visible
+9. ✅ Lead order has volume_override = total MT
+10. ✅ Lead order has original_order_ids = [child1, child2, ...]
+11. ✅ Children have parent_id = lead.id
+12. ✅ Table renders combined group with blue highlight
+
+### Orders moved
+13. ✅ feedmill_line updated to new line
+14. ✅ priority_seq updated to new position
+15. ✅ Orders appear on correct line after refetch
+
+### Batching
+16. ✅ Mutations batched in groups of 10
+17. ✅ Prevents API overload
+18. ✅ Each batch awaited before next
+
+### Error handling
+19. ✅ If any mutation fails, loading state cleared
+20. ✅ Error toast shown
+21. ✅ User can retry
+```

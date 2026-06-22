@@ -1,0 +1,186 @@
+Please update the **Auto-Sequence final sorting logic** so that the final visible sequence is **chronologically coherent**, while still preserving transparency in the **AI vs Final Sequence** table about both the AI’s **strategy-based rank** and the **date-based rank**.
+
+---
+
+## 1. MAKE `SUGGESTED / EFFECTIVE DATE` THE PRIMARY SORT KEY FOR THE FINAL VISIBLE SEQUENCE
+
+Please change the final visible order so that it is sorted primarily by the AI’s **Suggested / Effective Date**.
+
+### Required behavior
+Use:
+- **Primary sort:** Suggested / Effective Date ASC
+- **Secondary sort:** Strategy Rank ASC
+
+### Goal
+Ensure the final visible sequence is chronologically coherent.
+
+### Expected result
+Orders with earlier suggested/effective dates appear above later-dated orders in the final sequence.
+
+---
+
+## 2. USE `STRATEGY RANK` AS THE TIEBREAKER WITHIN THE SAME DATE
+
+Please preserve the AI’s strategic preference by using **Strategy Rank** within the same date group.
+
+### Required behavior
+If two or more orders share the same suggested/effective date, then sort those orders by:
+- **Strategy Rank ASC**
+
+### Goal
+Keep the AI’s sequencing logic visible and useful within each date bucket.
+
+### Expected result
+The sequence remains date-first, while still preserving AI-driven ordering inside the same date.
+
+---
+
+## 3. KEEP THE `AI VS FINAL SEQUENCE` TABLE SO USERS CAN SEE WHAT HAPPENED
+
+Even after changing the final visible order to date-first sorting, please keep the **AI vs Final Sequence** table as a transparency layer.
+
+### Goal
+Users should still be able to understand:
+- what the AI strategically preferred
+- what the date-based ordering did
+- and how the final visible rank was formed
+
+### Expected result
+The transparency table remains useful and explanatory.
+
+---
+
+## 4. INCLUDE BOTH `DATE RANK` AND `STRATEGY RANK` IN THE TRANSPARENCY TABLE
+
+Please keep both of these ranking dimensions visible in the **AI vs Final Sequence** table:
+
+- **Date Rank**
+- **Strategy Rank**
+
+### Definitions
+- **Date Rank** = the order’s position when sorted by Suggested / Effective Date
+- **Strategy Rank** = the AI’s strategic ranking preference
+
+### Goal
+Let users clearly see the difference between:
+- date-driven order
+- AI strategy-driven order
+- final visible order
+
+### Expected result
+Users can understand exactly why the final sequence looks the way it does.
+
+---
+
+## 5. KEEP `FINAL RANK` IN THE TRANSPARENCY TABLE
+
+Please continue to show **Final Rank** as the actual displayed sequence order after the final sort.
+
+### Goal
+Users should be able to compare:
+- Final Rank
+- Date Rank
+- Strategy Rank
+
+### Expected result
+The relationship between final display order and the two ranking dimensions becomes clear.
+
+---
+
+## 6. MAKE THE REASON COLUMN EXPLAIN HOW DATE RANK AND STRATEGY RANK INTERACTED
+
+Please make sure the **Reason** column explains things in plain language such as:
+- this order moved earlier because its Suggested Date is earlier
+- this order stayed after another order because both share the same date and Strategy Rank is lower
+- this order was repositioned by date-first sorting
+- this order kept its position because Date Rank and Strategy Rank were aligned
+
+### Goal
+Help users understand what actually happened to the order.
+
+### Expected result
+The transparency table becomes a clear explanation of how date and strategy interacted.
+
+---
+
+## 7. USE THIS TRANSPARENCY MODEL TO EXPLAIN WHY THE FINAL TABLE IS DATE-FIRST SORTED
+
+Since the final visible sequence will now be date-first sorted, please use the **AI vs Final Sequence** table to explain why an order may not match the AI’s pure strategy ranking.
+
+### Goal
+Make it easy for users to see:
+- the AI’s strategic preference
+- the date-based requirement
+- and the final actual result
+
+### Expected result
+The table gives users confidence in both chronology and transparency.
+
+---
+
+## IMPORTANT
+
+Please make the following change:
+
+### Final visible sequence
+Sort by:
+- **Suggested / Effective Date ASC**
+- then **Strategy Rank ASC**
+
+### Transparency table
+Keep showing:
+- **Final Rank**
+- **Date Rank**
+- **Strategy Rank**
+
+so users can understand:
+- what the AI ranked strategically
+- what the date-based ordering was
+- and how the final order was formed
+
+This is needed because the final visible sequence should remain **chronologically coherent**, but users should still be able to see what the AI’s strategic rank was.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log the final date-first sort and the transparency rank fields.
+
+```javascript
+console.debug('[Auto-Sequence Final Date-First Sort]', {
+  strategyId,
+  sortModel: ['suggestedDate ASC', 'strategyRank ASC'],
+});
+```
+
+```javascript
+console.debug('[AI vs Final Sequence Transparency Ranks]', {
+  strategyId,
+  rows: finalRows?.map(r => ({
+    orderId: r.orderId || r.entityId,
+    finalRank: r.finalRank,
+    dateRank: r.dateRank,
+    strategyRank: r.strategyRank,
+    suggestedDate: r.suggestedDate,
+  })),
+});
+```
+
+```javascript
+console.debug('[AI vs Final Sequence Reason Alignment]', {
+  strategyId,
+  reasonExplainsDateAndStrategyInteraction: true,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Final visible sequence is sorted by Suggested / Effective Date first
+2. ✅ Strategy Rank is used within the same date group
+3. ✅ Final sequence becomes chronologically coherent
+4. ✅ AI vs Final Sequence table still shows Final Rank, Date Rank, and Strategy Rank
+5. ✅ Users can see what happened between strategy and date-based ordering
+6. ✅ Reason column clearly explains the interaction
+7. ✅ No UI errors or console errors are introduced

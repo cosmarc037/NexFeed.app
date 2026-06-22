@@ -1,0 +1,201 @@
+Please fix the **diversion history logging** so it records the **true original source priority** and the **true final destination priority** of the moved order.
+
+---
+
+## 1. FIX THE DIVERSION HISTORY SO IT CAPTURES THE ORIGINAL SOURCE PRIORITY CORRECTLY
+
+There is a bug in the diversion history logging.
+
+Right now, when an order is diverted from one line to another, the history entry may incorrectly log the source priority as if it were already updated or reindexed.
+
+### Example of the issue
+Actual situation:
+- Original line = `Line 1`
+- Original priority = `Prio 2`
+- Target line = `Line 2`
+- Final inserted priority = `Prio 1`
+
+But the history currently logs:
+- `Moved from Prio 1 → 1`
+
+This is incorrect.
+
+### Expected result
+The history should log:
+- `Moved from Prio 2 → 1`
+
+because the order originally started in:
+- `Prio 2`
+
+before it was diverted.
+
+---
+
+## 2. CAPTURE THE SOURCE PRIORITY BEFORE ANY MOVE OR REINDEXING HAPPENS
+
+Please make sure the app stores the **original source priority** at the moment the diversion begins, before any of the following can mutate the order:
+
+- diversion insertion logic
+- reindexing
+- queue normalization
+- destination insertion shifts
+- priority recalculation
+- UI refresh or model remapping
+
+### Goal
+Freeze the true original priority before the order is moved.
+
+### Expected result
+The history logger should use the original source priority captured **before** the diversion modifies the queue.
+
+---
+
+## 3. USE THE FINAL APPLIED DESTINATION PRIORITY AFTER INSERTION
+
+Please continue using the **actual final inserted destination priority** after the diversion is completed.
+
+### Expected result
+The history entry should combine:
+- the true original source priority
+- the true final destination priority
+
+### Final logging format example
+- `Line shutdown: Line 1 → Line 2`
+- `Moved from Prio 2 → 1`
+
+---
+
+## 4. DO NOT LOG MUTATED OR INTERMEDIATE PRIORITY VALUES
+
+Please make sure the history does **not** use:
+- a recalculated source priority
+- an intermediate insertion value
+- a post-move normalized value
+- or any stale preview that is no longer the actual source/destination state
+
+### Important
+The source priority and destination priority should both be taken from the correct stage of the process:
+
+- source priority = before diversion
+- destination priority = after final placement
+
+### Expected result
+History reflects the actual movement that occurred, not a partially updated internal state.
+
+---
+
+## 5. KEEP THE DIVERSION DIALOG / IMPACT ANALYSIS CONSISTENT WITH HISTORY
+
+If the diversion dialog/impact analysis says:
+
+- `Insertion Position: Priority 1`
+
+and the order is actually inserted into:
+- `Priority 1`
+
+then the history should also reflect that exact destination priority.
+
+If the source order originally came from:
+- `Priority 2`
+
+then the history must say:
+- `Moved from Prio 2 → 1`
+
+### Expected result
+The diversion preview, final queue result, and history record should all match.
+
+---
+
+## 6. APPLY THIS TO BOTH DIVERSION AND REVERT HISTORY WHERE APPLICABLE
+
+Please also review the same priority-capture logic for **revert** history entries.
+
+### Goal
+If revert entries currently suffer from the same issue, they should also use:
+- original priority before revert
+- final inserted priority after revert
+
+### Expected result
+Diversion and reversion history should both record true before/after priorities accurately.
+
+---
+
+## 7. PRESERVE THE EXISTING HISTORY FORMAT
+
+Please keep the current history style and wording where possible, such as:
+- `Line shutdown: Line 1 → Line 2`
+- `Reverted: Line 2 → Line 1`
+- `Moved from Prio X → Y`
+
+This request is only to fix the correctness of the logged priority values.
+
+### Expected result
+The format stays the same, but the numbers are now accurate.
+
+---
+
+## IMPORTANT
+
+Please fix the history logging so that:
+
+- **source priority** is captured from the order’s true position **before diversion**
+- **destination priority** is captured from the order’s true final position **after diversion**
+- the history no longer logs mutated values like `Prio 1 → 1` when the actual movement was `Prio 2 → 1`
+
+This should apply at least to diversion, and ideally to revert as well if the same bug exists there.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log the frozen source priority and final destination priority used in the history entry.
+
+```javascript
+console.debug('[Diversion History Priority Capture]', {
+  orderId,
+  sourceLine,
+  targetLine,
+  sourcePriorityBeforeMove,
+  destinationPriorityAfterMove,
+  historyLoggedSourcePriority,
+  historyLoggedDestinationPriority,
+  matches:
+    sourcePriorityBeforeMove === historyLoggedSourcePriority &&
+    destinationPriorityAfterMove === historyLoggedDestinationPriority,
+});
+```
+
+```javascript
+console.debug('[Diversion History Write]', {
+  orderId,
+  historyType: 'diversion',
+  sourceLine,
+  targetLine,
+  sourcePriorityBeforeMove,
+  finalDestinationPriority,
+  historyMessage,
+});
+```
+
+```javascript
+console.debug('[Revert History Priority Capture]', {
+  orderId,
+  sourceLineBeforeRevert,
+  destinationLineAfterRevert,
+  sourcePriorityBeforeRevert,
+  destinationPriorityAfterRevert,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ If an order starts at `Prio 2` and is diverted to `Prio 1`, history logs `Prio 2 → 1`
+2. ✅ The source priority is captured before diversion changes the queue
+3. ✅ The destination priority is captured after final insertion is complete
+4. ✅ History no longer shows mutated/stale values such as `Prio 1 → 1` when the original priority was different
+5. ✅ Diversion dialog preview, final inserted position, and history stay consistent
+6. ✅ Existing history wording remains intact
+7. ✅ Revert history also uses correct before/after priorities if applicable
+8. ✅ No UI errors or console errors are introduced

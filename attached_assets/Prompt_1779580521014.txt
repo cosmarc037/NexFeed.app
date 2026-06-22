@@ -1,0 +1,234 @@
+Please update the **order status flow rules** so users cannot set an earlier order back to a not-yet-started status when a following order is already in an on-going status.
+
+---
+
+## 1. BLOCK NOT-YET-STARTED STATUSES IF A FOLLOWING ORDER IS ALREADY ON-GOING
+
+Please add a sequencing/status-flow validation rule for the order list.
+
+If a later/following order is already in an **on-going** status, users must not be allowed to set an earlier order back to a **not-yet-started** status.
+
+### Reason
+That would break the production flow and create an invalid sequence.
+
+If a following order is already actively running, then earlier orders in the same queue should not be downgraded to statuses that imply they have not started yet.
+
+### Expected result
+If any following order is already on-going, earlier applicable orders cannot be changed to not-yet-started statuses.
+
+---
+
+## 2. DEFINE THE NOT-YET-STARTED STATUSES TO BLOCK
+
+For this rule, please treat the following as **not-yet-started statuses**:
+
+- `Plotted`
+- `Planned`
+
+If applicable in your workflow, this can extend to any equivalent pre-production statuses, but for this request please at least enforce it for:
+
+- `Plotted`
+- `Planned`
+
+### Expected result
+These statuses should be disabled/unavailable when selecting them would break the flow because a following order is already on-going.
+
+---
+
+## 3. DEFINE THE ON-GOING TRIGGER CONDITION USING FOLLOWING ORDERS
+
+Please apply this rule when there is a **following order below the current order** whose status is already an on-going status, such as:
+
+- `On-going batching`
+- `On-going pelleting`
+- `On-going bagging`
+
+or any other status categorized as an **on-going / in-progress** production state.
+
+### Rule
+If a current order has any following order that is already on-going, then the current order must not be allowed to move into:
+- `Plotted`
+- `Planned`
+
+### Expected result
+Earlier and middle orders cannot be reset to not-yet-started states when a later order has already entered production.
+
+---
+
+## 4. EXAMPLE SCENARIO TO ENFORCE
+
+Please enforce this kind of sequence protection:
+
+### Example valid current state
+- Order A = `Done`
+- Order B = `On-going`
+- Order C = `On-going`
+
+### Invalid change that must be blocked
+Trying to change:
+- Order B = `Plotted`
+
+resulting in:
+- Order A = `Done`
+- Order B = `Plotted`
+- Order C = `On-going`
+
+This must not be allowed, because it breaks the order flow.
+
+The same applies if a middle or earlier order is changed to:
+- `Planned`
+
+while a following order is already on-going.
+
+---
+
+## 5. DISABLE THE STATUS OPTIONS IN THE DROPDOWN
+
+Please disable the not-yet-started status options in the status dropdown when they are not allowed due to a following order already being on-going.
+
+### Disable at least:
+- `Plotted`
+- `Planned`
+
+### Expected result
+When the dropdown opens for an order that has a later order already on-going:
+- `Plotted` should appear disabled
+- `Planned` should appear disabled
+
+This should prevent invalid sequence-breaking selections before they happen.
+
+---
+
+## 6. SHOW A WARNING NOTIFICATION WHEN THE USER TRIES TO USE A BLOCKED STATUS
+
+In addition to disabling the options, please show a **warning notification** if the user attempts to set the order to a blocked not-yet-started status.
+
+### Important
+Do **not** use a warning icon for this requirement.
+
+Use a visible **warning notification / toast / alert message**.
+
+### Suggested warning message
+- `You cannot set this order to Planned or Plotted because a following order is already on-going.`
+- or
+- `This status change is not allowed because a later order is already in production.`
+- or
+- `Cannot move this order back to a not-yet-started status while a following order is on-going.`
+
+Any similar wording is fine as long as the reason is clear.
+
+### Expected result
+The user receives clear feedback that the status change is blocked because it would break the flow.
+
+---
+
+## 7. APPLY THIS TO FIRST OR MIDDLE ORDERS, BASED ON FOLLOWING ORDER STATE
+
+This rule should apply to:
+- the first order
+- middle orders
+- any order that has one or more following orders below it
+
+### Condition
+If any following order is on-going, then the current order cannot be moved backward to:
+- `Plotted`
+- `Planned`
+
+### Expected result
+The sequence remains logically consistent from top to bottom.
+
+---
+
+## 8. KEEP DONE / ON-GOING / OTHER VALID STATES WORKING NORMALLY
+
+Please do not break valid status flows.
+
+This request is specifically to block invalid downgrades to **not-yet-started** statuses when a later order is already on-going.
+
+### Important
+Do not unintentionally block:
+- legitimate updates between on-going statuses
+- valid done transitions
+- valid hold/cut/combined behavior, unless separately governed by another rule
+
+Only enforce the specific sequence rule requested here.
+
+---
+
+## 9. APPLY THIS AS A FLOW-INTEGRITY RULE, SIMILAR TO DIVERT RESTRICTIONS
+
+This should behave similarly in spirit to the divert rules:
+- not every status action is allowed if it breaks production logic
+
+But for this request, the focus is specifically:
+- order flow consistency
+- preventing earlier orders from being set to not-yet-started states while later orders are already on-going
+
+### Goal
+Protect the sequencing logic in the order table.
+
+---
+
+## 10. ENFORCE THIS IN BOTH UI AND BUSINESS LOGIC
+
+Please implement this rule in:
+- the status dropdown UI
+- and the backend/business-rule validation layer
+
+### Important
+Even if the UI fails to disable the option correctly, the system should still reject the invalid change.
+
+### Expected result
+The invalid status change cannot succeed through edge cases or manual requests.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log sequence-based status blocking for not-yet-started statuses.
+
+```javascript
+console.debug('[Order Flow Status Restriction]', {
+  orderId,
+  currentStatus,
+  requestedStatus,
+  hasFollowingOngoingOrder,
+  blockedNotYetStartedStatuses: ['Plotted', 'Planned'],
+  blocked:
+    hasFollowingOngoingOrder &&
+    ['Plotted', 'Planned'].includes(requestedStatus),
+});
+```
+
+```javascript
+console.debug('[Order Flow Status Dropdown State]', {
+  orderId,
+  hasFollowingOngoingOrder,
+  plottedDisabled: hasFollowingOngoingOrder,
+  plannedDisabled: hasFollowingOngoingOrder,
+});
+```
+
+```javascript
+console.debug('[Order Flow Warning Notification]', {
+  orderId,
+  requestedStatus,
+  warningShown: true,
+  reason: 'following_order_already_ongoing',
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ If a following order is already on-going, the current order cannot be changed to `Plotted`
+2. ✅ If a following order is already on-going, the current order cannot be changed to `Planned`
+3. ✅ This applies to first or middle orders when there is a later on-going order
+4. ✅ The dropdown disables `Plotted` and `Planned` when the rule applies
+5. ✅ A warning notification is shown if the user attempts the blocked status change
+6. ✅ The warning explains that a following order is already on-going
+7. ✅ Valid non-blocked status changes continue to work normally
+8. ✅ Backend/business logic also rejects the invalid status change
+9. ✅ The order-flow sequence remains logically consistent
+10. ✅ No UI errors or console errors are introduced

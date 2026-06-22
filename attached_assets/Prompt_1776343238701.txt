@@ -1,0 +1,105 @@
+```
+Fix: Lead keeps parent_id = null. Only non-lead sub-orders get parent_id:
+
+---
+
+## 1. FIX applySequencedResultsToDB
+
+```javascript
+if (order._isCombined && order._combinedFrom && order._combinedFrom.length > 1) {
+  const leadId = order.id;
+  
+  // Calculate combined volume from sub-orders
+  const combinedVolume = order._combinedFrom.reduce((sum, sub) => {
+    return sum + (parseFloat(sub.volume) || parseFloat(sub.total_volume_mt) || 0);
+  }, 0);
+  
+  const finalVolume = combinedVolume > 0
+    ? combinedVolume
+    : (parseFloat(order.volume) || parseFloat(order.total_volume_mt) || null);
+  
+  const volumeOverride = finalVolume && finalVolume > 0 ? finalVolume : null;
+  
+  const allSubIds = order._combinedFrom.map(sub => sub.id);
+  
+  console.log(`  [Combined] Lead: ${leadId}, Volume: ${volumeOverride}`);
+  console.log(`    All sub IDs: ${allSubIds.join(', ')}`);
+  
+  // Step A: Update LEAD order — volume_override, original_order_ids, parent_id = NULL
+  await updateOrderMutation.mutateAsync({
+    id: leadId,
+    data: {
+      feedmill_line: line,
+      priority_seq: prioCounter,
+      volume_override: volumeOverride,
+      original_order_ids: allSubIds,
+      parent_id: null,  // MUST be null — lead is never a child
+    }
+  });
+  console.log(`    [Lead updated] ${leadId}: parent_id=null, volume_override=${volumeOverride}`);
+  
+  // Step B: ONLY non-lead sub-orders get parent_id
+  for (const sub of order._combinedFrom) {
+    // Skip the lead — it already has parent_id = null
+    if (String(sub.id) === String(leadId)) {
+      console.log(`    [Skip] ${sub.id} is the lead — already updated above`);
+      continue;
+    }
+    
+    await updateOrderMutation.mutateAsync({
+      id: sub.id,
+      data: {
+        parent_id: leadId,
+        feedmill_line: line,
+        priority_seq: null,
+      }
+    });
+    console.log(`    [Child updated] ${sub.id}: parent_id=${leadId}`);
+  }
+  
+  prioCounter++;
+}
+```
+
+---
+
+## KEY POINT: The table shows it correctly because:
+
+Lead (order A reused):
+  - parent_id = null  → shows in main table
+  - volume_override = 120 MT  → displays combined volume
+  - original_order_ids = [A, B]  → knows it has children
+
+Child (order B):
+  - parent_id = A  → hidden unless expanded
+  - keeps its original 60 MT
+
+The lead's own original data (60 MT) is inherent in the lead row.
+The table shows: Lead 120 MT, and when expanded: Child B 60 MT.
+
+For the PREVIEW to match, it should show ALL sub-orders including the lead's 
+original data. But the ORDER TABLE only shows non-lead children.
+
+So the pattern is:
+- Preview: Lead row (120 MT) + Sub A (60 MT) + Sub B (60 MT) — informational
+- Order table: Lead row (120 MT) + Child B (60 MT) — DB reality
+
+---
+
+## VERIFICATION
+
+### Lead visible in table
+1. ✅ Lead has parent_id = null → passes filter !order.parent_id
+2. ✅ Lead shows in main table with combined volume
+3. ✅ Lead is expandable to show children
+
+### Children visible when expanded
+4. ✅ Non-lead sub-orders have parent_id = leadId
+5. ✅ When lead is expanded, expandedLeads.has(parent_id) = true
+6. ✅ Children appear beneath lead
+
+### No self-referencing
+7. ✅ Lead NEVER has parent_id pointing to itself
+8. ✅ Lead's parent_id is explicitly set to null
+9. ✅ Skip logic prevents setting parent_id on the lead
+```

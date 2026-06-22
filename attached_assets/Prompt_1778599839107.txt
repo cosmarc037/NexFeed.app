@@ -1,0 +1,168 @@
+Please refine the AI date suggestion logic so that the order’s projected **Estimated Completion Date/Time** is used as an important planning guide and validation signal — but not as an absolute hard constraint by itself.
+
+---
+
+## IMPORTANT CORRECTION
+
+Do not treat Estimated Completion Date/Time as a strict hard blocker in all cases.
+
+In the preview, Estimated Completion is often derived from:
+- the current first-order start anchor
+- default start date/time (such as today at 8:00 AM)
+- production hours
+- cascading sequence logic
+
+Because of that, some later-dated orders (for example avail dates on May 20, May 22, May 23) may still show much earlier Estimated Completion dates in the preview, simply because the cascade starts early.
+
+That does **not** automatically mean the suggestion is wrong.
+
+So Estimated Completion should be used as:
+- a guide
+- a feasibility signal
+- a lateness detection input
+- a reasoning input
+
+but not as a universal hard rejection rule.
+
+---
+
+## REQUIRED COMPARISON LOGIC
+
+The AI should evaluate the relationship between:
+
+- Start Date / Start Time
+- Estimated Completion Date/Time
+- Avail Date
+
+using the planning logic:
+
+### Avail Date >= Estimated Completion Date >= Start Date/Time
+
+This should be interpreted as a target planning relationship, not an absolute rigid equality rule.
+
+---
+
+## WHAT THE AI SHOULD ASK
+
+For each order, the AI should evaluate:
+
+### 1. Is the Avail Date later than or equal to the Estimated Completion Date?
+If yes:
+- that is generally acceptable
+- the order is not late based on this signal
+- no forced correction is needed just because the dates differ
+
+### 2. Is the Estimated Completion Date later than the Avail Date?
+If yes:
+- this is a strong lateness / delay signal
+- the AI should consider:
+  - advancing the order earlier
+  - improving the suggested start date/time
+  - changing sequence position
+  - explaining the lateness risk in Sequence Insight
+
+This is especially important for long-running orders.
+
+---
+
+## EXAMPLE OF CORRECT INTERPRETATION
+
+Example:
+- Order A = Avail Date May 12 = Completion May 12 12:19 PM
+- Order B = Avail Date May 13 = Completion May 13 4:18 AM
+- Order C = Avail Date May 22 = Completion May 13 5:48 AM
+- Order D = Avail Date May 23 = Completion May 13 7:53 AM
+
+Interpretation:
+- Order A → okay if completion is within May 12
+- Order B → acceptable if completion still aligns before or within its due window
+- Order C → not a problem just because completion is much earlier than May 22
+- Order D → not a problem just because completion is much earlier than May 23
+
+So the AI should not reject Orders C and D based on Estimated Completion being earlier than Avail Date.
+
+The real problem case is when:
+- Estimated Completion > Avail Date
+
+That is what the AI should treat as a warning signal.
+
+---
+
+## USE ESTIMATED COMPLETION AS A DELAY DETECTION SIGNAL
+
+If a candidate order has:
+- Avail Date = May 12
+- Estimated Completion = May 13 4:18 AM
+
+then this is a likely delay signal.
+
+The AI should not blindly keep the same suggested date.
+Instead, it should:
+- treat this as evidence that the order may need earlier placement
+- or a better anchor
+- or better sequencing
+
+But still interpret it in context of:
+- the current sequence anchor
+- user overrides
+- strategy intent
+- the fact that preview completion is derived and may change if sequence changes
+
+---
+
+## DO NOT FORCE ALL DATES TO MATCH THE CURRENT CASCADE
+
+Avoid making the AI overly rigid by locking date suggestions to the currently shown Estimated Completion cascade.
+
+The AI should understand that:
+- Estimated Completion is influenced by the current preview anchor
+- sequence changes can shift completion
+- moving the order or changing anchor can improve the result
+
+So use Estimated Completion as a strong evaluation signal, not as an immutable truth.
+
+---
+
+## SEQUENCE INSIGHT SHOULD EXPLAIN WHEN THIS SIGNAL MATTERS
+
+If the AI detects:
+- Estimated Completion > Avail Date
+
+then Sequence Insight should explain that.
+
+Example:
+“This order was advanced because, under the current sequence timing, its projected completion would exceed its avail date, indicating likely delay risk.”
+
+If:
+- Estimated Completion < Avail Date
+
+then no warning is needed simply because the order completes earlier than required.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log:
+
+```javascript
+console.debug('[AI Avail vs Estimated Completion Check]', {
+  orderId,
+  availDate,
+  projectedEstimatedCompletion,
+  startDateTime,
+  isCompletionAfterAvailDate: projectedEstimatedCompletion > availDateEnd,
+  isCompletionBeforeAvailDate: projectedEstimatedCompletion <= availDateEnd,
+  usingAsGuideOnly: true,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Estimated Completion is now used as a guide and validation signal, not a rigid hard blocker
+2. ✅ The AI checks whether Avail Date is later than or equal to Estimated Completion
+3. ✅ Orders whose completion is earlier than Avail Date are not incorrectly treated as problematic
+4. ✅ Orders whose completion is later than Avail Date are treated as likely delay-risk candidates
+5. ✅ The AI uses this signal to improve advancement and date suggestion decisions
+6. ✅ Sequence Insight explains delay-risk cases using the Avail Date vs Estimated Completion comparison

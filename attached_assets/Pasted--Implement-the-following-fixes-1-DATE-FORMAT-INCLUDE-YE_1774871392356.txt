@@ -1,0 +1,120 @@
+```
+Implement the following fixes:
+
+---
+
+## 1. DATE FORMAT — INCLUDE YEAR IN COMPLETION AND AVAIL
+
+Both the tooltip and the N10D table columns should show dates with the year.
+
+### CURRENT (WRONG)
+
+```
+Completion:    Apr 4
+Avail:         Apr 5
+```
+
+### CORRECT
+
+```
+Completion:    Apr 4, 2026
+Avail:         Apr 5, 2026
+```
+
+### FIX
+
+Update the date formatting function used for Completion and Avail:
+
+```javascript
+function formatDateWithYear(date) {
+  if (!date) return '—';
+  
+  if (typeof date === 'string') {
+    date = parseDate(date);
+  }
+  
+  if (!date || isNaN(date.getTime())) return '—';
+  
+  const months = [
+    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+  ];
+  
+  return `${months[date.getMonth()]} ${date.getDate()}, ${date.getFullYear()}`;
+}
+```
+
+### APPLY TO
+
+| Location | What to update |
+|---|---|
+| N10D table — Completion column | Use `formatDateWithYear()` |
+| N10D table — Avail column | Use `formatDateWithYear()` |
+| N10D hover tooltip — Completion | Use `formatDateWithYear()` |
+| N10D hover tooltip — Avail | Use `formatDateWithYear()` |
+| Auto-Sequence hover tooltip — Completion | Use `formatDateWithYear()` |
+| Auto-Sequence hover tooltip — Avail | Use `formatDateWithYear()` |
+
+### DO NOT CHANGE
+
+- ❌ Day column headers (keep "APR 2", "APR 3", etc. — no year needed)
+- ❌ Any other date displays in the app
+
+---
+
+## 2. FIX TOOLTIP GAP — N10D TAB ONLY
+
+The tooltip in the N10D tab has a large gap between the hovered cell and the tooltip. The tooltip should appear closer to the hovered row.
+
+### THE PROBLEM
+
+Looking at the snip, the tooltip appears far above the hovered row with a visible gap, making it feel disconnected from the data.
+
+### THE FIX
+
+Reduce the gap between the row and the tooltip. Position the tooltip directly above or below the hovered row with minimal spacing.
+
+```javascript
+function getTooltipPosition(rowElement, tooltipWidth, tooltipHeight) {
+  const rowRect = rowElement.getBoundingClientRect();
+  const viewportWidth = window.innerWidth;
+  const viewportHeight = window.innerHeight;
+  const padding = 8;
+  const gap = 4; // Small gap between row and tooltip
+  
+  // Center horizontally relative to the viewport
+  let x = (viewportWidth - tooltipWidth) / 2;
+  
+  // Position directly above the row with minimal gap
+  let y = rowRect.top - tooltipHeight - gap;
+  
+  // If not enough space above, place directly below the row
+  if (y < padding) {
+    y = rowRect.bottom + gap;
+  }
+  
+  // If still goes off bottom, center vertically
+  if (y + tooltipHeight + padding > viewportHeight) {
+    y = (viewportHeight - tooltipHeight) / 2;
+  }
+  
+  // Horizontal bounds
+  if (x < padding) x = padding;
+  if (x + tooltipWidth + padding > viewportWidth) {
+    x = viewportWidth - tooltipWidth - padding;
+  }
+  
+  return { x, y };
+}
+```
+
+| Property | Current | Updated |
+|---|---|---|
+| Gap between row and tooltip | ~20-30px | 4px |
+| Tooltip offset | mouseY + 12 | rowRect.top - tooltipHeight - 4 |
+
+### APPLY ONLY TO
+
+- ✅ N10D table tooltip — reduce gap
+- ❌ Auto-Sequence tooltip — leave as-is (already centered from previous fix)
+```

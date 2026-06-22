@@ -1,0 +1,239 @@
+```
+Implement the following changes to the NexFeed application:
+
+---
+
+## AVAIL DATE — EDIT MODE WITH DONE/CANCEL BUTTONS AND REVERT
+
+Update the Avail Date field editing experience to include explicit confirmation/cancel buttons and the ability to revert to the original value.
+
+---
+
+### EDIT MODE — DONE AND CANCEL BUTTONS
+
+When the user clicks on the Avail Date cell to edit (via the lock icon / override mechanism):
+
+**Current behavior (problematic):**
+- Changes apply immediately with no way to cancel or confirm.
+
+**Updated behavior:**
+
+**Step 1: User clicks to edit the Avail Date**
+- The cell enters "edit mode".
+- A date picker opens OR the field becomes editable.
+
+**Step 2: Edit mode shows two small buttons below the input**
+
+```
+┌─────────────────────────────────┐
+│ March 22, 2026          📅      │   ← date picker / input
+├─────────────────────────────────┤
+│         [Cancel]  [Done]        │   ← action buttons
+└─────────────────────────────────┘
+```
+
+**"Done" button:**
+- Confirms and applies the change.
+- Small button, orange background (#fd5108), white text.
+- Font size: 11px.
+- Padding: 3px 10px.
+- Border radius: 4px.
+- On click: saves the new value, exits edit mode, triggers auto-sort if needed, recalculates cascade.
+
+**"Cancel" button:**
+- Discards the change and reverts to the value before editing started.
+- Small button, grey outline (#d1d5db), grey text (#6b7280).
+- Font size: 11px.
+- Padding: 3px 10px.
+- Border radius: 4px.
+- On click: restores the previous value, exits edit mode, no changes saved.
+
+**Button placement:**
+- Both buttons sit side by side below the date input/picker.
+- Right-aligned within the cell.
+- "Cancel" on the left, "Done" on the right.
+- Small enough to fit within the cell without overflowing.
+
+**Keyboard shortcuts:**
+- Enter key = "Done" (confirm and save).
+- Escape key = "Cancel" (discard and revert).
+
+---
+
+### REVERT TO ORIGINAL VALUE
+
+The Avail Date field should allow the user to revert to the ORIGINAL value that was parsed from the SAP upload.
+
+**What is the "original" value?**
+- The value that was initially parsed from the SAP Remarks column when the file was first uploaded.
+- This could be a date (e.g., "March 22, 2026" parsed from "TLD | Mar 22") or a non-date value (e.g., "prio replenish", "safety stocks").
+- This original value is stored separately and never overwritten, even when the user edits the Avail Date.
+
+**Storage:**
+- Add a field `original_avail_date` to each order.
+- Set this field ONCE during SAP upload parsing. It never changes after that.
+- The displayed/editable `avail_date` can be changed by the user, but `original_avail_date` is permanent.
+
+**Revert button:**
+
+When the current Avail Date value DIFFERS from the original value, show a small "Revert" option.
+
+**Display when Avail Date has been modified:**
+```
+┌─────────────────────────────────┐
+│ March 25, 2026          📅  ↩   │   ← ↩ revert icon
+│ Original: prio replenish        │   ← grey text showing original
+└─────────────────────────────────┘
+```
+
+**Revert icon (↩):**
+- Small icon positioned next to the lock/calendar icon.
+- Grey (#9ca3af) by default, orange (#fd5108) on hover.
+- Cursor: pointer.
+- Tooltip on hover: "Revert to original: [original value]"
+  - e.g., "Revert to original: prio replenish"
+  - e.g., "Revert to original: March 22, 2026 (TLD | Mar 22)"
+
+**On revert click — confirmation dialog:**
+
+```
+╔══════════════════════════════════════════════════════╗
+║  ↩ Revert Availability Date                          ║
+║                                                       ║
+║  Revert this order's availability date to its         ║
+║  original SAP value?                                  ║
+║                                                       ║
+║  Current value:    March 25, 2026                     ║
+║  Original value:   prio replenish                     ║
+║                                                       ║
+║  ⚠ This may affect the order's position in the       ║
+║  schedule. If the original value is a non-date,       ║
+║  the order will become a non-dated order and may      ║
+║  be repositioned by the auto-sort.                    ║
+║                                                       ║
+║              [Cancel]    [Confirm Revert]             ║
+╚══════════════════════════════════════════════════════╝
+```
+
+**Dialog buttons:**
+- [Cancel]: Grey outlined. Closes dialog, no changes.
+- [Confirm Revert]: Orange filled (#fd5108), white text. Reverts the value.
+
+**On confirm revert:**
+1. `avail_date` is set back to `original_avail_date`.
+2. The revert icon (↩) disappears (since current = original, no revert needed).
+3. The "Original: ..." line below the date disappears.
+4. Auto-sort runs:
+   - If the reverted value is a date, the order is repositioned chronologically among dated orders.
+   - If the reverted value is a non-date (prio replenish, safety stocks), the order stays in its current position but is now freely movable.
+5. Cascade recalculation triggers.
+6. Toast notification:
+   ```
+   ↩ Avail Date reverted to original: prio replenish
+   ```
+
+**When current = original (no changes made):**
+- The revert icon (↩) is NOT shown.
+- The "Original: ..." line is NOT shown.
+- The cell displays normally.
+
+---
+
+### ORIGINAL VALUE DISPLAY
+
+When the user has modified the Avail Date from its original SAP value, show the original value as a reference line below the current value.
+
+**Modified Avail Date — date changed to different date:**
+```
+March 25, 2026              📅  ↩
+Original: March 22, 2026
+(TLD | Mar 22)
+```
+
+- Line 1: Current value (dark text, bold).
+- Line 2: "Original: [original date]" in grey (#9ca3af), 11px.
+- Line 3: Original Remarks text in grey (#9ca3af), 10px, italic (if applicable).
+
+**Modified Avail Date — non-date changed to date:**
+```
+March 25, 2026              📅  ↩
+Original: prio replenish
+```
+
+- Line 1: Current value (dark text).
+- Line 2: "Original: prio replenish" in orange (#fd5108), 11px (orange because original was non-date).
+
+**Modified Avail Date — date changed to non-date (if possible):**
+```
+safety stocks               ↩
+Original: March 22, 2026
+```
+
+- Line 1: Current value in orange (#fd5108).
+- Line 2: "Original: March 22, 2026" in grey (#9ca3af), 11px.
+
+**Unmodified Avail Date (current = original):**
+```
+March 22, 2026              📅
+TLD | Mar 22
+```
+
+- Normal display, no "Original:" line, no revert icon.
+
+---
+
+### EDIT MODE — FULL FLOW
+
+**Step 1: User clicks lock icon / calendar icon on Avail Date cell**
+- Override confirmation dialog appears (existing behavior with "Type Confirm" input).
+- User confirms.
+
+**Step 2: Cell enters edit mode**
+```
+┌─────────────────────────────────┐
+│ [Date picker / text input]  📅  │
+│                                 │
+│ Original: prio replenish        │   ← reference line (if different)
+│                                 │
+│         [Cancel]  [Done]        │
+└─────────────────────────────────┘
+```
+
+**Step 3: User modifies the date**
+- Date picker allows selecting a new date.
+- The "Done" and "Cancel" buttons are visible.
+
+**Step 4: User clicks "Done"**
+- New value is saved.
+- Edit mode closes.
+- Auto-sort runs if the new value changes date ordering.
+- Cascade recalculates.
+- If the new value differs from original, the revert icon (↩) appears.
+
+**Step 5: User clicks "Cancel"**
+- Value reverts to what it was BEFORE this edit session started (not necessarily the original SAP value — just the value before the user opened edit mode).
+- Edit mode closes.
+- No changes saved.
+
+---
+
+### EDGE CASES
+
+**Edge case 1 — User sets date, then reverts, then sets again:**
+- Each edit session's "Cancel" reverts to the value at the START of that session.
+- The revert (↩) icon always compares against `original_avail_date` (SAP upload value).
+- Multiple edit-revert cycles work correctly because `original_avail_date` never changes.
+
+**Edge case 2 — Combined order's child:**
+- Child orders' Avail Date is read-only (child fields are read-only).
+- The revert icon does NOT appear on child orders.
+- Only the lead order or standalone orders can edit and revert Avail Date.
+
+**Edge case 3 — Cut order portions:**
+- Both cut portions inherit the same `original_avail_date`.
+- Each can be independently edited and reverted.
+
+**Edge case 4 — New order from subsequent upload:**
+- `original_avail_date` is set from the new upload's parsed value.
+- If the order was already in the table and the upload updates it, `original_avail_date` remains the FIRST upload's value (never overwritten).
+```

@@ -1,0 +1,285 @@
+```
+Implement the following fix:
+
+---
+
+## FIX: COMPLETION DATE — MUST BE AT LEAST 1 DAY BEFORE AVAIL DATE
+
+The completion date should always be at least one day before the avail date. Currently, users can set the completion date to the same day as the avail date.
+
+---
+
+### THE RULE
+
+```
+Completion Date ≤ Avail Date - 1 day
+
+Example:
+Avail Date: April 03, 2026
+Max Completion Date: April 02, 2026 (one day before)
+```
+
+### THE PROBLEM
+
+From the snip:
+```
+Avail Date: April 03, 2026
+Completion Date: April 03, 2026 ← WRONG, should be April 02 or earlier
+```
+
+---
+
+### UPDATE COMPLETION DATE CONSTRAINTS
+
+```javascript
+function getCompletionDateConstraints(order) {
+  const today = getMinSelectableDate();
+  
+  // Min: Start Date or Today
+  let minDate = today;
+  if (order.start_date) {
+    const startDate = parseDate(order.start_date);
+    if (startDate && startDate > today) {
+      minDate = startDate;
+    }
+  }
+  
+  // Max: Avail Date MINUS 1 day
+  let maxDate = null;
+  if (order.avail_date && isRealDate(order.avail_date)) {
+    const availDate = parseDate(order.avail_date);
+    if (availDate) {
+      maxDate = new Date(availDate);
+      maxDate.setDate(maxDate.getDate() - 1); // 1 day before avail
+      maxDate.setHours(23, 59, 59, 999);
+    }
+  }
+  
+  return {
+    minDate: minDate,
+    maxDate: maxDate
+  };
+}
+```
+
+### UPDATE CONFLICT CHECK
+
+```javascript
+function checkDateConflicts(order) {
+  const warnings = [];
+  
+  const startDate = order.start_date ? parseDate(order.start_date) : null;
+  const completionDate = order.completion_date ? parseDate(order.completion_date) : null;
+  const availDate = isRealDate(order.avail_date) ? parseDate(order.avail_date) : null;
+  const endDate = order.end_date ? parseDate(order.end_date) : null;
+  
+  // Start date after completion date
+  if (startDate && completionDate && startDate > completionDate) {
+    warnings.push({
+      field: 'start_date',
+      type: 'conflict',
+      message: 'Start date is after the completion date.'
+    });
+  }
+  
+  // Start date after avail date
+  if (startDate && availDate && startDate > availDate) {
+    warnings.push({
+      field: 'start_date',
+      type: 'conflict',
+      message: 'Start date is after the availability date.'
+    });
+  }
+  
+  // Completion date on same day or after avail date
+  if (completionDate && availDate) {
+    const availMinusOne = new Date(availDate);
+    availMinusOne.setDate(availMinusOne.getDate() - 1);
+    availMinusOne.setHours(23, 59, 59, 999);
+    
+    if (completionDate > availMinusOne) {
+      warnings.push({
+        field: 'completion_date',
+        type: 'conflict',
+        message: 'Completion date must be at least 1 day before the availability date.'
+      });
+    }
+  }
+  
+  // End date before start date
+  if (endDate && startDate && endDate < startDate) {
+    warnings.push({
+      field: 'end_date',
+      type: 'conflict',
+      message: 'End date is before the start date.'
+    });
+  }
+  
+  // End date before avail date (soft warning)
+  if (endDate && availDate && endDate < availDate) {
+    warnings.push({
+      field: 'end_date',
+      type: 'info',
+      message: 'End date is before the availability date.'
+    });
+  }
+  
+  return warnings;
+}
+```
+
+### UPDATE CASCADE CALCULATION
+
+When auto-cascading completion dates, also enforce the 1-day-before rule:
+
+```javascript
+function recalculateCompletionDates(line) {
+  const lineOrders = getOrdersForLine(line);
+  lineOrders.sort((a, b) => a.prio - b.prio);
+  
+  let currentEndTime = null;
+  
+  for (let i = 0; i < lineOrders.length; i++) {
+    const order = lineOrders[i];
+    
+    if (order.status === 'Done' || order.status === 'Cancel PO') {
+      continue;
+    }
+    
+    const productionTime = parseFloat(order.production_time) || 0;
+    const changeover = parseFloat(order.changeover) || 0;
+    const totalTime = productionTime + changeover;
+    
+    if (order.start_date && order.start_time) {
+      const startDateTime = parseDateTime(order.start_date, order.start_time);
+      
+      if (startDateTime) {
+        let completionDateTime = new Date(
+          startDateTime.getTime() + (totalTime * 60 * 60 * 1000)
+        );
+        
+        // Enforce: completion must be at least 1 day before avail
+        if (order.avail_date && isRealDate(order.avail_date)) {
+          const availDate = parseDate(order.avail_date);
+          if (availDate) {
+            const maxCompletion = new Date(availDate);
+            maxCompletion.setDate(maxCompletion.getDate() - 1);
+            maxCompletion.setHours(23, 59, 59, 999);
+            
+            if (completionDateTime > maxCompletion) {
+              // Flag as warning but still set the calculated date
+              order._completionExceedsAvail = true;
+            } else {
+              order._completionExceedsAvail = false;
+            }
+          }
+        }
+        
+        order.completion_date = formatDateFull(completionDateTime);
+        order.completion_time = formatTime(completionDateTime);
+        currentEndTime = completionDateTime;
+      }
+    } else if (currentEndTime) {
+      const startDateTime = new Date(currentEndTime);
+      
+      let completionDateTime = new Date(
+        startDateTime.getTime() + (totalTime * 60 * 60 * 1000)
+      );
+      
+      // Enforce: completion must be at least 1 day before avail
+      if (order.avail_date && isRealDate(order.avail_date)) {
+        const availDate = parseDate(order.avail_date);
+        if (availDate) {
+          const maxCompletion = new Date(availDate);
+          maxCompletion.setDate(maxCompletion.getDate() - 1);
+          maxCompletion.setHours(23, 59, 59, 999);
+          
+          if (completionDateTime > maxCompletion) {
+            order._completionExceedsAvail = true;
+          } else {
+            order._completionExceedsAvail = false;
+          }
+        }
+      }
+      
+      order.completion_date = formatDateFull(completionDateTime);
+      order.completion_time = formatTime(completionDateTime);
+      currentEndTime = completionDateTime;
+    }
+  }
+}
+```
+
+---
+
+### EXAMPLES
+
+```
+✅ VALID:
+Avail Date: April 03, 2026
+Completion Date: April 02, 2026 (1 day before ✅)
+
+✅ VALID:
+Avail Date: April 03, 2026
+Completion Date: March 31, 2026 (3 days before ✅)
+
+❌ INVALID:
+Avail Date: April 03, 2026
+Completion Date: April 03, 2026 (same day ❌)
+
+❌ INVALID:
+Avail Date: April 03, 2026
+Completion Date: April 04, 2026 (after avail ❌)
+```
+
+### CALENDAR — GREY OUT AVAIL DATE AND AFTER
+
+When Completion Date calendar opens:
+- Dates before Start Date (or today): greyed out
+- Avail Date itself: greyed out
+- Dates after Avail Date: greyed out
+- Selectable range: Start Date to (Avail Date - 1 day)
+
+```javascript
+function isCompletionDateDisabled(day, order) {
+  const constraints = getCompletionDateConstraints(order);
+  
+  if (constraints.minDate && day < constraints.minDate) return true;
+  if (constraints.maxDate && day > constraints.maxDate) return true;
+  
+  return false;
+}
+```
+
+---
+
+## UPDATED RULE TABLE
+
+| Field | Min | Max |
+|---|---|---|
+| Start Date | Today | Avail Date (if real date) |
+| Completion Date | Start Date (or Today) | Avail Date - 1 day |
+| Avail Date | Today | No limit |
+| End Date | Start Date (or no limit if empty) | No limit (warn if < Avail) |
+
+---
+
+## VERIFICATION
+
+1. Completion Date picker
+   - ✅ Avail Date (April 03) is greyed out in calendar
+   - ✅ April 02 (1 day before) is the last selectable date
+   - ✅ April 04+ greyed out
+   - ✅ Selecting April 02 works
+
+2. Existing violations
+   - ✅ Order with Completion = April 03, Avail = April 03: shows red cell + ⚠
+   - ✅ Warning: "Completion date must be at least 1 day before the availability date"
+
+3. Cascade
+   - ✅ Auto-cascaded completion dates flag if they exceed (avail - 1 day)
+   - ✅ Warning shown on cell
+
+4. Calendar hover tooltip
+   - ✅ Hovering cell with warning shows tooltip message
+```

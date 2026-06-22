@@ -1,0 +1,218 @@
+Please fix the **downstream Start Date picker behavior and Start Time-based date resolution** so invalid same-day dates are not retained and the next valid date is used correctly.
+
+---
+
+## 1. FIX THE DATE PICKER SO DISABLED DATES CANNOT REMAIN SELECTED
+
+There is a bug in the downstream scheduling UI.
+
+For orders with a previous order, the same calendar date as the previous order’s completion date is supposed to be disabled for manual **Start Date** selection. However, even when that date is visually disabled, the app is still allowing it to remain selected or displayed as the Start Date.
+
+### Example of the bug
+Previous order completion:
+- `May 23, 2026, 11:49 PM`
+
+Expected disabled date:
+- `May 23, 2026`
+
+But the downstream order still shows:
+- `Start Date = May 23, 2026`
+
+### Expected result
+If a date is disabled for downstream Start Date selection, it must not:
+- remain selected
+- be displayed as the saved Start Date
+- be preserved in the input value
+- be used in the resolved start datetime
+
+The disabled date rule must be enforced functionally, not just visually.
+
+---
+
+## 2. IF THE PREVIOUS COMPLETION DATE IS DISABLED, AUTO-USE THE NEXT VALID DATE
+
+When a downstream order references a previous order whose completion date is on a disabled date for manual Start Date selection, the UI should default or resolve to the **next valid date**, not the disabled one.
+
+### Example
+If the previous order completes on:
+- `May 23, 2026, 11:49 PM`
+
+and `May 23, 2026` is disabled for manual Start Date selection, then the next valid manual Start Date should be:
+- `May 24, 2026`
+
+### Expected result
+When the user opens the Start Date picker or when the app resolves a downstream date after validation:
+- the app should not stay on `May 23`
+- it should move to or use `May 24` as the next valid date where applicable
+
+---
+
+## 3. FIX THE START TIME RULE SO IT PROPERLY SHIFTS TO THE NEXT DATE WHEN NEEDED
+
+There is also a bug in the Start Time-based resolution logic.
+
+If the user enters a **Start Time** and that time is earlier than the previous order’s completion time, the app should automatically use the **following date**. Right now, it is incorrectly keeping the same date.
+
+### Example of the bug
+Previous order completion:
+- `May 23, 2026, 11:49 PM`
+
+User sets:
+- `Start Time = 12:00 PM`
+
+Since `12:00 PM` is earlier than `11:49 PM`, the correct resolved Start Date should be:
+- `May 24, 2026`
+
+But the app is currently showing:
+- `May 23, 2026, 12:00 PM`
+
+which is invalid because it starts before the previous order has completed.
+
+### Expected result
+For downstream orders:
+- if entered Start Time is **earlier than** previous completion time → use the **next date**
+- if entered Start Time is **later than or equal to** previous completion time → use the **same date**
+
+---
+
+## 4. KEEP THE RULE DISTINCTION BETWEEN MANUAL START DATE AND TIME-ONLY ENTRY
+
+Please preserve the intended distinction between these two behaviors.
+
+### A. Manual Start Date
+For downstream orders:
+- users cannot manually select the same date as the previous order’s completion date
+- users cannot select past dates
+- if the manually selected date is valid and Start Time is blank, default Start Time to **8:00 AM**
+
+### B. Start Time only
+If the user enters only a Start Time:
+- the app may still resolve to the **same date** as the previous order’s completion date if the time is later than or equal to the previous completion time
+- otherwise, it must resolve to the **next date**
+
+### Important
+Do not treat these as the same workflow.
+
+The manual Start Date input must respect disabled-date validation, while the Start Time-only workflow may still validly resolve to the same date.
+
+---
+
+## 5. ENSURE DATE PICKER STATE AND RESOLVED START DATETIME STAY IN SYNC
+
+Please make sure the UI date picker, the displayed Start Date field, and the internally resolved start datetime all stay synchronized.
+
+### Goal
+If the app determines that:
+- the selected date is invalid
+- or the entered Start Time requires shifting to the next day
+
+then the UI should immediately reflect the corrected/resolved Start Date.
+
+### Example
+If:
+- previous completion = `May 23, 2026, 11:49 PM`
+- user enters `12:00 PM`
+
+then the displayed Start Date should become:
+- `May 24, 2026`
+
+The UI should not continue showing:
+- `May 23, 2026`
+
+after resolution.
+
+---
+
+## 6. APPLY THIS ONLY TO DOWNSTREAM ORDERS
+
+This logic applies only to:
+- the **2nd order onward**
+- or any order that has a **previous order** above it in the schedule
+
+Do not change the already-implemented first-order default behavior.
+
+---
+
+## 7. DO NOT BREAK EXISTING SCHEDULING CASCADE LOGIC
+
+Please preserve the existing logic for:
+- estimated completion date cascading
+- production-hours-based sequencing
+- first-order default scheduling
+- valid downstream Start Date → default `8:00 AM`
+
+This request is specifically to fix:
+- disabled same-date enforcement
+- Start Time-based next-day rollover
+- UI synchronization of the resolved Start Date
+
+---
+
+## IMPORTANT
+
+Please ensure the app follows these rules together:
+
+- If the user manually chooses a Start Date, the same date as the previous order’s completion date must be blocked
+- If that date is blocked, it must not remain selected or displayed
+- If the user enters only a Start Time, the app must compare it against the previous completion time and decide:
+  - same date if aligned
+  - next date if earlier
+- If the resolved date becomes the next day, the UI must display that next day immediately
+
+This is both a **validation fix** and a **date-resolution sync fix**.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log the downstream date picker state and Start Time-based date resolution.
+
+```javascript
+console.debug('[Downstream Start Date Disabled-Date Enforcement]', {
+  orderId,
+  previousCompletionDate,
+  candidateStartDate,
+  isDisabledDate,
+  displayedStartDate,
+  resolvedStartDate,
+});
+```
+
+```javascript
+console.debug('[Downstream Start Time Date Resolution]', {
+  orderId,
+  previousCompletionDatetime,
+  enteredStartTime,
+  previousCompletionTime,
+  shouldUseSameDate: enteredStartTime >= previousCompletionTime,
+  shouldUseNextDate: enteredStartTime < previousCompletionTime,
+  resolvedStartDate,
+});
+```
+
+```javascript
+console.debug('[Downstream Start Date UI Sync]', {
+  orderId,
+  pickerSelectedDate,
+  inputDisplayedDate,
+  resolvedStartDate,
+  inSync:
+    pickerSelectedDate === resolvedStartDate &&
+    inputDisplayedDate === resolvedStartDate,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ For downstream orders, the same date as the previous order’s completion date is truly disabled for manual Start Date selection
+2. ✅ A disabled Start Date cannot remain selected or displayed in the input
+3. ✅ If `May 23, 2026` is disabled, the app does not keep showing `May 23, 2026` as the selected Start Date
+4. ✅ When applicable, the next valid date such as `May 24, 2026` is used instead
+5. ✅ If a user enters only `Start Time = 12:00 PM` and the previous completion time is `11:49 PM`, the app resolves the Start Date to `May 24, 2026`
+6. ✅ If a user enters only a Start Time later than or equal to the previous completion time, the app keeps the same date
+7. ✅ Manual Start Date validation and Start Time-only resolution remain separate behaviors
+8. ✅ The displayed Start Date, date picker state, and internal resolved start datetime stay synchronized
+9. ✅ Existing cascading completion-date logic continues to work
+10. ✅ No UI errors or console errors are introduced

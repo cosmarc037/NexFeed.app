@@ -1,0 +1,180 @@
+Please fix the **not-yet-started status restriction logic** so that it does **not** incorrectly treat **combined-group sub-orders** as separate following on-going orders when validating order-flow restrictions.
+
+---
+
+## 1. FIX FALSE “FOLLOWING ORDER IS ON-GOING” WARNINGS CAUSED BY SUB-ORDERS
+
+There is a bug in the order-flow restriction logic for status changes.
+
+Right now, when a user tries to move an order back to a **not-yet-started status** (such as `Plotted` or `Planned`), the app may show this warning:
+
+- `Cannot move this order back to a not-yet-started status while a following order is on-going.`
+
+However, in some cases, the visible following order is only:
+- `Plotted`
+
+and there is no true separate following on-going order in the sequence.
+
+### Likely cause
+The validation appears to be incorrectly counting **sub-orders inside a combined group** as if they were separate following on-going orders.
+
+### Expected result
+The app should not block the status change based on sub-orders that belong to the same combined group / lead-order context.
+
+---
+
+## 2. DO NOT TREAT SUB-ORDERS OF THE SAME COMBINED GROUP AS SEPARATE FOLLOWING ORDERS
+
+When evaluating whether a following order is already on-going, please exclude:
+
+- sub-orders belonging to the same combined group
+- sub-orders that only mirror or inherit the lead order’s on-going state
+- rows that are not truly separate downstream production orders in the sequence
+
+### Goal
+The flow-integrity validation should only consider **actual following orders/groups**, not subordinate rows that are part of the same combined structure.
+
+### Expected result
+A lead order should not be blocked from changing status just because its own combined-group sub-orders are being interpreted as independent following on-going orders.
+
+---
+
+## 3. EVALUATE FLOW RESTRICTION AT THE CORRECT SEQUENCE LEVEL
+
+Please update the validation so that it checks for on-going status at the correct sequence level.
+
+### Intended behavior
+When a user tries to set an earlier order to a not-yet-started status, the app should look at:
+- real following orders in the production queue
+- real following combined groups
+- real later independent production units
+
+It should **not** look at:
+- child/sub-order rows that are part of the same combined group
+- rows whose status simply reflects the same lead-order state
+
+### Expected result
+The warning should only appear when there is a true later on-going order that would make the downgrade invalid.
+
+---
+
+## 4. PRESERVE THE EXISTING FLOW-INTEGRITY RULE FOR TRUE FOLLOWING ON-GOING ORDERS
+
+Please keep the original business rule intact for real cases:
+
+If a true later/following order is already:
+- `On-going batching`
+- `On-going pelleting`
+- `On-going bagging`
+- or another on-going state
+
+then earlier orders still must not be moved back to:
+- `Plotted`
+- `Planned`
+
+### Important
+This fix is only to remove **false positives** caused by combined-group sub-orders.
+
+It should not weaken the legitimate flow-protection rule for real downstream on-going orders.
+
+---
+
+## 5. HANDLE LEAD + SUB-ORDER STATUS PROPAGATION CORRECTLY
+
+If a lead order changes to an on-going status and its sub-orders also reflect that status as part of the combined-group behavior, the validator should understand that this is:
+
+- one combined production unit
+- not multiple independent following on-going orders
+
+### Expected result
+Status propagation within a combined group should not create fake downstream blockers in the not-yet-started validation logic.
+
+---
+
+## 6. APPLY THIS TO THE WARNING/TOAST MESSAGE TRIGGER AS WELL
+
+Please make sure the warning notification is only shown when the underlying validation truly detects a valid later independent on-going order.
+
+### Expected result
+Users should no longer see the warning:
+- when the only supposed “following on-going order” is actually just a sub-order of the same combined group
+
+The toast/warning must reflect a real condition, not an internal grouping artifact.
+
+---
+
+## 7. PRESERVE OTHER STATUS RESTRICTIONS AND COMBINED-ORDER BEHAVIOR
+
+Please preserve:
+- combined-order structure
+- lead/sub-order relationships
+- legitimate on-going propagation behavior
+- existing status restrictions for real flow conflicts
+- history logging
+- combine/expand/collapse behavior
+
+This request is specifically to fix the validation scope for:
+- not-yet-started status blocking
+- following-order on-going detection
+
+---
+
+## IMPORTANT
+
+Please preserve this rule:
+
+- an earlier order cannot be moved back to a not-yet-started status if a **real following order** is already on-going
+
+But update the implementation so that:
+
+- **sub-orders of the same combined group are not treated as separate following on-going orders**
+
+The app should validate the rule at the correct production-flow level, not at the child-row level.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log which rows are being considered during the “following on-going order” validation.
+
+```javascript
+console.debug('[Not-Yet-Started Restriction Check]', {
+  orderId,
+  requestedStatus,
+  followingRowsScanned,
+  followingIndependentOrdersScanned,
+  followingSubOrdersIgnored,
+  hasTrueFollowingOngoingOrder,
+});
+```
+
+```javascript
+console.debug('[Combined Group Flow Validation]', {
+  orderId,
+  combinedGroupId,
+  isLeadOrder,
+  subOrdersDetected,
+  subOrdersIgnoredForFlowRestriction: true,
+});
+```
+
+```javascript
+console.debug('[Not-Yet-Started Warning Trigger]', {
+  orderId,
+  requestedStatus,
+  warningShown,
+  triggeredByTrueFollowingOngoingOrder,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ An order is still blocked from moving to `Plotted` or `Planned` if a true later independent order is already on-going
+2. ✅ Sub-orders of the same combined group are not treated as separate following on-going orders
+3. ✅ A lead order is not falsely blocked because its own sub-orders inherited the lead’s on-going status
+4. ✅ The warning notification only appears when there is a true downstream on-going order
+5. ✅ Combined-group status propagation still works normally
+6. ✅ Existing legitimate flow-protection rules remain intact
+7. ✅ No UI errors or console errors are introduced

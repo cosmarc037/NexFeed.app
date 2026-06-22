@@ -1,0 +1,346 @@
+```
+Update the AI strategy card metrics container so it shows only the following four user-facing metrics in this exact format:
+
+- Min. slack
+- MTS adjusted
+- Changeover time (time-saved)
+- Faithfulness
+
+---
+
+## OBJECTIVE
+
+Refine the strategy card metrics box to focus only on the most decision-useful comparison metrics for the user.
+
+The visible metrics inside the card should now be reduced to exactly these four rows:
+
+1. Min. slack
+2. MTS adjusted
+3. Changeover time (time-saved)
+4. Faithfulness
+
+Remove the other visible rows such as:
+- Risk level
+- Violations
+
+These may still remain available internally for validation and recommendation logic, but they should no longer appear in the main strategy card metrics container.
+
+---
+
+## 1. UPDATE THE VISIBLE METRICS BOX CONTENT
+
+Inside each strategy card, replace the current metric list with exactly:
+
+- Min. slack
+- MTS adjusted
+- Changeover time (time-saved)
+- Faithfulness
+
+Do not show any extra visible rows in the main metric box.
+
+---
+
+## 2. DEFINE EACH METRIC
+
+### A. Min. slack
+Keep the current min slack calculation.
+
+Display:
+- minimum slack under the strategy
+- formatted in hours
+
+Example:
+- `525.5 hr`
+
+Store in:
+```javascript
+strategy.metrics.minSlackHours
+```
+
+---
+
+### B. MTS adjusted
+Keep the current MTS adjusted logic.
+
+Display:
+- number of adjusted MTS/flexible orders
+- over total eligible MTS/flexible orders
+
+Example:
+- `5 / 6`
+
+Store in:
+```javascript
+strategy.metrics.mtsAdjusted
+strategy.metrics.mtsCount
+```
+
+---
+
+### C. Changeover time (time-saved)
+This row should combine both:
+- the total final changeover time for the strategy
+- the time saved compared to Standard
+
+This should be displayed in one row using this format:
+
+```text
+{totalChangeoverHours} hr ({timeSavedHours} hr saved)
+```
+
+Example:
+- `4.53 hr (1.67 hr saved)`
+
+If the strategy is Standard:
+- show only the baseline total changeover time
+- no saved suffix, or use a neutral placeholder
+
+Recommended Standard display:
+- `6.20 hr`
+or
+- `6.20 hr (baseline)`
+
+Recommended AI strategy display:
+- `4.53 hr (1.67 hr saved)`
+
+### Calculation rules:
+- **totalChangeoverHours** = sum of final row changeover hours for that strategy
+- **timeSavedHours** = Standard total changeover time − current strategy total changeover time
+
+### Helpers:
+```javascript
+function calculateTotalChangeoverTime(lineOrders) {
+  return Number(
+    lineOrders.reduce((sum, order) => {
+      const co = parseFloat(order.changeover ?? order._changeoverHrs ?? 0) || 0;
+      return sum + co;
+    }, 0).toFixed(2)
+  );
+}
+
+function calculateTimeSavedVsStandard(standardOrders, strategyOrders) {
+  const standardCO = calculateTotalChangeoverTime(standardOrders);
+  const strategyCO = calculateTotalChangeoverTime(strategyOrders);
+
+  const rawSaved = standardCO - strategyCO;
+
+  return {
+    rawSaved: Number(rawSaved.toFixed(2)),
+    displaySaved: Number(Math.max(0, rawSaved).toFixed(2)),
+  };
+}
+```
+
+Store in:
+```javascript
+strategy.metrics.totalChangeoverHours
+strategy.metrics.timeSavedHours
+strategy.metrics.rawTimeSavedHours
+```
+
+Important:
+- compute these values only after the final strategy orders are fully executed and row changeovers are finalized
+- use the same source-of-truth changeover values shown in the After table
+
+---
+
+### D. Faithfulness
+Keep the existing Faithfulness Score.
+
+Display as percentage.
+
+Examples:
+- `59.8%`
+- `100.0%`
+
+Store in:
+```javascript
+strategy.metrics.faithfulnessScore
+strategy.metrics.faithfulnessRating
+strategy.metrics.faithfulnessBreakdown
+```
+
+---
+
+## 3. COMPUTE CHANGEOVER TIME AND TIME-SAVED AFTER FINAL STRATEGY EXECUTION
+
+Do not calculate these too early.
+
+Correct sequence:
+1. apply the AI strategy
+2. finalize dates
+3. finalize order sequence
+4. recalculate row changeovers
+5. compute total changeover time
+6. compare against Standard
+7. populate the card metric
+
+This ensures the metric matches the actual After table.
+
+---
+
+## 4. UPDATE THE STRATEGY METRICS DATA MODEL
+
+Each strategy should now include:
+
+```javascript
+strategy.metrics = {
+  minSlackHours: ...,
+  mtsAdjusted: ...,
+  mtsCount: ...,
+  totalChangeoverHours: ...,
+  timeSavedHours: ...,
+  rawTimeSavedHours: ...,
+  faithfulnessScore: ...,
+  faithfulnessRating: ...,
+  faithfulnessBreakdown: ...,
+
+  // internal-only if still needed:
+  riskLevel: ...,
+  violations: ...,
+}
+```
+
+For Standard:
+- `totalChangeoverHours` should still be computed
+- `timeSavedHours` may be omitted, set to 0, or displayed as baseline-only in UI
+
+---
+
+## 5. UPDATE THE CARD UI TO SHOW THE METRICS IN THIS EXACT ORDER
+
+The visible metrics box should render exactly in this order:
+
+1. Min. slack
+2. MTS adjusted
+3. Changeover time (time-saved)
+4. Faithfulness
+
+### Example JSX:
+```jsx
+<div className="strategy-metrics-box">
+  <div className="metric-row">
+    <span>Min. slack</span>
+    <strong>{formatHours(strategy.metrics.minSlackHours)}</strong>
+  </div>
+
+  <div className="metric-row">
+    <span>MTS adjusted</span>
+    <strong>{strategy.metrics.mtsAdjusted} / {strategy.metrics.mtsCount}</strong>
+  </div>
+
+  <div className="metric-row">
+    <span>Changeover time (time-saved)</span>
+    <strong>
+      {strategy.id === 'standard'
+        ? `${formatHours(strategy.metrics.totalChangeoverHours)}`
+        : `${formatHours(strategy.metrics.totalChangeoverHours)} (${formatHours(strategy.metrics.timeSavedHours)} saved)`}
+    </strong>
+  </div>
+
+  <div className="metric-row">
+    <span>Faithfulness</span>
+    <strong>{formatFaithfulness(strategy.metrics.faithfulnessScore)}</strong>
+  </div>
+</div>
+```
+
+---
+
+## 6. FORMATTING RULES
+
+### Min. slack
+Display:
+- `525.5 hr`
+
+### MTS adjusted
+Display:
+- `5 / 6`
+
+### Changeover time (time-saved)
+For AI strategies:
+- `4.53 hr (1.67 hr saved)`
+
+For Standard:
+- `6.20 hr`
+or
+- `6.20 hr (baseline)`
+
+Preferred simpler Standard format:
+- `6.20 hr`
+
+### Faithfulness
+Display:
+- `59.8%`
+- `100.0%`
+
+---
+
+## 7. OPTIONAL VALUE COLORING
+
+Optional but recommended:
+
+### Faithfulness
+- green if >= 90
+- light green if >= 75
+- amber if >= 60
+- red if < 60
+
+### Changeover time (time-saved)
+- saved portion can be green if > 0
+- neutral if 0
+
+If styling the entire line is too much, keep plain text but make sure formatting is clear.
+
+---
+
+## 8. REMOVE RISK LEVEL / VIOLATIONS FROM VISIBLE CARD ONLY
+
+Do not display:
+- Risk level
+- Violations
+
+inside the main strategy card metrics container.
+
+However:
+- keep them in internal metrics if recommendation / validation logic still depends on them
+
+---
+
+## 9. UPDATE "VIEW AI REASONING" CONTENT TO MATCH THE NEW METRICS
+
+If possible, include changeover impact in the reasoning.
+
+Example:
+- “This strategy reduces total changeover time from 6.20 hr in Standard to 4.53 hr, saving 1.67 hr.”
+
+Also optionally include faithfulness summary:
+- “Faithfulness is 82.4%, reflecting that the final preview closely matches the intended flexible-date advancement logic.”
+
+This makes the metric box feel supported by the narrative.
+
+---
+
+## 10. VERIFICATION
+
+### Metrics behavior
+1. ✅ Visible card metrics now show only:
+   - Min. slack
+   - MTS adjusted
+   - Changeover time (time-saved)
+   - Faithfulness
+2. ✅ Metrics appear in that exact order
+3. ✅ Total changeover time is based on final executed row changeovers
+4. ✅ Time saved is calculated against Standard for the same line
+5. ✅ Faithfulness remains based on actual strategy execution vs intent
+
+### UI behavior
+6. ✅ Risk level is no longer visible in the card metrics box
+7. ✅ Violations are no longer visible in the card metrics box
+8. ✅ Standard shows baseline changeover time cleanly
+9. ✅ AI strategies show both changeover time and saved time clearly
+
+### Consistency
+10. ✅ Changeover time matches the actual row values shown in the After table
+11. ✅ Time saved reflects the real delta from Standard
+12. ✅ Metric content is cleaner, more focused, and easier for users to compare

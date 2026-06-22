@@ -1,0 +1,235 @@
+Please update the **shutdown diversion eligibility logic** so that orders that were already historically `in_production` or `completed` do not become divertible again just because their current visible status was temporarily changed.
+
+---
+
+## 1. PRESERVE NON-DIVERTIBLE BEHAVIOR FOR ORDERS THAT WERE ALREADY ONGOING OR DONE
+
+We already improved the shutdown status logic so that if an order had already reached:
+- `in_production`
+- `completed`
+
+and is later temporarily changed to another status such as:
+- `hold`
+- `cut`
+
+the app should still remember that the order had already been ongoing/done.
+
+Please apply the same principle to **shutdown diversion eligibility**.
+
+### Current issue
+Right now, if an order that was previously ongoing/done is changed to another visible status, the app may start treating it as divertible again.
+
+This is not correct.
+
+### Expected result
+If an order was already historically:
+- in production / ongoing, or
+- completed / done
+
+then it should **remain non-divertible**, even if its current visible status later becomes:
+- `hold`
+- `cut`
+- or another status
+
+The app must not revert it back into the diversion candidate pool.
+
+---
+
+## 2. DIVERSION ELIGIBILITY MUST NOT RELY ONLY ON CURRENT STATUS
+
+Please update the diversion logic so that it does not determine divertibility based only on the order’s **current status**.
+
+Instead, it should also consider whether the order had already previously reached:
+- `in_production`
+- `completed`
+
+### Goal
+If the order has already effectively entered production or been completed, then it should no longer be considered a movable order for shutdown diversion purposes.
+
+### Expected result
+Orders with prior production/completion history remain excluded from diversion even if the current visible status changes.
+
+---
+
+## 3. APPLY THE SAME “PRODUCTION-STATE MEMORY” TO DIVERSION RULES
+
+Please reuse the same concept already added for status restriction logic, such as:
+- history-based detection
+- lifecycle memory
+- `hasBeenInProduction`
+- `hasBeenCompleted`
+- or equivalent derived state
+
+### Rule
+If either of these is true:
+- `hasBeenInProduction = true`
+- `hasBeenCompleted = true`
+
+then the order should be treated as:
+- **not divertible**
+
+### Expected result
+The order should not reappear as a valid diversion target/source merely because its current visible status is no longer literally `in_production` or `completed`.
+
+---
+
+## 4. REMOVE OR DISABLE “RIGHT-CLICK TO DIVERT” FOR THESE ORDERS
+
+If an order is historically non-divertible because it has already been:
+- ongoing / in production
+- done / completed
+
+then the UI should not present it as a divertible shutdown row.
+
+### Example
+Do not show interaction cues such as:
+- `Line shutdown — right-click to divert`
+
+for an order that should no longer be divertible due to prior production/completion state.
+
+### Expected result
+The UI should clearly reflect that these orders are not eligible for diversion.
+
+That means:
+- no active divert action
+- no misleading diversion prompt
+- no selectable diversion behavior
+
+---
+
+## 5. KEEP TRUE UNSTARTED ORDERS DIVERTIBLE WHEN APPROPRIATE
+
+Please preserve normal diversion behavior for orders that are truly still eligible.
+
+### Eligible for diversion
+Orders that:
+- have never been in production
+- have never been completed
+- are still movable and not yet produced
+
+### Not eligible for diversion
+Orders that:
+- are currently `in_production`
+- are currently `completed`
+- were previously `in_production`
+- were previously `completed`
+
+### Expected result
+This change should only prevent reclassification of historically ongoing/done orders.
+It should not break diversion for genuinely unstarted eligible orders.
+
+---
+
+## 6. ALIGN DIVERSION ELIGIBILITY WITH THE SHUTDOWN STATUS-RESTRICTION IMPROVEMENT
+
+Please keep the app consistent across both behaviors:
+
+### Status option logic
+Orders that were already ongoing/done should retain access to those statuses even if temporarily changed to `hold`/`cut`.
+
+### Diversion logic
+The same orders should also retain their **non-divertible** behavior and must not become divertible again just because the current status changed.
+
+### Goal
+Do not let a temporary visible status override the true lifecycle state of the order.
+
+---
+
+## 7. ENFORCE THIS IN BOTH UI AND BACKEND
+
+Please implement this rule both:
+- in the frontend/UI eligibility and action display
+- and in the backend/service/business-rule validation
+
+### Important
+Even if a diversion action is triggered manually or through an edge case in the UI, the system must reject diversion for orders that had already reached:
+- `in_production`
+- `completed`
+
+### Expected result
+No historically ongoing/done order can be diverted after the app has already recognized it as having entered production/completion.
+
+---
+
+## 8. PRESERVE EXISTING DIVERSION HISTORY ONLY FOR VALID DIVERTED ORDERS
+
+Please preserve diversion history behavior for truly valid diverted orders, such as:
+- `Diverted / Feedmill Diverted: Line A → Line B`
+- `Reverted / Feedmill Reverted: Line B → Line A`
+
+### Important
+Orders that are historically non-divertible due to prior production/completion state must not receive new diversion history entries.
+
+Because they should not be diverted at all.
+
+---
+
+## IMPORTANT
+
+Please preserve this business rule:
+
+If an order has already been:
+- ongoing / in production, or
+- done / completed
+
+then it should remain **non-divertible**, even if its current visible status later changes to:
+- `hold`
+- `cut`
+- or another status
+
+A temporary status change must not cause the order to become divertible again.
+
+This should align with the improved production-state memory logic already implemented.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log diversion eligibility using prior production-state memory.
+
+```javascript
+console.debug('[Shutdown Diversion Eligibility]', {
+  orderId,
+  currentStatus,
+  hasBeenInProduction,
+  hasBeenCompleted,
+  isHistoricallyNonDivertible:
+    hasBeenInProduction || hasBeenCompleted,
+  canDivert:
+    !(hasBeenInProduction || hasBeenCompleted),
+});
+```
+
+```javascript
+console.debug('[Shutdown Diversion UI Action Visibility]', {
+  orderId,
+  showRightClickToDivert,
+  hasBeenInProduction,
+  hasBeenCompleted,
+});
+```
+
+```javascript
+console.debug('[Shutdown Diversion Backend Rejection]', {
+  orderId,
+  attemptedDiversion: true,
+  hasBeenInProduction,
+  hasBeenCompleted,
+  rejected:
+    hasBeenInProduction || hasBeenCompleted,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ An order that was previously `in_production` does not become divertible again after being changed to `hold`
+2. ✅ An order that was previously `completed` does not become divertible again after being changed to `cut` or `hold`
+3. ✅ Diversion eligibility does not rely only on the current visible status
+4. ✅ Orders with `hasBeenInProduction` or `hasBeenCompleted` remain excluded from diversion
+5. ✅ The UI no longer shows diversion prompts such as `right-click to divert` for historically non-divertible orders
+6. ✅ Backend/business logic also rejects diversion for historically ongoing/done orders
+7. ✅ Truly unstarted orders can still be diverted normally when a line is in shutdown
+8. ✅ No invalid diversion history is written for historically non-divertible orders
+9. ✅ No UI errors or console errors are introduced

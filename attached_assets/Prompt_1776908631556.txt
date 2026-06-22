@@ -1,0 +1,334 @@
+```
+Make the four changes: badge color, child grouping, terminology, and end date styling:
+
+---
+
+## 1. CHANGE "Selected to Move" BADGE TO GREEN
+
+```jsx
+// In the line auto-sequence preview stats section:
+
+<div className="auto-sequence-stats">
+  <StatBadge label="Current Orders" value={totalCurrentOrders} />
+  <StatBadge label="Candidates Found" value={candidates.length} color="blue" />
+  <StatBadge label="Selected to Move" value={selectedCandidates.length} color="green" />
+  <StatBadge label="After" value={totalAfterOrders} />
+</div>
+```
+
+And update the StatBadge styling:
+
+```css
+.stat-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.stat-badge-label {
+  color: #9ca3af;
+  font-weight: 400;
+}
+
+.stat-badge-value {
+  color: #1f2937;
+  font-size: 18px;
+}
+
+/* Color variants */
+.stat-badge.stat-badge-default {
+  background: #f3f4f6;
+}
+
+.stat-badge.stat-badge-blue {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+.stat-badge.stat-badge-green {
+  background: #dcfce7;
+  color: #16a34a;
+}
+
+.stat-badge.stat-badge-red {
+  background: #fecaca;
+  color: #dc2626;
+}
+
+.stat-badge.stat-badge-gray {
+  background: #e5e7eb;
+  color: #6b7280;
+}
+```
+
+---
+
+## 2. GROUP CHILD ORDERS TOGETHER IN ORDER HISTORY
+
+When a combined order's children are transferred to history, they should stay grouped (visually indented/connected). In the Order History table, add visual grouping:
+
+```jsx
+// In OrderHistoryTable.jsx — render sub-orders grouped with lead
+
+function renderOrderHistoryRow(order, index, allOrders) {
+  // Check if this order is a child (has parent_id)
+  const isChild = order.parent_id != null;
+  const leadOrder = isChild 
+    ? allOrders.find(o => o.id === order.parent_id)
+    : null;
+  
+  // If this is a lead order with children, render it and all children together
+  if (!isChild && order.original_order_ids && order.original_order_ids.length > 0) {
+    const children = allOrders.filter(o => o.parent_id === order.id);
+    
+    return (
+      <React.Fragment key={order.id}>
+        {/* Lead row */}
+        <tr className="order-history-row order-history-row-lead">
+          <td className="order-history-indicator">🔗</td>
+          {/* ... rest of columns ... */}
+        </tr>
+        
+        {/* Child rows — grouped together, indented */}
+        {children.map((child, childIndex) => (
+          <tr key={child.id} className="order-history-row order-history-row-sub">
+            <td className="order-history-indicator">
+              {childIndex === children.length - 1 ? '└─' : '├─'}
+            </td>
+            {/* ... rest of columns ... */}
+          </tr>
+        ))}
+      </React.Fragment>
+    );
+  }
+  
+  // If this is a child, skip it (already rendered above)
+  if (isChild) return null;
+  
+  // Regular order
+  return (
+    <tr key={order.id} className="order-history-row">
+      <td className="order-history-indicator"></td>
+      {/* ... rest of columns ... */}
+    </tr>
+  );
+}
+```
+
+Add styling:
+
+```css
+.order-history-row-lead {
+  background: #eff6ff;
+  border-left: 3px solid #3b82f6;
+}
+
+.order-history-row-sub {
+  background: #f9fafb;
+  border-left: 3px solid #d1d5db;
+  padding-left: 20px;
+}
+
+.order-history-indicator {
+  width: 30px;
+  padding: 8px 4px;
+  font-size: 11px;
+  color: #9ca3af;
+  font-family: monospace;
+}
+```
+
+---
+
+## 3. CHANGE "Child" TO "Sub" TERMINOLOGY
+
+Search and replace throughout the app:
+
+```javascript
+// Change all instances of:
+// "child" → "sub"
+// "Child" → "Sub"
+// "CHILD" → "SUB"
+
+// In combined order displays:
+// "Child orders" → "Sub-orders"
+// "View children" → "View sub-orders"
+// "Add child" → "Add sub-order" (if applicable)
+
+// In tables and UI:
+// Button: "child-remove-btn" → "sub-remove-btn"
+// Class: "as-row-combined-sub" (keep this, it's already "sub")
+// Label: "as-row-child" → keep as is if no instances exist
+
+// In badges/labels:
+// "Show children" → "Show sub-orders"
+// "{n} children" → "{n} sub-orders"
+// "as-child-remove-btn" → "as-sub-remove-btn"
+```
+
+Specific files to update:
+
+```jsx
+// PlantAfterRow.jsx
+// OLD:
+// const childOrders = isLead 
+//   ? allOrders.filter(o => String(o.parent_id) === String(order.id))
+//   : [];
+
+// NEW:
+const subOrders = isLead 
+  ? allOrders.filter(o => String(o.parent_id) === String(order.id))
+  : [];
+
+// OLD: {childOrders.length} orders combined
+// NEW: {subOrders.length} sub-orders combined
+
+// OLD: {childOrders.map((child, childIndex) => (
+// NEW: {subOrders.map((sub, subIndex) => (
+
+// Status: "Combined with other PO" (keep as is)
+// Label in preview: "Show sub-orders" or keep "2 orders combined"
+```
+
+---
+
+## 4. REMOVE COLOR HIGHLIGHT FROM END DATE, ONLY KEEP ICON
+
+```jsx
+// In the order details scheduling section:
+
+function renderSchedulingDates(order) {
+  const availDate = order.target_avail_date;
+  const estimatedCompletion = order.estimated_completion_date;
+  const endDate = order.end_date;
+  
+  const isAheadOfSchedule = endDate && availDate && new Date(endDate) < new Date(availDate);
+  
+  return (
+    <div className="scheduling-dates">
+      <div className="scheduling-date-row">
+        <label>Avail Date</label>
+        <span className="scheduling-date-value">{formatDate(availDate)}</span>
+      </div>
+      
+      <div className="scheduling-date-row">
+        <label>Estimated Completion Date</label>
+        <span className="scheduling-date-value scheduling-date-muted">{formatDate(estimatedCompletion)}</span>
+      </div>
+      
+      <div className="scheduling-date-row">
+        <label>End Date</label>
+        <div className="scheduling-end-date">
+          <span className="scheduling-date-value">
+            {formatDate(endDate)}
+          </span>
+          {isAheadOfSchedule && (
+            <span 
+              className="scheduling-ahead-icon" 
+              title="Production was completed ahead of schedule"
+            >
+              △
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+```
+
+Styling:
+
+```css
+.scheduling-date-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 0;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.scheduling-date-row:last-child {
+  border-bottom: none;
+}
+
+.scheduling-date-row label {
+  font-size: 11px;
+  color: #9ca3af;
+  font-weight: 600;
+  text-transform: uppercase;
+  min-width: 140px;
+}
+
+.scheduling-date-value {
+  font-size: 13px;
+  color: #374151;
+  font-weight: 500;
+}
+
+.scheduling-date-muted {
+  color: #9ca3af;
+  font-style: italic;
+}
+
+.scheduling-end-date {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.scheduling-ahead-icon {
+  font-size: 12px;
+  color: #16a34a;
+  font-weight: 700;
+  title: "Ahead of schedule";
+}
+
+/* Remove any background or text color that was previously highlighting */
+/* NO yellow background, NO red text, NO green background */
+/* Just plain text + icon */
+```
+
+Remove the old color highlighting:
+
+```css
+/* DELETE THESE if they exist: */
+/* .end-date-ahead { background: #fef3c7; color: #92400e; } */
+/* .end-date-on-time { background: #dbeafe; color: #1e40af; } */
+/* .end-date-delayed { background: #fecaca; color: #dc2626; } */
+```
+
+---
+
+## VERIFICATION
+
+### 1. Badge color
+1. ✅ "Current Orders" — default grey
+2. ✅ "Candidates Found" — blue
+3. ✅ "Selected to Move" — green (was orange/red)
+4. ✅ "After" — default grey
+
+### 2. Child grouping in history
+5. ✅ Lead order shows with 🔗 icon
+6. ✅ Sub-orders indented below
+7. ✅ Tree connector: ├─ and └─
+8. ✅ Visual grouping makes relationship clear
+
+### 3. Terminology
+9. ✅ "sub-orders" instead of "children"
+10. ✅ "Sub" badge instead of "Child"
+11. ✅ "2 sub-orders combined" label
+12. ✅ Consistent across all tables and previews
+
+### 4. End date styling
+13. ✅ No background color on end date
+14. ✅ No text color highlighting
+15. ✅ Only icon (△) shown when ahead of schedule
+16. ✅ Plain black text for end date
+17. ✅ Tooltip explains the △ icon: "Production was completed ahead of schedule"
+18. ✅ Makes sense: earlier end date = good (ahead of schedule)
+```

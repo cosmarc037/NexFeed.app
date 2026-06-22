@@ -1,0 +1,209 @@
+Please update the **Suggested Pre-orders** container in the **Fulfillment (Demo)** workspace with the following display and recalculation improvements.
+
+---
+
+# 1. SHOW BOTH FG AND SFG MATERIAL CODES IN THE PRE-ORDER HEADER
+
+Right now, the pre-order suggestion header does not clearly show the **SFG material code**.
+
+Please update the header format so it includes both **FG** and **SFG** material codes in a clear readable inline structure.
+
+### Required format
+Use a format like:
+
+- `[Pre-order] Elite XP Startex, Mini-pellet 50kg | FG: 1000000000241, SFG: 3000000000571`
+
+### Goal
+Make the generated pre-order easier to identify at a glance without needing to inspect the lower details area.
+
+### Expected result
+Each pre-order suggestion header clearly shows:
+- badge
+- item description
+- FG material code
+- SFG material code
+
+---
+
+# 2. ENSURE THE FPR USES THE CURRENT DATE IN PH TIME
+
+Please update the generated pre-order FPR so it reflects the **current date** using the expected FPR format and **Philippine time**.
+
+### FPR format
+The FPR format is:
+
+- `YYMMDD`
+
+### Example
+If today in **PH time** is:
+- `May 29, 2026`
+
+then the generated pre-order FPR should be:
+- `260529`
+
+and not:
+- `260528`
+
+### Goal
+Ensure generated pre-orders use the correct date basis regardless of timezone mismatch.
+
+### Expected result
+The generated pre-order FPR is based on **PH time**, not local browser/system timezone if that would differ.
+
+---
+
+# 3. FORMAT BATCH SIZE WITH NO DECIMAL PLACES
+
+Please remove decimal places from the displayed **Batch Size** in the pre-order suggestion details.
+
+### Current issue
+Batch size is currently displayed like:
+- `4.000`
+
+### Expected behavior
+Display it as:
+- `4`
+
+### Goal
+Make the value cleaner and more readable.
+
+### Expected result
+Batch Size is shown with no decimal places in the pre-order suggestion UI.
+
+---
+
+# 4. AUTOMATICALLY RECOMPUTE THE AI-SUGGESTED AVAIL DATE WHEN THE ORDER TABLE CHANGES
+
+Please make sure the **AI-Suggested Avail Date** automatically updates whenever relevant conditions in the order table change.
+
+### This includes changes such as:
+- order sequence changes
+- drag/drop reordering
+- auto-sequence updates
+- approval or dismissal of pre-order suggestions
+- inventory state changes
+- adjusted inventory changes
+- removal of invalid suggestions
+- other changes that affect where the pre-order should fit in the line
+
+### Goal
+The AI-suggested avail date should always reflect the current state of the demo order table and inventory situation.
+
+### Expected result
+If the order table changes, the suggested avail date should be recalculated automatically for the affected pre-order suggestions.
+
+---
+
+# 5. KEEP THE AI-SUGGESTED AVAIL DATE IN SYNC WITH THE ADJUSTED INVENTORY RULES
+
+We already added a rule that a pre-order suggestion should no longer remain valid if adjusted inventory can no longer satisfy the order.
+
+Please make sure the **AI-Suggested Avail Date** logic stays in sync with that behavior.
+
+### Expected behavior
+If:
+- inventory usage changes
+- adjusted inventory changes
+- a suggestion becomes invalid
+- or suggestion ordering changes because one pre-order is approved/dismissed
+
+then:
+- the AI-suggested avail date should refresh accordingly
+- and invalid suggestions should not keep stale dates
+
+### Goal
+Prevent stale AI-suggested dates from remaining visible after the suggestion list has effectively changed.
+
+### Expected result
+The suggestion list and the AI-suggested avail dates both stay consistent with the latest adjusted inventory state.
+
+---
+
+# 6. PRESERVE THE EXISTING PRE-ORDER CONTAINER IMPROVEMENTS
+
+Please keep the previously requested behaviors intact, including:
+- scrollable suggested pre-orders container
+- collapsed by default on initial load
+- buttons near the content
+- separate section below the active order table
+- richer details
+- single-order structure for generated pre-orders
+- FPR badge / Pre-order label behavior
+
+### Expected result
+These new improvements should build on top of the existing pre-order UI structure, not replace it.
+
+---
+
+# IMPORTANT
+
+Please update the **Fulfillment (Demo) Suggested Pre-orders** section as follows:
+
+- show both FG and SFG material codes in the header
+- format the header like:
+  - `[Pre-order] Item Name | FG: xxxxx, SFG: xxxxx`
+- generate the FPR using the **current PH date** in `YYMMDD` format
+- display Batch Size with **no decimal places**
+- automatically refresh the **AI-Suggested Avail Date** whenever the order table or adjusted inventory context changes
+
+---
+
+# DEBUG LOGGING
+
+Temporarily log the updated pre-order header content, FPR generation, and avail-date refresh behavior.
+
+```javascript
+console.debug('[Demo Pre-Order Header Display]', {
+  suggestionId,
+  itemDescription,
+  fgMaterialCode,
+  sfgMaterialCode,
+  headerFormat: `[Pre-order] ${itemDescription} | FG: ${fgMaterialCode}, SFG: ${sfgMaterialCode}`,
+});
+```
+
+```javascript
+console.debug('[Demo Pre-Order FPR Generation]', {
+  suggestionId,
+  timezone: 'Asia/Manila',
+  currentPhDate,
+  generatedFpr,
+  format: 'YYMMDD',
+});
+```
+
+```javascript
+console.debug('[Demo Pre-Order Batch Size Formatting]', {
+  suggestionId,
+  rawBatchSize,
+  displayedBatchSize,
+  decimalPlacesRemoved: true,
+});
+```
+
+```javascript
+console.debug('[Demo AI-Suggested Avail Date Refresh]', {
+  suggestionId,
+  triggeredBy,
+  adjustedInventory,
+  suggestionStillValid,
+  recomputedAiSuggestedAvailDate,
+});
+```
+
+---
+
+# VERIFICATION
+
+1. ✅ Each pre-order header shows both FG and SFG material codes
+2. ✅ Header format follows:
+   - `[Pre-order] Item Name | FG: ..., SFG: ...`
+3. ✅ Generated pre-order FPR uses the current **PH date**
+4. ✅ FPR format is `YYMMDD`
+5. ✅ Example: May 29, 2026 (PH time) becomes `260529`
+6. ✅ Batch Size is displayed without decimal places
+7. ✅ AI-Suggested Avail Date refreshes automatically when the order table changes
+8. ✅ AI-Suggested Avail Date refreshes automatically when adjusted inventory changes
+9. ✅ Invalidated suggestions do not keep stale AI-suggested dates
+10. ✅ Existing pre-order container improvements remain intact
+11. ✅ No UI errors or console errors are introduced

@@ -1,0 +1,195 @@
+Please add a **Mash-specific shutdown diversion workflow** so that when a line is marked as **shutdown**, eligible **Mash orders** can be surfaced as opportunistic diversion candidates to that shutdown line.
+
+---
+
+## 1. ALLOW MASH ORDERS TO BE DIVERTED TO A SHUTDOWN LINE
+
+Please add a special exception for **Mash orders** (`form = 'M'`) so that they can still be diverted to a line that is currently marked as **shutdown**.
+
+### Business reason
+According to the client, Mash orders are **opportunistic** and can still be produced on a shutdown line because they **skip the pellet mill**.
+
+### Important
+This exception should apply only to:
+- **Mash orders**
+
+It should **not** make shutdown lines generally available for non-mash orders.
+
+### Expected result
+Shutdown lines remain unavailable for normal orders, but can still be treated as eligible diversion destinations for Mash orders.
+
+---
+
+## 2. DETECT SHUTDOWN-LINE MASH DIVERSION OPPORTUNITIES
+
+When a line is marked as **shutdown**, please detect Mash orders on other lines that could be considered for diversion to that shutdown line.
+
+### Goal
+Surface useful operational opportunities where a Mash order can be moved to the shutdown line.
+
+### Expected result
+The app should identify eligible Mash orders that may benefit from being diverted to the shutdown line.
+
+---
+
+## 3. HIGHLIGHT ELIGIBLE MASH ORDERS IN THE TABLE WHEN A SHUTDOWN LINE EXISTS
+
+Please visually highlight eligible Mash orders in the schedule table when there is a shutdown line that they could be diverted to.
+
+### Example behavior
+Similar to how diversion opportunities can be surfaced/highlighted now, show a visual cue on the Mash order row.
+
+### Expected result
+The user can easily see that this Mash order is a candidate for diversion because a shutdown line is available.
+
+---
+
+## 4. SHOW A NOTE / PROMPT ON THE HIGHLIGHTED MASH ORDER
+
+Please show a note or prompt on the highlighted Mash order row such as:
+
+- `Line 3 is shutdown — consider diverting this Mash order to Line 3`
+
+### Goal
+Make it obvious why the order is being highlighted and what action is being suggested.
+
+### Expected result
+Users understand that the shutdown line creates a special diversion opportunity for the Mash order.
+
+---
+
+## 5. OPEN A MASH-SPECIFIC DIVERT MODAL WHEN THE USER ACTS ON THE HIGHLIGHTED ORDER
+
+When the user clicks the Mash diversion opportunity, open a **Divert** modal tailored for this shutdown-line Mash scenario.
+
+### Important difference from normal divert
+Unlike the normal divert flow, the user should **not** choose among multiple destination lines.
+
+### Required behavior
+The destination line should already be fixed:
+- source line = current line of the Mash order
+- destination line = the shutdown line
+
+### Expected result
+The modal should be simpler than the normal diversion modal because the shutdown line is already the intended destination.
+
+---
+
+## 6. IN THE MASH DIVERT MODAL, SHOW THE INSERTION POSITION FOR THE SHUTDOWN LINE
+
+Please calculate and show the insertion position for the Mash order on the shutdown line.
+
+### The modal should show
+- source line
+- destination shutdown line
+- insertion position
+- production impact if relevant
+- downstream effects if relevant
+- deadline / timing context if relevant
+
+### Expected result
+The user can review exactly where the Mash order would be inserted on the shutdown line before confirming.
+
+---
+
+## 7. KEEP THE MASH-SPECIFIC SHUTDOWN DIVERSION CONSISTENT WITH MASH DATE RULES
+
+Please make sure this new workflow still respects the existing Mash scheduling logic, including:
+- Mash early-production window
+- no drifting beyond avail date
+- relevant Mash clamps / protections already enforced in the app
+
+### Goal
+The shutdown-line diversion should not break the existing special scheduling behavior for Mash.
+
+### Expected result
+Mash orders diverted to a shutdown line still remain within their proper Mash scheduling window.
+
+---
+
+## 8. DO NOT OFFER THIS WORKFLOW FOR NON-MASH ORDERS
+
+This should be a Mash-only feature.
+
+### Expected behavior
+If the order is not Mash:
+- do not highlight it as a shutdown-line diversion opportunity
+- do not allow shutdown lines as diversion destinations under this special rule
+
+### Expected result
+Only Mash orders receive this shutdown-line diversion treatment.
+
+---
+
+## 9. APPLY THIS TO THE RELEVANT ORDER TABLES / DEMO WHERE DIVERSION IS USED
+
+Please apply this behavior anywhere the diversion opportunity should be surfaced for users, especially where shutdown-line handling and diversion actions are already supported.
+
+### Expected result
+The new Mash shutdown-diversion behavior fits naturally into the existing diversion workflow.
+
+---
+
+## IMPORTANT
+
+Please implement a **Mash-only shutdown diversion feature** with this behavior:
+
+- when a line is marked as shutdown
+- eligible Mash orders on other lines can be highlighted as diversion opportunities
+- the order row should show a note such as:
+  - `Line X is shutdown — consider diverting this Mash order to Line X`
+- clicking the highlighted opportunity opens a **Mash-specific divert modal**
+- unlike normal divert, the destination line is already fixed to the shutdown line
+- the modal shows the insertion position and impact analysis
+- if confirmed, the Mash order is diverted to that shutdown line
+
+This should apply only to **Mash orders**, since they skip the pellet mill and can be produced opportunistically even when the line is shutdown.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log shutdown-line Mash diversion detection and modal behavior.
+
+```javascript
+console.debug('[Mash Shutdown Diversion Opportunity]', {
+  mashOrderId,
+  currentLine,
+  shutdownLine,
+  eligibleForShutdownDiversion: true,
+});
+```
+
+```javascript
+console.debug('[Mash Shutdown Diversion Modal]', {
+  mashOrderId,
+  sourceLine,
+  destinationShutdownLine,
+  insertionPosition,
+  modalOpened: true,
+});
+```
+
+```javascript
+console.debug('[Mash Shutdown Diversion Applied]', {
+  mashOrderId,
+  sourceLine,
+  destinationShutdownLine,
+  finalInsertedPriority,
+  divertedToShutdownLine: true,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Shutdown lines remain unavailable for normal orders
+2. ✅ Mash orders can be considered for diversion to shutdown lines
+3. ✅ Eligible Mash orders are highlighted when a shutdown line exists
+4. ✅ A note/prompt explains the shutdown diversion opportunity
+5. ✅ Clicking the opportunity opens a Mash-specific divert modal
+6. ✅ The destination line is fixed to the shutdown line
+7. ✅ The modal shows insertion position and impact analysis
+8. ✅ Existing Mash scheduling rules remain respected
+9. ✅ No UI errors or console errors are introduced

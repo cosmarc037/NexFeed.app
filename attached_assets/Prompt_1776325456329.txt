@@ -1,0 +1,97 @@
+```
+Revert: Remove auto-sequence on upload. Orders upload directly to table as-is. Auto-sequence only via "Auto-Sequence (All)" button.
+
+---
+
+## 1. REVERT UPLOAD HANDLER — BACK TO ORIGINAL
+
+```javascript
+async function handleOrderUpload(file) {
+  try {
+    const parsedOrders = await parseOrderFile(file);
+    
+    if (parsedOrders.length === 0) {
+      toast.error('No orders found in the uploaded file.');
+      return;
+    }
+    
+    // Save directly to DB — no auto-sequence preview
+    const BATCH_SIZE = 10;
+    for (let i = 0; i < parsedOrders.length; i += BATCH_SIZE) {
+      const batch = parsedOrders.slice(i, i + BATCH_SIZE);
+      await Promise.all(
+        batch.map(order => createOrderMutation.mutateAsync({ data: order }))
+      );
+    }
+    
+    await queryClient.invalidateQueries({ queryKey: ["orders"] });
+    
+    toast.success(`${parsedOrders.length} orders uploaded successfully.`);
+    
+  } catch (error) {
+    console.error('Upload error:', error);
+    toast.error(`Upload failed: ${error.message}`);
+  }
+}
+```
+
+---
+
+## 2. REMOVE UPLOAD AUTO-SEQUENCE STATE AND COMPONENTS
+
+```javascript
+// DELETE these states
+// const [showUploadAutoSequence, setShowUploadAutoSequence] = useState(false);
+// const [uploadContext, setUploadContext] = useState(null);
+// const [uploadState, setUploadState] = useState(null);
+
+// DELETE the UploadAutoSequencePreview component entirely
+// DELETE the UploadLoadingOverlay component
+// DELETE handleUploadApplySequence function
+// DELETE handleUploadOnly function
+
+// DELETE this JSX block
+// {showUploadAutoSequence && uploadContext && (
+//   <UploadAutoSequencePreview ... />
+// )}
+
+// DELETE this JSX block
+// {uploadState && <UploadLoadingOverlay state={uploadState} />}
+```
+
+---
+
+## 3. KEEP EVERYTHING ELSE AS-IS
+
+The following remain unchanged and fully functional:
+- Auto-Sequence (All) button → plantLevelCombineAndPlace → preview → apply
+- Per-line auto-sequence button → finds candidates → preview → apply
+- applySequencedResultsToDB shared function
+- PlantAutoSequencePreview component
+- LineAutoSequencePreview component
+- All combine/uncombine logic
+- All AI explanation logic
+
+---
+
+## VERIFICATION
+
+### Upload is simple again
+1. ✅ User uploads file → orders saved to DB immediately
+2. ✅ Orders appear in table right away
+3. ✅ No auto-sequence preview on upload
+4. ✅ No loading overlay
+5. ✅ Toast confirms upload
+
+### Auto-sequence only via button
+6. ✅ "Auto-Sequence (All)" in All Feedmills tab → plant-level preview
+7. ✅ Per-line auto-sequence button → line-level preview
+8. ✅ Both work on existing DB orders (real IDs)
+9. ✅ Both use the same apply function
+
+### Nothing broken
+10. ✅ UploadAutoSequencePreview component removed
+11. ✅ No orphaned state variables
+12. ✅ No orphaned event handlers
+13. ✅ Plant-level and per-line auto-sequence untouched
+```

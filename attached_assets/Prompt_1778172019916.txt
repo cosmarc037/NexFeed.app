@@ -1,0 +1,256 @@
+```
+Improve how AI strategies for changeover reduction are generated and applied so the AI has better visibility into the actual line-up of orders and can propose clustering that is more faithfully reflected in the final table.
+
+---
+
+## OBJECTIVE
+
+The main issue is not necessarily the AI strategy wording itself.
+
+The problem is that when an AI strategy proposes a changeover-reduction approach, the resulting order table is not structured strongly enough to reflect that strategy.
+
+This is why the strategy may show only moderate faithfulness (e.g. 73%):
+- the AI strategy concept is reasonable
+- but the final line-up does not cluster the orders effectively enough to actually reduce changeovers as intended
+
+We want to improve the AI strategy generation and execution so the AI has visibility into the real line-up of orders and can assess how to cluster them in a way that is more clearly reflected in the final table.
+
+---
+
+## CORE ISSUE
+
+For changeover-reduction strategies, the AI needs to understand:
+- the actual current order sequence on the line
+- the neighboring order transitions
+- which transitions are costly
+- which orders are flexible enough to move
+- what grouping dimensions matter most for reducing changeover
+  - e.g. form
+  - diameter
+  - color
+  - category
+  - product family
+- what constraints must still be respected
+  - avail dates
+  - Future Dispatches
+  - MTO protection
+  - line eligibility
+  - start-date safety
+
+Right now, the AI strategy may describe clustering, but the actual executed order line-up is not clustered strongly enough to realize that objective.
+
+---
+
+## REQUIRED IMPROVEMENT
+
+When generating a changeover-focused AI strategy:
+- give the AI better visibility into the full line-up of orders on that line
+- let it see the current sequence and transition context
+- let it identify where expensive changeovers are occurring
+- let it recommend a more concrete clustering structure that can actually be applied to the sequence
+
+Then ensure the execution layer applies that structure as faithfully as possible.
+
+---
+
+## 1. PROVIDE THE AI WITH THE FULL CURRENT LINE-UP OF ORDERS
+
+For each line, the AI should receive the actual current order sequence, including for each order:
+- current position
+- item description
+- category
+- color
+- diameter
+- form
+- volume
+- production time
+- current changeover to next order
+- availability / due-date constraints
+- Future Dispatches / urgency status
+- whether the order is flexible/movable
+- whether it is MTO protected
+- whether it is already grouped/combined
+
+The AI should not only receive a summary. It should see the actual line-up.
+
+### Example prompt input structure
+```json
+[
+  {
+    "position": 1,
+    "item": "...",
+    "category": "...",
+    "color": "...",
+    "diameter": "...",
+    "form": "...",
+    "volume_mt": 24,
+    "production_hours": 1.24,
+    "changeover_to_next": 2.00,
+    "avail_date": "...",
+    "future_dispatch_status": "...",
+    "movable": true
+  }
+]
+```
+
+This gives the AI enough context to reason about clustering.
+
+---
+
+## 2. EXPLICITLY ASK THE AI TO IDENTIFY COSTLY TRANSITIONS
+
+When the AI is asked to generate a changeover-reduction strategy, include instruction like:
+
+- identify the most expensive changeovers in the current line-up
+- identify which adjacent transitions are causing them
+- determine whether those transitions can be reduced by regrouping similar orders
+- propose a sequence that creates more compatible clusters while respecting hard constraints
+
+The AI should not just output a vague clustering idea.
+It should reason based on the actual transition pattern.
+
+---
+
+## 3. ASK THE AI TO PROPOSE CONCRETE CLUSTERING BLOCKS, NOT JUST A GENERAL STRATEGY
+
+Instead of only returning a broad description like:
+- cluster diameter and color runs
+
+the AI should internally reason in terms of:
+- which orders should be adjacent
+- which blocks should stay together
+- which transitions should be avoided
+- which specific orders should move earlier/later
+
+This makes the strategy more executable.
+
+### Desired outcome
+The execution layer should receive enough structure to say:
+- group orders A, B, C together
+- keep D later due to date constraint
+- place E beside F to avoid a red/color changeover
+- avoid inserting G between two 4.0mm yellow orders if it causes a diameter/color break
+
+---
+
+## 4. IMPROVE THE STRATEGY EXECUTION LAYER SO IT BETTER HONORS THE AI CLUSTERING INTENT
+
+Even if the AI proposes good clustering, the table will still look poorly aligned if the execution layer applies the strategy too weakly.
+
+Review how the strategy output is translated into the final sequence.
+
+Make sure the execution layer:
+- understands intended adjacency/grouping
+- preserves AI-recommended clusters where possible
+- does not overly dilute the AI ordering into a weak heuristic sort
+- respects hard constraints but still applies the clustering strongly enough to be visible in the final line-up
+
+The result should be a more faithful final table.
+
+---
+
+## 5. IMPROVE FAITHFULNESS FOR CHANGEOVER-REDUCTION STRATEGIES
+
+For strategies focused on reducing changeover:
+- faithfulness should reflect whether the final table actually resembles the intended clusters
+
+But beyond measurement, improve the actual execution so the faithfulness becomes higher.
+
+Goal:
+- not just measure 73%
+- but increase it by making the sequence more structurally aligned with the AI strategy
+
+---
+
+## 6. INCLUDE CURRENT AND PROJECTED CHANGEOVER CONTEXT IN THE AI INPUT
+
+If possible, give the AI:
+- current total changeover
+- per-transition changeover values
+- projected impact of regrouping where available
+
+This helps the AI understand:
+- where the biggest penalties are
+- where clustering will have the strongest effect
+
+The AI should be able to distinguish:
+- low-cost breaks
+- high-cost breaks
+and prioritize fixing the costly ones first.
+
+---
+
+## 7. TELL THE AI TO RESPECT HARD CONSTRAINTS BUT MAXIMIZE CLUSTERING WITHIN THOSE BOUNDS
+
+The strategy generation prompt should explicitly say:
+
+- do not violate hard date / MTO / eligibility constraints
+- but within those valid windows, maximize adjacency of compatible orders to reduce changeover
+
+This helps the AI generate a realistic but stronger clustering proposal.
+
+---
+
+## 8. MAKE THE RESULTING STRATEGY CARD NARRATIVE REFLECT THIS STRONGER STRUCTURE
+
+Once the AI is given better visibility and the execution layer applies it more faithfully, the strategy card narrative can more truthfully say:
+- the line-up was restructured to cluster similar orders
+- expensive transitions were reduced
+- compatible blocks were formed
+
+This will be much more believable because the table will actually show it.
+
+---
+
+## 9. ADD DEBUG OUTPUT FOR AI LINE-UP CONTEXT AND APPLIED RESULT
+
+Temporarily log:
+```javascript
+console.debug('[AI Changeover Strategy Input]', {
+  lineId,
+  lineup: lineOrders.map((order, index) => ({
+    position: index + 1,
+    orderId: order.id,
+    item: order.item_description,
+    form: order.form,
+    color: order.color,
+    diameter: order.diameter,
+    changeoverToNext: order.changeover,
+    movable: order.movable,
+  })),
+});
+```
+
+And after applying:
+```javascript
+console.debug('[AI Changeover Strategy Result]', {
+  lineId,
+  finalLineup: finalOrders.map((order, index) => ({
+    position: index + 1,
+    orderId: order.id,
+    item: order.item_description,
+    form: order.form,
+    color: order.color,
+    diameter: order.diameter,
+    changeoverToNext: order.changeover,
+  })),
+  faithfulness,
+});
+```
+
+This will help verify:
+- the AI saw the real line-up
+- the final sequence more clearly reflects the intended clustering
+
+---
+
+## 10. VERIFICATION
+
+1. ✅ AI receives the full current line-up of orders for the line
+2. ✅ AI can see current adjacent transitions and changeover costs
+3. ✅ AI is prompted to identify costly transitions and propose concrete clustering
+4. ✅ Execution layer applies the clustering intent more faithfully
+5. ✅ Final order table shows stronger visible grouping of compatible orders
+6. ✅ Changeover-focused strategies are more clearly reflected in the actual sequence
+7. ✅ Faithfulness improves because the table better matches the intended strategy
+```

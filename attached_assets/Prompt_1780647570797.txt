@@ -1,0 +1,189 @@
+Please revisit the **AI-powered sequencing strategy generation**, especially the **first AI strategy**, because it appears to be overly biased toward **MTS / flexible-order advancement**.
+
+The current behavior suggests that the first AI-generated strategy is too often some variation of:
+- flexible advancement
+- flexible load advancement
+- advancement unlock
+- early load fill
+
+while the second AI strategy appears more capable of producing other sequencing patterns such as:
+- swine clustering
+- changeover smoothing
+- late-window preservation
+- and other distinct strategic approaches
+
+---
+
+## 1. REVIEW WHETHER THE FIRST AI STRATEGY IS OVER-BIASED TOWARD MTS ADVANCEMENT
+
+Please investigate whether the first AI-generated strategy is being biased toward advancement-first logic too frequently.
+
+### Current concern
+The first AI strategy appears to repeatedly default to:
+- advancing flexible orders
+- filling underloaded early days
+- MTS advancement
+- early load fill
+
+even in cases where other sequencing strategies might be more appropriate or more distinct.
+
+### Goal
+Determine whether the first strategy slot is effectively defaulting to MTS advancement instead of truly evaluating multiple strategic patterns.
+
+### Expected result
+The first AI strategy should not always be some version of advancement unless the actual line conditions truly justify that.
+
+---
+
+## 2. MAKE THE FIRST AI STRATEGY MORE CAPABLE OF PRODUCING DIFFERENT STRATEGIC PATTERNS
+
+Please improve the AI prompt/generation so the first strategy can also produce other valid strategy types when appropriate, such as:
+- swine/product-family clustering
+- changeover smoothing
+- late-window preservation
+- monitor-risk containment
+- balanced utilization without aggressive advancement
+- mixed strategy approaches
+
+### Goal
+Prevent the first AI strategy from feeling repetitive or formulaic.
+
+### Expected result
+The first AI strategy should show more variety and should feel truly responsive to the line’s actual conditions.
+
+---
+
+## 3. ENSURE THE TWO AI STRATEGIES ARE MEANINGFULLY DISTINCT
+
+If the app is presenting two AI-generated strategies, they should feel like genuinely different sequencing options.
+
+### Current concern
+The first strategy often seems to be:
+- “advance flexible orders earlier”
+
+while the second strategy is the one that more often shows other useful patterns.
+
+### Goal
+Make sure the two AI strategy cards are intentionally differentiated.
+
+### Expected result
+Users should see clearly different sequencing philosophies/options, not two lightly reworded versions of the same advancement idea.
+
+---
+
+## 4. DO NOT LET MTS ADVANCEMENT DOMINATE THE FIRST STRATEGY BY DEFAULT
+
+Please review whether MTS advancement is being over-weighted in the first strategy generation logic.
+
+### Concern
+The AI may be seeing underloaded capacity and repeatedly treating advancement as the default “best” lever, even when other strategic considerations could reasonably take priority.
+
+### Goal
+Make advancement one possible strategy, not the automatic first answer.
+
+### Expected result
+The first strategy should only be advancement-first when that is genuinely the strongest strategy for the actual line.
+
+---
+
+## 5. KEEP MTS ADVANCEMENT AVAILABLE, BUT NOT AS A REPETITIVE DEFAULT
+
+This is not a request to remove MTS advancement.
+
+### Important
+MTS advancement should still remain a valid and available strategy when it makes sense.
+
+### But
+It should not dominate the first AI strategy so often that users begin to feel the AI is following a template instead of truly analyzing the situation.
+
+### Goal
+Preserve advancement as an option without making it the apparent default behavior.
+
+### Expected result
+MTS advancement remains available, but the strategy set becomes more balanced and diverse.
+
+---
+
+## 6. REVIEW WHETHER THE FIRST AI STRATEGY SLOT IS BEING SEEDED OR PROMPTED DIFFERENTLY
+
+Please investigate whether the first strategy is being influenced by:
+- prompt ordering
+- strategy seeding
+- ranking bias
+- fallback wording
+- hidden preference toward underloaded-day utilization
+
+### Goal
+Understand whether the first strategy slot itself is structurally biased toward advancement-themed outputs.
+
+### Expected result
+If such bias exists, reduce it so the first strategy can represent a wider set of valid sequencing patterns.
+
+---
+
+## IMPORTANT
+
+Please revisit the AI strategy generation because the **first AI-powered sequence** appears to be too frequently some variation of **MTS / flexible advancement**.
+
+The first strategy should not keep defaulting to:
+- flexible advancement
+- flexible load advancement
+- early load fill
+- advancement unlock
+
+unless that is truly the best fit for the line.
+
+Please improve the AI so that the first strategy can also produce other valid patterns such as:
+- clustering
+- changeover smoothing
+- late-window preservation
+- balanced sequencing
+- product-family continuity
+- and other distinct sequencing approaches
+
+Also make sure the two AI-generated strategies are meaningfully different from each other.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log strategy diversity and first-strategy bias.
+
+```javascript
+console.debug('[AI Strategy Diversity Check]', {
+  line,
+  strategy1Title,
+  strategy2Title,
+  strategy1Theme,
+  strategy2Theme,
+  strategiesMeaningfullyDistinct: strategy1Theme !== strategy2Theme,
+});
+```
+
+```javascript
+console.debug('[AI Strategy 1 Advancement Bias Review]', {
+  line,
+  strategy1Theme,
+  mtsAdvancementDominant: true,
+  strategy1GeneratedFromActualConditions: true,
+});
+```
+
+```javascript
+console.debug('[AI Strategy Slot Bias Investigation]', {
+  line,
+  strategySlot: 1,
+  promptBiasTowardAdvancement: false,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ The first AI strategy is reviewed for over-bias toward MTS advancement
+2. ✅ The first strategy can produce a wider range of sequencing patterns
+3. ✅ The two AI-generated strategies become more meaningfully distinct
+4. ✅ MTS advancement remains available but is no longer the repetitive default
+5. ✅ Strategy generation better reflects actual line conditions
+6. ✅ No UI errors or console errors are introduced

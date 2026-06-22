@@ -1,0 +1,210 @@
+Please update the **generated-order cross-line movement guardrails** so that generated orders can only move within the intended allowed line range based on their source rule, instead of relying only on historical run-rate eligibility.
+
+---
+
+## 1. ADD EXPLICIT LINE GUARDRAILS FOR GENERATED-ORDER MOVEMENT
+
+The application currently allows generated orders to participate in cross-line auto-sequencing based primarily on:
+- historical run-rate eligibility
+- overlap checks
+- general movement scoring
+
+However, there is currently no explicit guardrail that limits generated-order movement based on the source/target split-rule structure.
+
+Please add explicit movement guardrails for generated orders.
+
+### Goal
+Do not rely only on master-data run rates to determine whether a generated order can move to a line.
+
+Instead, apply a clear business-rule boundary based on where the generated order came from.
+
+---
+
+## 2. LINE 5–DERIVED GENERATED ORDERS MAY MOVE ONLY WITHIN LINE 1 AND LINE 2
+
+For generated orders that originate from the **Line 5 → Line 2** split-rule flow:
+
+- allow movement only within:
+  - `Line 1`
+  - `Line 2`
+
+### Allowed behavior
+- generated order may stay on `Line 2`
+- generated order may move from `Line 2` to `Line 1`
+- generated order may move from `Line 1` back to `Line 2` if the optimizer re-evaluates placement
+
+### Not allowed
+Do **not** allow Line 5–derived generated orders to move to:
+- `Line 3`
+- `Line 4`
+- `Line 6`
+- `Line 7`
+
+### Expected result
+Line 5-generated orders should be constrained to the FM1 movement range only:
+- `Line 1`
+- `Line 2`
+
+---
+
+## 3. LINE 7–DERIVED GENERATED ORDERS MUST STAY ON LINE 6 AND MUST NOT MOVE TO LINE 7
+
+For generated orders that originate from the **Line 7 → Line 6** split-rule flow:
+
+- allow them to remain on:
+  - `Line 6`
+
+- do **not** allow them to move to:
+  - `Line 7`
+
+### Reason
+Line 7 is the source side of that generated-order relationship, so the generated order should not be moved back onto the source line.
+
+### Expected result
+Line 7-derived generated orders should remain on `Line 6` and must not be moved to `Line 7`, even if master data shows a historical run rate there.
+
+---
+
+## 4. APPLY THESE GUARDRAILS BEFORE OR ALONGSIDE RUN-RATE ELIGIBILITY CHECKS
+
+Please make sure these line guardrails are enforced before, or at least together with, the existing run-rate eligibility logic.
+
+### Important
+Run-rate eligibility alone should no longer be enough to approve a generated-order move.
+
+The move must satisfy both:
+- the new source-based line guardrail
+- and the existing run-rate / overlap / scoring rules
+
+### Expected result
+A generated order should only be considered movable to a candidate line if that candidate line is:
+- allowed by the generated-order guardrail
+- and otherwise eligible under the existing movement logic
+
+---
+
+## 5. DO NOT ALLOW LINE 7–DERIVED GENERATED ORDERS TO RETURN TO THEIR SOURCE LINE EVEN IF RUN RATE EXISTS
+
+Please explicitly block this case:
+
+If a generated order came from the **Line 7 → Line 6** rule, it must not be allowed to move to **Line 7**, even if:
+- the SFG material has a historical run rate on Line 7
+- the queue score looks favorable
+- the line is active
+
+### Expected result
+The app should not rely on indirect master-data absence to block this.
+It should be blocked by an explicit business rule.
+
+---
+
+## 6. PRESERVE EXISTING RUN-RATE ELIGIBILITY, OVERLAP CHECKS, AND OTHER MOVEMENT RULES
+
+Please keep the existing generated-order movement logic intact for:
+- SFG-based run-rate lookup
+- non-overlap with the same generated/source identity on adjacent lines
+- queue-time scoring
+- active-line checks
+- shutdown checks
+- other sequencing constraints
+
+This request is only to add a stronger line guardrail around where generated orders are allowed to move.
+
+### Expected result
+The app should still use run-rate eligibility and scoring, but only within the allowed movement boundary.
+
+---
+
+## 7. APPLY THIS TO PLANT-LEVEL AUTO-SEQUENCE AND ANY OTHER GENERATED-ORDER CROSS-LINE MOVEMENT LOGIC
+
+Please ensure these guardrails apply consistently anywhere generated orders can be moved across lines, including:
+- plant-level auto-sequence
+- AI-generated cross-line rebalancing
+- any shared generated-order movement helper used by those flows
+
+### Expected result
+There should be no part of the app where generated orders bypass these allowed-line restrictions.
+
+---
+
+## 8. UPDATE AI REASONING / DEBUG LOGIC IF A MOVE IS BLOCKED BY THE NEW GUARDRAIL
+
+If a generated order is not moved because of the new source-based line guardrail, please make that clear in debug logging and, if appropriate, in AI reasoning.
+
+### Example reasoning / logging
+- `Generated order not eligible for Line 7 because Line 7-derived generated orders are locked to Line 6.`
+- `Line 5-derived generated order movement restricted to Line 1 / Line 2 range only.`
+
+### Expected result
+Users and developers can understand that the move was blocked by a business rule, not by a hidden bug.
+
+---
+
+## IMPORTANT
+
+Please implement these generated-order movement guardrails:
+
+### For Line 5–derived generated orders
+- allowed lines: `Line 1`, `Line 2` only
+
+### For Line 7–derived generated orders
+- allowed line: `Line 6` only
+- not allowed to move to `Line 7`
+
+Do not rely only on historical run-rate eligibility to enforce this behavior.
+
+These source-based movement restrictions should be explicit business rules.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log the generated-order source-based movement guardrail evaluation.
+
+```javascript
+console.debug('[Generated Order Movement Guardrail]', {
+  orderId,
+  generatedSourceLine,
+  currentLine,
+  candidateLine,
+  allowedCandidateLines,
+  blockedBySourceGuardrail:
+    !allowedCandidateLines.includes(candidateLine),
+});
+```
+
+```javascript
+console.debug('[Generated Order Movement Guardrail Result]', {
+  orderId,
+  generatedSourceLine,
+  candidateLine,
+  passedSourceGuardrail,
+  passedRunRateGate,
+  passedOverlapGate,
+  finalEligibleForMove,
+});
+```
+
+```javascript
+console.debug('[Generated Order Movement Blocked]', {
+  orderId,
+  generatedSourceLine,
+  candidateLine,
+  reason: 'source_based_line_guardrail',
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Line 5-derived generated orders are allowed only on `Line 1` and `Line 2`
+2. ✅ Line 5-derived generated orders cannot move to `Line 3`, `Line 4`, `Line 6`, or `Line 7`
+3. ✅ Line 7-derived generated orders remain allowed on `Line 6`
+4. ✅ Line 7-derived generated orders cannot move to `Line 7`
+5. ✅ Source-based guardrails are enforced even if master data shows a valid run rate on a blocked line
+6. ✅ Existing SFG-based run-rate lookup for generated orders remains intact
+7. ✅ Existing overlap and scoring logic still applies within the allowed line range
+8. ✅ Plant-level auto-sequence respects these movement guardrails
+9. ✅ Debug logs clearly show when a move is blocked by the source-based guardrail
+10. ✅ No UI errors or console errors are introduced

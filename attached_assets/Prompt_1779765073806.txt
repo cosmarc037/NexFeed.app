@@ -1,0 +1,183 @@
+Please update the **order status / Cancel PO behavior** so that orders cannot be cancelled once **HA Prep** is already in progress or completed.
+
+---
+
+## 1. DISABLE “CANCEL PO” WHEN HA PREP IS `ON GOING` OR `DONE`
+
+The application has **Mixer Details** columns:
+- **HA Info**
+- **HA Prep**
+
+Where **HA** refers to **Hand-Additives**, and **HA Prep** tracks the preparation status of the hand-additives form.
+
+According to the client, if the HA is already being prepared or has already been prepared, the order should no longer be cancellable.
+
+### New rule
+Please disable the **`Cancel PO`** option in the **Status** dropdown when the order’s **HA Prep** value is:
+
+- `On Going`
+- `Done`
+
+### Expected result
+If HA Prep is already:
+- `On Going`
+- or `Done`
+
+then users must not be able to cancel that order.
+
+---
+
+## 2. ALLOW CANCELLATION FOR ALL OTHER HA PREP STATES
+
+For now, please allow cancellation normally if **HA Prep** is any value other than:
+
+- `On Going`
+- `Done`
+
+This means **Cancel PO** can still remain available when HA Prep is:
+- blank / not started
+- `Issued 3F`
+- `Issued 2F`
+- `Need to Elevate`
+- `Sacks to Elevate`
+
+unless you later receive a stricter client rule.
+
+### Expected result
+Only `On Going` and `Done` should block cancellation for now.
+
+---
+
+## 3. DISABLE THE “CANCEL PO” OPTION IN THE STATUS DROPDOWN
+
+Please update the **Status** dropdown so that when the HA Prep value is `On Going` or `Done`:
+
+- the `Cancel PO` option is disabled
+- or hidden if that is more consistent with the UI pattern
+
+### Preferred behavior
+Disable it visibly if possible, so users understand the option exists but is unavailable under the current HA Prep state.
+
+### Goal
+Prevent accidental cancellation once hand-additives work has already started or finished.
+
+---
+
+## 4. ENFORCE THE SAME RULE IN BACKEND / BUSINESS LOGIC
+
+Please also apply this rule at the backend / business-rule layer.
+
+### Important
+Even if the frontend dropdown fails to disable the option correctly, the system must still reject cancellation when:
+
+- `HA Prep = On Going`
+- `HA Prep = Done`
+
+### Expected result
+The rule is enforced consistently in both:
+- UI behavior
+- backend validation
+
+---
+
+## 5. SHOW A CLEAR WARNING / VALIDATION MESSAGE IF CANCELLATION IS BLOCKED
+
+If the user attempts to cancel an order that is blocked due to HA Prep status, please show a clear message.
+
+### Suggested wording
+- `This order cannot be cancelled because HA Prep is already On Going.`
+- `This order cannot be cancelled because HA Prep is already Done.`
+- `Cancel PO is not allowed once HA preparation has started or been completed.`
+
+### Expected result
+Users understand why the cancellation is not allowed.
+
+---
+
+## 6. KEEP EXISTING STATUS RULES INTACT
+
+Please preserve all existing status logic unless directly affected by this new HA Prep rule.
+
+Do not unintentionally break:
+- normal status transitions
+- shutdown status rules
+- diversion restrictions
+- done / on-going protections
+- history logging
+- readiness logic
+
+This request is specifically to control the availability of:
+- `Cancel PO`
+
+based on:
+- `HA Prep`
+
+---
+
+## 7. ALIGN THIS WITH THE BUSINESS MEANING OF HA PREP
+
+Please implement this rule based on the client’s operational meaning:
+
+- if **HA Prep = On Going**, the HA preparation process has already started
+- if **HA Prep = Done**, the HA preparation is already completed
+
+In either case, cancellation should no longer be allowed because preparation work has already progressed.
+
+### Expected result
+The application reflects the real-world operational rule that once HA work is underway or completed, the order should not be cancelled.
+
+---
+
+## IMPORTANT
+
+Please enforce this rule:
+
+- If `HA Prep = On Going` → disable `Cancel PO`
+- If `HA Prep = Done` → disable `Cancel PO`
+- For other HA Prep values → `Cancel PO` may remain available
+
+This applies to the order’s **Status** dropdown and backend cancellation logic.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log HA Prep–based cancellation eligibility.
+
+```javascript
+console.debug('[Cancel PO Eligibility - HA Prep]', {
+  orderId,
+  haPrepStatus,
+  cancelPoAllowed: !['On Going', 'Done'].includes(haPrepStatus),
+});
+```
+
+```javascript
+console.debug('[Cancel PO Blocked - HA Prep]', {
+  orderId,
+  haPrepStatus,
+  attemptedStatus: 'cancel_po',
+  blocked: ['On Going', 'Done'].includes(haPrepStatus),
+});
+```
+
+```javascript
+console.debug('[Status Dropdown Cancel PO State]', {
+  orderId,
+  haPrepStatus,
+  cancelPoDisabled: ['On Going', 'Done'].includes(haPrepStatus),
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ If `HA Prep = On Going`, the `Cancel PO` option is disabled
+2. ✅ If `HA Prep = Done`, the `Cancel PO` option is disabled
+3. ✅ If `HA Prep` is blank, `Issued 3F`, `Issued 2F`, `Need to Elevate`, or `Sacks to Elevate`, `Cancel PO` remains available
+4. ✅ Users cannot cancel an order through the UI when HA Prep is `On Going` or `Done`
+5. ✅ Backend/business logic also blocks cancellation when HA Prep is `On Going` or `Done`
+6. ✅ A clear warning/validation message explains why cancellation is blocked
+7. ✅ Existing status logic remains intact
+8. ✅ No UI errors or console errors are introduced

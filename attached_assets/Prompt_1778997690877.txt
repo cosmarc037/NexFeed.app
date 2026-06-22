@@ -1,0 +1,134 @@
+Please refine the combined-order diversion/revert behavior and visual messaging with the following rules.
+
+This should follow the same group-based logic already established for combined-order diversion.
+
+---
+
+## 1. SUB-ORDERS SHOULD NOT BE REVERTIBLE INDEPENDENTLY
+
+When a combined order has been diverted, the sub-orders must not be independently revertible.
+
+### Required behavior
+- only the **lead order** should expose the revert action
+- sub-orders should not have their own standalone “Revert to original line” behavior
+- sub-orders should not be treated as independently revertible rows
+
+### Correct behavior
+If the user reverts the **lead order**, then:
+- the full combined group should revert together
+- including all linked sub-orders
+
+This should mirror the same rule already used for diversion:
+- only the lead controls the action
+- sub-orders move along with it
+
+---
+
+## 2. REVERT ACTION SHOULD BE GROUP-BASED
+
+When the lead order is reverted:
+- revert the lead order
+- revert all linked sub-orders
+- preserve the combined lead/sub relationship
+- move the full group back together to the original line
+
+Do not leave sub-orders behind.
+Do not require separate revert actions for sub-orders.
+
+---
+
+## 3. REMOVE REPEATED “DIVERTED” OR “LINE SHUTDOWN” MESSAGES FROM SUB-ORDERS
+
+For visual clarity, only the **lead order** should display helper text such as:
+- `Diverted: Line 1 → Line 2`
+- `Line shutdown — right-click to divert`
+- or similar diversion/shutdown messaging
+
+### Required behavior
+For sub-orders:
+- remove the repeated diversion/shutdown helper text
+- do not display the same repeated status message on every sub-row
+
+### Goal
+The lead row should be enough to communicate the group state.
+
+Sub-orders should still visually belong to the combined group, but they should not duplicate the same text.
+
+---
+
+## 4. KEEP LEAD/SUB VISUAL RELATIONSHIP
+
+Continue to preserve the lead/sub visual distinction:
+- lead row = darker shade
+- sub-orders = lighter shade
+
+This should still apply for:
+- combined blue state
+- yellow divertable state
+- green diverted state
+
+But only the lead row should carry the explanatory diversion/shutdown text.
+
+---
+
+## 5. PRESERVE COMBINED GROUP LOGIC
+
+Please keep the previously required combined-order rules intact:
+- sub-orders cannot be diverted independently
+- only lead order can be diverted
+- diverting the lead moves all sub-orders
+- combined groups stay intact after diversion
+- lead/sub highlight shading remains visually distinct
+
+This update should extend the same logic to:
+- revert behavior
+- helper-text display
+
+---
+
+## 6. DEBUG LOGGING
+
+Temporarily log:
+
+### revert eligibility
+```javascript
+console.debug('[Combined Order Revert Eligibility]', {
+  orderId,
+  isLead,
+  isSub,
+  isCombinedGroup,
+  canShowRevertAction,
+});
+revert execution
+
+javascript
+Run Code
+Copy code
+console.debug('[Combined Order Revert Execution]', {
+  leadOrderId,
+  subOrderIds,
+  sourceLine,
+  originalLine,
+  revertedAsGroup: true,
+});
+helper text render
+
+javascript
+Run Code
+Copy code
+console.debug('[Combined Order Helper Text Render]', {
+  orderId,
+  isLead,
+  isSub,
+  diversionMessageVisible,
+  shutdownMessageVisible,
+});
+
+7. VERIFICATION
+✅ Sub-orders cannot be reverted independently
+✅ Only the lead order exposes the revert action
+✅ Reverting the lead order reverts all linked sub-orders together
+✅ Combined group stays intact after revert
+✅ Only the lead row shows diversion/shutdown helper text
+✅ Sub-orders no longer repeat Diverted or Line shutdown text
+✅ Lead/sub visual distinction remains intact across blue, yellow, and green group state

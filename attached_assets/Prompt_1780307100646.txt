@@ -1,0 +1,166 @@
+Please revisit and fix the **avail date mismatch for generated orders** during **Apply to Schedule**.
+
+The actual issue appears to be that **generated orders are copying/inheriting the source order’s avail date**, when they should instead keep the **date assigned to them in the selected preview / AI placement result**.
+
+---
+
+## 1. DO NOT LET GENERATED ORDERS COPY THE SOURCE ORDER’S AVAIL DATE
+
+There appears to be a rule or behavior where generated orders inherit the avail date of their linked source order.
+
+### Current problem
+Even when the selected auto-sequence preview places a generated order on its own date, the final applied schedule may overwrite that date by using the source order’s avail date instead.
+
+### Required rule
+Generated orders must **not automatically copy** the source order’s avail date.
+
+### Expected result
+Each generated order should preserve its own preview-selected / AI-assigned avail date when applied to the schedule.
+
+---
+
+## 2. USE THE GENERATED ORDER’S OWN PREVIEW / AI DATE AS THE SOURCE OF TRUTH
+
+When the user selects an auto-sequence preview and applies it, the generated order must use:
+- the date shown for that generated order in the preview
+not
+- the date shown on the source order
+
+### Goal
+The final schedule should reflect the generated order’s own selected placement/date from the preview.
+
+### Expected result
+If the preview shows a generated order with:
+- `June 07`
+
+then after apply, that generated order must still be:
+- `June 07`
+
+even if its source order has a different date.
+
+---
+
+## 3. KEEP SOURCE ORDER DATES AND GENERATED ORDER DATES INDEPENDENT UNLESS THE PREVIEW ACTUALLY PUTS THEM ON THE SAME DATE
+
+Please treat source-order dates and generated-order dates as separate schedule values.
+
+### Important
+Just because a generated order is linked to a source order does **not** mean they should always have the same avail date.
+
+### Expected result
+Source orders keep their own preview-selected date.
+Generated orders keep their own preview-selected date.
+They should only match if the selected preview actually assigned them the same date.
+
+---
+
+## 4. APPLY THIS SPECIFICALLY TO GENERATED / LINKED ORDER CASES
+
+Please review the apply-to-schedule logic for:
+- generated orders
+- linked orders
+- source/generated relationships
+- mirrored/generated scheduling flows
+
+### Expected result
+Linked/generated order relationships should no longer cause the generated row’s avail date to be overwritten by the source row’s date.
+
+---
+
+## 5. PRESERVE THE SELECTED PREVIEW RESULT FOR GENERATED ORDERS
+
+The preview is already assigning dates/positions to generated orders.
+
+### Required behavior
+When applying the selected preview:
+- preserve the generated order’s own date from the preview
+- preserve the generated order’s own position/ordering implied by that date
+- do not replace it with the source order’s existing stored date
+
+### Expected result
+Generated orders in the applied schedule should match the preview exactly.
+
+---
+
+## 6. KEEP CHRONOLOGICAL SORTING BASED ON THE FINAL APPLIED PREVIEW DATES
+
+Once the generated orders keep their own preview-selected dates, the final schedule should still sort chronologically using those final applied dates.
+
+### Expected result
+The rows should be ordered based on the actual preview-selected dates that were applied to:
+- source orders
+- generated orders
+
+not based on source-order date inheritance.
+
+---
+
+## IMPORTANT
+
+Please enforce this rule:
+
+> **Generated orders must not copy the source order’s avail date during Apply to Schedule.**
+
+Instead:
+- generated orders must keep the **date assigned to them in the selected preview / AI result**
+- source orders keep their own preview-selected dates
+- generated and source orders should only have the same date if the preview actually assigned them the same date
+
+This is the root issue causing preview dates and applied schedule dates to drift for generated orders.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log generated-order date preservation vs source-date overwrite.
+
+```javascript
+console.debug('[Generated Order Avail Date Preservation]', {
+  line,
+  feedmill,
+  generatedOrderId,
+  sourceOrderId,
+  previewGeneratedAvailDate,
+  sourceOrderAvailDate,
+  finalAppliedGeneratedAvailDate,
+  preservedPreviewGeneratedDate:
+    String(finalAppliedGeneratedAvailDate) === String(previewGeneratedAvailDate),
+  wronglyCopiedSourceDate:
+    String(finalAppliedGeneratedAvailDate) === String(sourceOrderAvailDate) &&
+    String(previewGeneratedAvailDate) !== String(sourceOrderAvailDate),
+});
+```
+
+```javascript
+console.debug('[Generated vs Source Date Independence]', {
+  line,
+  feedmill,
+  generatedOrderId,
+  sourceOrderId,
+  previewGeneratedAvailDate,
+  previewSourceAvailDate,
+  finalGeneratedAvailDate,
+  finalSourceAvailDate,
+});
+```
+
+```javascript
+console.debug('[Apply Schedule Generated Order Sort Basis]', {
+  line,
+  feedmill,
+  appliedOrderIds,
+  appliedAvailDates,
+  sortingUsesAppliedPreviewDates: true,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Generated orders no longer automatically copy the source order’s avail date
+2. ✅ Generated orders preserve their own preview-selected / AI-assigned avail date
+3. ✅ Source and generated orders keep separate applied dates unless the preview actually matched them
+4. ✅ Generated-order avail dates in the schedule now match the preview
+5. ✅ Final row sorting uses the applied preview-selected dates
+6. ✅ No UI errors or console errors are introduced

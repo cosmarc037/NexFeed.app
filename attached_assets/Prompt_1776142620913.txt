@@ -1,0 +1,154 @@
+```
+Fix the Before table to show the TRUE original order before any sequencing:
+
+---
+
+## FIX: SNAPSHOT MUST BE TAKEN BEFORE SEQUENCING RUNS
+
+The snapshot must be a DEEP COPY taken BEFORE the auto-sequence algorithm runs, not after.
+
+```javascript
+function handleAutoSequence(line) {
+  // Get current line orders BEFORE any sequencing
+  const currentLineOrders = allOrders
+    .filter(o => o.line === line && o.status !== 'Done' && o.status !== 'Cancel PO')
+    .sort((a, b) => a.prio - b.prio);
+  
+  // DEEP COPY — critical! Must not be a reference to the same objects
+  const originalSnapshot = currentLineOrders.map(o => ({
+    ...JSON.parse(JSON.stringify(o)),
+    _originalPrio: o.prio
+  }));
+  
+  // Store the snapshot BEFORE running auto-sequence
+  setOriginalOrderSnapshot(originalSnapshot);
+  
+  // NOW run auto-sequence on a SEPARATE copy
+  const ordersToSequence = currentLineOrders.map(o => ({ ...o }));
+  const sequencedOrders = runAutoSequence(ordersToSequence, changeoverRules, masterData, n10dData);
+  
+  // Calculate movement by comparing against originalSnapshot
+  const sequencedWithMovement = sequencedOrders.map((order, newIndex) => {
+    const newPrio = newIndex + 1;
+    
+    // Find this order's ORIGINAL position in the snapshot
+    const originalIndex = originalSnapshot.findIndex(o => o.id === order.id);
+    const originalPrio = originalIndex >= 0 ? originalIndex + 1 : newPrio;
+    
+    let movement = 'same';
+    let movementDelta = originalPrio - newPrio;
+    
+    if (movementDelta > 0) movement = 'up';
+    else if (movementDelta < 0) movement = 'down';
+    
+    return {
+      ...order,
+      prio: newPrio,
+      _originalPrio: originalPrio,
+      _movement: movement,
+      _movementDelta: Math.abs(movementDelta)
+    };
+  });
+  
+  setSequencedOrders(sequencedWithMovement);
+  setShowAutoSequencePreview(true);
+}
+```
+
+### ENSURE SNAPSHOT IS NOT MUTATED
+
+```javascript
+// When storing, freeze the snapshot so nothing can modify it
+const [originalOrderSnapshot, setOriginalOrderSnapshot] = useState([]);
+
+// In the component, NEVER modify originalOrderSnapshot directly
+// Always treat it as read-only
+
+// When passing to the Before table, pass a copy
+<AutoSequencePreview
+  originalOrders={[...originalOrderSnapshot]}
+  sequencedOrders={sequencedOrders}
+  // ...
+/>
+```
+
+### ENSURE RESET TO ORIGINAL USES THE SNAPSHOT
+
+```javascript
+function handleResetToOriginal() {
+  // Reset sequenced orders back to the original snapshot order
+  const resetOrders = originalOrderSnapshot.map((o, index) => ({
+    ...JSON.parse(JSON.stringify(o)),
+    prio: index + 1,
+    _movement: 'same',
+    _movementDelta: 0
+  }));
+  
+  setSequencedOrders(resetOrders);
+}
+```
+
+### ENSURE RE-ANALYZE PRESERVES THE ORIGINAL SNAPSHOT
+
+```javascript
+function handleReanalyze() {
+  // Re-run auto-sequence but keep the SAME original snapshot
+  // Do NOT update originalOrderSnapshot
+  
+  const ordersToSequence = originalOrderSnapshot.map(o => ({
+    ...JSON.parse(JSON.stringify(o))
+  }));
+  
+  const sequencedOrders = runAutoSequence(ordersToSequence, changeoverRules, masterData, n10dData);
+  
+  const sequencedWithMovement = sequencedOrders.map((order, newIndex) => {
+    const newPrio = newIndex + 1;
+    const originalIndex = originalOrderSnapshot.findIndex(o => o.id === order.id);
+    const originalPrio = originalIndex >= 0 ? originalIndex + 1 : newPrio;
+    
+    let movement = 'same';
+    let movementDelta = originalPrio - newPrio;
+    
+    if (movementDelta > 0) movement = 'up';
+    else if (movementDelta < 0) movement = 'down';
+    
+    return {
+      ...order,
+      prio: newPrio,
+      _originalPrio: originalPrio,
+      _movement: movement,
+      _movementDelta: Math.abs(movementDelta)
+    };
+  });
+  
+  setSequencedOrders(sequencedWithMovement);
+}
+```
+
+---
+
+## VERIFICATION
+
+### Before table shows ORIGINAL order
+1. ✅ Before table shows orders in the EXACT same order as before auto-sequence
+2. ✅ Deep copy ensures no mutation from the sequencing algorithm
+3. ✅ Prio numbers in Before table match what the user saw before clicking auto-sequence
+4. ✅ Before table does NOT change when user drags orders in After table
+5. ✅ Before table does NOT change when user clicks Re-analyze
+
+### Movement indicators are correct
+6. ✅ Movement compares After prio vs original snapshot prio (not current state)
+7. ✅ ▲ appears when order moved to a LOWER prio number (higher priority)
+8. ✅ ▼ appears when order moved to a HIGHER prio number (lower priority)
+9. ✅ No icon when order stayed in same position
+
+### Reset to Original
+10. ✅ Resets After table back to the original snapshot order
+11. ✅ All movement indicators become "same" (no icons)
+12. ✅ Before table unchanged
+
+### Re-analyze
+13. ✅ Re-runs auto-sequence on the original data
+14. ✅ Before table unchanged
+15. ✅ Movement indicators recalculated against original snapshot
+```

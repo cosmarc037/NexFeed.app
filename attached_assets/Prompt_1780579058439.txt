@@ -1,0 +1,164 @@
+Please improve the **Auto-Sequence AI** so that the AI’s **sequence position** and **suggested date** stay internally consistent, and so that truly top-priority orders such as **Critical** orders and **MTO orders whose avail date is the deadline** are ranked first when they must be produced.
+
+---
+
+## 1. MAKE THE AI’S `SUGGESTED DATE` CONSISTENT WITH THE ORDER’S ACTUAL POSITION IN THE SEQUENCE
+
+There are still cases where an order is placed late in the sequence, but the AI gives it an earlier suggested date than the orders above it.
+
+### Current issue
+For example:
+- an order is placed at the bottom / last position
+- but its suggested date is earlier than the orders above it
+
+This makes the AI output internally inconsistent.
+
+### Goal
+If the AI intends an order to remain late in the sequence, its suggested date should reflect that position.
+If the AI intends the order to be produced earlier, then its rank should reflect that instead.
+
+### Expected result
+Sequence position and suggested date should no longer contradict each other.
+
+---
+
+## 2. DO NOT LET THE AI LEAVE AN ORDER LAST WHILE GIVING IT THE EARLIEST DATE IN THE GROUP
+
+If an order is ranked last in a group, the AI should not simultaneously give it the earliest suggested date in that same visible sequence.
+
+### Goal
+Make the AI’s output more trustworthy and easier to explain.
+
+### Expected result
+Suggested date should support the sequence, not conflict with it.
+
+---
+
+## 3. MAKE THE AI TREAT CRITICAL ORDERS AS TOP PRIORITY
+
+Please explicitly strengthen the AI logic so that if an order is **Critical**, it should be ranked at the top because it **needs to be produced**.
+
+### Required behavior
+If an order is Critical:
+- it should be prioritized at the top of the sequence
+- especially when it represents a true must-produce-now case
+
+### Goal
+Ensure Critical orders are not buried below less urgent work.
+
+### Expected result
+Critical orders are ranked first or at the very top where operationally required.
+
+---
+
+## 4. MAKE THE AI TREAT MTO ORDERS WITH ACTUAL DEADLINE AVAIL DATES AS TOP PRIORITY
+
+Please also make the AI explicitly treat **MTO orders** whose actual avail date is effectively their deadline as top-priority production orders.
+
+### Required behavior
+If an MTO order must be produced by its actual avail/contract date:
+- the AI should rank it at the top when it needs to be produced now / at the earliest relevant point
+
+### Goal
+Ensure the AI understands that these orders are not flexible and must be produced to meet the real deadline.
+
+### Expected result
+MTO deadline-driven orders are ranked at or near the top when they must be produced.
+
+---
+
+## 5. MAKE THE AI UNDERSTAND THAT SOME ORDERS SHOULD BE RANK 1 BECAUSE THEY MUST BE PRODUCED
+
+Please explicitly feed the AI this rule:
+
+- if an order is **Critical**
+- or if it is an **MTO order with an actual avail date acting as the deadline**
+- and it truly needs to be produced now / first
+
+then that order should be ranked **1** or placed at the very top of the sequence.
+
+### Goal
+Remove ambiguity for the AI about what “must produce” means.
+
+### Expected result
+Orders that truly need immediate production should no longer be left below less urgent work.
+
+---
+
+## 6. KEEP THE AI’S RANKING LOGIC CONSISTENT WITH ITS DATE SUGGESTION LOGIC
+
+Please make sure the AI’s ranking logic and date logic are not produced as separate conflicting ideas.
+
+### Important
+The AI should not:
+- rank an order late
+- then suggest an earlier date that implies it should have been earlier
+
+### Goal
+Have the AI treat sequence position and date as parts of one coherent decision.
+
+### Expected result
+The AI output becomes more internally aligned and easier to trust.
+
+---
+
+## IMPORTANT
+
+Please improve the Auto-Sequence AI so that:
+
+- **Suggested Date** and **sequence position** are internally consistent
+- the AI does not leave an order last while suggesting an earlier date than the orders above it
+- **Critical orders** are treated as top-priority and ranked first when they truly need to be produced
+- **MTO orders with actual deadline-driven avail dates** are also treated as top-priority and ranked first when they need to be produced
+
+This is needed because the AI is still producing cases where:
+- the suggested date says an order should be earlier
+- but the sequence leaves it later
+which makes the output difficult to trust.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log date-position consistency and top-priority anchoring.
+
+```javascript
+console.debug('[Auto-Sequence AI Date/Position Consistency]', {
+  strategyId,
+  orderId,
+  aiRank,
+  suggestedDate,
+  contradictionDetected: true,
+});
+```
+
+```javascript
+console.debug('[Auto-Sequence AI Critical/MTO Priority Check]', {
+  orderId,
+  isCritical,
+  isMTO,
+  actualAvailDate,
+  aiRank,
+  shouldBeTopPriority: isCritical || isMTO,
+});
+```
+
+```javascript
+console.debug('[Auto-Sequence AI Must-Produce Ranking]', {
+  orderId,
+  aiRank,
+  mustProduceNow,
+  rankedAtTop: aiRank === 1,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Suggested date and sequence position no longer contradict each other
+2. ✅ Orders are not left last while being given the earliest suggested date in the group
+3. ✅ Critical orders are ranked at the top when they must be produced
+4. ✅ MTO deadline-driven orders are ranked at the top when they must be produced
+5. ✅ AI ranking and date logic become more internally consistent
+6. ✅ No UI errors or console errors are introduced

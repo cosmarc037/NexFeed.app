@@ -1,0 +1,219 @@
+Please update the **Recommended strategy logic** in the auto-sequence feature so that, for now, the recommendation is based **only on the visible metrics shown on the strategy cards**.
+
+---
+
+## 1. CHANGE THE RECOMMENDATION LOGIC TO RELY ONLY ON VISIBLE CARD METRICS
+
+The current recommendation logic uses an internal two-phase model, including hidden Phase 1 safety gates and Phase 2 weighted scoring.
+
+For now, please update the recommendation logic so that the **Recommended** badge is determined only by the metrics that are visibly shown on the auto-sequence strategy cards.
+
+### Visible metrics currently shown on the cards
+- `MTS adjusted`
+- `Changeover time`
+- `Time-saved`
+- `Orders at risk`
+- `Daily utilization`
+
+### Goal
+Make the recommendation easier to explain to users and clients using only the values they can actually see on the card.
+
+### Expected result
+If a strategy is recommended, its recommendation should be explainable directly from the visible metrics shown in the UI.
+
+---
+
+## 2. DO NOT USE HIDDEN PHASE 1 GATES TO BLOCK RECOMMENDATION FOR NOW
+
+For now, do not let hidden Phase 1 conditions such as:
+- violations
+- minimum slack
+- faithfulness
+- changeover-emphasis gate
+
+disqualify or override the final **Recommended** badge if those factors are not visible on the card.
+
+### Important
+This does **not** mean the underlying logic or calculations must be deleted.
+
+It only means:
+- these hidden Phase 1 checks should not currently determine which strategy gets the visible **Recommended** badge
+
+### Expected result
+The recommendation outcome should no longer depend on non-visible gating rules.
+
+---
+
+## 3. KEEP THE UNDERLYING PHASE 1 LOGIC IN CODE IF POSSIBLE, BUT DO NOT USE IT FOR THE CURRENT BADGE DECISION
+
+Please preserve the existing Phase 1 logic in the codebase if possible, because it may be useful again later if the product returns to a model where hidden/internal gates are displayed or reinstated.
+
+### Important
+Do not permanently remove the logic unless necessary.
+
+For now:
+- keep it available in the code if possible
+- but do not use it as the deciding layer for the current **Recommended** badge
+
+### Goal
+Allow the app to temporarily operate under **Option B** now, while still making it easier to reintroduce **Option A** later if needed.
+
+---
+
+## 4. BASE THE RECOMMENDATION ONLY ON THE METRICS DISPLAYED ON THE STRATEGY CARD
+
+Please calculate the recommendation using only these visible card metrics:
+
+- `MTS adjusted`
+- `Changeover time`
+- `Time-saved`
+- `Orders at risk`
+- `Daily utilization`
+
+### Expected result
+The strategy with the strongest visible-metric performance should receive the **Recommended** badge based only on the displayed values.
+
+### Important
+If weighting is still used, the weighting must be based only on these visible metrics.
+
+No hidden disqualifier should prevent a visually stronger strategy from being recommended.
+
+---
+
+## 5. MAKE THE RECOMMENDATION EXPLAINABLE FROM THE CARD ITSELF
+
+Please ensure that if a client asks:
+
+> “Why is this sequence recommended?”
+
+the answer can be given directly from the card’s visible metrics.
+
+### Example explanation
+- `This strategy is recommended because it performs best across the displayed metrics: MTS adjusted, changeover time, time-saved, orders at risk, and daily utilization.`
+
+### Goal
+Avoid needing to explain that a non-visible internal gate blocked another strategy.
+
+### Expected result
+The recommendation becomes transparent and defensible using only the information shown in the UI.
+
+---
+
+## 6. PRESERVE THE CURRENT CARD METRICS AND DISPLAY
+
+Please do not change the current set of visible metrics for this request.
+
+Keep the strategy cards showing:
+- `MTS adjusted`
+- `Changeover time`
+- `Time-saved`
+- `Orders at risk`
+- `Daily utilization`
+
+This request is specifically to align the badge logic with these visible metrics.
+
+### Expected result
+No new hidden-only reason should be needed to justify why one strategy is recommended over another.
+
+---
+
+## 7. IF NEEDED, UPDATE THE INTERNAL RECOMMENDATION EXPLANATION / REASONING TEXT
+
+If there is any internal helper text, tooltip, AI reasoning, or badge explanation that currently implies the recommendation is based on hidden gates, please update it so it aligns with the new temporary rule.
+
+### Goal
+The app should not say or imply that the recommendation comes from hidden factors that are no longer controlling the badge.
+
+### Expected result
+Recommendation explanations should now refer only to the visible strategy metrics.
+
+---
+
+## 8. KEEP THIS AS A TEMPORARY / REVERSIBLE PRODUCT DECISION
+
+Please implement this in a way that is easy to revise later if the product decides to return to the previous two-phase recommendation model or adopt a visible-gates model.
+
+### Important
+For now, we are intentionally choosing **Option B**:
+- recommend based only on visible metrics
+
+But we may later revisit:
+- Option A
+- or a hybrid approach
+
+### Expected result
+The code should remain maintainable and reversible if future changes require bringing back the earlier gating concept.
+
+---
+
+## IMPORTANT
+
+For now, the **Recommended** badge must be based **only on the metrics visibly displayed on the strategy cards**:
+
+- `MTS adjusted`
+- `Changeover time`
+- `Time-saved`
+- `Orders at risk`
+- `Daily utilization`
+
+Do not let hidden/internal Phase 1 gating logic decide the visible recommendation for now.
+
+If possible, preserve the old logic in the codebase for future reuse, but do not use it to control the badge at this time.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log the recommendation decision using only visible metrics.
+
+```javascript
+console.debug('[Recommended Strategy - Visible Metrics Only]', {
+  strategyName,
+  mtsAdjusted,
+  changeoverTime,
+  timeSaved,
+  ordersAtRisk,
+  dailyUtilization,
+  visibleMetricsOnlyScoring: true,
+});
+```
+
+```javascript
+console.debug('[Recommended Strategy Comparison]', {
+  comparedStrategies,
+  scoringBasis: [
+    'mtsAdjusted',
+    'changeoverTime',
+    'timeSaved',
+    'ordersAtRisk',
+    'dailyUtilization',
+  ],
+  hiddenPhase1IgnoredForBadge: true,
+  recommendedStrategy,
+});
+```
+
+```javascript
+console.debug('[Recommended Strategy - Legacy Phase1 Preserved]', {
+  legacyPhase1LogicStillPresent: true,
+  legacyPhase1UsedForBadge: false,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ The **Recommended** badge is now based only on visible card metrics
+2. ✅ Hidden Phase 1 gates no longer disqualify a strategy from receiving the badge
+3. ✅ The recommendation can be explained directly using:
+   - `MTS adjusted`
+   - `Changeover time`
+   - `Time-saved`
+   - `Orders at risk`
+   - `Daily utilization`
+4. ✅ The current visible card layout and metrics remain unchanged
+5. ✅ Internal recommendation text no longer implies hidden gating controls the badge
+6. ✅ The previous Phase 1 logic is preserved in code if possible, but not used for the badge
+7. ✅ The implementation remains reversible for future product changes
+8. ✅ No UI errors or console errors are introduced

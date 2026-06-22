@@ -1,0 +1,369 @@
+```
+Implement the following fix to the NexFeed application:
+
+---
+
+## FIX: DRAG AND DROP — ORDERS NOT MOVING
+
+Orders show a green highlight indicating they can be dragged, but they won't actually move when dropped at a new position. Fix the drag and drop functionality.
+
+---
+
+### THE PROBLEM
+
+1. User grabs an order row → green highlight appears ✅
+2. User drags to a new position → visual feedback shows ✅
+3. User drops the order → order stays at original position ❌
+4. Nothing happens — order doesn't move
+
+---
+
+### POSSIBLE CAUSES AND FIXES
+
+### CAUSE 1: onDrop handler not updating state
+
+```javascript
+// WRONG — visual drag works but state doesn't update
+function handleDrop(e, targetIndex) {
+  e.preventDefault();
+  // Missing: actually moving the order in state
+}
+
+// CORRECT — move the order in state and re-render
+function handleDrop(e, targetIndex) {
+  e.preventDefault();
+  
+  const draggedOrderId = e.dataTransfer.getData('text/plain');
+  const draggedIndex = orders.findIndex(o => o.id === draggedOrderId);
+  
+  if (draggedIndex === -1 || draggedIndex === targetIndex) return;
+  
+  const newOrders = [...orders];
+  const [draggedOrder] = newOrders.splice(draggedIndex, 1);
+  
+  // If it's a combined lead, also move its children
+  if (draggedOrder.isCombinedLead && draggedOrder.children) {
+    // Children are nested inside the lead, they move automatically
+  }
+  
+  // Insert at target position
+  newOrders.splice(targetIndex, 0, draggedOrder);
+  
+  // Renumber priorities
+  let prioCounter = 1;
+  newOrders.forEach(order => {
+    if (!order.isCombinedChild) {
+      order.prio = prioCounter;
+      prioCounter++;
+    }
+  });
+  
+  // UPDATE STATE — this is the critical step
+  setOrders(newOrders);
+}
+```
+
+### CAUSE 2: State update not triggering re-render
+
+```javascript
+// WRONG — mutating array in place (React won't detect change)
+function handleDrop(e, targetIndex) {
+  const draggedIndex = orders.findIndex(o => o.id === draggedOrderId);
+  orders.splice(draggedIndex, 1);        // mutating original array
+  orders.splice(targetIndex, 0, order);  // mutating original array
+  setOrders(orders);                     // React sees same reference, no re-render
+}
+
+// CORRECT — create new array reference
+function handleDrop(e, targetIndex) {
+  const newOrders = [...orders];          // new array
+  const [draggedOrder] = newOrders.splice(draggedIndex, 1);
+  newOrders.splice(targetIndex, 0, draggedOrder);
+  setOrders(newOrders);                   // React sees new reference, re-renders
+}
+```
+
+### CAUSE 3: e.preventDefault() missing on dragOver
+
+```javascript
+// WRONG — drop event won't fire without preventing default on dragOver
+<tr onDrop={handleDrop}>
+
+// CORRECT — must prevent default on dragOver for drop to work
+<tr 
+  onDragOver={(e) => e.preventDefault()}  // THIS IS REQUIRED
+  onDrop={(e) => handleDrop(e, index)}
+>
+```
+
+### CAUSE 4: dataTransfer not setting/getting data correctly
+
+```javascript
+// On drag start — set the data
+function handleDragStart(e, order, index) {
+  e.dataTransfer.setData('text/plain', order.id.toString());
+  e.dataTransfer.effectAllowed = 'move';
+  setDraggedIndex(index);
+}
+
+// On drop — get the data
+function handleDrop(e, targetIndex) {
+  e.preventDefault();
+  const draggedOrderId = e.dataTransfer.getData('text/plain');
+  // ... rest of logic
+}
+```
+
+### CAUSE 5: Drop target not registering correctly
+
+```jsx
+// WRONG — event handlers on wrong element
+<table>
+  <tr draggable onDragStart={handleDragStart}>
+    <td>Content</td>  {/* drop target might be on td, not tr */}
+  </tr>
+</table>
+
+// CORRECT — all handlers on the same tr element
+<tr 
+  draggable={!order.isCombinedChild}  // children not draggable
+  onDragStart={(e) => handleDragStart(e, order, index)}
+  onDragOver={(e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setDropTargetIndex(index);  // for visual indicator
+  }}
+  onDragLeave={() => setDropTargetIndex(null)}
+  onDrop={(e) => handleDrop(e, index)}
+  onDragEnd={() => {
+    setDraggedIndex(null);
+    setDropTargetIndex(null);
+  }}
+>
+```
+
+---
+
+### COMPLETE DRAG AND DROP IMPLEMENTATION
+
+```jsx
+function OrderTable({ orders, setOrders }) {
+  const [draggedIndex, setDraggedIndex] = useState(null);
+  const [dropTargetIndex, setDropTargetIndex] = useState(null);
+  
+  function handleDragStart(e, order, index) {
+    // Don't allow dragging child orders
+    if (order.isCombinedChild) {
+      e.preventDefault();
+      return;
+    }
+    
+    e.dataTransfer.setData('text/plain', JSON.stringify({
+      orderId: order.id,
+      sourceIndex: index
+    }));
+    e.dataTransfer.effectAllowed = 'move';
+    setDraggedIndex(index);
+  }
+  
+  function handleDragOver(e, index) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    
+    if (index !== dropTargetIndex) {
+      setDropTargetIndex(index);
+    }
+  }
+  
+  function handleDragLeave(e) {
+    // Only clear if actually leaving the row
+    const relatedTarget = e.relatedTarget;
+    if (!e.currentTarget.contains(relatedTarget)) {
+      setDropTargetIndex(null);
+    }
+  }
+  
+  function handleDrop(e, targetIndex) {
+    e.preventDefault();
+    
+    const data = JSON.parse(e.dataTransfer.getData('text/plain'));
+    const sourceIndex = data.sourceIndex;
+    
+    if (sourceIndex === targetIndex) {
+      cleanup();
+      return;
+    }
+    
+    // Create new array
+    const newOrders = [...orders];
+    
+    // Remove dragged order from source
+    const [draggedOrder] = newOrders.splice(sourceIndex, 1);
+    
+    // Adjust target index if source was before target
+    const adjustedTarget = sourceIndex < targetIndex 
+      ? targetIndex - 1 
+      : targetIndex;
+    
+    // Insert at target
+    newOrders.splice(adjustedTarget, 0, draggedOrder);
+    
+    // Renumber priorities (skip combined children)
+    let prioCounter = 1;
+    newOrders.forEach(order => {
+      if (order.isCombinedChild) {
+        order.prio = null;
+      } else {
+        order.prio = prioCounter;
+        prioCounter++;
+      }
+    });
+    
+    // Check for delay warnings (combined orders)
+    if (draggedOrder.isCombinedLead) {
+      const totalTime = draggedOrder.production_time + draggedOrder.changeover;
+      const impact = calculateDownstreamImpact(newOrders, adjustedTarget, totalTime);
+      
+      if (impact.hasDelay) {
+        showDragWarning(impact, () => {
+          // "Move anyway" callback
+          setOrders(newOrders);
+        }, () => {
+          // "Cancel move" callback — don't update
+          cleanup();
+        });
+        return;
+      }
+    }
+    
+    // Update state — THIS MAKES THE MOVE HAPPEN
+    setOrders(newOrders);
+    cleanup();
+  }
+  
+  function handleDragEnd() {
+    cleanup();
+  }
+  
+  function cleanup() {
+    setDraggedIndex(null);
+    setDropTargetIndex(null);
+  }
+  
+  return (
+    <table>
+      <tbody>
+        {orders.map((order, index) => {
+          // Skip combined children in the main loop
+          // They are rendered by the lead order's expand logic
+          if (order.isCombinedChild) return null;
+          
+          const isDragging = draggedIndex === index;
+          const isDropTarget = dropTargetIndex === index;
+          
+          return (
+            <React.Fragment key={order.id}>
+              {/* Main order row */}
+              <tr
+                draggable={!order.isCombinedChild}
+                onDragStart={(e) => handleDragStart(e, order, index)}
+                onDragOver={(e) => handleDragOver(e, index)}
+                onDragLeave={handleDragLeave}
+                onDrop={(e) => handleDrop(e, index)}
+                onDragEnd={handleDragEnd}
+                className={`
+                  ${isDragging ? 'dragging' : ''}
+                  ${isDropTarget ? 'drop-target' : ''}
+                `}
+              >
+                {/* ... cell content */}
+              </tr>
+              
+              {/* Expanded child rows — directly after lead */}
+              {order.isCombinedLead && order.isExpanded && 
+                order.children?.map((child, childIndex) => (
+                  <tr 
+                    key={`${order.id}_child_${childIndex}`}
+                    className="child-order-row"
+                    draggable={false}
+                  >
+                    {/* ... child cell content */}
+                  </tr>
+                ))
+              }
+            </React.Fragment>
+          );
+        })}
+      </tbody>
+    </table>
+  );
+}
+```
+
+---
+
+### VISUAL FEEDBACK STYLING
+
+```css
+/* Row being dragged */
+tr.dragging {
+  opacity: 0.5;
+  background: #f3f4f6;
+}
+
+/* Drop target indicator — green highlight */
+tr.drop-target {
+  border-top: 2px solid #22c55e;
+  background: #f0fdf4;
+}
+
+/* Alternative: show drop line above the target row */
+tr.drop-target::before {
+  content: '';
+  position: absolute;
+  top: -1px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: #22c55e;
+  z-index: 10;
+}
+```
+
+---
+
+### DEBUGGING CHECKLIST
+
+Search the codebase and verify:
+
+| Check | What to look for |
+|---|---|
+| onDragOver | Must have `e.preventDefault()` — without this, onDrop NEVER fires |
+| onDrop | Must call `setOrders(newOrders)` with a NEW array reference |
+| State update | Must use `[...orders]` spread, not mutate original |
+| dataTransfer | `setData()` on dragStart and `getData()` on drop must match |
+| draggable attr | `draggable={true}` or `draggable` on the `<tr>` element |
+| Array splice | Source index and target index correctly calculated |
+| Re-render | Component re-renders after `setOrders()` is called |
+
+---
+
+### VERIFICATION
+
+1. Drag order from Prio 1 to Prio 3
+   - ✅ Order moves to Prio 3
+   - ✅ All priorities renumber correctly
+   - ✅ Order stays at new position after drop
+
+2. Drag order from Prio 5 to Prio 1
+   - ✅ Order moves to Prio 1
+   - ✅ All others shift down
+
+3. Drag combined lead order
+   - ✅ Lead moves to new position
+   - ✅ Expanding shows children still attached
+   - ✅ No orphaned children at old position
+
+4. Try dragging a child order
+   - ✅ Cannot drag — cursor shows not-allowed
+```

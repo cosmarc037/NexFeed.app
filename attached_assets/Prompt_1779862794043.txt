@@ -1,0 +1,245 @@
+Please update the **divert / revert UX and diversion history logging** with the following improvements.
+
+---
+
+## 1. ADD A LOADING STATE TO THE “CONFIRM REVERT” BUTTON
+
+When a user clicks **Confirm Revert** in the revert dialog, the button should show a loading/in-progress state immediately.
+
+### Current issue
+Right now, when the user clicks **Confirm Revert**, it feels like nothing is happening.
+
+### Expected behavior
+Once the user clicks **Confirm Revert**:
+- the button should show a loading spinner/icon
+- the button should become disabled to prevent repeated clicks
+- the label may change to something like:
+  - `Reverting...`
+  - or keep the same label with a spinner
+
+### Goal
+Give users visible feedback that the revert process is already running.
+
+### Expected result
+Users can clearly see that the revert action is being processed.
+
+---
+
+## 2. ADD A LOADING STATE TO THE “CONFIRM DIVERSION” BUTTON
+
+When a user clicks **Confirm Diversion** in the diversion dialog, the button should also show a loading/in-progress state immediately.
+
+### Current issue
+Right now, when the user clicks **Confirm Diversion**, it also feels like nothing is happening.
+
+### Expected behavior
+Once the user clicks **Confirm Diversion**:
+- the button should show a loading spinner/icon
+- the button should become disabled to prevent duplicate submissions
+- the label may change to something like:
+  - `Diverting...`
+  - or keep the same label with a spinner
+
+### Goal
+Make the action feel responsive and clearly indicate that the diversion request is being processed.
+
+### Expected result
+Users can see that the diversion is actively in progress after the button is clicked.
+
+---
+
+## 3. PREVENT DOUBLE SUBMISSION WHILE DIVERT / REVERT IS PROCESSING
+
+Please make sure that while the loading state is active for either:
+- **Confirm Revert**
+- **Confirm Diversion**
+
+the action cannot be clicked repeatedly.
+
+### Expected behavior
+During processing:
+- disable the confirm button
+- optionally disable the cancel button as well if appropriate
+- prevent duplicate requests from being sent
+
+### Expected result
+The user cannot accidentally trigger the same diversion/revert action multiple times.
+
+---
+
+## 4. FIX THE DIVERSION HISTORY ENTRY SO THE DESTINATION PRIORITY MATCHES THE ACTUAL INSERTED POSITION
+
+There is a history/audit issue in diversion logging.
+
+### Current issue
+When an order is diverted to another line, the history records the original priority correctly, but the destination priority in the history can be wrong.
+
+Example:
+- Original line priority = `Prio 4`
+- Diversion places the order on the target line at `Prio 1`
+- But the history says:
+  - `Prio 4 → 2`
+
+when it should say:
+- `Prio 4 → 1`
+
+### Expected behavior
+The diversion history entry must use the **actual final inserted priority on the destination line**, not a stale intermediate value or incorrect preview value.
+
+### Expected result
+History should reflect the real final move:
+- source line
+- destination line
+- original priority
+- actual destination priority after insertion
+
+---
+
+## 5. USE THE FINAL APPLIED DESTINATION POSITION FOR HISTORY LOGGING
+
+Please make sure the diversion history is written only after the final destination position is confirmed.
+
+### Goal
+Avoid logging:
+- predicted priority
+- pre-shifted priority
+- or stale pre-insertion estimates
+
+if the real inserted priority ends up different after the line reorders or inserts the diverted order.
+
+### Expected result
+The audit/history entry should use the same final priority that the user sees in the destination line after diversion is completed.
+
+---
+
+## 6. ALIGN HISTORY WITH THE ACTUAL DIVERSION RESULT SHOWN IN THE IMPACT ANALYSIS / FINAL INSERTION
+
+If the diversion dialog or impact analysis suggests:
+- `Insertion Position: Priority 1`
+
+and the order is actually inserted at:
+- `Priority 1`
+
+then the history must also reflect:
+- `Prio 4 → 1`
+
+### Important
+History should not display a conflicting destination priority.
+
+### Expected result
+The diversion history should stay consistent with:
+- the impact analysis
+- the actual inserted result
+- the visible destination queue after the move
+
+---
+
+## 7. PRESERVE EXISTING DIVERSION / REVERT HISTORY FORMAT UNLESS NEEDED
+
+Please keep the current history style and wording where possible, such as:
+- `Line shutdown: Line 1 → Line 2`
+- `Moved from Prio X → Y`
+
+This request is only to fix the incorrect destination priority value and improve the button UX.
+
+### Expected result
+The history remains familiar, but the logged priority is now correct.
+
+---
+
+## 8. APPLY THE BUTTON LOADING UX TO BOTH DIALOGS CONSISTENTLY
+
+Please make sure the loading-state behavior feels consistent between:
+- the **Revert Order** modal
+- the **Divert Order** modal
+
+### Expected behavior
+Both should:
+- show immediate loading feedback
+- disable repeat submission
+- return to normal state only after success/failure completes
+
+### Expected result
+Diversion and reversion actions have consistent UX and feel responsive.
+
+---
+
+## IMPORTANT
+
+Please implement these three fixes:
+
+### A. Revert UX
+- add loading state/spinner to **Confirm Revert**
+
+### B. Diversion UX
+- add loading state/spinner to **Confirm Diversion**
+
+### C. Diversion history accuracy
+- log the **actual final destination priority**
+- not an incorrect or stale predicted priority
+
+This should improve both:
+- user confidence during the action
+- audit/history correctness after the action
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log diversion/revert action state and final history values.
+
+```javascript
+console.debug('[Revert Order Submit]', {
+  orderId,
+  originalLine,
+  currentLine,
+  submitting: true,
+});
+```
+
+```javascript
+console.debug('[Diversion Submit]', {
+  orderId,
+  sourceLine,
+  targetLine,
+  suggestedTargetPriority,
+  submitting: true,
+});
+```
+
+```javascript
+console.debug('[Diversion Final Placement]', {
+  orderId,
+  sourceLine,
+  targetLine,
+  originalPriority,
+  finalInsertedPriority,
+  historyLoggedPriority,
+  historyMatchesFinalPlacement:
+    finalInsertedPriority === historyLoggedPriority,
+});
+```
+
+```javascript
+console.debug('[Diversion/Revert Button State]', {
+  actionType, // 'divert' | 'revert'
+  loading,
+  disabled,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Clicking **Confirm Revert** shows a loading spinner/icon immediately
+2. ✅ Clicking **Confirm Revert** disables the button while the action is processing
+3. ✅ Clicking **Confirm Diversion** shows a loading spinner/icon immediately
+4. ✅ Clicking **Confirm Diversion** disables the button while the action is processing
+5. ✅ Duplicate diversion/revert submissions are prevented during processing
+6. ✅ Diversion history logs the correct original priority
+7. ✅ Diversion history logs the actual final inserted destination priority
+8. ✅ If an order is inserted at `Prio 1`, the history records `Prio X → 1`
+9. ✅ History no longer shows a conflicting or stale destination priority
+10. ✅ Existing diversion/revert history style remains intact
+11. ✅ No UI errors or console errors are introduced

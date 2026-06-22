@@ -1,0 +1,466 @@
+```
+Ensure the new auto-sequence (All) follows the exact same sequencing logic as the original per-line auto-sequence:
+
+---
+
+## 1. AFTER COMBINE + PLACE, RUN THE SAME preSortOrders PER LINE
+
+```javascript
+// In plantLevelAutoSequence — after all orders are placed on their lines:
+
+// Phase 4: N10D + Sequencing — use the EXACT same logic as per-line auto-sequence
+allLines.forEach(line => {
+  const orders = lineOrdersMap[line] || [];
+  if (orders.length === 0) {
+    finalLineOrders[line] = [];
+    return;
+  }
+  
+  // Step 1: Filter OUT orders that should not be in the preview
+  // Done, Cancelled, In Production, On-going should NOT appear
+  const previewOrders = orders.filter(o => 
+    o.status !== 'Done' && 
+    o.status !== 'Cancel PO' && 
+    o.status !== 'In Production' && 
+    o.status !== 'On-going'
+  );
+  
+  if (previewOrders.length === 0) {
+    finalLineOrders[line] = [];
+    return;
+  }
+  
+  // Step 2: Run preSortOrders — SAME function as per-line auto-sequence
+  // This categorizes each order:
+  //   Category A: has real avail date (dated)
+  //   Category B: N10D targeted (prio replenish — has inferred target date)
+  //   Category C: urgent non-dated (critical/urgent in N10D)
+  //   Category D: stock sufficient (safe/sufficient in N10D)
+  //   Category E: no N10D data
+  const categorized = preSortOrders(previewOrders, n10dData, masterData);
+  
+  // Step 3: Sort using SAME logic as per-line auto-sequence
+  const sorted = autoSequenceSort(categorized, changeoverRules);
+  
+  finalLineOrders[line] = sorted;
+});
+```
+
+---
+
+## 2. REUSE THE EXACT preSortOrders FUNCTION
+
+This is the same function from the per-line auto-sequence. It:
+- Looks up N10D data for each order
+- Assigns _category (A/B/C/D/E)
+- Assigns _targetDate for non-dated orders
+- Assigns _n10dStatus (Critical/Urgent/Sufficient/etc.)
+- Colors the avail date accordingly
+
+```javascript
+function preSortOrders(orders, n10dData, masterData) {
+  return orders.map(order => {
+    const enriched = { ...order };
+    
+    // Check if order has a real avail date
+    const availDate = order.target_avail_date;
+    const hasRealDate = availDate && /^\d{4}-\d{2}-\d{2}/.test(availDate) && !isNaN(Date.parse(availDate));
+    
+    if (hasRealDate) {
+      enriched._category = 'A';
+      enriched._sortDate = new Date(availDate);
+      enriched._availDateColor = 'default';
+      return enriched;
+    }
+    
+    // Look up N10D data
+    const materialCode = String(order.material_code_fg || '').trim();
+    const n10dEntry = n10dData.find(n => 
+      String(n.material_code || '').trim() === materialCode
+    );
+    
+    if (!n10dEntry) {
+      enriched._category = 'E';
+      enriched._sortDate = new Date('2099-12-31');
+      enriched._availDateDisplay = availDate || '—';
+      enriched._availDateColor = 'default';
+      return enriched;
+    }
+    
+    // Determine N10D status and target date
+    const n10dStatus = n10dEntry.status || n10dEntry.stock_status || '';
+    const inferredDate = n10dEntry.inferred_target_date || n10dEntry.target_date;
+    
+    enriched._n10dStatus = n10dStatus;
+    enriched._n10dEntry = n10dEntry;
+    
+    if (n10dStatus === 'Critical' || n10dStatus === 'Urgent') {
+      // Category C: urgent/critical — no specific date but needs attention
+      if (inferredDate && !isNaN(Date.parse(inferredDate))) {
+        // Has inferred date — use it
+        enriched._category = 'B';
+        enriched._targetDate = inferredDate;
+        enriched._sortDate = new Date(inferredDate);
+        enriched._availDateDisplay = new Date(inferredDate).toLocaleDateString('en-US', {
+          month: 'short', day: 'numeric', year: 'numeric'
+        });
+        enriched._availDateColor = n10dStatus === 'Critical' ? 'red' : 'orange';
+        
+        // Update target_avail_date for display
+        enriched.target_avail_date = inferredDate;
+      } else {
+        enriched._category = 'C';
+        enriched._sortDate = new Date('2000-01-01'); // Sort to top
+        enriched._availDateDisplay = availDate || 'prio replenish';
+        enriched._availDateColor = n10dStatus === 'Critical' ? 'red' : 'orange';
+      }
+    } else if (n10dStatus === 'Sufficient' || n10dStatus === 'Safe' || n10dStatus === 'OK') {
+      enriched._category = 'D';
+      
+      if (inferredDate && !isNaN(Date.parse(inferredDate))) {
+        enriched._targetDate = inferredDate;
+        enriched._sortDate = new Date(inferredDate);
+        enriched._availDateDisplay = new Date(inferredDate).toLocaleDateString('en-US', {
+          month: 'short', day: 'numeric', year: 'numeric'
+        });
+      } else {
+        enriched._sortDate = new Date('2099-12-31');
+        enriched._availDateDisplay = availDate || 'safety stocks';
+      }
+      enriched._availDateColor = 'green';
+    } else {
+      // Prio replenish or other statuses with inferred date
+      if (inferredDate && !isNaN(Date.parse(inferredDate))) {
+        enriched._category = 'B';
+        enriched._targetDate = inferredDate;
+        enriched._sortDate = new Date(inferredDate);
+        enriched._availDateDisplay = new Date(inferredDate).toLocaleDateString('en-US', {
+          month: 'short', day: 'numeric', year: 'numeric'
+        });
+        enriched._availDateColor = 'orange';
+        enriched.target_avail_date = inferredDate;
+      } else {
+        enriched._category = 'E';
+        enriched._sortDate = new Date('2099-12-31');
+        enriched._availDateDisplay = availDate || '—';
+        enriched._availDateColor = 'default';
+      }
+    }
+    
+    return enriched;
+  });
+}
+```
+
+---
+
+## 3. REUSE THE EXACT autoSequenceSort FUNCTION
+
+```javascript
+function autoSequenceSort(orders, changeoverRules) {
+  // Sort priority:
+  // 1. Category C (critical/urgent non-dated) — at the TOP
+  // 2. Category A (dated) — sorted by avail date ascending
+  // 3. Category B (N10D targeted) — sorted by inferred date ascending
+  // 4. Category D (stock sufficient) — sorted by inferred date ascending
+  // 5. Category E (no data) — at the bottom
+  
+  const catC = orders.filter(o => o._category === 'C')
+    .sort((a, b) => {
+      // Critical before Urgent
+      if (a._n10dStatus === 'Critical' && b._n10dStatus !== 'Critical') return -1;
+      if (a._n10dStatus !== 'Critical' && b._n10dStatus === 'Critical') return 1;
+      return 0;
+    });
+  
+  const catA = orders.filter(o => o._category === 'A')
+    .sort((a, b) => a._sortDate - b._sortDate);
+  
+  const catB = orders.filter(o => o._category === 'B')
+    .sort((a, b) => a._sortDate - b._sortDate);
+  
+  const catD = orders.filter(o => o._category === 'D')
+    .sort((a, b) => a._sortDate - b._sortDate);
+  
+  const catE = orders.filter(o => o._category === 'E');
+  
+  // Combine in priority order
+  const sorted = [...catC, ...catA, ...catB, ...catD, ...catE];
+  
+  // Assign prio
+  sorted.forEach((order, index) => {
+    order.prio = index + 1;
+    order.priority_seq = index + 1;
+  });
+  
+  return sorted;
+}
+```
+
+---
+
+## 4. UPDATE THE AVAIL DATE DISPLAY IN THE AFTER TABLE
+
+```jsx
+// In PlantAfterRow — the avail date cell should use the colored display
+
+<td className="as-col-avail">
+  {renderAvailDate(order)}
+</td>
+
+function renderAvailDate(order) {
+  // If has colored avail date from preSortOrders
+  if (order._availDateColor && order._availDateColor !== 'default') {
+    const colorMap = {
+      red: { color: '#dc2626', bg: '#fef2f2', icon: '🔴' },
+      orange: { color: '#ea580c', bg: '#fff7ed', icon: '🟠' },
+      green: { color: '#16a34a', bg: '#f0fdf4', icon: '🟢' },
+    };
+    
+    const style = colorMap[order._availDateColor] || {};
+    const displayText = order._availDateDisplay || formatAvailDate(order.target_avail_date);
+    
+    return (
+      <span 
+        className="as-avail-colored"
+        style={{ color: style.color }}
+        title={`N10D: ${order._n10dStatus || '—'}`}
+      >
+        {displayText}
+        {order._n10dStatus && (
+          <span className="as-avail-status-icon">
+            {order._availDateColor === 'red' ? ' ⊘' : 
+             order._availDateColor === 'orange' ? ' △' : 
+             ' ◉'}
+          </span>
+        )}
+      </span>
+    );
+  }
+  
+  // Regular avail date
+  return (
+    <span className="as-avail-default">
+      {formatAvailDate(order.target_avail_date)}
+    </span>
+  );
+}
+```
+
+---
+
+## 5. UPDATE APPLY — WRITE N10D TARGET DATES TO DB
+
+```javascript
+// In applySequencedResultsToDB — for regular orders:
+const updateData = {
+  feedmill_line: line,
+  priority_seq: prioCounter,
+  parent_id: null,
+  volume_override: null,
+  original_order_ids: null,
+  status: 'Planned',
+};
+
+// Write N10D target date if categorized
+if (order._category === 'B' || order._category === 'C') {
+  if (order._targetDate) {
+    updateData.target_avail_date = order._targetDate;
+    updateData.last_target_date = order._targetDate;
+    updateData.avail_date_source = 'auto_sequence';
+  }
+}
+if (order._category === 'D') {
+  if (order._targetDate) {
+    updateData.target_avail_date = order._targetDate;
+    updateData.last_target_date = order._targetDate;
+    updateData.avail_date_source = 'auto_sequence';
+  } else {
+    updateData.target_avail_date = 'stock_sufficient';
+    updateData.last_target_date = 'stock_sufficient';
+    updateData.avail_date_source = 'auto_sequence';
+  }
+}
+
+await updateOrderMutation.mutateAsync({
+  id: order.id,
+  data: updateData
+});
+
+// For combined lead (new record) — also write target date:
+const newLead = await createOrderMutation.mutateAsync({
+  data: {
+    // ... existing fields ...
+    status: 'Planned',
+    target_avail_date: order._targetDate || order.target_avail_date || null,
+    last_target_date: order._targetDate || null,
+    avail_date_source: order._targetDate ? 'auto_sequence' : null,
+  }
+});
+```
+
+---
+
+## 6. FILTER OUT IN-PRODUCTION/DONE/CANCELLED FROM PREVIEW AND PROCESSING
+
+```javascript
+// In the main algorithm — at the very start:
+function plantLevelAutoSequence(...) {
+  // ONLY process orders that are eligible
+  const activeOrders = allOrders.filter(o => 
+    o.status !== 'Done' && 
+    o.status !== 'Cancel PO' && 
+    o.status !== 'In Production' && 
+    o.status !== 'On-going'
+  );
+  
+  // ...
+}
+
+// In the preview — before/after tables should also exclude:
+const previewOrders = sequencedOrders.filter(o =>
+  o.status !== 'Done' && 
+  o.status !== 'Cancel PO' && 
+  o.status !== 'In Production' && 
+  o.status !== 'On-going'
+);
+
+// When applying — respect existing order positions
+// Orders that are In Production should keep their prio
+// New sequenced orders should be placed AFTER In Production orders
+```
+
+---
+
+## 7. ENSURE SEQUENCED ORDERS DON'T GO ABOVE IN-PRODUCTION ORDERS
+
+```javascript
+// When building the final line sequence, In Production orders stay at the top
+function buildFinalLineSequence(lineOrders, existingInProductionOrders) {
+  // Get orders that are In Production — these keep their position
+  const inProduction = existingInProductionOrders
+    .sort((a, b) => (a.priority_seq || 0) - (b.priority_seq || 0));
+  
+  // Sequenced orders go AFTER In Production
+  const sequenced = lineOrders; // Already sorted by autoSequenceSort
+  
+  // Final sequence: In Production first, then sequenced
+  const final = [...inProduction, ...sequenced];
+  
+  // Reassign prio
+  final.forEach((order, index) => {
+    order.prio = index + 1;
+    order.priority_seq = index + 1;
+  });
+  
+  return final;
+}
+
+// Use in the main algorithm:
+allLines.forEach(line => {
+  const sequencedOrders = finalLineOrders[line] || [];
+  
+  // Get In Production orders for this line (from original data)
+  const inProductionOrders = (originalAllOrders || []).filter(o =>
+    normalizeLine(o.feedmill_line) === line &&
+    (o.status === 'In Production' || o.status === 'On-going')
+  );
+  
+  if (inProductionOrders.length > 0) {
+    finalLineOrders[line] = buildFinalLineSequence(sequencedOrders, inProductionOrders);
+  }
+});
+```
+
+---
+
+## 8. APPLY — HANDLE PRIO OFFSET FOR IN-PRODUCTION ORDERS
+
+```javascript
+// In applySequencedResultsToDB:
+for (const [line, lineOrders] of Object.entries(sequencedResults)) {
+  if (!lineOrders || lineOrders.length === 0) continue;
+  
+  // Get current In Production orders on this line
+  const currentOrders = queryClient.getQueryData(["orders"]) || [];
+  const inProductionOnLine = currentOrders.filter(o =>
+    normalizeLine(o.feedmill_line) === line &&
+    (o.status === 'In Production' || o.status === 'On-going')
+  );
+  
+  // Prio starts AFTER In Production orders
+  let prioCounter = inProductionOnLine.length + 1;
+  
+  for (const order of lineOrders) {
+    // Skip In Production orders — don't update them
+    if (order.status === 'In Production' || order.status === 'On-going') {
+      continue;
+    }
+    
+    // ... existing create/update logic with prioCounter ...
+    prioCounter++;
+  }
+}
+```
+
+---
+
+## 9. STYLING FOR COLORED AVAIL DATES
+
+```css
+.as-avail-colored {
+  font-size: 11px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.as-avail-status-icon {
+  font-size: 9px;
+}
+
+.as-avail-default {
+  font-size: 11px;
+  color: #374151;
+}
+```
+
+---
+
+## VERIFICATION
+
+### N10D dates reflected
+1. ✅ preSortOrders runs on each line's orders after placement
+2. ✅ Non-dated orders get _targetDate from N10D data
+3. ✅ _targetDate written to DB as target_avail_date on apply
+4. ✅ avail_date_source set to 'auto_sequence'
+
+### Orders sorted correctly
+5. ✅ Critical/Urgent at top (Category C)
+6. ✅ Dated orders sorted by avail date ascending (Category A)
+7. ✅ N10D targeted sorted by inferred date ascending (Category B)
+8. ✅ Stock sufficient sorted by date (Category D)
+9. ✅ No data at bottom (Category E)
+
+### Avail dates colored
+10. ✅ Red for Critical
+11. ✅ Orange for Urgent / Prio Replenish
+12. ✅ Green for Sufficient / Safety Stocks
+13. ✅ Status icon shown (⊘, △, ◉)
+14. ✅ Tooltip shows N10D status
+
+### In Production orders respected
+15. ✅ In Production orders NOT in preview
+16. ✅ In Production orders NOT moved or combined
+17. ✅ Sequenced orders placed AFTER In Production orders
+18. ✅ Prio counter starts after In Production count
+19. ✅ In Production orders keep their position on apply
+
+### Same logic as per-line
+20. ✅ preSortOrders — same function
+21. ✅ autoSequenceSort — same function
+22. ✅ Changeover calculation — same function
+23. ✅ N10D target date assignment — same pattern
+24. ✅ Status colors — same colors
+```

@@ -1,0 +1,291 @@
+```
+Fix the queue time calculation in auto-sequence so the app correctly reads the total MT already assigned to each line before computing queue time.
+
+---
+
+## PROBLEM TO FIX
+
+In the auto-sequence move explanation, the source line queue time is showing as:
+
+- `0.00 hrs (0.0 MT ÷ 20 MT/hr)`
+
+even when the line clearly already has existing load/orders assigned to it.
+
+Example from current output:
+- order moved from L2 → L4
+- L4 correctly shows load increasing from 10.0 MT to 12.0 MT
+- but L2 incorrectly shows queue time based on `0.0 MT`
+
+This means the source line’s total MT is not being retrieved correctly before calculating queue time.
+
+---
+
+## OBJECTIVE
+
+Queue time must be calculated using the actual total MT currently assigned to each line.
+
+### Correct formula
+```text
+Queue time = total MT on line ÷ line run rate
+```
+
+For every move explanation, the app must correctly show:
+
+### Source line
+- total MT before move
+- total MT after move
+- queue time before move
+- queue time after move
+
+### Destination line
+- total MT before move
+- total MT after move
+- queue time before move
+- queue time after move
+
+This must use the real assigned line loads, not fallback `0.0 MT`.
+
+---
+
+## 1. DEFINE THE SOURCE OF TRUTH FOR LINE LOAD
+
+The total MT per line must come from the actual current assigned/planned orders on that line during auto-sequence evaluation.
+
+Do not calculate queue time from:
+- only the moved order
+- a partially filtered list
+- a missing line key fallback
+- an empty temporary structure
+- only newly moved orders
+
+Use the actual current order set already assigned to each line at that stage of auto-sequence processing.
+
+---
+
+## 2. CREATE A HELPER TO SUM TOTAL MT PER LINE
+
+Use a shared helper to compute total MT for a given line.
+
+```javascript
+function getOrderVolumeMT(order) {
+  const candidates = [
+    order.volume_override,
+    order.volume,
+    order.total_volume_mt,
+    order.volume_mt,
+  ];
+
+  for (const val of candidates) {
+    const parsed = parseFloat(val);
+    if (!Number.isNaN(parsed)) return parsed;
+  }
+
+  return 0;
+}
+
+function calculateLineTotalMT(orders) {
+  return Number(
+    (orders || []).reduce((sum, order) => {
+      return sum + getOrderVolumeMT(order);
+    }, 0).toFixed(2)
+  );
+}
+```
+
+This helper must be used consistently for queue-time calculations.
+
+---
+
+## 3. NORMALIZE LINE KEYS BEFORE LOOKUP
+
+One likely cause is inconsistent line key formatting.
+
+Example mismatches:
+- `Line 2`
+- `L2`
+- `2`
+- `line_2`
+
+Create/use a shared normalization helper so all line lookups use the same format.
+
+```javascript
+function normalizeLineKey(line) {
+  return String(line || '')
+    .trim()
+    .toLowerCase()
+    .replace(/^line\s*/, 'l')
+    .replace(/[^a-z0-9]/g, '');
+}
+```
+
+Then use normalized keys when reading line order groups:
+```javascript
+const normalizedTarget = normalizeLineKey(targetLine);
+```
+
+Make sure source and destination line lookup uses the same normalized key.
+
+---
+
+## 4. CALCULATE SOURCE AND DESTINATION LOADS FROM THE ACTUAL PRE-MOVE STATE
+
+When evaluating a move from source line to destination line:
+
+### Before move
+- source line total MT = sum of orders currently on source line
+- destination line total MT = sum of orders currently on destination line
+
+### After move
+- source line total MT after move = source total MT before move − moved order MT
+- destination line total MT after move = destination total MT before move + moved order MT
+
+This must be explicit.
+
+### Example:
+```javascript
+const movedMT = getOrderVolumeMT(orderToMove);
+
+const sourceBeforeMT = calculateLineTotalMT(sourceLineOrders);
+const destinationBeforeMT = calculateLineTotalMT(destinationLineOrders);
+
+const sourceAfterMT = Number((sourceBeforeMT - movedMT).toFixed(2));
+const destinationAfterMT = Number((destinationBeforeMT + movedMT).toFixed(2));
+```
+
+Do not accidentally compute sourceBeforeMT from a list where the moved order has already been removed.
+
+---
+
+## 5. MAKE SURE SOURCE BEFORE-MOVE LOAD IS CALCULATED BEFORE REMOVAL
+
+This is a likely bug source.
+
+If the app removes the order from the source line first, and only then calculates the source queue, it may end up with:
+- wrong source total
+- or 0 if the structure is rebuilt incorrectly
+
+So enforce this order:
+
+1. gather source line orders before move
+2. gather destination line orders before move
+3. calculate before-move totals
+4. calculate after-move totals
+5. then apply the move
+
+Do not compute sourceBeforeMT after mutation.
+
+---
+
+## 6. CREATE A QUEUE TIME HELPER
+
+```javascript
+function calculateQueueTimeHours(totalMT, runRate) {
+  const mt = parseFloat(totalMT) || 0;
+  const rr = parseFloat(runRate) || 0;
+
+  if (rr <= 0) return 0;
+
+  return Number((mt / rr).toFixed(2));
+}
+```
+
+Then:
+```javascript
+const sourceBeforeQueue = calculateQueueTimeHours(sourceBeforeMT, sourceRunRate);
+const sourceAfterQueue = calculateQueueTimeHours(sourceAfterMT, sourceRunRate);
+const destinationBeforeQueue = calculateQueueTimeHours(destinationBeforeMT, destinationRunRate);
+const destinationAfterQueue = calculateQueueTimeHours(destinationAfterMT, destinationRunRate);
+```
+
+---
+
+## 7. UPDATE THE MOVE REASONING TEXT TO USE THE CORRECT VALUES
+
+The explanation text should use the actual calculated source/destination totals.
+
+Example target format:
+```text
+The 2.0 MT order was moved from L2, which had a queue time of 1.10 hrs (22.0 MT ÷ 20 MT/hr), to L4, increasing its load from 10.0 to 12.0 MT. The queue time on L4 changed from 1.00 hr to 1.20 hrs.
+```
+
+If helpful, also show source after-move queue:
+```text
+L2 load reduced from 22.0 to 20.0 MT, improving queue time from 1.10 hr to 1.00 hr.
+```
+
+This would be even better than only mentioning source before state.
+
+---
+
+## 8. VERIFY LINE LOADS AGAINST WHAT THE USER SEES
+
+The line total MT used in queue calculation must align with the orders visibly assigned to that line at that stage.
+
+If the user can see:
+- multiple orders already on L2
+
+then sourceBeforeMT must not be 0 unless the line is truly empty.
+
+---
+
+## 9. ADD DEBUG LOGGING FOR QUEUE CALCULATION
+
+Temporarily log:
+
+```javascript
+console.debug('[Queue Time Calculation]', {
+  sourceLine,
+  destinationLine,
+  movedOrderId: orderToMove.id,
+  movedMT,
+  sourceBeforeMT,
+  sourceAfterMT,
+  destinationBeforeMT,
+  destinationAfterMT,
+  sourceRunRate,
+  destinationRunRate,
+  sourceBeforeQueue,
+  sourceAfterQueue,
+  destinationBeforeQueue,
+  destinationAfterQueue,
+  sourceOrderCount: sourceLineOrders.length,
+  destinationOrderCount: destinationLineOrders.length,
+});
+```
+
+This will help confirm:
+- source line orders are being found correctly
+- totals are not defaulting to zero
+- mutation order is correct
+
+---
+
+## 10. CHECK FOR FILTERING BUGS
+
+Review whether source line totals are accidentally being computed from:
+- only active move candidates
+- only combinable orders
+- only post-removal source lists
+- only line summary objects that were never populated
+
+If so, replace with the actual current assigned orders per line.
+
+---
+
+## 11. VERIFICATION
+
+### Queue calculation
+1. ✅ Source line total MT is correctly computed before move
+2. ✅ Destination line total MT is correctly computed before move
+3. ✅ Source and destination after-move totals are correct
+4. ✅ Queue time = total MT ÷ run rate
+5. ✅ Source line no longer incorrectly shows `0.0 MT` unless truly empty
+
+### Move reasoning
+6. ✅ Move explanation text uses correct before/after totals
+7. ✅ Source line queue time is accurate
+8. ✅ Destination line queue time is accurate
+
+### Data consistency
+9. ✅ Line key normalization prevents lookup mismatches
+10. ✅ Queue calculations use actual assigned line orders, not partial/empty temporary lists

@@ -1,0 +1,620 @@
+Clear. Here's the prompt:
+
+```
+Implement the following changes to the NexFeed application:
+
+---
+
+## 1. SMART RECOMMENDATIONS — TWO-PANEL LAYOUT
+
+Replace the current single Smart Recommendation section (above the interactive table, per line tab) with a TWO-PANEL side-by-side layout.
+
+### LAYOUT:
+
+```
+┌─────────────────────────────────┬─────────────────────────────────┐
+│  🧠 Production Insights         │  🔔 Alerts & Reminders          │
+│                                 │                                 │
+│  [Insight 1]                    │  [Alert 1]                      │
+│  [Insight 2]                    │  [Alert 2]                      │
+│  [Insight 3]                    │  [Alert 3]                      │
+│  [Insight 4]                    │  [Alert 4]                      │
+│                                 │                                 │
+└─────────────────────────────────┴─────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────┐
+│  Interactive Table                                                   │
+│  ...                                                                 │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+- Two panels side by side, equal width (50/50).
+- Positioned ABOVE the interactive table.
+- Replaces the current single Smart Recommendation section.
+- Each panel has its own header, content area, and scrollable body.
+
+### PANEL STYLING:
+
+**Panel 1 — Production Insights:**
+- Header background: Light blue (#eff6ff)
+- Header text: "🧠 Production Insights" — dark blue (#1e40af), bold, 14px
+- Body background: White
+- Border: 1px solid #dbeafe
+- Border radius: 8px
+
+**Panel 2 — Alerts & Reminders:**
+- Header background: Light orange (#fff7ed)
+- Header text: "🔔 Alerts & Reminders" — dark orange (#c2410c), bold, 14px
+- Body background: White
+- Border: 1px solid #fed7aa
+- Border radius: 8px
+
+**Both panels:**
+- Max height: 400px (scrollable if content exceeds)
+- Padding: 16px body
+- Gap between panels: 16px
+- Responsive: On smaller screens, stack vertically instead of side by side.
+
+---
+
+## 2. PANEL 1 — PRODUCTION INSIGHTS
+
+This panel provides actionable recommendations to optimize the production schedule.
+
+### INSIGHT CATEGORIES:
+
+---
+
+#### INSIGHT A — PRIORITY ORDERS
+
+Identifies which orders should be prioritized based on availability dates, urgency, and current position.
+
+**Example:**
+```
+📌 Prioritize Order
+
+FPR: 260309 (Elite XP Startex, Mini-pellet 50kg) 
+has an availability date of March 15, 2026 but is 
+currently at Prio 8. Consider moving it higher in the 
+schedule to ensure it completes on time. Based on 
+current production speed, it needs to start by 
+March 14, 8:00 AM at the latest.
+```
+
+**Logic:**
+- Scan all active orders on this line.
+- Find orders where the estimated completion date is CLOSE to or PAST the availability date.
+- Calculate the latest possible start position to meet the deadline.
+- Suggest moving the order to a higher Prio.
+- Reference specific Prio numbers and order details.
+
+**When referencing orders:**
+- Order references (FPR numbers, product names) are BOLD and ORANGE (#fd5108).
+- Order references are CLICKABLE — clicking scrolls the interactive table to that order and briefly highlights it (flash yellow background for 2 seconds).
+- Cursor changes to pointer on hover.
+- Underline on hover to indicate clickability.
+
+---
+
+#### INSIGHT B — COMBINE SUGGESTIONS
+
+Identifies orders that could benefit from being combined.
+
+**Example:**
+```
+🔗 Consider Combining
+
+FPR: 260309 (Prio 5, 8 MT) and FPR: 260309 
+(Prio 8, 12 MT) are the same product (Elite XP 
+Startex, Mini-pellet 50kg) on the same line. 
+Combining them would save ~30 min changeover and 
+create a single 20 MT run (5 batches). 
+
+Also consider adding FPR: 260309 (Prio 11, 20 MT) 
+to the group for a combined 40 MT run (10 batches), 
+saving ~1 hour total changeover.
+```
+
+**Logic:**
+- Scan for orders on the same line with matching product (same FG, material code).
+- Calculate changeover savings if combined.
+- Reference specific orders with FPR, Prio, volume, and product name.
+- Show potential combined volume and batch count.
+
+**Order references:** Bold + orange, clickable (scroll to order).
+
+---
+
+#### INSIGHT C — CUT SUGGESTIONS
+
+Identifies orders that could be cut without disrupting the schedule.
+
+**Example:**
+```
+✂ Consider Cutting
+
+FPR: 260311 (Prio 3, 80 MT, Elite XP Growex) is a 
+large order that takes ~10 hours to produce. Cutting 
+it into 32 MT + 48 MT would let the first portion 
+finish by 12:00 PM, freeing up the line for 
+FPR: 260315 (Prio 4) which has a tighter deadline 
+(March 16 availability). The second portion can be 
+scheduled after.
+```
+
+**Logic:**
+- Identify large orders (high volume relative to others on the line).
+- Check if splitting would allow a downstream order with a tighter deadline to start sooner.
+- Suggest specific split volumes that align with batch size.
+- Reference the downstream order that would benefit.
+
+**Order references:** Bold + orange, clickable.
+
+---
+
+#### INSIGHT D — SEQUENCE OPTIMIZATION
+
+Identifies orders that could be swapped or moved to reduce changeover time.
+
+**Example:**
+```
+🔄 Sequence Optimization
+
+Swapping FPR: 260310 (Prio 6, Salto Grower P 50kg, 
+MP) and FPR: 260312 (Prio 7, Elite XP Startex, 
+Mini-pellet 50kg, MP) would save ~30 min changeover. 
+Both are the same form (MP) but FPR: 260312 shares the 
+same category (Hogs) as FPR: 260308 (Prio 5), making 
+the transition smoother.
+```
+
+**Logic:**
+- Analyze the current sequence for changeover inefficiencies.
+- Find adjacent orders where swapping would reduce or eliminate changeover.
+- Consider form, category, and product similarity.
+- Calculate time saved.
+
+**Order references:** Bold + orange, clickable.
+
+---
+
+#### INSIGHT E — LINE CAPACITY GAPS
+
+Identifies gaps in the production schedule where capacity is underutilized.
+
+**Example:**
+```
+⏳ Line Capacity Gap
+
+There's a ~2 hour gap between FPR: 260308 (Prio 5, 
+completes March 19 at 2:00 PM) and FPR: 260310 
+(Prio 6, starts March 19 at 4:00 PM) on Line 1. 
+Consider moving a smaller order into this slot or 
+adjusting start times to avoid idle line time.
+```
+
+**Logic:**
+- Check completion time of each order vs start time of the next.
+- If the gap exceeds a threshold (e.g., 1 hour), flag it.
+- Suggest filling the gap or adjusting timing.
+
+**Order references:** Bold + orange, clickable.
+
+---
+
+### INSIGHT DISPLAY RULES:
+
+- Show a MAXIMUM of 5 insights at a time.
+- Order by priority: Priority orders first, then combine, then cut, then sequence, then capacity.
+- If no insights are available for a category, skip it.
+- If there are no insights at all:
+  ```
+  ✅ Looking good! No optimization suggestions at this time. 
+  Your production schedule is well-organized.
+  ```
+
+### INSIGHT ITEM STYLING:
+
+Each insight is a card within the panel:
+
+```
+┌─────────────────────────────────────────────┐
+│ 📌 Prioritize Order                          │  ← heading, bold, 13px
+│                                              │
+│ FPR: 260309 (Elite XP Startex...) has an     │  ← body, 12px
+│ availability date of March 15...             │
+│                                              │
+└─────────────────────────────────────────────┘
+```
+
+- Each insight card: white background, 1px solid #e5e7eb border, border-radius 6px, padding 12px.
+- Heading: bold, 13px, dark text (#1a1a1a), with emoji prefix.
+- Body: regular, 12px, dark grey (#4b5563), line-height 1.5.
+- Spacing between insight cards: 10px.
+- Clickable order references in body: bold, orange (#fd5108), underline on hover, cursor pointer.
+
+---
+
+## 3. PANEL 2 — ALERTS & REMINDERS
+
+This panel shows time-sensitive warnings and reminders.
+
+### ALERT CATEGORIES:
+
+---
+
+#### ALERT A — URGENT / NEARING DEADLINE
+
+Orders whose availability date is approaching and may not complete in time.
+
+**Example (approaching deadline):**
+```
+🚨 Urgent — Deadline Approaching
+
+FPR: 260315 (Elite XP Growex, Pellet 50kg) has an 
+availability date of March 16, 2026. Based on its 
+current position (Prio 9), estimated completion is 
+March 16, 2026 at 11:30 PM — only 30 minutes before 
+the deadline. Consider moving it up or prioritizing.
+```
+
+**Example (past deadline):**
+```
+🔴 Overdue — Past Deadline
+
+FPR: 260318 (Salto Finisher P 25kg) had an availability 
+date of March 14, 2026 but is still active at Prio 12 
+with estimated completion March 17. This order is 
+3 days overdue. Immediate action recommended.
+```
+
+**Severity levels:**
+
+| Severity | Condition | Icon | Color |
+|---|---|---|---|
+| Critical | Past availability date | 🔴 | Red (#e53935) |
+| Urgent | Within 24 hours of availability date | 🟠 | Orange (#fd5108) |
+| Warning | Within 48 hours of availability date | 🟡 | Amber (#f59e0b) |
+
+**Logic:**
+- Compare each order's estimated completion date with its availability date.
+- Flag orders based on severity thresholds.
+- Sort: Critical first, then Urgent, then Warning.
+- Skip orders with non-date availability ("safety stocks", "prio replenish").
+
+---
+
+#### ALERT B — SAP FILE UPLOAD REMINDER
+
+Reminds the user to upload new SAP data based on the M-W-F schedule.
+
+**Logic:**
+
+The SAP upload schedule is Monday, Wednesday, Friday. The system tracks the last upload date.
+
+| Today | Last Upload | Alert |
+|---|---|---|
+| Monday | Friday (or earlier) | "📥 Today is a scheduled SAP upload day. Please upload the latest SAP file to keep orders up to date." |
+| Tuesday | Monday | No alert (uploaded yesterday, next is Wednesday) |
+| Tuesday | Friday | "⚠ You may have missed Monday's upload. Last upload was Friday, March 7. Consider uploading today." |
+| Wednesday | Monday | "📥 Today is a scheduled SAP upload day. Last upload was Monday, March 9. Please upload the latest SAP file." |
+| Wednesday | Friday | "🔴 SAP data may be outdated. Last upload was Friday, March 7 (5 days ago). Please upload immediately." |
+| Thursday | Wednesday | No alert |
+| Thursday | Monday | "⚠ You may have missed Wednesday's upload. Last upload was Monday, March 9. Consider uploading today." |
+| Friday | Wednesday | "📥 Today is a scheduled SAP upload day. Last upload was Wednesday, March 11. Please upload the latest SAP file." |
+| Saturday | Friday | No alert |
+| Sunday | Friday | No alert |
+
+**Alert messages:**
+
+**On upload day (data is current from last upload):**
+```
+📥 SAP Upload Day
+
+Today is a scheduled upload day (Wednesday). Your last 
+upload was Monday, March 9. Please upload the latest 
+SAP file to keep production orders current.
+
+[Upload SAP File]  ← button that opens the upload dialog
+```
+
+**Missed upload day:**
+```
+⚠ Missed SAP Upload
+
+It looks like the scheduled Monday upload was missed. 
+Your last upload was Friday, March 7 (4 days ago). 
+Orders may be outdated. Consider uploading today to 
+catch up.
+
+[Upload SAP File]
+```
+
+**Significantly outdated:**
+```
+🔴 SAP Data Outdated
+
+Your last SAP upload was 5+ days ago (Friday, March 7). 
+Production orders may not reflect the latest SAP data. 
+Please upload as soon as possible.
+
+[Upload SAP File]
+```
+
+**Upload button:**
+- Small orange (#fd5108) filled button, white text.
+- Clicking opens the existing SAP upload dialog/flow.
+- Positioned at the bottom of the alert card.
+
+**Tracking last upload:**
+- Store the last SAP upload timestamp.
+- Compare with current date to determine which alert to show.
+
+---
+
+#### ALERT C — ORDERS WITH MISSING DATA
+
+Identifies orders that are missing critical planned order data.
+
+**Fields to check:**
+- FG (Finished Good code)
+- SFG (Semi-Finished Good code)
+- PMX code
+- Material Code
+- Item Description
+- Volume (MT)
+- Form
+- Batch Size
+- Completion Date
+
+**Example:**
+```
+📋 Missing Order Data
+
+3 orders have incomplete data:
+
+• FPR: 260309 (Prio 5) — Missing: SFG, PMX
+• FPR: 260312 (Prio 8) — Missing: Completion Date
+• FPR: 260318 (Prio 12) — Missing: FG, Material Code, 
+  Item Description
+
+Orders with missing data may not schedule correctly. 
+Please review and fill in the missing fields, or check 
+the SAP source data.
+```
+
+**Logic:**
+- Scan all active orders on the line.
+- Check each field in the required list.
+- Group missing fields by order.
+- Show up to 5 orders with missing data.
+- If more than 5, show "...and X more orders with missing data."
+
+**Order references:** Bold + orange, clickable.
+
+---
+
+#### ALERT D — ORDERS ON HOLD TOO LONG
+
+Identifies orders that have been on "Hold" status for an extended period.
+
+**Example:**
+```
+⏸ Order On Hold
+
+FPR: 260310 (Salto Grower P 50kg) has been on Hold 
+for 3 days (since March 8, 2026). This may be blocking 
+downstream orders. Consider resolving the hold or 
+moving it to a different position.
+```
+
+**Logic:**
+- Track when an order's status was changed to "Hold" (store timestamp).
+- If status has been "Hold" for more than 24 hours, flag it.
+- Show the duration and the date it was put on hold.
+
+**Thresholds:**
+
+| Duration on Hold | Severity |
+|---|---|
+| 24-48 hours | 🟡 Warning |
+| 48-72 hours | 🟠 Attention |
+| 72+ hours | 🔴 Extended hold |
+
+---
+
+#### ALERT E — OVERDUE ORDERS
+
+Orders that are past their availability date but still active.
+
+**Example:**
+```
+🔴 Overdue Order
+
+FPR: 260318 (Salto Finisher P 25kg) is 3 days past 
+its availability date (March 14, 2026). Current 
+status: In production (Prio 12). Estimated completion: 
+March 17, 2026. Please escalate or adjust the schedule.
+```
+
+**Logic:**
+- Compare current date with availability date.
+- If current date > availability date AND order is not "Done" or "Cancel PO", flag it.
+- Show how many days overdue.
+- Show current status and estimated completion.
+
+---
+
+### ALERT DISPLAY RULES:
+
+- Show a MAXIMUM of 5 alerts at a time.
+- Order by severity: Critical/Overdue first, then Urgent, then Warnings, then Reminders.
+- If no alerts:
+  ```
+  ✅ All clear! No urgent alerts or reminders at this time.
+  ```
+
+### ALERT ITEM STYLING:
+
+Each alert is a card within the panel:
+
+```
+┌─────────────────────────────────────────────┐
+│ 🚨 Urgent — Deadline Approaching             │  ← heading
+│                                              │
+│ FPR: 260315 (Elite XP Growex...) has an      │  ← body
+│ availability date of March 16...             │
+│                                              │
+└─────────────────────────────────────────────┘
+```
+
+**Severity-based card styling:**
+
+| Severity | Left border | Background |
+|---|---|---|
+| Critical / Overdue | 3px solid #e53935 | Light red (#fef2f2) |
+| Urgent | 3px solid #fd5108 | Light orange (#fff7ed) |
+| Warning | 3px solid #f59e0b | Light amber (#fef3c7) |
+| Info / Reminder | 3px solid #3b82f6 | Light blue (#eff6ff) |
+
+- Each card: border-radius 6px, padding 12px.
+- Heading: bold, 13px.
+- Body: regular, 12px, line-height 1.5.
+- Clickable order references: bold, orange, underline on hover.
+- Spacing between cards: 10px.
+
+---
+
+## 4. REMOVE ALERTS & REMINDERS BELOW INTERACTIVE TABLE
+
+Since the Alerts & Reminders are now in Panel 2 above the table, REMOVE the existing alerts/reminders section that appears below the interactive table to avoid redundancy.
+
+- Delete or hide the bottom alerts section.
+- All alert content is now consolidated in Panel 2.
+- The area below the interactive table should be clean — no duplicate alerts.
+
+---
+
+## 5. AUTO-REFRESH INSIGHTS AND ALERTS
+
+Both panels auto-refresh whenever the user makes changes to the production schedule.
+
+**Trigger events for auto-refresh:**
+- After drag-and-drop reorder
+- After combine / uncombine
+- After cut / merge back
+- After status change (any status)
+- After SAP file upload
+- After Auto-Sequence
+- After start date / start time change
+- After any order modification
+
+**Refresh behavior:**
+- Insights and alerts recalculate based on the CURRENT state of the table.
+- The refresh happens automatically — no manual button needed.
+- Brief loading animation (subtle shimmer or fade) while recalculating (~0.5 second).
+- New insights/alerts replace the old ones with a smooth transition.
+
+**Also refresh on:**
+- Tab switch (when user clicks on a different line tab and back).
+- Initial page load.
+- Every 5 minutes (background auto-refresh) to keep time-based alerts current (deadlines, hold durations).
+
+---
+
+## 6. CLICKABLE ORDER REFERENCES
+
+When an order is referenced in any insight or alert:
+
+**Display:**
+- Text format: "FPR: 260309" or "FPR: 260309 (Product Name)"
+- Font: Bold
+- Color: Orange (#fd5108)
+- Underline: On hover only
+- Cursor: Pointer on hover
+
+**On click:**
+1. Scroll the interactive table to the referenced order's row.
+2. Briefly highlight the row with a yellow flash animation:
+   - Background changes to light yellow (#fef9c3) for 2 seconds.
+   - Then fades back to the normal row background (white, or blue tint if combined).
+3. If the table is scrolled far from the order, smooth scroll to it.
+
+**Implementation:**
+- Wrap order references in a clickable span/component.
+- Attach an onClick handler that:
+  a. Finds the order row element in the DOM by order ID or Prio.
+  b. Calls `element.scrollIntoView({ behavior: 'smooth', block: 'center' })`.
+  c. Adds a temporary CSS class for the yellow highlight.
+  d. Removes the class after 2 seconds.
+
+---
+
+## 7. ANALYTICS TAB — AUTO-GENERATE INSIGHTS ON OPEN
+
+Currently, the Analytics tab requires the user to manually click a button to generate AI insights. Change this so insights are automatically generated when the tab is opened.
+
+**Behavior:**
+- When the user clicks/opens the Analytics tab:
+  1. Show a brief loading state (spinner or skeleton placeholder) for the insights section.
+  2. Automatically trigger the AI insights generation.
+  3. Display the generated insights once ready.
+  4. No manual "Generate" button needed.
+
+- The loading state should show:
+  ```
+  🤖 Generating insights...
+  ```
+  with a subtle spinner or pulsing animation.
+
+- If insight generation fails:
+  ```
+  ⚠ Unable to generate insights. Please try again.
+  [Retry]
+  ```
+  with a retry button.
+
+- If the user navigates away and back to the Analytics tab:
+  - If insights were generated less than 5 minutes ago, show cached insights (no re-generation).
+  - If more than 5 minutes ago, regenerate automatically.
+
+---
+
+## 8. AUTO-SEQUENCE DIALOG — CHATBOT Z-INDEX FIX
+
+When the "Auto-Sequence" dialog appears, the chatbot icon/widget overlays on top of the dialog, blocking interaction.
+
+**Fix:**
+- The Auto-Sequence dialog (modal) must have a higher z-index than the chatbot icon.
+- OR the chatbot icon must be temporarily hidden or pushed behind when any modal/dialog is open.
+
+**Implementation options (pick the most appropriate):**
+
+**Option A — Increase modal z-index:**
+- Set the Auto-Sequence modal overlay z-index to 9999.
+- Set the Auto-Sequence modal content z-index to 10000.
+- Ensure the chatbot icon z-index is lower (e.g., 999 or 1000).
+
+**Option B — Hide chatbot when modal is open:**
+- When ANY modal/dialog opens (Auto-Sequence, Cancel, Cut, Combine, Uncombine, Merge Back, etc.):
+  - Set the chatbot icon to `display: none` or `visibility: hidden` or `opacity: 0`.
+- When the modal closes:
+  - Restore the chatbot icon visibility.
+
+**Option C — Push chatbot behind:**
+- When any modal opens:
+  - Set chatbot z-index to 0 or -1.
+- When modal closes:
+  - Restore chatbot z-index to its normal value.
+
+**Recommended: Option B** — cleanest approach, ensures no visual conflicts with any dialog.
+
+**Apply this fix to ALL dialogs/modals in the app:**
+- Auto-Sequence dialog
+- Cancel Order dialog
+- Cut Order dialog
+- Combine/Uncombine dialog
+- Merge Back dialog
+- Restore Order dialog
+- Any future dialogs
+```

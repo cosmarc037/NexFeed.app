@@ -1,0 +1,363 @@
+```
+Fix the following issue in the Smart Combine approve handler:
+
+---
+
+## THE PROBLEM
+
+The AI recommends "Priority 8" but the combined order ends up at Priority 2. The parser is failing to extract the number, AND the fallback logic uses the lowest prio number among combined orders (which was 4, but somehow ended up at 2).
+
+Two issues:
+1. `parseRecommendedPrio` is not reliably extracting the number from AI text
+2. Even the fallback is wrong — it should at minimum use the lowest prio (4), not 2
+
+---
+
+## FIX 1: STORE AI RECOMMENDED PRIO AS A STRUCTURED FIELD
+
+Instead of relying on text parsing after the fact, extract the prio number during the AI response parsing and store it separately.
+
+### UPDATE THE AI PROMPT — REQUEST STRUCTURED PRIO NUMBER
+
+Add to the end of the insertion position section in the prompt:
+
+```javascript
+function buildCombineAnalysisPrompt(context) {
+  // ... existing prompt ...
+
+  return `
+... (existing prompt content) ...
+
+RESPOND IN EXACTLY THIS FORMAT (no markdown, no # headers, no **bold**):
+
+Insertion Position:
+RECOMMENDED_PRIO: [number]
+[Explanation of why this position was chosen. Reference specific orders and avail dates. Keep to 2-3 sentences.]
+
+Scheduling Impact:
+[Describe what happens to downstream orders. Name specific orders affected and quantify time shifts in hours. If no delays, state clearly. Keep to 2-4 sentences.]
+
+Alerts:
+[List ALL warnings. Each on its own line starting with ⚠. Include volume warnings and delay warnings. If none, state "No alerts — all orders remain on schedule."]
+  `;
+}
+```
+
+### UPDATE THE RESPONSE PARSER — EXTRACT STRUCTURED PRIO
+
+```javascript
+function parseCombineAnalysisResponse(response) {
+  let cleaned = response;
+  
+  // Remove markdown
+  cleaned = cleaned.replace(/#{1,6}\s*/g, '');
+  cleaned = cleaned.replace(/\*\*/g, '');
+  cleaned = cleaned.replace(/\*([^*]+)\*/g, '$1');
+  cleaned = cleaned.replace(/_([^_]+)_/g, '$1');
+  
+  const result = {
+    insertionPosition: '',
+    recommendedPrio: null,
+    schedulingImpact: '',
+    alerts: ''
+  };
+  
+  // Parse sections
+  const insertionMatch = cleaned.match(/Insertion Position:\s*([\s\S]*?)(?=Scheduling Impact:|$)/i);
+  const impactMatch = cleaned.match(/Scheduling Impact:\s*([\s\S]*?)(?=Alerts?:|$)/i);
+  const alertsMatch = cleaned.match(/Alerts?:\s*([\s\S]*?)$/i);
+  
+  if (insertionMatch) {
+    let insertionText = insertionMatch[1].trim();
+    
+    // Extract RECOMMENDED_PRIO
+    const prioLineMatch = insertionText.match(/RECOMMENDED_PRIO:\s*(\d+)/i);
+    if (prioLineMatch) {
+      result.recommendedPrio = parseInt(prioLineMatch[1], 10);
+      // Remove the RECOMMENDED_PRIO line from display text
+      insertionText = insertionText.replace(/RECOMMENDED_PRIO:\s*\d+\s*/i, '').trim();
+    }
+    
+    // If RECOMMENDED_PRIO not found, try other patterns
+    if (result.recommendedPrio === null) {
+      result.recommendedPrio = extractPrioFromText(insertionText);
+    }
+    
+    result.insertionPosition = insertionText;
+  }
+  
+  if (impactMatch) result.schedulingImpact = impactMatch[1].trim();
+  if (alertsMatch) result.alerts = alertsMatch[1].trim();
+  
+  // Fallback
+  if (!result.insertionPosition && !result.schedulingImpact && !result.alerts) {
+    result.insertionPosition = cleaned.trim();
+    result.schedulingImpact = 'See above.';
+    result.alerts = 'Please review manually.';
+  }
+  
+  return result;
+}
+
+function extractPrioFromText(text) {
+  if (!text) return null;
+  
+  // Try multiple patterns in order of specificity
+  const patterns = [
+    /RECOMMENDED_PRIO:\s*(\d+)/i,
+    /^(\d+)\.\s/m,                                    // "8. The combined order..."
+    /[Pp]riority\s+(\d+)/,                            // "Priority 8"
+    /[Pp]rio\s+(\d+)/,                                // "Prio 8"
+    /inserted?\s+at\s+(?:[Pp]riority\s+)?(\d+)/i,     // "inserted at Priority 8"
+    /position\s+(\d+)/i,                               // "position 8"
+    /(?:recommend|suggest)\w*\s+(?:[Pp]riority\s+)?(\d+)/i,  // "recommend Priority 8"
+    /occupy\s+(?:position\s+)?(?:[Pp]riority\s+)?(\d+)/i,    // "occupy Priority 8"
+    /placed?\s+at\s+(?:[Pp]riority\s+)?(\d+)/i,              // "placed at Priority 8"
+  ];
+  
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match) {
+      const num = parseInt(match[1], 10);
+      if (num > 0 && num <= 100) { // Sanity check
+        return num;
+      }
+    }
+  }
+  
+  return null;
+}
+```
+
+---
+
+## FIX 2: UPDATE APPROVE HANDLER — USE STRUCTURED PRIO
+
+```javascript
+function handleApprove(group, analysis) {
+  const combiningOrders = group.orders;
+  
+  // Step 1: Determine avail date type
+  const datedOrders = combiningOrders.filter(o => {
+    const avail = o.target_avail_date;
+    return avail && /^\d{4}-\d{2}-\d{2}/.test(avail) && !isNaN(Date.parse(avail));
+  });
+  
+  let insertionPrio;
+  let combinedAvailDate;
+  
+  if (datedOrders.length > 0) {
+    // DATED — always use earliest avail date order's prio
+    const earliest = datedOrders.sort((a, b) =>
+      new Date(a.target_avail_date) - new Date(b.target_avail_date)
+    )[0];
+    insertionPrio = earliest.prio;
+    combinedAvailDate = earliest.target_avail_date;
+    
+    console.log(`[SmartCombine] Dated order — inserting at Prio ${insertionPrio} (earliest avail: ${combinedAvailDate})`);
+  } else {
+    // NON-DATED — use AI's structured recommendation
+    const aiPrio = analysis?.recommendedPrio;
+    
+    if (aiPrio !== null && aiPrio !== undefined && aiPrio > 0) {
+      // Validate AI prio is within range
+      const allPriosOnLine = getAllOrdersForLine(group.line)
+        .filter(o => o.status !== 'Done' && o.status !== 'Cancel PO')
+        .map(o => o.prio);
+      const maxPrio = Math.max(...allPriosOnLine, 0);
+      
+      if (aiPrio <= maxPrio) {
+        insertionPrio = aiPrio;
+        console.log(`[SmartCombine] Non-dated — using AI recommended Prio ${insertionPrio}`);
+      } else {
+        // AI gave a prio out of range — fallback
+        insertionPrio = Math.min(...combiningOrders.map(o => o.prio));
+        console.warn(`[SmartCombine] AI Prio ${aiPrio} out of range (max ${maxPrio}). Falling back to lowest combined prio: ${insertionPrio}`);
+      }
+    } else {
+      // AI didn't provide a prio — fallback to lowest prio among combined orders
+      insertionPrio = Math.min(...combiningOrders.map(o => o.prio));
+      console.warn(`[SmartCombine] No AI prio extracted. Falling back to lowest combined prio: ${insertionPrio}`);
+    }
+    
+    combinedAvailDate = combiningOrders[0].target_avail_date;
+  }
+  
+  // Step 2: Create combined order
+  const combinedVolume = combiningOrders.reduce((s, o) => s + (parseFloat(o.volume) || 0), 0);
+  
+  // Use the order at the insertion prio as the base, or first order
+  const baseOrder = { ...(combiningOrders.find(o => o.prio === insertionPrio) || combiningOrders[0]) };
+  
+  baseOrder.volume = combinedVolume;
+  baseOrder.target_avail_date = combinedAvailDate;
+  baseOrder.prio = insertionPrio;
+  baseOrder.batches = Math.ceil(combinedVolume / (parseFloat(baseOrder.batch_size) || 1));
+  baseOrder.bags = baseOrder.batches * (parseFloat(baseOrder.fg_weight) || 1) * 20;
+  
+  const runRate = parseFloat(baseOrder.run_rate) || 0;
+  baseOrder.production_time = runRate > 0 ? (combinedVolume / runRate).toFixed(2) : '0.00';
+  baseOrder._isCombined = true;
+  baseOrder._combinedFrom = combiningOrders.map(o => o.id);
+  
+  // Step 3: Remove all original orders
+  const orderIdsToRemove = combiningOrders.map(o => o.id);
+  let updatedOrders = allOrders.filter(o => !orderIdsToRemove.includes(o.id));
+  
+  // Step 4: Insert combined order at the correct position
+  // Get all line orders, add the combined order, sort to place it at insertionPrio
+  const otherLineOrders = updatedOrders
+    .filter(o => o.line === group.line && o.status !== 'Done' && o.status !== 'Cancel PO')
+    .sort((a, b) => a.prio - b.prio);
+  
+  // Find where to insert based on the original prio position
+  // The combined order should take the slot of insertionPrio
+  // All orders with prio < insertionPrio stay before it
+  // All orders with prio > insertionPrio (that aren't being combined) stay after it
+  
+  const beforeOrders = otherLineOrders.filter(o => o.prio < insertionPrio);
+  const afterOrders = otherLineOrders.filter(o => o.prio >= insertionPrio);
+  
+  const finalLineOrders = [...beforeOrders, baseOrder, ...afterOrders];
+  
+  // Reassign prios sequentially
+  finalLineOrders.forEach((o, idx) => {
+    o.prio = idx + 1;
+  });
+  
+  // Replace line orders in full order list
+  const otherLines = updatedOrders.filter(o => o.line !== group.line || o.status === 'Done' || o.status === 'Cancel PO');
+  updatedOrders = [...otherLines, ...finalLineOrders];
+  
+  // Step 5: Recalculate everything
+  recalculateAllChangeovers(updatedOrders, getDefaultChangeoverRules());
+  recalculateCompletionDates(updatedOrders);
+  
+  setAllOrders(updatedOrders);
+  
+  // Find the final prio after reassignment
+  const finalPrio = finalLineOrders.findIndex(o => o.id === baseOrder.id) + 1;
+  
+  showNotification('success', `Orders combined: ${baseOrder.item_description} (${combinedVolume} MT) at Priority ${finalPrio}.`);
+  
+  console.log(`[SmartCombine] Combined order placed at final Prio ${finalPrio}. AI recommended: ${analysis?.recommendedPrio || 'N/A'}`);
+}
+```
+
+---
+
+## FIX 3: STORE recommendedPrio IN STATE AND PASS TO APPROVE
+
+```jsx
+function CombineGroup({ group, lineOrders, masterData, n10dData, changeoverRules }) {
+  const [insertionAnalysis, setInsertionAnalysis] = useState(null);
+  const [recommendedPrio, setRecommendedPrio] = useState(null);
+  const [schedulingAnalysis, setSchedulingAnalysis] = useState(null);
+  const [alertsAnalysis, setAlertsAnalysis] = useState(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(true);
+  
+  async function generateAllAnalyses() {
+    setIsAnalyzing(true);
+    try {
+      const context = buildCombineAnalysisContext(group, lineOrders, masterData, n10dData, changeoverRules);
+      const prompt = buildCombineAnalysisPrompt(context);
+      const response = await callAI(prompt);
+      const parsed = parseCombineAnalysisResponse(response);
+      
+      setInsertionAnalysis(parsed.insertionPosition);
+      setRecommendedPrio(parsed.recommendedPrio);
+      setSchedulingAnalysis(parsed.schedulingImpact);
+      setAlertsAnalysis(parsed.alerts);
+      
+      console.log(`[SmartCombine] AI recommended prio: ${parsed.recommendedPrio}`);
+    } catch (error) {
+      console.error('Combine analysis failed:', error);
+      setInsertionAnalysis('Unable to determine. Review manually.');
+      setRecommendedPrio(null);
+      setSchedulingAnalysis('Analysis unavailable.');
+      setAlertsAnalysis('Please verify scheduling impact before approving.');
+    } finally {
+      setIsAnalyzing(false);
+    }
+  }
+  
+  // ... refreshSection updates recommendedPrio too ...
+  
+  async function refreshSection(section) {
+    const context = buildCombineAnalysisContext(group, lineOrders, masterData, n10dData, changeoverRules);
+    const prompt = buildCombineAnalysisPrompt(context);
+    
+    try {
+      const response = await callAI(prompt);
+      const parsed = parseCombineAnalysisResponse(response);
+      
+      if (section === 'insertion') {
+        setInsertionAnalysis(parsed.insertionPosition);
+        setRecommendedPrio(parsed.recommendedPrio);
+      }
+      if (section === 'scheduling') setSchedulingAnalysis(parsed.schedulingImpact);
+      if (section === 'alerts') setAlertsAnalysis(parsed.alerts);
+    } catch (error) {
+      console.error(`Refresh ${section} failed:`, error);
+    }
+  }
+  
+  return (
+    <div className="combine-group">
+      {/* ... order cards, summary, etc ... */}
+      
+      {/* Actions — pass recommendedPrio to approve */}
+      <div className="combine-group-actions">
+        <button 
+          className="combine-approve-btn"
+          onClick={() => handleApprove(group, { 
+            insertionPosition: insertionAnalysis,
+            recommendedPrio: recommendedPrio
+          })}
+          disabled={isAnalyzing}
+        >
+          Approve
+        </button>
+        <button 
+          className="combine-dismiss-btn"
+          onClick={() => handleDismiss(group)}
+        >
+          Dismiss
+        </button>
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+## VERIFICATION
+
+### Structured prio extraction
+1. ✅ AI outputs "RECOMMENDED_PRIO: 8" as a structured line
+2. ✅ Parser extracts 8 as `recommendedPrio` field
+3. ✅ "RECOMMENDED_PRIO: 8" is stripped from display text — user sees clean explanation
+4. ✅ If RECOMMENDED_PRIO line missing, fallback to text pattern matching
+5. ✅ Sanity check: prio must be > 0 and <= 100
+
+### Approve handler
+6. ✅ Dated orders → uses earliest avail date prio (unchanged)
+7. ✅ Non-dated orders → uses `analysis.recommendedPrio` (structured field)
+8. ✅ If AI prio out of range → falls back to lowest combined prio
+9. ✅ If AI prio null → falls back to lowest combined prio
+10. ✅ Console logs for debugging
+
+### Insertion position
+11. ✅ AI says Prio 8 → combined order inserted at position 8
+12. ✅ Orders with prio < 8 stay before
+13. ✅ Orders with prio >= 8 (non-combined) shift after
+14. ✅ Prios reassigned sequentially after insertion
+15. ✅ Notification shows correct final prio
+
+### No more misalignment
+16. ✅ AI recommendation and actual placement match
+17. ✅ No phantom Prio 2 when AI said Prio 8
+18. ✅ recommendedPrio stored in state and passed to handler
+19. ✅ Refresh updates recommendedPrio too
+```

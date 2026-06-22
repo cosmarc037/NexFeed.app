@@ -1,0 +1,438 @@
+```
+Fix the following issues in the shutdown dialog:
+
+---
+
+## FIX 1: SCROLLABLE CONTAINER FOR IMPACT ANALYSIS
+
+The impact analysis output expands the entire dialog, making it too long. Place it in a scrollable container with a fixed max-height.
+
+### UPDATE THE ANALYSIS SECTION
+
+```jsx
+<div className="shutdown-dialog-analysis">
+  <div className="shutdown-analysis-header">
+    <span>✨ Impact Analysis</span>
+    {isAnalyzing && (
+      <span className="shutdown-analysis-loading">
+        <span className="refresh-spinning">🔄</span> Analyzing...
+      </span>
+    )}
+  </div>
+  
+  <div className="shutdown-analysis-scroll">
+    {isAnalyzing && !analysis && (
+      <div className="shutdown-analysis-loading-text">
+        Analyzing impact on orders and identifying diversion opportunities...
+      </div>
+    )}
+    
+    {analysis && (
+      <ShutdownAnalysisDisplay analysis={analysis} />
+    )}
+  </div>
+</div>
+```
+
+### STYLING — SCROLLABLE
+
+```css
+.shutdown-analysis-scroll {
+  max-height: 300px;
+  overflow-y: auto;
+  padding: 14px 20px;
+}
+
+/* Scrollbar styling */
+.shutdown-analysis-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.shutdown-analysis-scroll::-webkit-scrollbar-track {
+  background: #f3f4f6;
+  border-radius: 3px;
+}
+
+.shutdown-analysis-scroll::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 3px;
+}
+
+.shutdown-analysis-scroll::-webkit-scrollbar-thumb:hover {
+  background: #9ca3af;
+}
+```
+
+---
+
+## FIX 2: COMPACT ORDER CARDS INSTEAD OF FLAT BULLET LIST
+
+The current output lists each detail as a separate bullet point, which is too spread out and hard to scan. Instead, instruct the AI to output each order as a compact single bullet, and also render orders as compact cards.
+
+### UPDATE THE AI PROMPT — COMPACT FORMAT
+
+Update the response format instruction in `buildShutdownDialogPrompt`:
+
+```javascript
+// Replace the EXAMPLE OUTPUT FORMAT section with:
+
+`
+RESPONSE FORMAT:
+Write a 2-3 sentence summary paragraph first.
+
+Then write "Affected orders:" as a header.
+
+For each order, write ONE compact bullet that includes ALL details in a single line or two. Do NOT put each detail as a separate bullet. Format like this:
+
+• [Product Name] — [Volume] MT, [N10D Status]. Prod time: [X.XX] hrs. [Recommendation]. [Brief reason].
+
+Example:
+• Gall 21 Chicken Layer P (Breeder) 50Kg — 39 MT, Critical. Prod time: 2.00 hrs. Divert to Line 2 immediately. DFL exceeds inventory — stockout risk.
+• Elite XP Startex, Mini-pellet 50kg — 80 MT, Sufficient. Prod time: 4.19 hrs. Can divert to Line 2 or Line 3/4 (outside FM1). No urgency.
+
+After listing all orders, write a "Capacity note:" line about the partner line load.
+
+Then write a "Total impact:" line with the total halted production hours.
+
+Keep each bullet to 1-2 lines maximum. Do NOT break a single order into multiple bullets.
+Do NOT use markdown formatting.
+`
+```
+
+### ALSO UPDATE THE DISPLAY COMPONENT — RENDER AS CARDS
+
+```jsx
+function ShutdownAnalysisDisplay({ analysis }) {
+  if (!analysis) return null;
+  
+  const lines = analysis.split('\n').filter(l => l.trim());
+  
+  return (
+    <div className="shutdown-analysis-content">
+      {lines.map((line, index) => {
+        const trimmed = line.trim();
+        
+        // Bullet point — render as compact card
+        if (trimmed.startsWith('•') || trimmed.startsWith('-')) {
+          const text = trimmed.replace(/^[•\-]\s*/, '');
+          
+          // Try to parse product name (before the — dash)
+          const dashSplit = text.split('—');
+          if (dashSplit.length >= 2) {
+            const productName = dashSplit[0].trim();
+            const details = dashSplit.slice(1).join('—').trim();
+            
+            // Extract N10D status for color coding
+            let statusClass = '';
+            if (details.toLowerCase().includes('critical')) statusClass = 'shutdown-order-critical';
+            else if (details.toLowerCase().includes('urgent')) statusClass = 'shutdown-order-urgent';
+            else if (details.toLowerCase().includes('monitor')) statusClass = 'shutdown-order-monitor';
+            else if (details.toLowerCase().includes('sufficient')) statusClass = 'shutdown-order-sufficient';
+            
+            return (
+              <div key={index} className={`shutdown-order-card ${statusClass}`}>
+                <div className="shutdown-order-name">{productName}</div>
+                <div className="shutdown-order-details">{details}</div>
+              </div>
+            );
+          }
+          
+          // Fallback — simple bullet
+          return (
+            <div key={index} className="shutdown-analysis-bullet">
+              <span className="shutdown-bullet-dot">•</span>
+              <span className="shutdown-bullet-text">{text}</span>
+            </div>
+          );
+        }
+        
+        // Sub-headers (e.g., "Affected orders:", "Capacity note:", "Total impact:")
+        if (trimmed.endsWith(':') && trimmed.length < 60) {
+          return (
+            <div key={index} className="shutdown-analysis-subheader">
+              {trimmed}
+            </div>
+          );
+        }
+        
+        // Capacity note or total impact — highlight box
+        if (trimmed.toLowerCase().startsWith('capacity note') || 
+            trimmed.toLowerCase().startsWith('partner line capacity') ||
+            trimmed.toLowerCase().startsWith('total impact')) {
+          return (
+            <div key={index} className="shutdown-analysis-note">
+              {trimmed}
+            </div>
+          );
+        }
+        
+        // Regular paragraph
+        if (trimmed.length > 0) {
+          return (
+            <p key={index} className="shutdown-analysis-paragraph">
+              {trimmed}
+            </p>
+          );
+        }
+        
+        return null;
+      })}
+    </div>
+  );
+}
+```
+
+### COMPACT CARD STYLING
+
+```css
+.shutdown-analysis-content {
+  font-size: 12px;
+  color: #374151;
+  line-height: 1.6;
+}
+
+.shutdown-analysis-paragraph {
+  margin: 0 0 10px 0;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.shutdown-analysis-subheader {
+  font-size: 11px;
+  font-weight: 700;
+  color: #1a1a1a;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  margin: 12px 0 8px 0;
+}
+
+/* Compact order card */
+.shutdown-order-card {
+  padding: 8px 12px;
+  border-radius: 6px;
+  margin-bottom: 6px;
+  border-left: 3px solid #e5e7eb;
+  background: #f9fafb;
+}
+
+.shutdown-order-card.shutdown-order-critical {
+  border-left-color: #dc2626;
+  background: #fef2f2;
+}
+
+.shutdown-order-card.shutdown-order-urgent {
+  border-left-color: #ea580c;
+  background: #fff7ed;
+}
+
+.shutdown-order-card.shutdown-order-monitor {
+  border-left-color: #ca8a04;
+  background: #fefce8;
+}
+
+.shutdown-order-card.shutdown-order-sufficient {
+  border-left-color: #16a34a;
+  background: #f0fdf4;
+}
+
+.shutdown-order-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: #1a1a1a;
+  margin-bottom: 2px;
+}
+
+.shutdown-order-details {
+  font-size: 11px;
+  color: #4b5563;
+  line-height: 1.5;
+}
+
+/* Info note box (capacity, total impact) */
+.shutdown-analysis-note {
+  padding: 8px 12px;
+  background: #eff6ff;
+  border-left: 3px solid #3b82f6;
+  border-radius: 6px;
+  font-size: 11px;
+  color: #1e40af;
+  line-height: 1.6;
+  margin: 10px 0;
+}
+
+/* Simple bullet fallback */
+.shutdown-analysis-bullet {
+  display: flex;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.shutdown-bullet-dot {
+  color: #fd5108;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.shutdown-bullet-text {
+  font-size: 12px;
+  color: #374151;
+  line-height: 1.6;
+}
+```
+
+---
+
+## FIX 3: ENSURE DIALOG ITSELF DOESN'T OVERFLOW SCREEN
+
+The dialog should have a max-height and be scrollable as a whole if needed:
+
+```css
+.shutdown-dialog {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 560px;
+  max-height: 85vh;
+  background: #ffffff;
+  border-radius: 12px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.2);
+  z-index: 10001;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Header — fixed */
+.shutdown-dialog-header {
+  flex-shrink: 0;
+  padding: 16px 20px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+/* Summary — fixed */
+.shutdown-dialog-summary {
+  flex-shrink: 0;
+  padding: 16px 20px;
+  background: #f9fafb;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+/* Analysis header — fixed */
+.shutdown-analysis-header {
+  flex-shrink: 0;
+  padding: 12px 20px;
+  background: #fff7ed;
+  border-bottom: 1px solid #fed7aa;
+}
+
+/* Analysis body — SCROLLABLE */
+.shutdown-analysis-scroll {
+  max-height: 280px;
+  overflow-y: auto;
+  padding: 14px 20px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+/* Form — fixed */
+.shutdown-dialog-form {
+  flex-shrink: 0;
+  padding: 16px 20px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+/* Footer — fixed */
+.shutdown-dialog-footer {
+  flex-shrink: 0;
+  padding: 14px 20px;
+}
+```
+
+---
+
+## EXPECTED OUTPUT EXAMPLE
+
+With the updated prompt and rendering, the dialog should look like:
+
+```
+┌──────────────────────────────────────────────────────┐
+│ ⏻ Shutdown Line 1                               ✕   │
+├──────────────────────────────────────────────────────┤
+│ AFFECTED LINES     ACTIVE ORDERS                     │
+│ Line 1             10                                │
+│ TOTAL VOLUME       AVAILABLE LINES                   │
+│ 371 MT             Line 2                            │
+├──────────────────────────────────────────────────────┤
+│ ✨ Impact Analysis                                    │
+├──────────────────────────────────────────────────────┤
+│ ┌──────────────────────────────────────────────────┐ │
+│ │ Shutting down Line 1 will halt 10 orders         │ │
+│ │ totaling 371 MT. The most at-risk orders are     │ │
+│ │ Gall 21 (Critical) and Gallimax 3 (Urgent).     │ │
+│ │                                                  │ │
+│ │ AFFECTED ORDERS:                                 │ │
+│ │                                                  │ │
+│ │ ┌── Gall 21 Chicken Layer P (Breeder) 50Kg ───┐ │ │
+│ │ │ 39 MT, Critical. Prod: 2.00 hrs. Divert to  │ │ │
+│ │ │ Line 2 immediately. Stockout risk — DFL      │ │ │
+│ │ │ exceeds inventory.                           │ │ │
+│ │ └─────────────────────────────────────────────┘ │ │
+│ │                                                  │ │
+│ │ ┌── Gallimax 3 Maintenance (Natural) P ────────┐ │ │
+│ │ │ 80 MT, Urgent. Prod: 4.18 hrs. Divert to    │ │ │
+│ │ │ Line 2. Breach expected within 3 days.       │ │ │
+│ │ └─────────────────────────────────────────────┘ │ │
+│ │                                                  │ │
+│ │ ┌── Elite XP Startex, Mini-pellet 50kg ────────┐ │ │
+│ │ │ 80 MT, Sufficient. Prod: 4.19 hrs. Divert   │ │ │
+│ │ │ to Line 2 or Line 3/4 (outside FM1).         │ │ │
+│ │ │ No urgency.                                  │ │ │
+│ │ └─────────────────────────────────────────────┘ │ │
+│ │                                                  │ │
+│ │ ... (scroll for more) ...                        │ │
+│ │                                                  │ │
+│ │ ┌── Capacity note ────────────────────────────┐ │ │
+│ │ │ Line 2 has 9 orders (408 MT). Diverting all │ │ │
+│ │ │ would add 371 MT. Monitor for overload.     │ │ │
+│ │ └─────────────────────────────────────────────┘ │ │
+│ │                                                  │ │
+│ │ Total impact: 19.7 hrs of production halted.    │ │
+│ └──────────────────────────────────────────────────┘ │
+├──────────────────────────────────────────────────────┤
+│ Reason for Shutdown *                                │
+│ [Select reason...                              ▾]    │
+│                                                      │
+│ Notes (optional)                                     │
+│ [                                                ]   │
+│ [                                                ]   │
+├──────────────────────────────────────────────────────┤
+│                          [Cancel]  [Confirm Shutdown] │
+└──────────────────────────────────────────────────────┘
+```
+
+---
+
+## VERIFICATION
+
+### Scrollable container
+1. ✅ Impact Analysis section has max-height of 280px
+2. ✅ Content scrolls within the container when it overflows
+3. ✅ Scrollbar is subtle and styled
+4. ✅ Dialog header, summary, form, and footer remain fixed
+5. ✅ Dialog itself doesn't overflow the viewport (max 85vh)
+
+### Compact output
+6. ✅ Each order is ONE compact card, not multiple separate bullets
+7. ✅ Card shows: product name (bold), then details on second line
+8. ✅ Critical orders have red left border
+9. ✅ Urgent orders have orange left border
+10. ✅ Sufficient orders have green left border
+11. ✅ Capacity note in blue info box
+12. ✅ Summary paragraph at the top is concise (2-3 sentences)
+
+### Readability
+13. ✅ Easy to scan — product name stands out, details are secondary
+14. ✅ Color coding helps quickly identify urgency
+15. ✅ Not overwhelming — compact cards reduce visual noise
+16. ✅ Total impact clearly stated at the end
+```

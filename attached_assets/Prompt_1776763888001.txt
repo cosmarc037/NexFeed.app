@@ -1,0 +1,243 @@
+```
+Fix three issues: volume override highlight, status selection, and last order changeover:
+
+---
+
+## 1. FIX VOLUME OVERRIDE HIGHLIGHT — ONLY SHOW IF MANUALLY OVERRIDDEN
+
+The issue is that combined orders set `volume_override` which the table interprets as a manual override (showing red/orange). Combined orders should NOT show the override highlight — the volume is calculated, not manually changed.
+
+```javascript
+// In applySequencedResultsToDB — when creating the lead:
+const newLead = await createOrderMutation.mutateAsync({
+  data: {
+    // ... existing fields ...
+    volume_override: volumeOverride,
+    original_order_ids: validChildIds,
+    
+    // ADD: flag to indicate this is a combined volume, not a manual override
+    is_combined_volume: true,
+  }
+});
+```
+
+OR — better approach — fix the display logic in the order table:
+
+```jsx
+// In OrderTable.jsx — where volume is displayed:
+// Find where the volume cell renders and checks for override
+
+function VolumeCell({ order }) {
+  const effectiveVolume = getEffectiveVolume(order);
+  
+  // Determine if this is a manual override or combined volume
+  const isManualOverride = order.volume_override != null && 
+                           order.volume_override !== '' &&
+                           !order.original_order_ids?.length; // NOT a combined lead
+  
+  const isCombinedLead = order.original_order_ids?.length > 0;
+  
+  return (
+    <span className={`volume-cell ${isManualOverride ? 'volume-overridden' : ''} ${isCombinedLead ? 'volume-combined' : ''}`}>
+      <strong>{effectiveVolume}</strong> MT
+      {isManualOverride && <span className="volume-override-icon">🔒</span>}
+    </span>
+  );
+}
+```
+
+If the table uses a simpler check like `order.volume_override ? 'red' : ''`, fix it:
+
+```jsx
+// BEFORE (wrong — highlights combined orders):
+const isOverridden = order.volume_override != null && order.volume_override !== '';
+
+// AFTER (correct — only highlights manual overrides):
+const isOverridden = order.volume_override != null && 
+                     order.volume_override !== '' &&
+                     !(order.original_order_ids && order.original_order_ids.length > 0);
+```
+
+---
+
+## 2. FIX STATUS — USE THE ACTUAL STATUS VALUE, NOT FREE TEXT
+
+The status field likely uses a dropdown/select. If the apply just writes the string "Planned" but the dropdown expects a specific value from a predefined list, it won't match.
+
+Check what values the status dropdown uses:
+
+```javascript
+// In applySequencedResultsToDB — check the exact status values used in the app:
+
+// The status dropdown likely has these exact values:
+const STATUS_VALUES = {
+  PLOTTED: 'Plotted',
+  PLANNED: 'Planned', 
+  IN_PRODUCTION: 'In Production',
+  ON_GOING: 'On-going',
+  DONE: 'Done',
+  CANCEL: 'Cancel PO',
+  COMBINED: 'Combined with other PO',
+  NEW: 'New',
+  CUT: 'Cut',
+};
+
+// When updating status, use the EXACT string that matches the dropdown options:
+// Check if status is stored as a string value or an enum/key
+
+// For regular orders:
+await updateOrderMutation.mutateAsync({
+  id: order.id,
+  data: {
+    // ... other fields ...
+    status: 'Planned',  // Must match EXACTLY what the dropdown renders
+  }
+});
+```
+
+But the real issue from the snip is that "Planned" appears in different colors — some are dark (properly selected), some look like plain text (just typed). This suggests the status field is being SET correctly but the display might treat it differently.
+
+**The actual fix:** Check if the status field in the DB has a separate `status_id` or if it's just a text field. If the dropdown uses a lookup:
+
+```javascript
+// If status uses an ID-based lookup:
+// status: 'Planned'          ← wrong (text)
+// status_id: 3               ← correct (ID that maps to "Planned")
+
+// Find the correct way to set status by checking how the dropdown saves:
+// Look at how manual status change works in the app
+// For example, when user manually changes status in the order table:
+// Does it save order.status = 'Planned' or order.status_id = 3?
+
+// Match that exact pattern:
+await updateOrderMutation.mutateAsync({
+  id: order.id,
+  data: {
+    status: 'Planned',
+    // If there's also a status_id field:
+    // status_id: STATUS_IDS.PLANNED,
+  }
+});
+```
+
+**Most likely fix — the status column stores plain text, but the CSS styling differs for "selected" vs "typed":**
+
+```javascript
+// The issue might be that the dropdown component checks if the value
+// is in its options list. "Planned" might need to match exactly.
+// Check for trailing spaces, case sensitivity, etc.
+
+// Ensure exact match:
+const PLANNED_STATUS = 'Planned'; // No spaces, exact capitalization
+
+await updateOrderMutation.mutateAsync({
+  id: order.id,
+  data: {
+    status: PLANNED_STATUS,
+  }
+});
+```
+
+---
+
+## 3. FIX LAST ORDER CHANGEOVER — NO CHANGEOVER FOR LAST ORDER
+
+The changeover should be 0 for the last order on a line since there's no following order to compare against.
+
+```javascript
+// In cascadeSchedule or calculateChangeovers:
+
+function calculateChangeovers(orders, changeoverRules) {
+  for (let i = 0; i < orders.length; i++) {
+    const currentOrder = orders[i];
+    
+    // LAST ORDER — no changeover
+    if (i === orders.length - 1) {
+      currentOrder.changeover = 0;
+      currentOrder._changeoverTotal = 0;
+      currentOrder._changeoverDetails = null;
+      continue;
+    }
+    
+    // Not last — calculate based on the NEXT order
+    const nextOrder = orders[i + 1];
+    const changeover = calculateChangeoverBetween(currentOrder, nextOrder, changeoverRules);
+    currentOrder.changeover = changeover;
+    currentOrder._changeoverTotal = changeover;
+  }
+}
+```
+
+Also fix in `calculatePreviewChangeovers` used in the auto-sequence preview:
+
+```javascript
+function calculatePreviewChangeovers(orders, changeoverRules) {
+  for (let i = 0; i < orders.length; i++) {
+    const currentOrder = orders[i];
+    
+    // LAST ORDER — no changeover
+    if (i === orders.length - 1) {
+      currentOrder.changeover = 0;
+      currentOrder._changeoverTotal = 0;
+      currentOrder._changeoverDetails = 'Last order — no changeover';
+      continue;
+    }
+    
+    const nextOrder = orders[i + 1];
+    const changeover = calculateChangeoverBetween(currentOrder, nextOrder, changeoverRules);
+    
+    currentOrder.changeover = changeover.total || 0;
+    currentOrder._changeoverTotal = changeover.total || 0;
+    currentOrder._changeoverDetails = changeover.details || '';
+  }
+  
+  return orders;
+}
+```
+
+Also fix in the apply — when cascading schedule:
+
+```javascript
+// In cascadeSchedule — when calculating production time for each order:
+async function cascadeSchedule(orders, startIndex) {
+  for (let i = startIndex; i < orders.length; i++) {
+    const order = orders[i];
+    
+    // Calculate changeover based on NEXT order (not previous)
+    let changeover = 0;
+    if (i < orders.length - 1) {
+      const nextOrder = orders[i + 1];
+      changeover = calculateChangeoverBetween(order, nextOrder, changeoverRules);
+    }
+    // Last order: changeover = 0 (no next order)
+    
+    order.changeover = changeover;
+    
+    // ... rest of cascade logic (production time, completion date, etc.) ...
+  }
+}
+```
+
+---
+
+## VERIFICATION
+
+### Volume override highlight fixed
+1. ✅ Combined lead orders do NOT show red/orange override highlight
+2. ✅ Only manually overridden volumes show the highlight
+3. ✅ Check: has volume_override AND does NOT have original_order_ids
+4. ✅ Combined orders show normal volume styling (bold, but no override color)
+
+### Status properly set
+5. ✅ Status value matches exactly what the dropdown expects
+6. ✅ "Planned" displays with proper styling (not plain text look)
+7. ✅ "Combined with other PO" displays correctly on children
+8. ✅ No trailing spaces or case mismatches
+
+### Last order changeover
+9. ✅ Last order on any line: changeover = 0
+10. ✅ No "CO: 2.49" displayed on last order
+11. ✅ Works in preview (calculatePreviewChangeovers)
+12. ✅ Works after apply (cascadeSchedule)
+13. ✅ Production time calculation for last order: no changeover added
+```

@@ -1,0 +1,974 @@
+```
+Update per-line auto-sequence to look for orders from other lines that can be moved:
+
+---
+
+## 1. PER-LINE AUTO-SEQUENCE HANDLER
+
+```javascript
+function handleLineAutoSequence(targetLine) {
+  const allActiveOrders = enrichedOrders.filter(
+    o => o.status !== 'Done' && o.status !== 'Cancel PO'
+  );
+  
+  const normalizedTarget = normalizeLine(targetLine);
+  
+  // Save original snapshot for ALL lines (since orders may be pulled from any line)
+  const originalSnapshot = {};
+  ALL_LINES_ORDERED.forEach(({ line }) => {
+    const normalized = normalizeLine(line);
+    originalSnapshot[normalized] = allActiveOrders
+      .filter(o => normalizeLine(o.feedmill_line) === normalized)
+      .sort((a, b) => (a.priority_seq || 0) - (b.priority_seq || 0))
+      .map(o => ({ ...JSON.parse(JSON.stringify(o)) }));
+  });
+  
+  // Step 1: Find orders that CAN be produced on the target line
+  const targetLineOrders = originalSnapshot[normalizedTarget] || [];
+  const otherLineOrders = [];
+  
+  ALL_LINES_ORDERED.forEach(({ line }) => {
+    const normalized = normalizeLine(line);
+    if (normalized === normalizedTarget) return;
+    
+    const lineOrders = originalSnapshot[normalized] || [];
+    lineOrders.forEach(order => {
+      if (canProduceOnLine(order, normalizedTarget, masterData)) {
+        otherLineOrders.push({
+          ...order,
+          _sourceLineNormalized: normalized,
+          _sourceLine: line
+        });
+      }
+    });
+  });
+  
+  // Step 2: Calculate current queue times
+  const lineTotalMT = {};
+  ALL_LINES_ORDERED.forEach(({ line }) => {
+    const normalized = normalizeLine(line);
+    const orders = originalSnapshot[normalized] || [];
+    lineTotalMT[normalized] = orders.reduce((sum, o) => sum + (parseFloat(o.volume) || 0), 0);
+  });
+  
+  const targetQueueTime = calculateLineQueueTime(targetLineOrders, normalizedTarget);
+  
+  // Step 3: Evaluate which orders are worth moving
+  // An order is worth moving if moving it REDUCES overall production time
+  // i.e., the target line queue time (after adding) is still lower than the source line (after removing)
+  const candidateOrders = [];
+  
+  otherLineOrders.forEach(order => {
+    const orderVolume = parseFloat(order.volume) || 0;
+    const sourceLine = order._sourceLineNormalized;
+    
+    // Source line queue after removing this order
+    const sourceMTBefore = lineTotalMT[sourceLine] || 0;
+    const sourceMTAfter = sourceMTBefore - orderVolume;
+    const sourceQueueBefore = sourceMTBefore / getLineRunRate(sourceLine);
+    const sourceQueueAfter = sourceMTAfter / getLineRunRate(sourceLine);
+    
+    // Target line queue after adding this order
+    const targetMTBefore = lineTotalMT[normalizedTarget] || 0;
+    const targetMTAfter = targetMTBefore + orderVolume;
+    const targetQueueBefore = targetMTBefore / getLineRunRate(normalizedTarget);
+    const targetQueueAfter = targetMTAfter / getLineRunRate(normalizedTarget);
+    
+    // Worth moving if target queue AFTER is still lower than source queue BEFORE
+    // This means the order finishes EARLIER on the target line
+    const isWorthMoving = targetQueueAfter < sourceQueueBefore;
+    
+    candidateOrders.push({
+      ...order,
+      _isWorthMoving: isWorthMoving,
+      _sourceMTBefore: sourceMTBefore,
+      _sourceMTAfter: sourceMTAfter,
+      _sourceQueueBefore: sourceQueueBefore,
+      _sourceQueueAfter: sourceQueueAfter,
+      _targetMTBefore: targetMTBefore,
+      _targetMTAfter: targetMTAfter,
+      _targetQueueBefore: targetQueueBefore,
+      _targetQueueAfter: targetQueueAfter,
+      _queueImprovement: sourceQueueBefore - targetQueueAfter
+    });
+  });
+  
+  // Sort candidates: best improvement first
+  const worthMoving = candidateOrders
+    .filter(o => o._isWorthMoving)
+    .sort((a, b) => b._queueImprovement - a._queueImprovement);
+  
+  // Step 4: Greedily select orders to move (recalculating queue time after each)
+  const selectedToMove = [];
+  let runningTargetMT = lineTotalMT[normalizedTarget] || 0;
+  const runningSourceMT = { ...lineTotalMT };
+  
+  worthMoving.forEach(candidate => {
+    const orderVolume = parseFloat(candidate.volume) || 0;
+    const sourceLine = candidate._sourceLineNormalized;
+    
+    // Recalculate with running totals
+    const sourceQueueAfter = ((runningSourceMT[sourceLine] || 0) - orderVolume) / getLineRunRate(sourceLine);
+    const targetQueueAfter = (runningTargetMT + orderVolume) / getLineRunRate(normalizedTarget);
+    
+    // Still worth moving?
+    const sourceQueueBefore = (runningSourceMT[sourceLine] || 0) / getLineRunRate(sourceLine);
+    
+    if (targetQueueAfter < sourceQueueBefore) {
+      selectedToMove.push({
+        ...candidate,
+        _finalSourceQueueBefore: sourceQueueBefore,
+        _finalSourceQueueAfter: sourceQueueAfter,
+        _finalTargetQueueBefore: runningTargetMT / getLineRunRate(normalizedTarget),
+        _finalTargetQueueAfter: targetQueueAfter
+      });
+      
+      runningTargetMT += orderVolume;
+      runningSourceMT[sourceLine] = (runningSourceMT[sourceLine] || 0) - orderVolume;
+    }
+  });
+  
+  // Step 5: Also find combinable orders on the target line + moved orders
+  const allTargetOrders = [
+    ...targetLineOrders,
+    ...selectedToMove
+  ];
+  
+  // Group by Material Code + Formula Version for combine candidates
+  const combineGroups = {};
+  allTargetOrders.forEach(order => {
+    const key = `${String(order.material_code_fg || '').trim()}||${order.formula_version || '—'}`;
+    if (!combineGroups[key]) combineGroups[key] = [];
+    combineGroups[key].push(order);
+  });
+  
+  const combineCandidates = Object.entries(combineGroups)
+    .filter(([_, orders]) => orders.length >= 2)
+    .map(([key, orders]) => ({
+      key,
+      orders,
+      totalVolume: orders.reduce((s, o) => s + (parseFloat(o.volume) || 0), 0),
+      canCombine: orders.reduce((s, o) => s + (parseFloat(o.volume) || 0), 0) <= MAX_COMBINE_MT
+    }));
+  
+  // Store results for preview
+  setLineAutoSequenceData({
+    targetLine: normalizedTarget,
+    targetLineLabel: targetLine,
+    originalSnapshot,
+    targetLineOrders,
+    candidateOrders: worthMoving,
+    selectedToMove,
+    combineCandidates,
+    lineTotalMT: { ...lineTotalMT }
+  });
+  
+  setShowLineAutoSequencePreview(true);
+}
+```
+
+---
+
+## 2. PER-LINE AUTO-SEQUENCE PREVIEW
+
+```jsx
+function LineAutoSequencePreview({
+  data,
+  masterData,
+  n10dData,
+  changeoverRules,
+  onApply,
+  onCancel
+}) {
+  const [selectedOrders, setSelectedOrders] = useState(
+    new Set(data.selectedToMove.map(o => o.id))
+  );
+  const [isCombined, setIsCombined] = useState(false);
+  const [isCombining, setIsCombining] = useState(false);
+  const [isApplying, setIsApplying] = useState(false);
+  const [sequencedResult, setSequencedResult] = useState(null);
+  const [placementLog, setPlacementLog] = useState([]);
+  
+  // AI state
+  const [aiExplanations, setAiExplanations] = useState(null);
+  const [isLoadingAI, setIsLoadingAI] = useState(false);
+  const [useFallback, setUseFallback] = useState(false);
+  
+  // Build the "after" view based on selections
+  useEffect(() => {
+    buildSequencedResult();
+  }, [selectedOrders]);
+  
+  function buildSequencedResult() {
+    // Start with existing orders on target line
+    const afterOrders = [...data.targetLineOrders.map(o => ({ ...o }))];
+    
+    // Add selected orders from other lines
+    const movedOrders = data.selectedToMove.filter(o => selectedOrders.has(o.id));
+    movedOrders.forEach(order => {
+      afterOrders.push({
+        ...order,
+        _movedFromLine: order._sourceLineNormalized,
+        _movement: 'new_to_line'
+      });
+    });
+    
+    // Run auto-sequence on the combined set
+    const sequenced = runAutoSequence(afterOrders, changeoverRules, masterData, n10dData);
+    const withChangeovers = calculatePreviewChangeovers(sequenced, changeoverRules);
+    
+    // Add movement indicators
+    const originalIds = new Set(data.targetLineOrders.map(o => o.id));
+    
+    const withMovement = withChangeovers.map((order, index) => {
+      const newPrio = index + 1;
+      const isFromOtherLine = !originalIds.has(order.id);
+      
+      if (isFromOtherLine) {
+        return {
+          ...order,
+          prio: newPrio,
+          _movement: 'new_to_line',
+          _movementDelta: 0
+        };
+      }
+      
+      const originalIndex = data.targetLineOrders.findIndex(o => o.id === order.id);
+      const originalPrio = originalIndex >= 0 ? originalIndex + 1 : -1;
+      const delta = originalPrio - newPrio;
+      
+      return {
+        ...order,
+        prio: newPrio,
+        _originalPrio: originalPrio,
+        _movement: delta > 0 ? 'up' : delta < 0 ? 'down' : 'same',
+        _movementDelta: Math.abs(delta)
+      };
+    });
+    
+    setSequencedResult(withMovement);
+    
+    // Build placement log
+    const log = movedOrders.map(order => {
+      const sourceLine = order._sourceLineNormalized;
+      const targetLine = data.targetLine;
+      
+      return {
+        type: 'moved',
+        product: order.item_description,
+        materialCode: order.material_code_fg,
+        fromLine: sourceLine,
+        toLine: targetLine,
+        volume: parseFloat(order.volume) || 0,
+        fpr: order.fpr,
+        lineScores: [
+          {
+            line: sourceLine,
+            runRate: getLineRunRate(sourceLine),
+            totalMTBefore: order._sourceMTBefore,
+            queueTimeBefore: order._sourceQueueBefore,
+            totalMTAfter: order._sourceMTAfter,
+            queueTimeAfter: order._sourceQueueAfter
+          },
+          {
+            line: targetLine,
+            runRate: getLineRunRate(targetLine),
+            totalMTBefore: order._targetMTBefore,
+            queueTimeBefore: order._targetQueueBefore,
+            totalMTAfter: order._targetMTAfter,
+            queueTimeAfter: order._targetQueueAfter
+          }
+        ],
+        bestLineReason: {
+          line: targetLine,
+          runRate: getLineRunRate(targetLine),
+          queueTime: order._targetQueueBefore,
+          totalMTBefore: order._targetMTBefore,
+          totalMTAfter: order._targetMTAfter,
+          queueTimeAfter: order._targetQueueAfter
+        },
+        fromLineReason: {
+          line: sourceLine,
+          queueTime: order._sourceQueueBefore,
+          runRate: getLineRunRate(sourceLine)
+        }
+      };
+    });
+    
+    setPlacementLog(log);
+    
+    if (log.length > 0 && !aiExplanations) {
+      generateAI(log);
+    }
+  }
+  
+  async function generateAI(log) {
+    setIsLoadingAI(true);
+    try {
+      const prompt = buildActionsPrompt(log);
+      const response = await callAI(prompt);
+      const parsed = parseActionsResponse(response, log);
+      if (Object.keys(parsed).length >= log.length * 0.5) {
+        setAiExplanations(parsed);
+      } else {
+        setUseFallback(true);
+      }
+    } catch {
+      setUseFallback(true);
+    }
+    setIsLoadingAI(false);
+  }
+  
+  function toggleOrder(orderId) {
+    const newSet = new Set(selectedOrders);
+    if (newSet.has(orderId)) {
+      newSet.delete(orderId);
+    } else {
+      newSet.add(orderId);
+    }
+    setSelectedOrders(newSet);
+    setAiExplanations(null);
+    setUseFallback(false);
+  }
+  
+  function selectAll() {
+    setSelectedOrders(new Set(data.selectedToMove.map(o => o.id)));
+    setAiExplanations(null);
+  }
+  
+  function deselectAll() {
+    setSelectedOrders(new Set());
+    setAiExplanations(null);
+  }
+  
+  async function handleCombine() {
+    if (isCombining || isCombined) return;
+    setIsCombining(true);
+    
+    // Run combine on the current sequenced result
+    const combineResult = plantLevelCombineOnly(
+      sequencedResult.map(o => ({ ...o, line: data.targetLine, feedmill_line: data.targetLine })),
+      masterData,
+      n10dData,
+      [data.targetLine]
+    );
+    
+    const combinedLineOrders = combineResult.lineOrdersMap[data.targetLine] || [];
+    
+    // Re-sequence after combine
+    const resequenced = runAutoSequence(combinedLineOrders, changeoverRules, masterData, n10dData);
+    const withChangeovers = calculatePreviewChangeovers(resequenced, changeoverRules);
+    
+    const originalIds = new Set(data.targetLineOrders.map(o => o.id));
+    const withMovement = withChangeovers.map((order, index) => {
+      const newPrio = index + 1;
+      const isFromOtherLine = !originalIds.has(order.id) && !order._isCombined;
+      
+      return {
+        ...order,
+        prio: newPrio,
+        _movement: isFromOtherLine ? 'new_to_line' : 'same',
+        _movementDelta: 0
+      };
+    });
+    
+    setSequencedResult(withMovement);
+    
+    // Merge logs
+    const mergedLog = [...placementLog, ...combineResult.placementLog];
+    setPlacementLog(mergedLog);
+    
+    setIsCombined(true);
+    setIsCombining(false);
+    
+    // Regenerate AI
+    setAiExplanations(null);
+    setUseFallback(false);
+    if (mergedLog.length > 0) {
+      generateAI(mergedLog);
+    }
+  }
+  
+  const movedCount = sequencedResult?.filter(o => o._movement === 'new_to_line').length || 0;
+  const combinedCount = sequencedResult?.filter(o => o._isCombined).length || 0;
+  
+  return (
+    <div className="auto-sequence-overlay" onClick={e => e.stopPropagation()}>
+      <div className="auto-sequence-modal" onClick={e => e.stopPropagation()}>
+        {/* Header */}
+        <div className="auto-sequence-header">
+          <div>
+            <h2>✨ Auto-Sequence — {data.targetLineLabel}</h2>
+            <span className="auto-sequence-subtitle">
+              Find orders from other lines that can be moved to {data.targetLineLabel}
+            </span>
+          </div>
+          <button 
+            className="auto-sequence-close" 
+            onClick={onCancel}
+            disabled={isApplying}
+          >
+            ✕
+          </button>
+        </div>
+        
+        {/* Stats */}
+        <div className="auto-sequence-stats">
+          <StatBadge label="Current Orders" value={data.targetLineOrders.length} />
+          <StatBadge label="Candidates Found" value={data.selectedToMove.length} color="blue" />
+          <StatBadge label="Selected to Move" value={selectedOrders.size} color="orange" />
+          {sequencedResult && (
+            <StatBadge label="After" value={sequencedResult.length} />
+          )}
+          {isCombined && combinedCount > 0 && (
+            <StatBadge label="Combined" value={combinedCount} color="green" />
+          )}
+        </div>
+        
+        {/* Candidate selection panel */}
+        {data.selectedToMove.length > 0 && (
+          <div className="line-as-candidates">
+            <div className="line-as-candidates-header">
+              <span className="line-as-candidates-title">
+                📋 Orders available to move to {data.targetLineLabel}
+              </span>
+              <div className="line-as-candidates-actions">
+                <button className="line-as-select-btn" onClick={selectAll}>Select All</button>
+                <button className="line-as-select-btn" onClick={deselectAll}>Deselect All</button>
+              </div>
+            </div>
+            <div className="line-as-candidates-list">
+              {data.selectedToMove.map(candidate => (
+                <label key={candidate.id} className="line-as-candidate-row">
+                  <input
+                    type="checkbox"
+                    checked={selectedOrders.has(candidate.id)}
+                    onChange={() => toggleOrder(candidate.id)}
+                    disabled={isApplying}
+                  />
+                  <span className="line-as-candidate-line-badge">
+                    {getLineShortName(candidate._sourceLineNormalized)}
+                  </span>
+                  <span className="line-as-candidate-desc">
+                    {candidate.item_description}
+                  </span>
+                  <span className="line-as-candidate-volume">
+                    {candidate.volume} MT
+                  </span>
+                  <span className="line-as-candidate-improvement">
+                    {candidate._queueImprovement > 0 
+                      ? `↓ ${candidate._queueImprovement.toFixed(2)} hrs`
+                      : '—'
+                    }
+                  </span>
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
+        
+        {data.selectedToMove.length === 0 && (
+          <div className="line-as-no-candidates">
+            No orders from other lines can be moved to {data.targetLineLabel} at this time. 
+            All eligible lines have lower or equal queue times.
+          </div>
+        )}
+        
+        {/* Before and After tables */}
+        {sequencedResult && (
+          <div className="auto-sequence-comparison">
+            <div className="auto-sequence-comparison-container">
+              <div className="auto-sequence-comparison-scroll">
+                {/* Before table */}
+                <div className="auto-sequence-table-panel">
+                  <div className="auto-sequence-table-label auto-sequence-label-before">
+                    <span className="auto-sequence-label-icon">📋</span>
+                    Before — {data.targetLineOrders.length} orders
+                  </div>
+                  <div className="auto-sequence-table-wrapper">
+                    <table className="auto-sequence-table auto-sequence-table-before">
+                      <thead>
+                        <tr>
+                          <th className="as-col-prio">Prio</th>
+                          <th className="as-col-fpr">FPR</th>
+                          <th className="as-col-planned">Planned Order</th>
+                          <th className="as-col-material">Material Code (FG)</th>
+                          <th className="as-col-desc">Item Description</th>
+                          <th className="as-col-form">Form</th>
+                          <th className="as-col-volume">Volume (MT)</th>
+                          <th className="as-col-batch">Batch Size</th>
+                          <th className="as-col-batches">Batches</th>
+                          <th className="as-col-prod">Production Time</th>
+                          <th className="as-col-start-date">Start Date</th>
+                          <th className="as-col-start-time">Start Time</th>
+                          <th className="as-col-avail">Avail Date</th>
+                          <th className="as-col-completion">Estimated Completion Date</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {data.targetLineOrders.map((order, index) => (
+                          <tr key={order.id} className="auto-sequence-row-before">
+                            <td className="as-col-prio">
+                              <span className="as-prio-badge">{index + 1}</span>
+                            </td>
+                            <td className="as-col-fpr">{order.fpr}</td>
+                            <td className="as-col-planned">
+                              <div>{order.planned_order_fg}</div>
+                              <div className="as-sub-text">{order.planned_order_sfg}</div>
+                            </td>
+                            <td className="as-col-material">{order.material_code_fg}</td>
+                            <td className="as-col-desc">
+                              <div className="as-desc-main">{order.item_description}</div>
+                              <div className="as-sub-text">{order.category}</div>
+                            </td>
+                            <td className="as-col-form">{order.form}</td>
+                            <td className="as-col-volume"><strong>{order.volume}</strong> MT</td>
+                            <td className="as-col-batch">{order.batch_size}</td>
+                            <td className="as-col-batches">{order.batches}</td>
+                            <td className="as-col-prod">
+                              <div><strong>{formatProductionTime(order.production_time)}</strong></div>
+                              <div className="as-sub-text">CO: {formatProductionTime(order._changeoverTotal || order.changeover || 0)}</div>
+                            </td>
+                            <td className="as-col-start-date">{order.start_date ? formatDate(order.start_date) : '—'}</td>
+                            <td className="as-col-start-time">{order.start_time || '—'}</td>
+                            <td className="as-col-avail">{formatAvailDate(order.target_avail_date)}</td>
+                            <td className="as-col-completion">{order.completion_date || '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+                
+                <div className="auto-sequence-divider"></div>
+                
+                {/* After table */}
+                <div className="auto-sequence-table-panel">
+                  <div className="auto-sequence-table-label auto-sequence-label-after">
+                    <span className="auto-sequence-label-icon">✨</span>
+                    After — {sequencedResult.length} orders
+                    {movedCount > 0 && ` · ${movedCount} from other lines`}
+                    {combinedCount > 0 && ` · ${combinedCount} combined`}
+                  </div>
+                  <div className="auto-sequence-table-wrapper">
+                    <table className="auto-sequence-table auto-sequence-table-after">
+                      <thead>
+                        <tr>
+                          <th className="as-col-drag"></th>
+                          <th className="as-col-prio">Prio</th>
+                          <th className="as-col-fpr">FPR</th>
+                          <th className="as-col-planned">Planned Order</th>
+                          <th className="as-col-material">Material Code (FG)</th>
+                          <th className="as-col-desc">Item Description</th>
+                          <th className="as-col-form">Form</th>
+                          <th className="as-col-volume">Volume (MT)</th>
+                          <th className="as-col-batch">Batch Size</th>
+                          <th className="as-col-batches">Batches</th>
+                          <th className="as-col-prod">Production Time</th>
+                          <th className="as-col-start-date">Start Date</th>
+                          <th className="as-col-start-time">Start Time</th>
+                          <th className="as-col-avail">Avail Date</th>
+                          <th className="as-col-completion">Estimated Completion Date</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {sequencedResult.map(order => (
+                          <PlantAfterRow key={order.id} order={order} />
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+        
+        {/* Actions Taken */}
+        {placementLog.length > 0 && (
+          <div className="line-actions-plain" style={{ padding: '16px 24px' }}>
+            <h3 className="plant-summary-title">📋 Actions Taken</h3>
+            {isLoadingAI && (
+              <div className="plant-actions-loading">Analyzing actions...</div>
+            )}
+            {!isLoadingAI && placementLog.map((entry, index) => {
+              const explanation = (!useFallback && aiExplanations && aiExplanations[index])
+                ? aiExplanations[index]
+                : generateFallbackExplanation(entry);
+              const isAI = !useFallback && aiExplanations && aiExplanations[index];
+              const toScore = entry.lineScores?.find(ls => ls.line === entry.toLine);
+              
+              return (
+                <div key={index} className="plant-action-card">
+                  <div className="plant-action-header">
+                    {entry.type === 'combined' ? (
+                      <>
+                        <span className="plant-action-icon">🔗</span>
+                        <span className="plant-action-title">
+                          Combined <strong>{entry.ordersCount}</strong> orders of <strong>{entry.product}</strong> ({entry.totalVolume} MT)
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="plant-action-icon">↗</span>
+                        <span className="plant-action-title">
+                          Moved <strong>{entry.product}</strong> ({entry.volume} MT) {getLineShortName(entry.fromLine)} → {data.targetLineLabel}
+                        </span>
+                      </>
+                    )}
+                    {isAI && <span className="plant-action-ai-tag">AI</span>}
+                  </div>
+                  <div className="plant-action-explanation">{explanation}</div>
+                  <div className="plant-action-badges">
+                    {toScore && (
+                      <span className="plant-action-mt-badge plant-action-mt-increase">
+                        {getLineShortName(entry.toLine)} {toScore.totalMTBefore.toFixed(1)} MT → {toScore.totalMTAfter.toFixed(1)} MT
+                        <span className="plant-action-mt-diff">(+{(toScore.totalMTAfter - toScore.totalMTBefore).toFixed(1)} MT)</span>
+                      </span>
+                    )}
+                    {entry.type === 'combined' && entry.individualVolumes && (
+                      entry.individualVolumes.map((iv, subIdx) => (
+                        <span key={subIdx} className="plant-action-sub-chip">
+                          {getLineShortName(iv.fromLine)} · {iv.volume} MT
+                        </span>
+                      ))
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        
+        {/* Applying overlay */}
+        {isApplying && (
+          <div className="auto-sequence-applying-overlay">
+            <div className="auto-sequence-applying-content">
+              <div className="auto-sequence-applying-spinner"></div>
+              <span className="auto-sequence-applying-text">Applying to schedule...</span>
+              <span className="auto-sequence-applying-sub">Please wait. Do not close this window.</span>
+            </div>
+          </div>
+        )}
+        
+        {/* Footer */}
+        <div className="auto-sequence-footer">
+          <div className="auto-sequence-footer-left">
+            {!isCombined && sequencedResult && sequencedResult.length > 0 && (
+              <button
+                className={`btn-combine-orders ${isCombining ? 'btn-combine-loading' : ''}`}
+                onClick={handleCombine}
+                disabled={isCombining || isApplying}
+              >
+                {isCombining ? (
+                  <>
+                    <span className="btn-apply-spinner"></span>
+                    Combining...
+                  </>
+                ) : (
+                  '🔗 Combine Orders'
+                )}
+              </button>
+            )}
+            {isCombined && (
+              <span className="btn-combine-done">✅ Orders Combined</span>
+            )}
+          </div>
+          <div className="auto-sequence-footer-right">
+            <button
+              className="btn-cancel"
+              onClick={onCancel}
+              disabled={isApplying}
+            >
+              Cancel
+            </button>
+            <button
+              className={`btn-apply ${isApplying ? 'btn-apply-loading' : ''}`}
+              onClick={() => {
+                if (isApplying) return;
+                setIsApplying(true);
+                onApply({
+                  targetLine: data.targetLine,
+                  sequencedOrders: sequencedResult,
+                  affectedSourceLines: [...new Set(
+                    data.selectedToMove
+                      .filter(o => selectedOrders.has(o.id))
+                      .map(o => o._sourceLineNormalized)
+                  )]
+                });
+              }}
+              disabled={isApplying || !sequencedResult}
+            >
+              {isApplying ? (
+                <>
+                  <span className="btn-apply-spinner"></span>
+                  Applying...
+                </>
+              ) : (
+                'Apply to Schedule'
+              )}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+## 3. APPLY HANDLER FOR PER-LINE
+
+```javascript
+async function handleLineApply({ targetLine, sequencedOrders, affectedSourceLines }) {
+  try {
+    const mutationPayloads = [];
+    let prioCounter = 1;
+    
+    for (const order of sequencedOrders) {
+      if (order._isCombined && order._combinedFrom && order._combinedFrom.length > 1) {
+        const leadId = order.id;
+        const childIds = order._combinedFrom.map(sub => sub.id);
+        
+        mutationPayloads.push({
+          id: leadId,
+          data: {
+            feedmill_line: targetLine,
+            priority_seq: prioCounter,
+            volume_override: parseFloat(order.volume) || 0,
+            original_order_ids: childIds,
+            parent_id: null,
+          }
+        });
+        
+        const children = order._combinedFrom.filter(sub => sub.id !== leadId);
+        for (const child of children) {
+          mutationPayloads.push({
+            id: child.id,
+            data: {
+              parent_id: leadId,
+              feedmill_line: targetLine,
+              priority_seq: null,
+            }
+          });
+        }
+        
+        prioCounter++;
+      } else {
+        mutationPayloads.push({
+          id: order.id,
+          data: {
+            feedmill_line: targetLine,
+            priority_seq: prioCounter,
+            parent_id: null,
+            volume_override: null,
+            original_order_ids: null,
+          }
+        });
+        prioCounter++;
+      }
+    }
+    
+    // Execute in batches
+    const BATCH_SIZE = 10;
+    for (let i = 0; i < mutationPayloads.length; i += BATCH_SIZE) {
+      const batch = mutationPayloads.slice(i, i + BATCH_SIZE);
+      await Promise.all(
+        batch.map(p => updateOrderMutation.mutateAsync({ id: p.id, data: p.data }))
+      );
+    }
+    
+    // Cascade schedule for target line
+    await queryClient.invalidateQueries({ queryKey: ["orders"] });
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
+    const topLevel = sequencedOrders.map((o, i) => ({
+      ...o,
+      id: o.id,
+      priority_seq: i + 1,
+      feedmill_line: targetLine
+    }));
+    await cascadeSchedule(topLevel, 0);
+    
+    await queryClient.invalidateQueries({ queryKey: ["orders"] });
+    
+    setShowLineAutoSequencePreview(false);
+    
+    toast.success(
+      `Auto-sequence applied to ${targetLine}: ${sequencedOrders.length} orders.`
+    );
+    
+  } catch (error) {
+    console.error('Error applying line auto-sequence:', error);
+    toast.error('Failed to apply. Please try again.');
+  }
+}
+```
+
+---
+
+## 4. STYLING FOR CANDIDATES PANEL
+
+```css
+/* Candidates panel */
+.line-as-candidates {
+  margin: 0 24px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.line-as-candidates-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 16px;
+  background: #f9fafb;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.line-as-candidates-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #1a1a1a;
+}
+
+.line-as-candidates-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.line-as-select-btn {
+  font-size: 11px;
+  color: #ea580c;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.line-as-select-btn:hover {
+  text-decoration: underline;
+}
+
+.line-as-candidates-list {
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.line-as-candidate-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  font-size: 12px;
+  cursor: pointer;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.line-as-candidate-row:hover {
+  background: #fafafa;
+}
+
+.line-as-candidate-row:last-child {
+  border-bottom: none;
+}
+
+.line-as-candidate-row input[type="checkbox"] {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  accent-color: #ea580c;
+}
+
+.line-as-candidate-line-badge {
+  display: inline-flex;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 700;
+  background: #dbeafe;
+  color: #1d4ed8;
+  border: 1px solid #93c5fd;
+  flex-shrink: 0;
+}
+
+.line-as-candidate-desc {
+  flex: 1;
+  color: #374151;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.line-as-candidate-volume {
+  flex-shrink: 0;
+  font-weight: 600;
+  color: #1a1a1a;
+}
+
+.line-as-candidate-improvement {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: #16a34a;
+  font-weight: 600;
+  min-width: 70px;
+  text-align: right;
+}
+
+/* No candidates */
+.line-as-no-candidates {
+  margin: 0 24px;
+  padding: 16px;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  font-size: 12px;
+  color: #6b7280;
+  text-align: center;
+}
+```
+
+---
+
+## VERIFICATION
+
+### Finds candidates from other lines
+1. ✅ Scans ALL lines across ALL feedmills
+2. ✅ Only includes orders producible on target line (master data run rate > 0)
+3. ✅ Only includes orders where moving improves queue time
+4. ✅ Sorted by queue improvement (best first)
+5. ✅ Recalculates queue time after each selection
+
+### User can select/deselect
+6. ✅ Checkbox per candidate order
+7. ✅ Select All / Deselect All buttons
+8. ✅ After table updates in real-time based on selection
+9. ✅ Shows source line badge (L3, L6) per candidate
+
+### Preview matches plant-level style
+10. ✅ Before/after comparison tables with full columns
+11. ✅ Movement indicators (line badges for moved orders)
+12. ✅ Actions Taken with AI explanations
+13. ✅ Stats badges (Current, Candidates, Selected, After)
+
+### Combine
+14. ✅ "Combine Orders" button available
+15. ✅ Combines matching orders on the target line
+16. ✅ Preview updates in-place after combine
+17. ✅ Button changes to "Orders Combined" after
+
+### Apply
+18. ✅ Uses DB mutations (feedmill_line, priority_seq, parent_id, volume_override)
+19. ✅ Cascades schedule
+20. ✅ Loading state, double-click prevention
+21. ✅ Modal locked during apply
+
+### Empty line scenario
+22. ✅ Empty line has 0 queue time → most orders will be worth moving
+23. ✅ Shows all producible orders as candidates
+24. ✅ User selects which ones to move
+```

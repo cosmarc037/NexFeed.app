@@ -1,0 +1,146 @@
+Please update the **Powermix container layout** so its **Category Breakdown** section is visually aligned and consistent with the category breakdown layout used in the other feedmill containers.
+
+---
+
+## 1. ALIGN THE POWERMIX CATEGORY BREAKDOWN WITH THE OTHER CONTAINERS
+
+Please make the **Category Breakdown** section inside the **Powermix** container match the same layout structure and spacing pattern used by the other feedmill containers.
+
+### Current issue
+In the screenshot, the Powermix category breakdown appears visually misaligned compared to:
+- Feedmill 1
+- Feedmill 2
+- Feedmill 3
+
+The section content is present, but the alignment/spacing/layout does not look consistent with the other cards.
+
+### Expected result
+The **Powermix** category breakdown should be inline and visually consistent with the category breakdown sections in the other containers.
+
+---
+
+## 2. MATCH THE SAME CATEGORY BREAKDOWN STRUCTURE USED IN OTHER FEEDMILL CARDS
+
+Please use the same visual structure for Powermix as the other feedmill cards, including alignment of:
+
+- the `Category Breakdown` heading
+- category label rows
+- color dots / indicators
+- MT values on the right
+- scheduled progress bar row
+- total row
+- divider spacing
+
+### Goal
+Powermix should not look like a separate or offset variation of the same component unless intentionally designed that way.
+
+### Expected result
+The Powermix card should use the same internal layout rhythm and row positioning as the other cards.
+
+---
+
+## 3. ENSURE CATEGORY LABELS AND VALUES LINE UP HORIZONTALLY
+
+Please specifically ensure the category rows in Powermix align the same way as the other cards for:
+
+- `Completed`
+- `In Progress`
+- `On Hold`
+- `Cancelled`
+- `Scheduled`
+
+### Expected result
+Each row should follow the same pattern as the other containers:
+- left side = color dot + category name
+- right side = MT value
+- consistent vertical spacing between rows
+- no extra indentation or offset unique to Powermix
+
+---
+
+## 4. ALIGN THE “SCHEDULED” BAR / TOTAL SECTION WITH THE OTHER CARDS
+
+Please make sure the **Scheduled** row and the **Total** section inside Powermix follow the same alignment and spacing as the equivalent sections in the other containers.
+
+### Expected result
+- the scheduled bar width/container should align with the same visual grid
+- the MT value should sit in the same right-hand position
+- the total row should align consistently with the total rows in the other cards
+
+---
+
+## 5. PRESERVE POWERMIX DATA, ONLY FIX THE LAYOUT / PRESENTATION
+
+This request is primarily a **UI alignment/layout update**.
+
+Please do not change:
+- Powermix totals
+- category values
+- utilization numbers
+- line summary logic
+- shutdown behavior
+- underlying calculations
+
+### Goal
+Only make the Powermix **Category Breakdown** visually consistent with the other feedmill containers.
+
+---
+
+## 6. REUSE THE SAME STYLING / COMPONENT RULES IF POSSIBLE
+
+If the other feedmill cards already use a shared layout/component pattern for the category breakdown, please reuse that same pattern for Powermix.
+
+### Goal
+Avoid having Powermix use a separate spacing/alignment structure unless there is a valid business reason.
+
+### Expected result
+Powermix should feel like the same card family and not like a misaligned custom variation.
+
+---
+
+## IMPORTANT
+
+Please make the **Powermix Category Breakdown** appear inline with the other breakdown sections.
+
+This includes consistency in:
+- margins
+- padding
+- label/value positioning
+- divider placement
+- scheduled bar placement
+- total row alignment
+
+The request is for **visual consistency**, not logic changes.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log layout rendering info for the category breakdown sections if helpful during QA.
+
+```javascript
+console.debug('[Category Breakdown Layout]', {
+  container: 'Powermix',
+  section: 'Category Breakdown',
+  alignedWithStandardFeedmillLayout: true,
+});
+```
+
+```javascript
+console.debug('[Category Breakdown Row Alignment]', {
+  container: 'Powermix',
+  categories: ['Completed', 'In Progress', 'On Hold', 'Cancelled', 'Scheduled'],
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ The Powermix `Category Breakdown` heading aligns visually with the same section in the other feedmill cards
+2. ✅ Category rows in Powermix align consistently with the rows in Feedmill 1, Feedmill 2, and Feedmill 3
+3. ✅ Color dots, labels, and right-aligned MT values use the same structure as the other cards
+4. ✅ The `Scheduled` row/progress bar aligns consistently with the other cards
+5. ✅ The `Total` row aligns consistently with the other cards
+6. ✅ Powermix data and calculations remain unchanged
+7. ✅ No UI errors or layout regressions are introduced

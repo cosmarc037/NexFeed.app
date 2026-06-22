@@ -1,0 +1,235 @@
+```
+Implement the following change to the NexFeed application:
+
+---
+
+## ALL CONFIRM DIALOGS — INCREASE FONT SIZE
+
+Increase font sizes across ALL confirmation dialogs in the application for better readability.
+
+---
+
+### AFFECTED DIALOGS
+
+Every confirmation dialog in the app:
+
+- Override dialogs (Volume, Avail Date, Completion Date)
+- Cancel PO dialog
+- Cut Order dialog
+- Combine / Uncombine dialog
+- Merge Back dialog
+- Delete Upload dialog
+- Restore Order dialog
+- Order Not Ready warning dialog
+- Revert Avail Date dialog
+- Auto-Sequence Apply dialog
+- Any other confirmation dialog
+
+---
+
+### UPDATED FONT SIZES
+
+| Element | Current (~size) | Updated |
+|---|---|---|
+| Dialog title | ~14-16px | 18px, font-weight 700 |
+| Dialog body text / description | ~12-13px | 14px, line-height 1.6 |
+| Labels (FPR:, Item:, Line:, Current:, etc.) | ~12px | 14px, grey (#6b7280) |
+| Label values (260309, Elite XP Startex, etc.) | ~12px | 14px, font-weight 600, dark text (#1a1a1a) |
+| Warning section text (⚠ messages) | ~11-12px | 13px |
+| Warning section heading | ~12px | 14px, font-weight 600 |
+| Bullet points in warning/missing lists | ~11px | 13px |
+| "Type Confirm" instruction text | ~12px | 14px |
+| Text input (where user types "Confirm") | ~12px | 14px |
+| Text input placeholder | ~12px | 14px, italic |
+| Error/validation text below input | ~10px | 12px |
+| Bottom question text ("Do you want to proceed?") | ~12-13px | 14px |
+| Button text | ~12px | 14px, font-weight 600 |
+| Tooltip / helper text | ~10-11px | 12px |
+
+---
+
+### DIALOG CONTAINER ADJUSTMENTS
+
+With larger text, increase dialog padding and width:
+
+| Property | Current | Updated |
+|---|---|---|
+| Dialog max-width | ~400-420px | 480px |
+| Dialog padding | ~20px 24px | 24px 28px |
+| Button padding | ~8px 16px | 10px 20px |
+| Button height | ~36px | 40px |
+| Button border-radius | ~6px | 8px |
+| Gap between buttons | ~8-12px | 12px |
+| Gap between sections | ~12-16px | 16px |
+
+---
+
+### SPECIFIC DIALOG EXAMPLES
+
+**Override dialog (Volume, Avail Date, Completion Date):**
+
+```
+╔══════════════════════════════════════════════════════════╗
+║                                                          ║
+║  ✏️ Edit Volume                          (18px, bold)     ║
+║                                                          ║
+║  You are about to override the volume    (14px)          ║
+║  for this order. This may affect                         ║
+║  batches, bags, production time, and                     ║
+║  completion date calculations.                           ║
+║                                                          ║
+║  FPR:     260309                         (14px)          ║
+║  Item:    Elite XP Startex, Mini-pellet  (14px, bold)    ║
+║  Current: 80 MT                          (14px, bold)    ║
+║                                                          ║
+║           [Cancel]        [Proceed]      (14px)          ║
+║                                                          ║
+╚══════════════════════════════════════════════════════════╝
+```
+
+**Cancel PO dialog:**
+
+```
+╔══════════════════════════════════════════════════════════╗
+║                                                          ║
+║  🚫 Cancel Order                         (18px, bold)    ║
+║                                                          ║
+║  Are you sure you want to cancel this    (14px)          ║
+║  order? This action will move the order                  ║
+║  to the bottom of the table.                             ║
+║                                                          ║
+║  FPR:     260309                         (14px)          ║
+║  Item:    Gallimax Pigeon Pellet, 50kg   (14px, bold)    ║
+║  Volume:  24 MT                          (14px, bold)    ║
+║                                                          ║
+║  Type "Confirm" to proceed:              (14px)          ║
+║  ┌────────────────────────────────────┐                  ║
+║  │                                    │  (14px input)    ║
+║  └────────────────────────────────────┘                  ║
+║                                                          ║
+║           [Go Back]       [Cancel Order] (14px)          ║
+║                                                          ║
+╚══════════════════════════════════════════════════════════╝
+```
+
+**Order Not Ready warning:**
+
+```
+╔══════════════════════════════════════════════════════════╗
+║                                                          ║
+║  ⚠ Order Not Ready                      (18px, bold)    ║
+║                                                          ║
+║  This order has not passed its           (14px)          ║
+║  readiness check. Some details may be                    ║
+║  missing or incomplete.                                  ║
+║                                                          ║
+║  Line:    1                              (14px)          ║
+║  FPR:     260309                         (14px, bold)    ║
+║  Item:    Gallimax Pigeon Pellet, 50kg   (14px, bold)    ║
+║  Volume:  24 MT                          (14px)          ║
+║                                                          ║
+║  ┌──────────────────────────────────────┐                ║
+║  │ Missing or incomplete:          (14px, bold)          ║
+║  │                                                       ║
+║  │ • Production Order FG1 — not set (13px)               ║
+║  │ • HA Prep — not confirmed        (13px)               ║
+║  │ • SCADA — not set                (13px)               ║
+║  └──────────────────────────────────────┘                ║
+║                                                          ║
+║  Do you want to proceed with             (14px)          ║
+║  In production anyway?                                   ║
+║                                                          ║
+║           [Go Back]     [Proceed Anyway] (14px)          ║
+║                                                          ║
+╚══════════════════════════════════════════════════════════╝
+```
+
+**Delete Upload dialog:**
+
+```
+╔══════════════════════════════════════════════════════════╗
+║                                                          ║
+║  🗑 Delete Upload                        (18px, bold)    ║
+║                                                          ║
+║  Are you sure you want to delete         (14px)          ║
+║  this file?                                              ║
+║                                                          ║
+║  File:     Dummy 10 Days.xlsx            (14px, bold)    ║
+║  Uploaded: 03/19/2026 04:22 PM           (14px)          ║
+║  Records:  20 products                   (14px)          ║
+║                                                          ║
+║  ┌──────────────────────────────────────┐                ║
+║  │ ⚠ This action cannot be undone.      (13px)          ║
+║  └──────────────────────────────────────┘                ║
+║                                                          ║
+║  Type "Confirm" to proceed:              (14px)          ║
+║  ┌────────────────────────────────────┐                  ║
+║  │                                    │  (14px input)    ║
+║  └────────────────────────────────────┘                  ║
+║                                                          ║
+║           [Cancel]        [Delete]       (14px)          ║
+║                                                          ║
+╚══════════════════════════════════════════════════════════╝
+```
+
+---
+
+### APPLY TO ALL DIALOGS GLOBALLY
+
+To ensure no dialog is missed, apply a global CSS rule:
+
+```css
+/* All dialog titles */
+.dialog-title,
+.modal-title {
+  font-size: 18px !important;
+  font-weight: 700 !important;
+}
+
+/* All dialog body text */
+.dialog-body,
+.modal-body,
+.dialog-body p,
+.modal-body p {
+  font-size: 14px !important;
+  line-height: 1.6 !important;
+}
+
+/* All dialog labels */
+.dialog-label {
+  font-size: 14px !important;
+}
+
+/* All dialog label values */
+.dialog-value {
+  font-size: 14px !important;
+  font-weight: 600 !important;
+}
+
+/* All dialog buttons */
+.dialog-button,
+.modal-button {
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  padding: 10px 20px !important;
+}
+
+/* All dialog inputs */
+.dialog-input,
+.modal-input {
+  font-size: 14px !important;
+  padding: 10px 12px !important;
+}
+
+/* Warning/missing list items */
+.dialog-warning-item {
+  font-size: 13px !important;
+}
+
+/* Warning section heading */
+.dialog-warning-heading {
+  font-size: 14px !important;
+  font-weight: 600 !important;
+}
+```
+```

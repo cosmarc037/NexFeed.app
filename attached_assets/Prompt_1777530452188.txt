@@ -1,0 +1,285 @@
+```
+Fix the "Changeover time (time-saved)" metric in the strategy card so it correctly shows:
+1. the actual total changeover time for that specific strategy
+2. the time saved versus Standard
+3. different values per strategy when their final After-table sequences differ
+
+---
+
+## PROBLEM TO FIX
+
+Current issue observed:
+- the metric label says: `Changeover time (time-saved)`
+- but the card only displays a single value like `1.02 hr`
+- the saved-time portion is missing
+- the same value appears across Standard and AI strategies, even when the strategy sequence differs
+
+This suggests that:
+- the UI is not rendering the time-saved part
+- and/or total changeover time is being sourced incorrectly from the same baseline for all strategies
+
+---
+
+## OBJECTIVE
+
+For each strategy card:
+
+### Standard Sequence
+Display:
+- baseline total changeover time only
+
+Example:
+- `1.02 hr`
+
+### AI strategy
+Display:
+- strategy total changeover time
+- plus time saved compared to Standard
+
+Example:
+- `0.83 hr (0.19 hr saved)`
+
+If no savings:
+- `1.10 hr (0.00 hr saved)`
+or
+- `1.10 hr (no savings)`
+
+The metric must reflect the final executed After-table rows for that strategy, not a shared baseline value.
+
+---
+
+## 1. RECALCULATE TOTAL CHANGEOVER TIME PER STRATEGY FROM THAT STRATEGY’S FINAL ROWS
+
+Each strategy must compute its own total changeover time from its own final executed orders.
+
+Do not reuse:
+- Standard’s total changeover time
+- a shared base line value
+- a pre-strategy placeholder value
+
+Use the final row values already shown in the After table for that strategy.
+
+### Helper:
+```javascript
+function calculateTotalChangeoverTime(lineOrders) {
+  return Number(
+    lineOrders.reduce((sum, order) => {
+      const co = parseFloat(
+        order.changeover ??
+        order._changeoverHrs ??
+        order._changeover ??
+        order.change_over ??
+        0
+      ) || 0;
+
+      return sum + co;
+    }, 0).toFixed(2)
+  );
+}
+```
+
+Important:
+- `lineOrders` must be the final executed order rows for that specific strategy
+- compute after final sequencing/date application and final changeover recalculation
+
+Store in:
+```javascript
+strategy.metrics.totalChangeoverHours
+```
+
+---
+
+## 2. CALCULATE TIME SAVED AGAINST STANDARD FOR THE SAME LINE
+
+For each AI strategy:
+- compare its total changeover time against the Standard Sequence total changeover time for that same line
+
+### Helper:
+```javascript
+function calculateTimeSavedVsStandard(standardOrders, strategyOrders) {
+  const standardCO = calculateTotalChangeoverTime(standardOrders);
+  const strategyCO = calculateTotalChangeoverTime(strategyOrders);
+
+  const rawSaved = standardCO - strategyCO;
+
+  return {
+    standardCO: Number(standardCO.toFixed(2)),
+    strategyCO: Number(strategyCO.toFixed(2)),
+    rawSaved: Number(rawSaved.toFixed(2)),
+    displaySaved: Number(Math.max(0, rawSaved).toFixed(2)),
+  };
+}
+```
+
+Store in:
+```javascript
+strategy.metrics.totalChangeoverHours
+strategy.metrics.timeSavedHours
+strategy.metrics.rawTimeSavedHours
+strategy.metrics.standardChangeoverHours
+```
+
+For Standard:
+```javascript
+strategy.metrics.totalChangeoverHours = calculateTotalChangeoverTime(standardOrders);
+strategy.metrics.timeSavedHours = null;
+strategy.metrics.rawTimeSavedHours = null;
+strategy.metrics.standardChangeoverHours = strategy.metrics.totalChangeoverHours;
+```
+
+---
+
+## 3. ENSURE THESE VALUES ARE COMPUTED AFTER FINAL STRATEGY EXECUTION
+
+Correct order of operations:
+
+1. generate strategy
+2. execute strategy into final After-table rows
+3. finalize dates
+4. finalize sequence order
+5. finalize row changeovers
+6. compute total changeover time from those final rows
+7. compute time saved vs Standard
+8. render metrics box
+
+Do not calculate these metrics before final row changeovers are available.
+
+---
+
+## 4. FIX UI RENDERING SO "TIME-SAVED" ACTUALLY APPEARS
+
+Right now, the UI appears to only render the total changeover time.
+
+Update the row rendering logic.
+
+### Desired rendering:
+#### Standard
+- `1.02 hr`
+
+#### AI strategy
+- `0.83 hr (0.19 hr saved)`
+
+### Example JSX:
+```jsx
+<div className="metric-row">
+  <span>Changeover time (time-saved)</span>
+  <strong>
+    {strategy.id === 'standard'
+      ? formatHours(strategy.metrics.totalChangeoverHours)
+      : `${formatHours(strategy.metrics.totalChangeoverHours)} (${formatHours(strategy.metrics.timeSavedHours)} saved)`}
+  </strong>
+</div>
+```
+
+If you prefer cleaner formatting:
+```jsx
+<div className="metric-row">
+  <span>Changeover time (time-saved)</span>
+  <strong>
+    {strategy.id === 'standard'
+      ? `${formatHours(strategy.metrics.totalChangeoverHours)}`
+      : `${formatHours(strategy.metrics.totalChangeoverHours)} (${formatHours(strategy.metrics.timeSavedHours)} hr saved)`}
+  </strong>
+</div>
+```
+
+Make sure the saved-time substring is actually rendered.
+
+---
+
+## 5. HANDLE ZERO OR NEGATIVE SAVINGS PROPERLY
+
+If strategy does not reduce changeover time:
+- still show actual strategy changeover time
+- saved time should be zero-clamped for display unless UX prefers negative values
+
+### Recommended:
+- display `0.00 hr saved` if rawSaved <= 0
+
+Optional friendlier display:
+- `1.10 hr (no savings)`
+
+If using the simpler numeric style:
+```javascript
+const savedLabel =
+  strategy.metrics.timeSavedHours > 0
+    ? `${formatHours(strategy.metrics.timeSavedHours)} saved`
+    : `0.00 hr saved`;
+```
+
+---
+
+## 6. ADD DEBUG LOGGING TO CONFIRM VALUES ARE STRATEGY-SPECIFIC
+
+Temporarily log the values per strategy to verify they are no longer identical incorrectly.
+
+```javascript
+console.debug('[Strategy Changeover Metrics]', {
+  line,
+  strategyId: strategy.id,
+  totalChangeoverHours: strategy.metrics.totalChangeoverHours,
+  standardChangeoverHours: strategy.metrics.standardChangeoverHours,
+  timeSavedHours: strategy.metrics.timeSavedHours,
+  rawTimeSavedHours: strategy.metrics.rawTimeSavedHours,
+});
+```
+
+This should help verify:
+- Standard baseline value
+- AI strategy 1 value
+- AI strategy 2 value
+are computed separately
+
+---
+
+## 7. VERIFY THE METRIC MATCHES THE AFTER TABLE
+
+The total changeover time displayed in the card must equal the sum of the CO values shown in that strategy’s After table.
+
+Example:
+If the After table for AI Strategy 1 shows row CO values:
+- 0.17
+- 0.83
+- 0.83
+- 2.33
+- 2.33
+- 0.00
+
+Then the displayed card metric should equal the sum of those rows for that exact strategy.
+
+Do not allow:
+- same changeover metric across all cards unless the actual final row sums are truly identical
+
+---
+
+## 8. KEEP THE CURRENT VISIBLE METRIC ORDER
+
+The visible metrics should remain:
+
+1. Min. slack
+2. MTS adjusted
+3. Changeover time (time-saved)
+4. Faithfulness
+
+Only fix the calculation/rendering of the changeover row.
+
+---
+
+## 9. VERIFICATION
+
+### Calculation
+1. ✅ Each strategy computes total changeover time from its own final After-table rows
+2. ✅ AI strategies compute time saved against Standard for the same line
+3. ✅ Standard keeps only baseline changeover time
+4. ✅ The metrics are no longer copied/shared incorrectly across strategies
+
+### UI
+5. ✅ The "time-saved" part is now visibly rendered for AI strategies
+6. ✅ Standard shows only baseline changeover time
+7. ✅ AI strategies show:
+   `X.XX hr (Y.YY hr saved)`
+
+### Consistency
+8. ✅ The card metric matches the actual row CO values shown in the After table
+9. ✅ Different strategies can now show different changeover totals
+10. ✅ If strategies really produce different sequences, their changeover metrics reflect those differences

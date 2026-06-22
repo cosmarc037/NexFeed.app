@@ -1,0 +1,218 @@
+Please update the **Fulfillment (Demo) pre-order suggestion logic** so that it uses **Adjusted Inventory** when deciding whether another order can still be fulfilled from inventory.
+
+---
+
+## 1. USE ADJUSTED INVENTORY, NOT JUST RAW INVENTORY, FOR PRE-ORDER ELIGIBILITY
+
+The current fulfillment suggestion behavior appears to detect whether an order can be satisfied based on the product’s original/raw inventory from Demo Future Dispatches.
+
+Please refine this logic.
+
+### New rule
+Pre-order eligibility must be based on the product’s **current adjusted inventory**, not only the original inventory value.
+
+### Goal
+Prevent the app from suggesting multiple pre-orders for the same product when earlier approved fulfillments have already consumed most or all of the available inventory.
+
+### Expected result
+Once inventory has effectively been used by one approved fulfillment decision, later orders of the same product should be re-evaluated against the updated adjusted inventory.
+
+---
+
+## 2. WHEN A USER APPROVES A PRE-ORDER / FULFILLMENT DECISION, REDUCE THE AVAILABLE INVENTORY FOR THAT PRODUCT
+
+When the user approves a pre-order suggestion for an order that is being satisfied from inventory, the app should treat that approved fulfillment as inventory usage.
+
+### Expected behavior
+If the original product inventory is:
+- `200 MT`
+
+and the user approves a fulfillment for:
+- `Gallimax Order 1 = 190 MT`
+
+then the remaining available inventory should now reflect that usage.
+
+### Expected result
+The app should no longer continue evaluating later Gallimax orders against the original full `200 MT`.
+It should use the updated inventory state after the approved usage.
+
+---
+
+## 3. RE-EVALUATE LATER ORDERS OF THE SAME PRODUCT AGAINST THE UPDATED ADJUSTED INVENTORY
+
+After a fulfillment approval consumes inventory for a product, any other orders of that same product should be rechecked using the updated adjusted inventory.
+
+### Example
+Inventory:
+- `Gallimax = 200 MT`
+
+Orders:
+- `Gallimax Order 1 = 190 MT`
+- `Gallimax Order 2 = 50 MT`
+
+### Correct behavior
+If the user approves the generated pre-order / fulfillment for:
+- `Gallimax Order 1 = 190 MT`
+
+then remaining inventory is effectively no longer enough for:
+- `Gallimax Order 2 = 50 MT`
+
+So:
+- Gallimax Order 2 should no longer receive a valid pre-order suggestion
+- or any existing suggestion for Gallimax Order 2 should be removed/disabled/re-evaluated accordingly
+
+### Expected result
+The app should not overcommit the same inventory to multiple orders.
+
+---
+
+## 4. PRE-ORDER SUGGESTIONS MUST BE STATEFUL, NOT INDEPENDENTLY BASED ON THE ORIGINAL INVENTORY SNAPSHOT
+
+Please ensure the fulfillment logic is state-aware.
+
+### Important
+Do not evaluate each order in isolation using the same original inventory snapshot.
+
+Instead:
+- approved fulfillments should consume inventory
+- adjusted inventory should be updated
+- later suggestion eligibility should be recalculated from the new remaining balance
+
+### Expected result
+The order of approvals matters, and the system should maintain a live/updated inventory state for suggestion logic.
+
+---
+
+## 5. IF INVENTORY IS NO LONGER ENOUGH, DO NOT SUGGEST ANOTHER PRE-ORDER FOR THAT PRODUCT ORDER
+
+Please block or remove fulfillment suggestions once the updated adjusted inventory is no longer enough to satisfy the next order.
+
+### Expected result
+If the remaining adjusted inventory for a product is below the needed order volume, the app should:
+- not show a pre-order suggestion for that order
+- or remove/disable the suggestion if it was previously shown and is no longer valid
+
+### Goal
+Ensure suggestions remain realistic and reflect the actual remaining inventory after prior approvals.
+
+---
+
+## 6. KEEP THE ADJUSTED INVENTORY COLUMN IN SYNC WITH THE PRE-ORDER ELIGIBILITY LOGIC
+
+Please make sure the same adjusted inventory state used for:
+- the `Adjusted Inventory` column in Demo Future Dispatches
+
+is also the one used for:
+- fulfillment/pre-order eligibility checks
+
+### Goal
+Avoid a mismatch where:
+- the column shows reduced inventory
+but
+- the suggestion engine still behaves as if the original raw inventory is available
+
+### Expected result
+The UI and the suggestion logic should reflect the same inventory state.
+
+---
+
+## 7. UPDATE OR REFRESH EXISTING SUGGESTIONS WHEN APPROVAL CHANGES THE REMAINING INVENTORY
+
+If approving a pre-order changes the adjusted inventory such that another pending suggestion is no longer valid, please update the suggestion list accordingly.
+
+### Acceptable behaviors
+Any of the following are acceptable as long as they are clear and consistent:
+- automatically remove invalidated suggestions
+- automatically disable invalidated suggestions
+- recalculate and refresh the suggestion section immediately
+
+### Expected result
+The suggestion list should stay accurate after each approval.
+
+---
+
+## 8. APPLY THIS LOGIC WITHIN THE FULFILLMENT (DEMO) WORKSPACE ONLY
+
+Please apply this updated inventory-consumption logic specifically to the **Fulfillment (Demo)** workspace.
+
+### Scope
+This includes:
+- Demo All Feedmills
+- Demo Future Dispatches
+- demo pre-order suggestions
+
+### Expected result
+The demo fulfillment workflow becomes inventory-aware and does not over-suggest multiple fulfillments from the same stock.
+
+---
+
+## IMPORTANT
+
+Please implement this rule:
+
+> Pre-order suggestion eligibility must be based on **Adjusted Inventory**, not just the original inventory value.
+
+This means:
+- once a user approves a pre-order/fulfillment for a product,
+- the inventory is effectively consumed for that product,
+- and later orders of the same product must be re-evaluated using the updated adjusted inventory
+
+### Example
+If:
+- Inventory = `200 MT`
+- Order 1 = `190 MT`
+- Order 2 = `50 MT`
+
+Then after Order 1 is approved:
+- Order 2 should no longer get a valid pre-order suggestion if the remaining adjusted inventory is insufficient
+
+This prevents the same inventory from being allocated multiple times.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log adjusted inventory usage during pre-order eligibility evaluation.
+
+```javascript
+console.debug('[Fulfillment Demo Adjusted Inventory Eligibility]', {
+  product,
+  rawInventory,
+  adjustedInventory,
+  orderId,
+  orderVolume,
+  canStillBeSatisfied: adjustedInventory >= orderVolume,
+});
+```
+
+```javascript
+console.debug('[Fulfillment Demo Inventory Consumption]', {
+  product,
+  approvedOrderId,
+  consumedVolume,
+  inventoryBefore,
+  inventoryAfter,
+});
+```
+
+```javascript
+console.debug('[Fulfillment Demo Suggestion Recalculation]', {
+  product,
+  suggestionIdsChecked,
+  invalidatedSuggestions,
+  refreshedAfterApproval: true,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Pre-order eligibility is based on Adjusted Inventory, not just raw inventory
+2. ✅ Approving a fulfillment/pre-order consumes inventory for that product in the demo logic
+3. ✅ Later orders of the same product are re-evaluated against the updated adjusted inventory
+4. ✅ The app no longer suggests multiple fulfillments that overuse the same inventory
+5. ✅ If remaining inventory is insufficient, the later order no longer gets a valid pre-order suggestion
+6. ✅ Adjusted Inventory column and suggestion logic stay in sync
+7. ✅ Suggestion list refreshes or updates after each approval
+8. ✅ No UI errors or console errors are introduced

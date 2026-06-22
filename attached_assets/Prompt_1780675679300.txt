@@ -1,0 +1,197 @@
+Please revisit the **AI-powered sequencing strategy generation**, because the strategy cards still show contradictions between what the AI claims as a goal and what the actual sequence and key metrics demonstrate.
+
+The current behavior suggests that the AI may declare goals across the THREE-DIMENSION ANALYSIS (primary, secondary, or both) without ensuring those goals are visibly supported in the final sequence and the displayed metrics.
+
+This applies to **every dimension the AI labels as a goal**, not only the primary one.
+
+---
+
+## 1. EVERY CLAIMED GOAL MUST BE REFLECTED IN THE FINAL SEQUENCE AND METRICS
+
+Please make the AI honor this rule strictly:
+
+- If a dimension is labeled **PRIMARY**, the final sequence and metrics must show a **clear and noticeable improvement** in that dimension versus the Standard Sequence.
+- If a dimension is labeled **SECONDARY**, the final sequence and metrics must show a **visible, supporting effect** in that dimension versus the Standard Sequence.
+- If a dimension is labeled **DEPRIORITIZED**, no improvement is required, but the AI must clearly acknowledge that no benefit was pursued there.
+
+### Goal
+The AI must not declare a dimension as a goal (primary or secondary) unless the final sequence actually demonstrates a corresponding effect in the metrics.
+
+### Expected result
+Whatever the AI says it is trying to achieve must be traceable in:
+- the order sequence
+- the displayed key details
+- the comparison against Standard
+
+---
+
+## 2. USE THE STANDARD SEQUENCE AS THE BASELINE FOR EVERY CLAIM
+
+Please make the Standard Sequence the explicit reference point for evaluating whether a claimed goal was actually achieved.
+
+### Goal
+Every claim of improvement must be expressed as a difference versus Standard.
+
+### Expected result
+The AI should be able to point to a real metric difference such as:
+- changeover time decreased versus Standard
+- MTS adjusted count increased versus Standard
+- daily utilization improved versus Standard
+- margin-aware ordering changed versus Standard
+
+If no such difference exists, the AI must not claim the goal was achieved.
+
+---
+
+## 3. ENFORCE A CLAIM-TO-METRIC MAPPING
+
+Please apply this strict mapping for any dimension the AI labels as a goal:
+
+### Changeover reduction
+- Final changeover time must be lower than Standard
+- Time-saved must be negative (i.e., time was saved)
+- Specific transitions removed should be identifiable
+
+### MTS advancement
+- MTS adjusted count must be higher than Standard
+- Advancement must be visible at the order level
+- Daily utilization must not get noticeably worse if utilization is being used to justify the advancement
+- If utilization regresses, the AI must acknowledge it as a tradeoff rather than claiming improved capacity use
+
+### Profitability
+- Higher-margin orders must be visibly placed earlier or in better positions
+- The reordering must be traceable in the final sequence
+- The AI must not claim profitability improvement if no margin-aware reordering occurred
+
+### Goal
+Make sure every claimed goal corresponds to a verifiable change in the right metric direction.
+
+### Expected result
+No goal can be claimed unless its associated metric supports it.
+
+---
+
+## 4. DO NOT HIDE TRADEOFFS OR OVERSTATE BENEFITS
+
+Please prevent the AI from describing strategies in ways that gloss over negative metric movement.
+
+### Current concern
+The AI sometimes claims a benefit (such as improved capacity use) while the actual displayed metric (such as daily utilization) clearly moves in the opposite direction.
+
+### Goal
+Force the AI to reflect both the positive and negative metric movements honestly.
+
+### Expected result
+If utilization dropped while flexibles were advanced, the card must:
+- not claim improved utilization
+- acknowledge the utilization tradeoff explicitly
+- still be allowed to claim advancement, but only as advancement, not as utilization improvement
+
+---
+
+## 5. DOWNGRADE OR REMOVE GOALS THAT ARE NOT REFLECTED IN THE METRICS
+
+Please make the AI revise its labels when its own final sequence does not support the claimed goal.
+
+### Goal
+- If a dimension was intended as PRIMARY but the metrics do not support it, downgrade it to SECONDARY or DEPRIORITIZED.
+- If a dimension was intended as SECONDARY but the metrics do not support it, downgrade it to DEPRIORITIZED or remove it as a stated goal.
+- If no dimension is meaningfully supported, the strategy must be described as constraint-limited, low-impact, or unrealized rather than presented as a successful optimization.
+
+### Expected result
+A claimed goal must always match what the sequence actually delivers.
+
+---
+
+## 6. ENSURE THE TITLE, SUMMARY, AND 3D ANALYSIS ALL REFLECT THE SAME REALITY
+
+Please make sure the entire strategy card tells the same story.
+
+### Goal
+The title, the strategy summary, the “why this strategy fits this line” section, and the THREE-DIMENSION ANALYSIS must all be consistent with the final displayed metrics.
+
+### Expected result
+- The title should not imply a benefit that did not happen.
+- The summary should not describe improvements that the metrics do not show.
+- The 3D analysis should not assign goals that the sequence does not realize.
+- Every numerical claim should match the displayed key details exactly.
+
+---
+
+## 7. APPLY THIS RULE TO BOTH AI STRATEGIES
+
+Please ensure this consistency rule is applied to every AI-generated strategy on a line, not just the first one.
+
+### Goal
+Both AI strategies must independently pass this claim-to-metric verification.
+
+### Expected result
+Every AI strategy card on a line must independently show that its claimed goals are visible in its actual sequence and metrics.
+
+---
+
+## IMPORTANT
+
+Whatever the AI says it is trying to do — at any priority level, primary or secondary — must be reflected in the actual sequence and metrics shown on the card.
+
+- If the AI says it is reducing changeover, the changeover time must clearly decrease versus Standard.
+- If the AI says it is advancing MTS, advancement must be visible and utilization must not silently regress.
+- If the AI says profitability is a goal, margin-aware ordering must be visible.
+- If the AI cannot deliver the claimed goal, it must downgrade or remove that goal rather than overstate it.
+
+The Standard Sequence should be the basis for evaluating whether the AI strategy actually delivered something different. If there is no real change in the right direction, the AI must not present it as a successful goal.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log whether each claimed goal is reflected in the final sequence and metrics.
+
+```javascript
+console.debug('[AI Goal-To-Metric Alignment Check]', {
+  line,
+  strategyTitle,
+  baselineMetrics,
+  finalMetrics,
+  claimedPrimary,
+  claimedSecondary,
+  primaryReflectedInMetrics: true,
+  secondaryReflectedInMetrics: true,
+  tradeoffsAcknowledged: true,
+});
+```
+
+```javascript
+console.debug('[AI Standard-Sequence Comparison Check]', {
+  line,
+  strategyTitle,
+  changeoverDeltaVsStandard,
+  utilizationDeltaVsStandard,
+  mtsAdjustedDeltaVsStandard,
+  marginOrderingChangedVsStandard,
+  claimsMatchDeltas: true,
+});
+```
+
+```javascript
+console.debug('[AI Goal Downgrade Audit]', {
+  line,
+  strategyTitle,
+  unsupportedClaimedGoals,
+  goalsDowngradedAfterMetricCheck: true,
+  unrealizedGoalsRemovedOrReframed: true,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Every claimed goal (primary or secondary) is reflected in the final sequence and displayed metrics
+2. ✅ The Standard Sequence is used as the explicit baseline for all comparisons
+3. ✅ Claim-to-metric mapping is enforced for changeover, advancement, and profitability
+4. ✅ Tradeoffs are acknowledged honestly rather than hidden
+5. ✅ Unsupported goals are downgraded or removed instead of overstated
+6. ✅ Title, summary, “why this strategy fits,” and 3D analysis all reflect the same metric reality
+7. ✅ Both AI strategies independently pass this verification
+8. ✅ No UI errors or console errors are introduced

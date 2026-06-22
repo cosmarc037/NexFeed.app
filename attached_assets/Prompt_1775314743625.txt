@@ -1,0 +1,193 @@
+```
+Implement the following fixes to the Tour feature:
+
+---
+
+## FIX 1: HIGHLIGHT ONLY THE TARGETED ELEMENT, NOT ADJACENT ELEMENTS
+
+The tour highlight is covering both Production Insights AND Alerts & Reminders when only Production Insights should be highlighted. This happens because the data-tour attribute is on a parent container that wraps both elements.
+
+### THE RULE
+
+Every `data-tour` attribute must be placed on the SPECIFIC element that should be highlighted — NOT on a parent wrapper that contains other elements.
+
+### CHECK AND FIX ALL data-tour PLACEMENTS
+
+Go through EVERY `data-tour` attribute in the app and ensure it is placed on the individual target element, not a shared parent.
+
+**ORDERS PAGE — Production Insights and Alerts:**
+
+```jsx
+{/* WRONG — both inside one wrapper */}
+<div data-tour="orders-insights">
+  <div>Production Insights (5 insights)</div>
+  <div>Alerts & Reminders (5 alerts)</div>
+</div>
+
+{/* CORRECT — separate data-tour on each section */}
+<div className="insights-alerts-row">
+  <div data-tour="orders-insights" className="production-insights-section">
+    🟡 Production Insights (5 insights) ▾
+  </div>
+  <div data-tour="orders-alerts" className="alerts-reminders-section">
+    🔔 Alerts & Reminders 🔴 (5 alerts) ▾
+  </div>
+</div>
+```
+
+**ORDERS PAGE — Metric cards:**
+
+```jsx
+{/* If metrics are individual cards, each gets its own wrapper */}
+{/* But if highlighting all 4 as a group is intended, keep the parent */}
+{/* Only fix if the highlight visually bleeds into other sections */}
+<div data-tour="orders-metrics" className="metrics-row">
+  <div>Total Orders: 19</div>
+  <div>Active Orders: 19</div>
+  <div>Urgent Orders: 0</div>
+  <div>Lacking Details: 16</div>
+</div>
+```
+
+**OVERVIEW PAGE — Feedmill cards:**
+
+```jsx
+{/* If highlighting all feedmill cards as a group is fine, keep parent */}
+<div data-tour="overview-feedmill-cards" className="feedmill-cards-row">
+  <div>Feedmill 1</div>
+  <div>Feedmill 2</div>
+  <div>Feedmill 3</div>
+  <div>Powermix</div>
+</div>
+
+{/* Shutdown button must be on the specific button, not the card */}
+<button data-tour="overview-shutdown">Shutdown</button>
+```
+
+**OVERVIEW PAGE — Month and Export:**
+
+```jsx
+{/* These should be on their specific row/group */}
+<div data-tour="overview-month-export" className="month-export-row">
+  <select>April 2026</select>
+  <button>Export Report</button>
+</div>
+```
+
+**ORDERS PAGE — Header groups:**
+
+```jsx
+{/* Each header group gets its own data-tour on the specific <th> */}
+<th data-tour="orders-header-details" colSpan={6}>ORDER DETAILS</th>
+<th data-tour="orders-header-production" colSpan={7}>PRODUCTION PARAMETERS</th>
+<th data-tour="orders-header-mixer" colSpan={2}>MIXER DETAILS</th>
+<th data-tour="orders-header-operator" colSpan={1}>OPERATOR</th>
+<th data-tour="orders-header-scheduling" colSpan={4}>SCHEDULING</th>
+<th data-tour="orders-header-product-insights" colSpan={1}>PRODUCT INSIGHTS</th>
+<th data-tour="orders-header-notes" colSpan={2}>NOTES</th>
+```
+
+**N10D PAGE — Buttons row:**
+
+```jsx
+{/* Each button gets its own data-tour */}
+<div className="n10d-actions-row">
+  <button data-tour="n10d-reapply">Re-apply to Existing Orders</button>
+  <button data-tour="n10d-download">Download N10D</button>
+  <button data-tour="n10d-upload">Upload Next 10 Days</button>
+</div>
+```
+
+**N10D PAGE — Table headers:**
+
+```jsx
+<th data-tour="n10d-header-product" colSpan={3}>PRODUCT DETAILS</th>
+<th data-tour="n10d-header-days" colSpan={10}>NEXT 10 DAYS</th>
+<th data-tour="n10d-header-tracking" colSpan={5}>TRACKING</th>
+```
+
+**ANALYTICS PAGE — Charts:**
+
+```jsx
+{/* Each chart section gets its own data-tour */}
+<div data-tour="analytics-volume-category" className="chart-card">
+  <h3>Volume by Category (MT)</h3>
+  {/* chart */}
+</div>
+
+<div data-tour="analytics-orders-line" className="chart-card">
+  <h3>Orders by Feedmill Line</h3>
+  {/* chart */}
+</div>
+
+<div data-tour="analytics-top-items" className="chart-card">
+  <h3>Top 5 Most Ordered Items</h3>
+  {/* chart */}
+</div>
+```
+
+### GENERAL VALIDATION
+
+For every `data-tour` attribute, verify:
+1. The element it's on contains ONLY the content that should be highlighted
+2. No sibling elements outside the target are visually included in the highlight box
+3. If a parent wrapper has padding/gap that makes the highlight bleed into adjacent elements, move the `data-tour` attribute to the specific child element
+
+---
+
+## FIX 2: PRODUCTION INSIGHTS DESCRIPTION — REMOVE AI MENTION
+
+Only the Production Insights step mentions "AI-generated". Remove it.
+
+### BEFORE
+
+```javascript
+{
+  target: '[data-tour="orders-insights"]',
+  title: 'Production Insights',
+  description: 'AI-generated insights about your production schedule. Expand to see optimization suggestions and potential issues.',
+  position: 'bottom'
+}
+```
+
+### AFTER
+
+```javascript
+{
+  target: '[data-tour="orders-insights"]',
+  title: 'Production Insights',
+  description: 'Insights about your production schedule. Expand to see optimization suggestions and potential issues.',
+  position: 'bottom'
+}
+```
+
+Only change: removed "AI-generated". No other descriptions need to be changed.
+
+---
+
+## VERIFICATION
+
+### Highlight accuracy
+1. ✅ Production Insights step highlights ONLY the Production Insights section
+2. ✅ Alerts & Reminders is NOT included in the Production Insights highlight
+3. ✅ Alerts & Reminders step highlights ONLY the Alerts & Reminders section
+4. ✅ Each tour step highlights only its specific target element
+5. ✅ No adjacent elements bleed into any highlight
+
+### data-tour placement audit
+6. ✅ orders-insights → on Production Insights element only
+7. ✅ orders-alerts → on Alerts & Reminders element only
+8. ✅ orders-metrics → on metrics cards row
+9. ✅ overview-feedmill-cards → on feedmill cards container
+10. ✅ overview-shutdown → on the specific Shutdown button
+11. ✅ n10d-upload → on the Upload button only
+12. ✅ n10d-reapply → on the Re-apply button only
+13. ✅ n10d-download → on the Download button only
+14. ✅ analytics-volume-category → on the Volume by Category chart card only
+15. ✅ analytics-orders-line → on the Orders by Line chart card only
+16. ✅ Each header group data-tour is on the specific <th> element
+
+### Description
+17. ✅ Production Insights description does not mention "AI" or "AI-generated"
+18. ✅ All other descriptions remain unchanged
+```

@@ -1,0 +1,729 @@
+```
+Add a before-and-after comparison view to the Auto-Sequence Preview:
+
+---
+
+## 1. STORE ORIGINAL ORDER BEFORE SEQUENCING
+
+When auto-sequence is triggered, save a snapshot of the original order before any changes:
+
+```javascript
+function handleAutoSequence(line) {
+  // Save snapshot of current orders BEFORE sequencing
+  const currentLineOrders = allOrders
+    .filter(o => o.line === line && o.status !== 'Done' && o.status !== 'Cancel PO')
+    .sort((a, b) => a.prio - b.prio);
+  
+  const originalSnapshot = currentLineOrders.map(o => ({
+    ...o,
+    _originalPrio: o.prio
+  }));
+  
+  // Store in state
+  setOriginalOrderSnapshot(originalSnapshot);
+  
+  // Run auto-sequence algorithm
+  const sequencedOrders = runAutoSequence(currentLineOrders, changeoverRules, masterData, n10dData);
+  
+  // Calculate movement indicators
+  const sequencedWithMovement = sequencedOrders.map((order, newIndex) => {
+    const newPrio = newIndex + 1;
+    const originalIndex = originalSnapshot.findIndex(o => o.id === order.id);
+    const originalPrio = originalIndex >= 0 ? originalIndex + 1 : newPrio;
+    
+    let movement = 'same';
+    let movementDelta = originalPrio - newPrio;
+    
+    if (movementDelta > 0) movement = 'up';
+    else if (movementDelta < 0) movement = 'down';
+    
+    return {
+      ...order,
+      prio: newPrio,
+      _originalPrio: originalPrio,
+      _movement: movement,
+      _movementDelta: Math.abs(movementDelta)
+    };
+  });
+  
+  setSequencedOrders(sequencedWithMovement);
+  setShowAutoSequencePreview(true);
+}
+```
+
+---
+
+## 2. BEFORE-AND-AFTER LAYOUT
+
+```jsx
+function AutoSequencePreview({ 
+  line, 
+  originalOrders, 
+  sequencedOrders, 
+  onApply, 
+  onCancel, 
+  onReanalyze, 
+  onResetToOriginal 
+}) {
+  return (
+    <div className="auto-sequence-overlay">
+      <div className="auto-sequence-modal">
+        {/* Header */}
+        <div className="auto-sequence-header">
+          <div>
+            <h2>✨ Auto-Sequence Preview</h2>
+            <span className="auto-sequence-subtitle">{getFeedmillName(line)} — {line}</span>
+          </div>
+          <button className="auto-sequence-close" onClick={onCancel}>✕</button>
+        </div>
+        
+        {/* Stats badges */}
+        <div className="auto-sequence-stats">
+          <StatBadge label="Orders" value={sequencedOrders.length} />
+          <StatBadge label="With Deadline" value={countDated(sequencedOrders)} color="blue" />
+          <StatBadge label="No Deadline" value={countNonDated(sequencedOrders)} />
+          <StatBadge label="Stock Sufficient" value={countSufficient(sequencedOrders)} color="green" />
+          <StatBadge label="Conflicts" value={countConflicts(sequencedOrders)} color="red" />
+          <StatBadge 
+            label="Orders Moved" 
+            value={sequencedOrders.filter(o => o._movement !== 'same').length} 
+            color="orange" 
+          />
+        </div>
+        
+        {/* Sequence Analysis */}
+        <div className="auto-sequence-analysis">
+          {/* ... existing sequence analysis section ... */}
+        </div>
+        
+        {/* Comparison tables */}
+        <div className="auto-sequence-comparison">
+          <div className="auto-sequence-comparison-scroll">
+            {/* BEFORE table */}
+            <div className="auto-sequence-table-panel">
+              <div className="auto-sequence-table-label auto-sequence-label-before">
+                <span className="auto-sequence-label-icon">📋</span>
+                Before (Original)
+              </div>
+              <div className="auto-sequence-table-wrapper">
+                <table className="auto-sequence-table auto-sequence-table-before">
+                  <thead>
+                    <tr>
+                      <th className="as-col-prio">Prio</th>
+                      <th className="as-col-fpr">FPR</th>
+                      <th className="as-col-planned">Planned Order</th>
+                      <th className="as-col-material">Material Code (FG)</th>
+                      <th className="as-col-desc">Item Description</th>
+                      <th className="as-col-form">Form</th>
+                      <th className="as-col-volume">Volume (MT)</th>
+                      <th className="as-col-batch">Batch Size</th>
+                      <th className="as-col-batches">Batches</th>
+                      <th className="as-col-prod">Production Time</th>
+                      <th className="as-col-start-date">Start Date</th>
+                      <th className="as-col-start-time">Start Time</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {originalOrders.map((order, index) => (
+                      <tr key={order.id} className="auto-sequence-row-before">
+                        <td className="as-col-prio">
+                          <span className="as-prio-badge">{index + 1}</span>
+                        </td>
+                        <td className="as-col-fpr">{order.fpr}</td>
+                        <td className="as-col-planned">
+                          <div>{order.planned_order_fg}</div>
+                          <div className="as-sub-text">{order.planned_order_sfg}</div>
+                        </td>
+                        <td className="as-col-material">{order.material_code_fg}</td>
+                        <td className="as-col-desc">
+                          <div className="as-desc-main">{order.item_description}</div>
+                          <div className="as-sub-text">{order.category}</div>
+                        </td>
+                        <td className="as-col-form">{order.form}</td>
+                        <td className="as-col-volume">
+                          <strong>{order.volume}</strong> MT
+                        </td>
+                        <td className="as-col-batch">{order.batch_size}</td>
+                        <td className="as-col-batches">{order.batches}</td>
+                        <td className="as-col-prod">
+                          <div><strong>{formatProductionTime(order.production_time)}</strong></div>
+                          <div className="as-sub-text">CO: {formatProductionTime(order._changeoverTotal || order.changeover || 0)}</div>
+                        </td>
+                        <td className="as-col-start-date">{order.start_date ? formatDate(order.start_date) : '—'}</td>
+                        <td className="as-col-start-time">{order.start_time || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            
+            {/* Divider */}
+            <div className="auto-sequence-divider"></div>
+            
+            {/* AFTER table */}
+            <div className="auto-sequence-table-panel">
+              <div className="auto-sequence-table-label auto-sequence-label-after">
+                <span className="auto-sequence-label-icon">✨</span>
+                After (Auto-Sequenced)
+              </div>
+              <div className="auto-sequence-table-wrapper">
+                <table className="auto-sequence-table auto-sequence-table-after">
+                  <thead>
+                    <tr>
+                      <th className="as-col-drag"></th>
+                      <th className="as-col-prio">Prio</th>
+                      <th className="as-col-fpr">FPR</th>
+                      <th className="as-col-planned">Planned Order</th>
+                      <th className="as-col-material">Material Code (FG)</th>
+                      <th className="as-col-desc">Item Description</th>
+                      <th className="as-col-form">Form</th>
+                      <th className="as-col-volume">Volume (MT)</th>
+                      <th className="as-col-batch">Batch Size</th>
+                      <th className="as-col-batches">Batches</th>
+                      <th className="as-col-prod">Production Time</th>
+                      <th className="as-col-start-date">Start Date</th>
+                      <th className="as-col-start-time">Start Time</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sequencedOrders.map((order, index) => (
+                      <tr 
+                        key={order.id} 
+                        className={`auto-sequence-row-after ${
+                          order._movement === 'up' ? 'as-row-moved-up' :
+                          order._movement === 'down' ? 'as-row-moved-down' : ''
+                        }`}
+                      >
+                        <td className="as-col-drag">
+                          <span className="as-drag-handle">⠿</span>
+                        </td>
+                        <td className="as-col-prio">
+                          <div className="as-prio-with-movement">
+                            <span className="as-prio-badge as-prio-badge-after">{order.prio}</span>
+                            <MovementIndicator movement={order._movement} delta={order._movementDelta} />
+                          </div>
+                        </td>
+                        <td className="as-col-fpr">{order.fpr}</td>
+                        <td className="as-col-planned">
+                          <div>{order.planned_order_fg}</div>
+                          <div className="as-sub-text">{order.planned_order_sfg}</div>
+                        </td>
+                        <td className="as-col-material">{order.material_code_fg}</td>
+                        <td className="as-col-desc">
+                          <div className="as-desc-main">{order.item_description}</div>
+                          <div className="as-sub-text">{order.category}</div>
+                        </td>
+                        <td className="as-col-form">{order.form}</td>
+                        <td className="as-col-volume">
+                          <strong>{order.volume}</strong> MT
+                        </td>
+                        <td className="as-col-batch">{order.batch_size}</td>
+                        <td className="as-col-batches">{order.batches}</td>
+                        <td className="as-col-prod">
+                          <div><strong>{formatProductionTime(order.production_time)}</strong></div>
+                          <div className="as-sub-text">CO: {formatProductionTime(order._changeoverTotal || order.changeover || 0)}</div>
+                        </td>
+                        <td className="as-col-start-date">
+                          {order.start_date ? (
+                            formatDate(order.start_date)
+                          ) : (
+                            <span className="as-placeholder">Set start date</span>
+                          )}
+                        </td>
+                        <td className="as-col-start-time">
+                          {order.start_time ? (
+                            order.start_time
+                          ) : (
+                            <span className="as-placeholder">Set time</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        {/* Footer */}
+        <div className="auto-sequence-footer">
+          <div className="auto-sequence-footer-left">
+            <button className="btn-reanalyze" onClick={onReanalyze}>
+              ↻ Re-analyze
+            </button>
+            <button className="btn-reset" onClick={onResetToOriginal}>
+              ↺ Reset to Original
+            </button>
+          </div>
+          <div className="auto-sequence-footer-right">
+            <button className="btn-cancel" onClick={onCancel}>Cancel</button>
+            <button className="btn-apply" onClick={() => onApply(sequencedOrders)}>
+              Apply to Schedule
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+## 3. MOVEMENT INDICATOR COMPONENT
+
+```jsx
+function MovementIndicator({ movement, delta }) {
+  if (movement === 'same' || delta === 0) return null;
+  
+  if (movement === 'up') {
+    return (
+      <span className="as-movement as-movement-up" title={`Moved up ${delta} position${delta > 1 ? 's' : ''}`}>
+        ↑{delta}
+      </span>
+    );
+  }
+  
+  if (movement === 'down') {
+    return (
+      <span className="as-movement as-movement-down" title={`Moved down ${delta} position${delta > 1 ? 's' : ''}`}>
+        ↓{delta}
+      </span>
+    );
+  }
+  
+  return null;
+}
+```
+
+---
+
+## 4. STYLING
+
+```css
+/* Comparison container */
+.auto-sequence-comparison {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.auto-sequence-comparison-scroll {
+  display: flex;
+  overflow-x: auto;
+  flex: 1;
+}
+
+.auto-sequence-comparison-scroll::-webkit-scrollbar {
+  height: 8px;
+}
+
+.auto-sequence-comparison-scroll::-webkit-scrollbar-track {
+  background: #f3f4f6;
+}
+
+.auto-sequence-comparison-scroll::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 4px;
+}
+
+/* Table panels */
+.auto-sequence-table-panel {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Table labels */
+.auto-sequence-table-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  font-size: 13px;
+  font-weight: 700;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.auto-sequence-label-icon {
+  font-size: 14px;
+}
+
+.auto-sequence-label-before {
+  background: #f9fafb;
+  color: #6b7280;
+  border-bottom: 2px solid #e5e7eb;
+}
+
+.auto-sequence-label-after {
+  background: #fff7ed;
+  color: #92400e;
+  border-bottom: 2px solid #fed7aa;
+}
+
+/* Divider between tables */
+.auto-sequence-divider {
+  width: 3px;
+  flex-shrink: 0;
+  background: #e5e7eb;
+  position: relative;
+}
+
+.auto-sequence-divider::after {
+  content: '→';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 24px;
+  height: 24px;
+  background: #ffffff;
+  border: 2px solid #e5e7eb;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+/* Table wrapper */
+.auto-sequence-table-wrapper {
+  overflow-y: auto;
+  flex: 1;
+}
+
+/* Table */
+.auto-sequence-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.auto-sequence-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.auto-sequence-table th {
+  padding: 8px 10px;
+  text-align: left;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  color: #6b7280;
+  background: #f9fafb;
+  border-bottom: 1px solid #e5e7eb;
+  white-space: nowrap;
+}
+
+.auto-sequence-table td {
+  padding: 10px 10px;
+  border-bottom: 1px solid #f3f4f6;
+  vertical-align: middle;
+  font-size: 12px;
+  color: #374151;
+}
+
+/* Before table — read-only, subtle style */
+.auto-sequence-table-before {
+  background: #fafafa;
+}
+
+.auto-sequence-table-before td {
+  color: #6b7280;
+}
+
+.auto-sequence-row-before {
+  cursor: default;
+}
+
+/* After table — interactive */
+.auto-sequence-table-after {
+  background: #ffffff;
+}
+
+/* Prio badge */
+.as-prio-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: 700;
+  background: #f3f4f6;
+  color: #374151;
+  border: 1px solid #d1d5db;
+}
+
+.as-prio-badge-after {
+  background: #fff7ed;
+  color: #92400e;
+  border-color: #fed7aa;
+}
+
+/* Prio with movement */
+.as-prio-with-movement {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Movement indicators */
+.as-movement {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 4px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+
+.as-movement-up {
+  color: #16a34a;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+}
+
+.as-movement-down {
+  color: #dc2626;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+}
+
+/* Row highlights for moved orders in After table */
+.as-row-moved-up {
+  background: #fafff5;
+}
+
+.as-row-moved-down {
+  background: #fffafa;
+}
+
+/* Sub text */
+.as-sub-text {
+  font-size: 10px;
+  color: #9ca3af;
+  margin-top: 2px;
+}
+
+/* Description */
+.as-desc-main {
+  font-size: 12px;
+  color: #1a1a1a;
+  font-weight: 500;
+}
+
+/* Drag handle — only in After table */
+.as-drag-handle {
+  cursor: grab;
+  color: #d1d5db;
+  font-size: 14px;
+}
+
+.as-drag-handle:hover {
+  color: #6b7280;
+}
+
+.as-col-drag {
+  width: 24px;
+  text-align: center;
+}
+
+/* Placeholder text for empty dates */
+.as-placeholder {
+  color: #d1d5db;
+  font-style: italic;
+  font-size: 11px;
+}
+
+/* Column widths */
+.as-col-prio { width: 60px; text-align: center; }
+.as-col-fpr { width: 70px; }
+.as-col-planned { width: 100px; }
+.as-col-material { width: 130px; }
+.as-col-desc { min-width: 200px; }
+.as-col-form { width: 60px; }
+.as-col-volume { width: 80px; text-align: right; }
+.as-col-batch { width: 70px; text-align: right; }
+.as-col-batches { width: 60px; text-align: right; }
+.as-col-prod { width: 110px; }
+.as-col-start-date { width: 100px; }
+.as-col-start-time { width: 80px; }
+
+/* Stats badge for "Orders Moved" */
+.stat-badge-orange {
+  border-color: #fed7aa;
+  color: #ea580c;
+}
+
+.stat-badge-orange .stat-badge-value {
+  color: #ea580c;
+}
+
+/* Modal sizing — full width for comparison */
+.auto-sequence-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: #ffffff;
+  z-index: 10001;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Header */
+.auto-sequence-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 24px;
+  border-bottom: 1px solid #e5e7eb;
+  flex-shrink: 0;
+}
+
+.auto-sequence-header h2 {
+  font-size: 18px;
+  font-weight: 700;
+  color: #1a1a1a;
+  margin: 0;
+}
+
+.auto-sequence-subtitle {
+  font-size: 13px;
+  color: #6b7280;
+}
+
+.auto-sequence-close {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  border: 1px solid #e5e7eb;
+  background: #ffffff;
+  color: #6b7280;
+  font-size: 16px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.auto-sequence-close:hover {
+  background: #f3f4f6;
+  color: #1a1a1a;
+}
+
+/* Stats */
+.auto-sequence-stats {
+  display: flex;
+  gap: 12px;
+  padding: 16px 24px;
+  border-bottom: 1px solid #e5e7eb;
+  flex-shrink: 0;
+}
+
+/* Analysis */
+.auto-sequence-analysis {
+  padding: 0 24px;
+  flex-shrink: 0;
+}
+
+/* Footer */
+.auto-sequence-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 24px;
+  border-top: 1px solid #e5e7eb;
+  background: #f9fafb;
+  flex-shrink: 0;
+}
+
+.auto-sequence-footer-left {
+  display: flex;
+  gap: 10px;
+}
+
+.auto-sequence-footer-right {
+  display: flex;
+  gap: 10px;
+}
+
+/* Overlay */
+.auto-sequence-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 10000;
+}
+```
+
+---
+
+## 5. ADD "ORDERS MOVED" STAT BADGE
+
+```jsx
+function StatBadge({ label, value, color }) {
+  return (
+    <div className={`stat-badge ${color ? `stat-badge-${color}` : ''}`}>
+      <span className="stat-badge-value">{value}</span>
+      <span className="stat-badge-label">{label}</span>
+    </div>
+  );
+}
+```
+
+---
+
+## VERIFICATION
+
+### Layout
+1. ✅ Before table on the left, After table on the right
+2. ✅ Side-by-side with horizontal scroll
+3. ✅ Divider between tables with → arrow icon
+4. ✅ Full-screen modal for maximum space
+5. ✅ Both tables have the same columns
+
+### Before table
+6. ✅ Read-only, non-interactive
+7. ✅ No drag handles
+8. ✅ Subtle grey background to indicate read-only
+9. ✅ Shows original prio order
+10. ✅ Same columns as After table
+
+### After table
+11. ✅ Has drag handles for reordering
+12. ✅ Has start date/time pickers
+13. ✅ Shows auto-sequenced order
+14. ✅ Interactive — user can still adjust
+
+### Movement indicators
+15. ✅ Green ↑3 badge = moved up 3 positions
+16. ✅ Red ↓2 badge = moved down 2 positions
+17. ✅ No indicator for orders that stayed in same position
+18. ✅ Subtle row background tint for moved orders (green/red)
+19. ✅ Tooltip shows "Moved up/down X positions"
+
+### Stats
+20. ✅ "Orders Moved" badge shows count of orders that changed position
+21. ✅ Existing stats (Orders, With Deadline, etc.) still present
+
+### Scrolling
+22. ✅ Horizontal scroll for side-by-side tables
+23. ✅ Vertical scroll within each table independently
+24. ✅ Table headers sticky on scroll
+```

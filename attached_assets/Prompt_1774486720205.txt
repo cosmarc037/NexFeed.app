@@ -1,0 +1,398 @@
+```
+Implement the following feature in the NexFeed application:
+
+---
+
+## RIGHT-CLICK CONTEXT MENU — COMMENTS, RECOLOR, VIEW HISTORY
+
+Add a right-click context menu on order table cells with three features:
+1. Leave a comment on a cell
+2. Recolor/highlight an entire row
+3. View order history
+
+---
+
+### 1. RIGHT-CLICK CONTEXT MENU
+
+When the user right-clicks on any cell in the order table, a custom context menu appears (replacing the browser's default context menu).
+
+### MENU LAYOUT
+
+```
+┌────────────────────────────────────┐
+│ 💬 Leave a comment                  │
+│ 🕐 View order history               │
+├────────────────────────────────────┤
+│ ○  🟣  🟢  🟠                       │
+└────────────────────────────────────┘
+```
+
+- Top section: action items (comment, history)
+- Divider line
+- Bottom section: color circles for row highlighting
+
+### MENU STYLING
+
+| Property | Value |
+|---|---|
+| Background | White (#ffffff) |
+| Border | 1px solid #e5e7eb |
+| Border-radius | 8px |
+| Box shadow | 0 4px 12px rgba(0,0,0,0.1) |
+| Padding | 8px 0 |
+| Min-width | 220px |
+| Z-index | 1000 (above everything) |
+
+### MENU ITEMS STYLING
+
+| Property | Value |
+|---|---|
+| Font size | 12px |
+| Color | Dark text (#374151) |
+| Padding | 8px 16px |
+| Cursor | Pointer |
+| Hover background | Light grey (#f3f4f6) |
+| Icon | Left-aligned, 14px, grey (#6b7280) |
+| Icon-text gap | 8px |
+
+### DIVIDER
+
+| Property | Value |
+|---|---|
+| Type | 1px solid #e5e7eb |
+| Margin | 4px 0 |
+
+### COLOR CIRCLES ROW
+
+| Property | Value |
+|---|---|
+| Padding | 8px 16px |
+| Display | Flex, row, gap 12px |
+| Alignment | Center |
+
+### DISMISS
+
+- Click anywhere outside the menu → menu closes
+- Press Escape → menu closes
+- Click a menu item → action executes, menu closes
+- Right-click on another cell → previous menu closes, new one opens at new position
+
+### POSITIONING
+
+- Menu appears at the mouse cursor position
+- If near the right edge of the screen → menu shifts left
+- If near the bottom edge → menu shifts up
+- Always fully visible within the viewport
+
+---
+
+### 2. COLOR CIRCLES — ROW HIGHLIGHTING
+
+Four color circles in the bottom section of the context menu.
+
+### CIRCLE OPTIONS
+
+| Circle | Color | Fill | Hover tooltip |
+|---|---|---|---|
+| ○ No highlight | White (#ffffff) | Transparent/white with 1px grey border (#d1d5db) | "No highlight" |
+| 🟣 Violet | Soft violet (#8B5CF6) | Filled | "Violet" |
+| 🟢 Green | Soft green (#22C55E) | Filled | "Green" |
+| 🟠 Orange | Soft orange (#F97316) | Filled | "Orange" |
+
+### CIRCLE STYLING
+
+| Property | Value |
+|---|---|
+| Size | 20px × 20px |
+| Border-radius | 50% (circle) |
+| Border | 2px solid transparent |
+| Cursor | Pointer |
+| Hover | 2px solid matching darker shade |
+| Active/selected | 2px solid matching darker shade + checkmark inside |
+
+**No highlight circle (special):**
+
+| Property | Value |
+|---|---|
+| Background | White (#ffffff) |
+| Border | 1px solid #d1d5db |
+| Hover border | 1px solid #9ca3af |
+| Tooltip | "No highlight" |
+
+**Violet circle:**
+
+| Property | Value |
+|---|---|
+| Background | #8B5CF6 |
+| Hover border | 2px solid #7C3AED |
+
+**Green circle:**
+
+| Property | Value |
+|---|---|
+| Background | #22C55E |
+| Hover border | 2px solid #16A34A |
+
+**Orange circle:**
+
+| Property | Value |
+|---|---|
+| Background | #F97316 |
+| Hover border | 2px solid #EA580C |
+
+### ROW HIGHLIGHT BEHAVIOR
+
+When user clicks a color circle:
+- The ENTIRE row gets a light tint of that color as background
+- The context menu closes
+- The highlight persists until changed or removed
+
+**Row tint colors (very light, so text remains readable):**
+
+| Color | Row background tint |
+|---|---|
+| No highlight | Default white / transparent |
+| Violet | #F5F3FF (very light violet) |
+| Green | #F0FDF4 (very light green) |
+| Orange | #FFF7ED (very light orange) |
+
+**Row left border accent (optional, for stronger visual):**
+
+| Color | Left border |
+|---|---|
+| Violet | 3px solid #8B5CF6 |
+| Green | 3px solid #22C55E |
+| Orange | 3px solid #F97316 |
+
+### CURRENTLY SELECTED COLOR
+
+When a row already has a highlight, the corresponding circle shows a small white checkmark (✓) inside it:
+
+```
+○  🟣✓  🟢  🟠    ← Violet is currently selected
+```
+
+| Property | Value |
+|---|---|
+| Checkmark | White (#ffffff), 10px, centered inside the circle |
+| Font weight | 700 |
+
+---
+
+### 3. LEAVE A COMMENT — CELL-LEVEL
+
+When the user clicks "💬 Leave a comment":
+
+### COMMENT POPOVER
+
+A popover appears anchored to the cell that was right-clicked.
+
+```
+┌──────────────────────────────────────────────┐
+│ Comment on Volume (MT)            ✕          │
+├──────────────────────────────────────────────┤
+│                                              │
+│ ┌── Previous comments ─────────────────────┐ │
+│ │                                          │ │
+│ │ John — March 25, 10:30 AM               │ │
+│ │ Volume adjusted due to client request    │ │
+│ │                              [Edit] [🗑] │ │
+│ │                                          │ │
+│ │ Maria — March 25, 2:15 PM               │ │
+│ │ Confirmed with warehouse, stock ok       │ │
+│ │                              [Edit] [🗑] │ │
+│ │                                          │ │
+│ └──────────────────────────────────────────┘ │
+│                                              │
+│ ┌──────────────────────────────────────────┐ │
+│ │ Add a comment...                         │ │
+│ └──────────────────────────────────────────┘ │
+│                                 [Post]       │
+│                                              │
+└──────────────────────────────────────────────┘
+```
+
+### POPOVER STYLING
+
+| Property | Value |
+|---|---|
+| Background | White (#ffffff) |
+| Border | 1px solid #e5e7eb |
+| Border-radius | 8px |
+| Box shadow | 0 4px 12px rgba(0,0,0,0.1) |
+| Width | 320px |
+| Max height | 400px |
+| Overflow-y | Auto (scrollable if many comments) |
+| Padding | 0 |
+
+### POPOVER HEADER
+
+| Property | Value |
+|---|---|
+| Text | "Comment on [Column Name]" |
+| Font size | 12px |
+| Font weight | 600 |
+| Color | Dark text (#1a1a1a) |
+| Padding | 12px 16px |
+| Border-bottom | 1px solid #f3f4f6 |
+| ✕ close button | Right-aligned, grey (#9ca3af), hover dark grey |
+
+### COMMENT THREAD
+
+| Property | Value |
+|---|---|
+| Container padding | 12px 16px |
+
+**Each comment:**
+
+| Property | Value |
+|---|---|
+| Username | 11px, font-weight 600, dark text (#1a1a1a) |
+| Timestamp | 11px, font-weight 400, grey (#9ca3af), separated by " — " |
+| Comment text | 12px, font-weight 400, dark grey (#374151), line-height 1.5 |
+| Margin-bottom | 12px (between comments) |
+| Border-bottom | 1px solid #f3f4f6 (between comments) |
+| Padding-bottom | 12px |
+
+**Edit and Delete buttons:**
+
+| Property | Value |
+|---|---|
+| Position | Right-aligned below the comment text |
+| Font size | 10px |
+| Color | Grey (#9ca3af) |
+| Hover color | Dark text (#374151) for Edit, Red (#e53935) for Delete |
+| Cursor | Pointer |
+| Gap | 8px between Edit and Delete |
+| Visibility | Always visible (since no RBAC yet, any user can edit/delete any comment) |
+
+### EDIT MODE
+
+When user clicks [Edit]:
+- The comment text becomes an editable textarea
+- [Edit] and [🗑] buttons change to [Save] and [Cancel]
+- On Save → comment text updates, timestamp updates to "Edited — March 25, 3:00 PM"
+- On Cancel → reverts to original text
+
+### DELETE
+
+When user clicks [🗑]:
+- Brief confirmation: "Delete this comment?" [Cancel] [Delete]
+- On delete → comment removed from thread
+- If last comment is deleted → triangle indicator removes from cell
+
+### ADD COMMENT INPUT
+
+| Property | Value |
+|---|---|
+| Textarea | 12px, placeholder "Add a comment...", border 1px solid #d1d5db |
+| Textarea height | 60px, resizable vertically |
+| Textarea padding | 8px 12px |
+| Textarea focus border | Orange (#fd5108) |
+| [Post] button | Orange filled (#fd5108), white text, 11px, font-weight 600 |
+| [Post] disabled | When textarea is empty — grey background, not-allowed cursor |
+
+### ON POST
+
+1. Comment added to the thread with current username and timestamp
+2. Textarea clears
+3. Triangle indicator appears on the cell (if not already there)
+
+### USERNAME (TEMPORARY — NO RBAC YET)
+
+Since there's no user access/RBAC yet:
+- Use a simple prompt or stored name: "Planner" or allow user to set a display name in settings
+- Or use "User" as default
+- When RBAC is added later, replace with actual user info
+
+### TRIANGLE INDICATOR
+
+When a cell has at least one comment, show a small triangle in the top-right corner.
+
+| Property | Value |
+|---|---|
+| Position | Absolute, top-right corner of the cell |
+| Size | 8px × 8px |
+| Shape | Triangle (CSS border trick) |
+| Color | Orange (#fd5108) |
+
+```css
+.cell-comment-indicator {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 0;
+  height: 0;
+  border-left: 8px solid transparent;
+  border-top: 8px solid #fd5108;
+}
+```
+
+### HOVER ON TRIANGLE
+
+When user hovers over a cell with the triangle indicator:
+- Show a tooltip preview of the latest comment:
+  ```
+  John — March 25, 10:30 AM
+  Volume adjusted due to client request
+  
+  + 1 more comment
+  ```
+- Tooltip appears after 300ms hover delay
+- Click on the cell (or right-click → Leave a comment) opens the full popover
+
+---
+
+### 4. VIEW ORDER HISTORY
+
+When the user clicks "🕐 View order history":
+- Opens the SAME history panel/modal that the existing History column button opens
+- Pre-selected to the order that was right-clicked
+- No changes to the history panel itself — just a new entry point
+
+---
+
+### 5. CONTEXT MENU — COMPLETE EXAMPLE
+
+**Right-click on Volume cell of "Elite XP Startex" row (currently highlighted green):**
+
+```
+┌────────────────────────────────────┐
+│ 💬 Leave a comment                  │
+│ 🕐 View order history               │
+├────────────────────────────────────┤
+│ ○   🟣   🟢✓   🟠                  │
+└────────────────────────────────────┘
+```
+
+- Green circle has ✓ because the row is currently highlighted green
+- "Leave a comment" opens comment popover for the Volume cell
+- "View order history" opens the history panel for this order
+
+**Right-click on a cell with existing comment (triangle indicator visible):**
+
+Same menu appears. Clicking "Leave a comment" opens the popover showing existing comments + input to add more.
+
+---
+
+### 6. APPLY TO ALL ORDER TABLES
+
+The right-click context menu works on:
+- ✅ All line tabs (Line 1, Line 2, etc.)
+- ✅ All feedmill tabs
+- ✅ "All" tab
+- ✅ Every cell in the order table (order details, production parameters, scheduling columns)
+- ❌ NOT on column headers
+- ❌ NOT on the table header container
+- ❌ NOT on Done or Cancelled order rows (or should it? Let me know)
+
+---
+
+### 7. DATA PERSISTENCE
+
+| Data | Storage |
+|---|---|
+| Comments | Saved per cell (keyed by order ID + column name) |
+| Row highlight color | Saved per order ID |
+| Both persist | Across page refresh, tab switches, and sessions |
+```

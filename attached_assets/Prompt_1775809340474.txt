@@ -1,0 +1,225 @@
+```
+Fix the following issue:
+
+---
+
+## FIX: PERSIST SHUTDOWN STATE IN localStorage
+
+The shutdown state is currently stored only in React state (useState), which resets on page refresh. Move it to localStorage so it persists across refreshes.
+
+---
+
+### 1. INITIALIZE STATE FROM localStorage
+
+```javascript
+function getPersistedLineShutdowns() {
+  try {
+    const saved = localStorage.getItem('line_shutdowns');
+    return saved ? JSON.parse(saved) : {};
+  } catch (e) {
+    console.error('Failed to load line shutdowns:', e);
+    return {};
+  }
+}
+
+function getPersistedFeedmillShutdowns() {
+  try {
+    const saved = localStorage.getItem('feedmill_shutdowns');
+    return saved ? JSON.parse(saved) : {};
+  } catch (e) {
+    console.error('Failed to load feedmill shutdowns:', e);
+    return {};
+  }
+}
+
+// In your component:
+const [lineShutdowns, setLineShutdowns] = useState(() => getPersistedLineShutdowns());
+const [feedmillShutdowns, setFeedmillShutdowns] = useState(() => getPersistedFeedmillShutdowns());
+```
+
+### 2. PERSIST TO localStorage ON EVERY CHANGE
+
+```javascript
+// Whenever lineShutdowns changes, save to localStorage
+useEffect(() => {
+  try {
+    localStorage.setItem('line_shutdowns', JSON.stringify(lineShutdowns));
+  } catch (e) {
+    console.error('Failed to save line shutdowns:', e);
+  }
+}, [lineShutdowns]);
+
+// Whenever feedmillShutdowns changes, save to localStorage
+useEffect(() => {
+  try {
+    localStorage.setItem('feedmill_shutdowns', JSON.stringify(feedmillShutdowns));
+  } catch (e) {
+    console.error('Failed to save feedmill shutdowns:', e);
+  }
+}, [feedmillShutdowns]);
+```
+
+### 3. ON APP LOAD — RECALCULATE VISUAL INDICATORS
+
+When the app loads and shutdown state is restored from localStorage, recalculate all visual indicators (red borders, divert markers, changeovers, completion dates):
+
+```javascript
+useEffect(() => {
+  // On initial load, if there are persisted shutdowns, reapply visual indicators
+  const savedLineShutdowns = getPersistedLineShutdowns();
+  const savedFeedmillShutdowns = getPersistedFeedmillShutdowns();
+  
+  const hasShutdowns = Object.keys(savedLineShutdowns).some(
+    line => savedLineShutdowns[line]?.isShutdown
+  );
+  
+  if (hasShutdowns) {
+    // Re-mark divertible orders
+    markDivertibleOrders(allOrders, savedLineShutdowns, masterData);
+    
+    // Recalculate changeovers and completion dates
+    recalculateAllChangeovers(allOrders, changeoverRules);
+    recalculateCompletionDates(allOrders);
+  }
+}, []); // Run once on mount
+```
+
+### 4. SHUTDOWN HANDLER — ALREADY TRIGGERS setState, NOW ALSO PERSISTS
+
+The existing `handleShutdownConfirm` already calls `setLineShutdowns` and `setFeedmillShutdowns`. Since we added the `useEffect` watchers above, the state will automatically persist to localStorage whenever it changes. No additional changes needed in the handler.
+
+```javascript
+function handleShutdownConfirm(shutdownData) {
+  const { target, targetType, reason, notes, timestamp } = shutdownData;
+  
+  if (targetType === 'line') {
+    // This triggers the useEffect which saves to localStorage
+    setLineShutdowns(prev => ({
+      ...prev,
+      [target]: {
+        isShutdown: true,
+        reason,
+        notes,
+        since: timestamp,
+        feedmill: LINE_TO_FEEDMILL_MAP[target]
+      }
+    }));
+  } else {
+    const lines = FEEDMILL_LINE_MAP[target];
+    setLineShutdowns(prev => {
+      const updated = { ...prev };
+      lines.forEach(line => {
+        updated[line] = {
+          isShutdown: true,
+          reason,
+          notes,
+          since: timestamp,
+          feedmill: target,
+          isFeedmillShutdown: true
+        };
+      });
+      return updated;
+    });
+    
+    setFeedmillShutdowns(prev => ({
+      ...prev,
+      [target]: { isShutdown: true, reason, notes, since: timestamp }
+    }));
+  }
+  
+  // Mark divertible orders
+  markDivertibleOrders(allOrders, lineShutdowns, masterData);
+  
+  // Recalculate
+  recalculateAllChangeovers(allOrders, changeoverRules);
+  recalculateCompletionDates(allOrders);
+  
+  showNotification('warning', `${target} has been shut down. ${reason}.`);
+}
+```
+
+### 5. RESUME HANDLER — ALSO PERSISTS VIA useEffect
+
+```javascript
+function handleResume(target, targetType) {
+  if (targetType === 'line') {
+    setLineShutdowns(prev => {
+      const updated = { ...prev };
+      delete updated[target];
+      return updated;
+    });
+    
+    clearDivertMarkers(target);
+  } else {
+    const lines = FEEDMILL_LINE_MAP[target];
+    setLineShutdowns(prev => {
+      const updated = { ...prev };
+      lines.forEach(line => delete updated[line]);
+      return updated;
+    });
+    
+    setFeedmillShutdowns(prev => {
+      const updated = { ...prev };
+      delete updated[target];
+      return updated;
+    });
+    
+    lines.forEach(line => clearDivertMarkers(line));
+  }
+  
+  // Recalculate after resume
+  recalculateAllChangeovers(allOrders, changeoverRules);
+  recalculateCompletionDates(allOrders);
+  
+  showNotification('success', `${target} has been resumed.`);
+}
+```
+
+### 6. ALSO RE-MARK DIVERTIBLE ORDERS WHEN ORDERS DATA CHANGES
+
+If orders are added, removed, or modified while a shutdown is active, re-mark divertible orders:
+
+```javascript
+useEffect(() => {
+  const hasShutdowns = Object.keys(lineShutdowns).some(
+    line => lineShutdowns[line]?.isShutdown
+  );
+  
+  if (hasShutdowns) {
+    markDivertibleOrders(allOrders, lineShutdowns, masterData);
+  }
+}, [allOrders, lineShutdowns, masterData]);
+```
+
+---
+
+## VERIFICATION
+
+### Persistence
+1. ✅ Shutdown Line 1 → refresh → Line 1 still shows as shutdown
+2. ✅ Red borderline persists after refresh
+3. ✅ Divert hints persist after refresh (yellow/white with notes)
+4. ✅ Shutdown banner with date and reason persists after refresh
+5. ✅ Shutdown feedmill → refresh → both lines still shutdown
+
+### Resume persistence
+6. ✅ Resume Line 1 → refresh → Line 1 is active (not reverted to shutdown)
+7. ✅ Resume feedmill → refresh → all lines active
+
+### Shutdown info
+8. ✅ Reason persists after refresh
+9. ✅ Notes persist after refresh
+10. ✅ "Since" date persists after refresh
+
+### Visual indicators on reload
+11. ✅ Red border recalculated on load
+12. ✅ Divertible orders re-marked on load
+13. ✅ Changeovers recalculated on load
+14. ✅ Completion dates recalculated on load
+
+### Edge cases
+15. ✅ localStorage error → gracefully falls back to empty state
+16. ✅ Corrupted localStorage → doesn't crash, resets to empty
+17. ✅ Multiple shutdowns (Line 1 + Line 3) → both persist
+18. ✅ Adding/removing orders while shutdown is active → divert markers update
+```

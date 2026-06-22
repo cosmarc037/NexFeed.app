@@ -1,0 +1,134 @@
+Please add bidirectional clickable navigation between Line 5 source orders and the orders automatically created from them through Powermix Split logic.
+
+This is a usability enhancement to make linked Powermix orders easier to trace in the schedule.
+
+---
+
+## OBJECTIVE
+
+If an order on **Line 5** generates a split order on **Line 2** or **Line 6**, users should be able to click the order and directly navigate to its linked counterpart.
+
+This should work in both directions:
+
+### A. From Line 5 source order
+Clicking the source order should navigate to the generated split order.
+
+### B. From generated split order
+Clicking the generated order should navigate back to the source Line 5 order.
+
+This is important because once there are many orders on the screen, manually searching for the linked row becomes difficult and causes eye strain.
+
+---
+
+## REQUIRED BEHAVIOR
+
+### 1. LINE 5 → GENERATED ORDER
+If a Line 5 order has a generated split order:
+- make the order’s item description clickable (or provide a clear clickable link/icon near it)
+- on click, navigate directly to the generated order row in the target line
+- if needed, switch the UI to the correct line automatically
+- scroll to the target row
+- visually highlight the target row briefly so the user can identify it immediately
+
+### 2. GENERATED ORDER → LINE 5 SOURCE ORDER
+If an order in Line 2 or Line 6 was generated from a Line 5 order:
+- make the generated order’s item description clickable (or provide a clear clickable link/icon near it)
+- on click, navigate directly to the source Line 5 order
+- switch to Line 5 if needed
+- scroll to the source row
+- visually highlight the source row briefly
+
+---
+
+## LINKAGE REQUIREMENT
+
+This behavior should use the existing or required source/generated linkage for Powermix orders, such as:
+- source_order_id
+- generated_order_id
+- linked_order_id
+- generation_rule_id
+- generated_from_powermix = true
+
+Do not rely on loose matching by item description text only.
+
+Navigation should use the actual linked order relationship.
+
+---
+
+## UI / UX SUGGESTION
+
+Preferred approach:
+- make the item description clickable for linked Powermix rows
+
+Alternative acceptable approach:
+- add a small link / arrow / chain icon next to the item description
+
+Examples of tooltip text:
+- `Go to generated split order`
+- `Go to source Line 5 order`
+
+If helpful, visually distinguish these linked rows using the already existing purple styling for generated orders.
+
+---
+
+## EDGE CASES
+
+### If linked row is missing
+If the linked row no longer exists or cannot be found:
+- do not break the page
+- show a small message such as:
+  - `Linked order not found`
+  - or disable the click affordance
+
+### If multiple generated rows ever exist in the future
+If one source Line 5 order can create multiple linked rows in the future, then clicking should either:
+- open the first linked row for now
+- or show a small selection popover
+
+For now, current behavior can assume one linked row per rule-generated relationship unless the app already supports more.
+
+---
+
+## VISUAL FEEDBACK
+
+When navigating to the linked order:
+- scroll it into view
+- apply a temporary highlight or pulse effect
+- keep the row visibly selected for a few seconds if possible
+
+This helps the user immediately locate the target row after navigation.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log:
+
+```javascript
+console.debug('[Powermix Linked Navigation]', {
+  clickedOrderId,
+  clickedOrderLine,
+  linkedOrderId,
+  linkedOrderLine,
+  navigationDirection, // source_to_generated | generated_to_source
+});
+```
+
+```javascript
+console.debug('[Powermix Linked Navigation Result]', {
+  linkedOrderFound,
+  targetScrolledIntoView,
+  targetHighlighted,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Clicking a linked Line 5 source order navigates to the generated split order
+2. ✅ Clicking a generated split order navigates back to the source Line 5 order
+3. ✅ Navigation works even if the linked order is on another line
+4. ✅ The app scrolls to the linked row and highlights it
+5. ✅ Navigation uses actual source/generated order linkage, not weak text matching
+6. ✅ Missing linked rows are handled gracefully without UI failure

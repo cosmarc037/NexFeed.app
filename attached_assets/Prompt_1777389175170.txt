@@ -1,0 +1,211 @@
+```
+Fix AI Balanced final ordering so the table is always chronologically correct, while still refining same-date or equal-priority orders to reduce changeovers.
+
+---
+
+## OBJECTIVE
+
+Ensure that AI Balanced never displays orders with a later avail date above an earlier avail date.
+
+Example of wrong behavior:
+- 22 May
+- 22 May
+- 05 May ❌
+
+This must never happen.
+
+The final output should remain:
+- chronology first
+- hard constraints second
+- material compatibility third
+
+Material optimization must only refine order inside the same effective date or same safe date bucket. It must not override chronological order.
+
+---
+
+## 1. ENFORCE FINAL CHRONOLOGICAL SORT AS PRIMARY RULE
+
+Update the final sorting function for AI Balanced so that effective avail date is always the primary sort key.
+
+```javascript
+function sortOrdersChronologicallyWithBalancedTieBreak(orders) {
+  return [...orders].sort((a, b) => {
+    const dateA = normalizeDate(a._aiSuggestedDate || a.target_avail_date);
+    const dateB = normalizeDate(b._aiSuggestedDate || b.target_avail_date);
+
+    const isAReal = isISODate(dateA);
+    const isBReal = isISODate(dateB);
+
+    // 1. Real dated values come first over non-date labels
+    if (isAReal && !isBReal) return -1;
+    if (!isAReal && isBReal) return 1;
+
+    // 2. If both are real dates, chronological order ALWAYS wins
+    if (isAReal && isBReal) {
+      const diff = new Date(dateA) - new Date(dateB);
+      if (diff !== 0) return diff;
+    }
+
+    // 3. Same date only → apply protected priority
+    const rankA = getProtectedRank(a);
+    const rankB = getProtectedRank(b);
+    if (rankA !== rankB) return rankA - rankB;
+
+    // 4. Same date and same rank only → apply material compatibility tie-breaker
+    return compareMaterialCompatibility(a, b);
+  });
+}
+```
+
+---
+
+## 2. DO NOT LET MATERIAL COMPATIBILITY OVERRIDE DIFFERENT DATES
+
+If current logic applies compatibility scoring across different effective dates, remove that.
+
+Material compatibility can only influence:
+- same effective date
+- or optionally same date bucket if explicitly defined
+
+But it must never reorder:
+- 05 May below 22 May
+- 01 May below 30 Apr
+- etc.
+
+This means:
+- if `dateA !== dateB`, immediately return chronological comparison
+- do not apply compatibility scoring after that
+
+---
+
+## 3. FINAL AI BALANCED FLOW MUST END WITH CHRONOLOGICAL RE-SORT
+
+After:
+- AI reordering
+- AI date suggestion
+- heuristic refinement
+
+the final result must be re-sorted using the chronology-first function.
+
+```javascript
+async function generateAIBalancedSequence(enrichedByLine, n10dData, masterData, changeoverRules) {
+  const prompt = buildAIBalancedPrompt(enrichedByLine, changeoverRules);
+
+  let aiResult = { strategy: {}, reasoning: '', dateAdjustments: [] };
+
+  try {
+    const response = await callAzureOpenAI(prompt);
+    aiResult = parseAIResponse(response);
+  } catch (error) {
+    console.error('AI Balanced generation failed:', error);
+    return generateStandardSequence(enrichedByLine);
+  }
+
+  const aiReordered = applyAIReordering(enrichedByLine, aiResult);
+  const withDates = applyBalancedDateHeuristic(aiReordered, changeoverRules, n10dData);
+
+  const finalResult = {};
+
+  Object.entries(withDates).forEach(([line, orders]) => {
+    finalResult[line] = sortOrdersChronologicallyWithBalancedTieBreak(orders).map((o, i) => ({
+      ...o,
+      prio: i + 1,
+    }));
+  });
+
+  return {
+    id: 'ai_balanced',
+    name: 'AI Balanced',
+    theme: 'AI-Powered (Balanced)',
+    description: 'AI suggests practical dates and refines sequencing to reduce changeovers while preserving chronological order',
+    icon: '🤖',
+    color: 'purple',
+    orders: finalResult,
+    metrics: calculateStrategyMetrics(finalResult),
+    aiReasoning: aiResult.reasoning || '',
+    dateAdjustments: collectDateAdjustments(finalResult),
+    isAIRecommended: false,
+  };
+}
+```
+
+---
+
+## 4. OPTIONAL: ONLY APPLY MATERIAL TIEBREAK WITH SAME-DATE GROUPS
+
+To make it extra safe, explicitly group by date first, then sort inside each date group.
+
+```javascript
+function sortWithinDateGroups(orders) {
+  const groups = new Map();
+
+  orders.forEach(order => {
+    const key = normalizeDate(order._aiSuggestedDate || order.target_avail_date) || '__NO_DATE__';
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(order);
+  });
+
+  const sortedDates = Array.from(groups.keys()).sort((a, b) => {
+    if (a === '__NO_DATE__') return 1;
+    if (b === '__NO_DATE__') return -1;
+    return new Date(a) - new Date(b);
+  });
+
+  const final = [];
+
+  sortedDates.forEach(dateKey => {
+    const bucket = groups.get(dateKey);
+
+    bucket.sort((a, b) => {
+      const rankA = getProtectedRank(a);
+      const rankB = getProtectedRank(b);
+      if (rankA !== rankB) return rankA - rankB;
+
+      return compareMaterialCompatibility(a, b);
+    });
+
+    final.push(...bucket);
+  });
+
+  return final;
+}
+```
+
+If you use this function, use it as the final sort instead of a flat comparator.
+
+---
+
+## 5. KEEP DATE SUGGESTIONS, BUT FINAL VISUAL ORDER MUST STILL BE CORRECT
+
+No changes needed to:
+- AI date generation
+- date adjustments display
+- insights
+
+Only fix the final output ordering so that once dates are assigned, the table visually reflects those dates in ascending order.
+
+---
+
+## VERIFICATION
+
+### Chronological correctness
+1. ✅ Orders are always displayed in ascending avail date order
+2. ✅ 05 May will never appear below 22 May
+3. ✅ 30 Apr will never appear below 01 May
+4. ✅ Earlier dates always appear above later dates
+
+### Balanced refinement
+5. ✅ Material compatibility still refines ordering only when dates are equal
+6. ✅ Changeover reduction still applies within same-date groups
+7. ✅ Compatibility no longer overrides chronology across different dates
+
+### Protected logic
+8. ✅ MTO dates remain fixed
+9. ✅ Critical orders remain protected
+10. ✅ Urgent / Monitor still follow safe date rules
+11. ✅ Flexible orders can still get AI-suggested dates
+
+### Final rendering
+12. ✅ After table visually matches chronological expectations
+13. ✅ AI Balanced remains sensible and easy to understand
+14. ✅ No more “later date above earlier date” regression

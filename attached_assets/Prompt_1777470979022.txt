@@ -1,0 +1,158 @@
+```
+Update the strategy card badge layout so the top-right badges are aligned horizontally on a single row and positioned dynamically based on which badges are present.
+
+## Goal
+Currently, when a strategy card has both:
+- Recommended
+- Low distinction
+
+the badges can appear stacked vertically, like:
+[Recommended]
+[Low distinction]
+
+Instead, they should appear on the same horizontal line:
+[Low distinction] [Recommended]
+
+Also, if a card has only one badge, it should still stay aligned to the top-right corner.
+
+Example desired behavior:
+
+### Both badges present
+top-right:
+[Low distinction] [Recommended]
+
+### Only Low distinction present
+top-right:
+[Low distinction]
+
+### Only Recommended present
+top-right:
+[Recommended]
+
+Do not leave the badge floating more toward the middle of the card when it is the only badge.
+
+---
+
+## Implementation requirements
+
+### 1. Use one shared badge container in the top-right corner
+Each strategy card should have a single badge wrapper positioned absolutely in the top-right corner.
+
+Example:
+```jsx
+<div className="strategy-card-badges">
+  {strategy.isLowDistinction && (
+    <span className="strategy-badge strategy-badge-low-distinction">
+      ⓘ Low distinction
+    </span>
+  )}
+
+  {strategy.isAIRecommended && (
+    <span className="strategy-badge strategy-badge-recommended">
+      ⭐ Recommended
+    </span>
+  )}
+</div>
+```
+
+---
+
+### 2. Render badges in a horizontal row
+Badges should be displayed using flex row layout, not stacked vertically.
+
+Example CSS:
+```css
+.strategy-card-badges {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  z-index: 2;
+  flex-wrap: nowrap;
+}
+```
+
+This ensures:
+- badges stay on one row
+- badges stay pinned right
+- single badge also stays right-aligned
+
+---
+
+### 3. Maintain consistent badge order
+When both are present, use this order:
+
+```text
+[Low distinction] [Recommended]
+```
+
+So:
+- Low distinction first
+- Recommended second
+
+This matches the expected visual order.
+
+---
+
+### 4. Keep layout dynamic
+The container should adapt automatically:
+- if only one badge exists, it stays at top-right
+- if both exist, they appear side-by-side
+- if none exist, no empty space or placeholder should appear
+
+---
+
+### 5. Prevent overlap with card title/content
+If necessary, add enough top padding to the card header/content area so the badge row does not overlap the strategy title.
+
+Example:
+```css
+.strategy-card {
+  position: relative;
+}
+
+.strategy-card-header,
+.strategy-card-body {
+  padding-top: 24px; /* adjust only if needed */
+}
+```
+
+Only do this if actual overlap occurs.
+
+---
+
+### 6. Make badge styling visually consistent
+Ensure both badges have compatible height and spacing so they look aligned on the same row.
+
+Example:
+```css
+.strategy-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+```
+
+Keep existing colors/styles unless adjustment is needed.
+
+---
+
+## Verification
+
+1. If both badges are present, they appear on one row:
+   [Low distinction] [Recommended]
+2. If only Low distinction exists, it stays top-right
+3. If only Recommended exists, it stays top-right
+4. Badges are no longer stacked vertically
+5. Badge placement feels dynamic and clean across all strategy cards
+6. No overlap occurs with strategy title or description

@@ -1,0 +1,153 @@
+Please revisit the **`today + 2` minimum scheduling floor** in the Auto-Sequence AI, especially for **Sufficient / Flexible / MTS orders**, because it may be blocking valid earlier-fulfillment opportunities and leaving earlier days underutilized.
+
+---
+
+## 1. REVISIT OR REMOVE THE GLOBAL `TODAY + 2` FLOOR FOR FLEXIBLE / MTS ADVANCEMENT
+
+Right now, the AI appears to be using `today + 2` as the earliest date it can schedule most orders.
+
+### Current issue
+This means that even if:
+- there is available capacity on an earlier day
+- and a flexible / MTS order could be safely advanced
+- and doing so would improve utilization
+
+the AI is still blocked from using that earlier day.
+
+### Goal
+Allow the AI to use earlier underloaded days when that makes operational sense.
+
+### Expected result
+Flexible / MTS orders should not be automatically forced to start only from `today + 2` if earlier fulfillment is valid and useful.
+
+---
+
+## 2. DO NOT LET THE `TODAY + 2` FLOOR UNDERMINE EARLIER-FULFILLMENT LOGIC
+
+The AI is supposed to support earlier fulfillment by advancing flexible orders into underloaded days when beneficial.
+
+### Current problem
+If the earliest allowed date is hard-blocked at `today + 2`, then even clearly underutilized earlier days cannot be filled.
+
+### Example
+If:
+- today is `June 4`
+- the line has very little work on `June 4`
+- and there are flexible orders that could be advanced safely
+
+then the AI should not be forced to wait until `June 6` just because of the `today + 2` floor.
+
+### Goal
+Make sure the AI can actually use early advancement to improve utilization.
+
+### Expected result
+Earlier fulfillment opportunities are no longer artificially blocked by the current minimum-date rule.
+
+---
+
+## 3. LET FLEXIBLE / SUFFICIENT / MTS ORDERS USE EARLIER DAYS WHEN SAFE
+
+Please allow the AI to place flexible orders on earlier dates if:
+- the order is allowed to be advanced
+- the line/day has available capacity
+- there is no business rule explicitly preventing it
+- and it improves schedule utilization or sequencing quality
+
+### Goal
+Make the AI more opportunistic with underloaded earlier days.
+
+### Expected result
+The AI can use earlier dates when that is beneficial, instead of being blocked by a blanket two-day floor.
+
+---
+
+## 4. KEEP STRICTER DATE RULES ONLY WHERE THEY ARE ACTUALLY NEEDED
+
+This request is mainly about flexible / MTS / Sufficient advancement.
+
+### Important
+If certain order types still need stricter timing behavior (for example MTO or other truly fixed orders), those rules can remain where appropriate.
+
+### Goal
+Avoid using one blanket minimum-date rule for all order types if that prevents valid optimization.
+
+### Expected result
+The AI has more freedom for flexible orders, while still respecting true hard-date constraints where necessary.
+
+---
+
+## 5. MAKE THE AI MORE ABLE TO FILL UNDERUTILIZED EARLIER DAYS
+
+One of the goals of the AI is to improve utilization.
+
+### Current issue
+A hard `today + 2` floor can leave days like `today` or `tomorrow` underloaded even when flexible orders could reasonably be placed there.
+
+### Goal
+Allow the AI to improve line utilization by using earlier available dates when feasible.
+
+### Expected result
+Earlier days should no longer remain unnecessarily underutilized just because flexible orders were artificially blocked from being placed there.
+
+---
+
+## IMPORTANT
+
+Please revisit the `today + 2` earliest-date rule.
+
+The current behavior appears to prevent the AI from advancing flexible / MTS orders into earlier underloaded days, which undermines the earlier-fulfillment goal of the AI.
+
+Please adjust or remove this blanket floor — especially for flexible / Sufficient / MTS orders — so the AI can:
+- use earlier available dates when safe
+- improve utilization
+- and better support earlier fulfillment
+
+This is needed because a hard `today + 2` floor can leave earlier days underutilized even when there are valid flexible orders that could be produced there.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log whether earlier placement is being blocked by the `today + 2` rule.
+
+```javascript
+console.debug('[Auto-Sequence Today+2 Floor Check]', {
+  orderId,
+  status,
+  rawAvailDate,
+  suggestedDate,
+  todayPlus2FloorApplied,
+  blockedEarlierPlacementBecauseOfTodayPlus2: true,
+});
+```
+
+```javascript
+console.debug('[Auto-Sequence Earlier Fulfillment Opportunity]', {
+  orderId,
+  status,
+  earlierDayAvailable,
+  earlierPlacementWouldImproveUtilization,
+  aiAllowedToUseEarlierDay,
+});
+```
+
+```javascript
+console.debug('[Auto-Sequence Underloaded Day Missed Opportunity]', {
+  line,
+  date,
+  dayLoad,
+  hadFlexibleOrdersThatCouldAdvance,
+  blockedByTodayPlus2,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ The `today + 2` floor is revisited for flexible/MTS orders
+2. ✅ Flexible orders can be advanced to earlier underloaded days when safe
+3. ✅ Earlier fulfillment is no longer blocked by a blanket minimum-date rule
+4. ✅ Underutilized earlier days can be filled more intelligently
+5. ✅ True hard-date rules still remain where needed
+6. ✅ No UI errors or console errors are introduced

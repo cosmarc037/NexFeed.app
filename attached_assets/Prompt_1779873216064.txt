@@ -1,0 +1,229 @@
+Please update the **Plant-Level Auto-Sequence** behavior so that **shutdown lines are excluded from auto-sequence participation**, and clearly indicate in the preview UI that those lines are in shutdown.
+
+---
+
+## 1. EXCLUDE SHUTDOWN LINES FROM AUTO-SEQUENCE PARTICIPATION
+
+The auto-sequence feature is responsible for:
+- cross-line movement
+- line load balancing
+- cross-line combination
+- AI sequencing strategy generation
+
+Please update the auto-sequence engine so that if a line is currently in **shutdown**, that line is **not included** in the active optimization set.
+
+### New rule
+If a line is in shutdown, it must not participate in:
+- cross-line movement destination evaluation
+- cross-line combination scanning/placement
+- AI sequencing candidate placement
+- plant-level active-line balancing
+- final auto-sequence placement decisions
+
+### Expected result
+Auto-sequence should only operate on **active lines**.
+
+Shutdown lines must be excluded from the sequencing engine’s active placement universe until they resume operations.
+
+---
+
+## 2. DO NOT PLACE ORDERS ONTO SHUTDOWN LINES DURING AUTO-SEQUENCE
+
+Please make sure auto-sequence does not place, re-place, or move orders onto a line that is currently in shutdown.
+
+### Important
+This includes:
+- normal orders
+- diverted orders
+- combined orders
+- generated orders
+- orders being rebalanced from other lines
+
+### Expected result
+No order should be auto-assigned onto a shutdown line while the shutdown remains active.
+
+---
+
+## 3. DO NOT MOVE DIVERTED ORDERS BACK TO THEIR SHUTDOWN SOURCE LINE DURING AUTO-SEQUENCE
+
+If a user diverts an order away from a shutdown line, then later runs auto-sequence and applies the schedule, the app must not move that diverted order back to the original shutdown line.
+
+### Example
+- Line 1 is in shutdown
+- an order is diverted from `Line 1` to `Line 2`
+- user runs plant-level auto-sequence
+
+### Expected behavior
+As long as Line 1 is still in shutdown:
+- auto-sequence must not place the order back onto Line 1
+- the order must remain eligible only among active lines
+
+### Expected result
+Shutdown lines should never “reclaim” diverted orders through auto-sequence while the shutdown is active.
+
+---
+
+## 4. EXCLUDE SHUTDOWN LINES FROM CROSS-LINE COMBINATION LOGIC
+
+Please also ensure that shutdown lines are excluded from the cross-line combination process during auto-sequence.
+
+### Important
+If a line is in shutdown, it should not be treated as:
+- a valid target line for combining
+- a valid active queue for cross-line combine placement
+- a valid line in the optimizer’s combine scan outcome
+
+### Expected result
+Cross-line combination should only consider active lines.
+
+Shutdown lines must not act as active combination destinations or placement candidates during plant-level auto-sequence.
+
+---
+
+## 5. KEEP SHUTDOWN LINES VISIBLE IN THE AUTO-SEQUENCE PREVIEW UI
+
+Even though shutdown lines should be excluded from optimization, please keep them visible in the preview UI for context.
+
+### Goal
+Users should still be able to see that the line exists and understand why it was not used by the optimizer.
+
+### Expected result
+Shutdown lines should still appear in the Plant-Level Auto-Sequence preview/tab area, but clearly marked as unavailable for sequencing.
+
+---
+
+## 6. ADD A CLEAR SHUTDOWN INDICATOR IN THE PREVIEW UI
+
+Please add a visual indicator in the auto-sequence preview so users can clearly see that a line is in shutdown.
+
+### Suggested UI options
+Any of the following are acceptable as long as the meaning is clear:
+- a red `Shutdown` badge/tag next to the line name
+- muted/low-opacity styling for the line tab/section
+- a red highlight accent
+- a visible note/banner inside the line preview section
+
+### Goal
+Users should immediately understand:
+- why orders were not placed on that line
+- why the line was not used in auto-sequence
+- why no cross-line movement/combination considered that line
+
+### Expected result
+The preview should visually explain that the line is excluded because it is currently in shutdown.
+
+---
+
+## 7. SHOW A SHUTDOWN EXPLANATION MESSAGE IN THE PREVIEW IF A USER OPENS THAT LINE
+
+If a user selects or views a shutdown line in the Plant-Level Auto-Sequence preview, please show a message such as:
+
+- `This line is currently in shutdown and was excluded from auto-sequence optimization.`
+- or
+- `Orders were not placed on this line because it is currently in shutdown.`
+
+### Goal
+Make the behavior self-explanatory.
+
+### Expected result
+Users do not have to guess why that line has no optimization activity or placements.
+
+---
+
+## 8. APPLY THIS TO BOTH LINE-LEVEL AND PLANT-LEVEL AUTO-SEQUENCE WHERE RELEVANT
+
+Please apply the shutdown exclusion rule consistently wherever the app performs sequencing logic that:
+- moves orders across lines
+- combines across lines
+- or recommends placements among multiple lines
+
+### Expected result
+There should be no auto-sequence flow where a shutdown line is still treated as a valid active placement line.
+
+---
+
+## 9. PRESERVE MANUAL VISIBILITY AND SHUTDOWN WORKFLOWS
+
+Please preserve existing shutdown-related workflows such as:
+- viewing orders on the shutdown line
+- manual diversion away from shutdown lines
+- revert after the line resumes
+- shutdown history and indicators elsewhere in the app
+
+This request is specifically about:
+- excluding shutdown lines from auto-sequence optimization
+- and visually indicating that exclusion in the preview UI
+
+### Expected result
+Shutdown lines remain visible and manageable in the app, but are not used as active sequencing targets while shutdown is active.
+
+---
+
+## IMPORTANT
+
+Please implement these rules together:
+
+### Functional rule
+If a line is in shutdown, it must be excluded from:
+- cross-line movement
+- cross-line combination
+- AI sequence placement
+- auto-sequence candidate-line evaluation
+
+### UI rule
+The auto-sequence preview should clearly indicate that the line is in shutdown, so users understand why:
+- no orders were placed there
+- it was not considered during optimization
+
+Shutdown lines should be visible for context, but not treated as active sequencing lines.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log shutdown-line exclusion and preview indicator behavior.
+
+```javascript
+console.debug('[Auto-Sequence Shutdown Exclusion]', {
+  lineId,
+  lineName,
+  shutdownActive,
+  includedInAutoSequence: !shutdownActive,
+  includedInCrossLineCombine: !shutdownActive,
+  includedInCrossLineMovement: !shutdownActive,
+});
+```
+
+```javascript
+console.debug('[Auto-Sequence Shutdown Line Block]', {
+  orderId,
+  candidateLine,
+  shutdownActive,
+  blockedByShutdown: shutdownActive,
+});
+```
+
+```javascript
+console.debug('[Auto-Sequence Preview Shutdown Indicator]', {
+  lineId,
+  lineName,
+  shutdownActive,
+  shutdownBadgeShown: shutdownActive,
+  previewMuted: shutdownActive,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Shutdown lines are excluded from plant-level auto-sequence optimization
+2. ✅ Shutdown lines are excluded from cross-line movement destination evaluation
+3. ✅ Shutdown lines are excluded from cross-line combination placement
+4. ✅ Auto-sequence does not place any order onto a shutdown line while shutdown is active
+5. ✅ Diverted orders are not moved back to their shutdown source line during auto-sequence
+6. ✅ Shutdown lines remain visible in the preview UI
+7. ✅ The preview clearly indicates when a line is in shutdown
+8. ✅ Users can understand why no orders were placed on that line
+9. ✅ Existing shutdown/diversion/revert workflows remain intact
+10. ✅ No UI errors or console errors are introduced

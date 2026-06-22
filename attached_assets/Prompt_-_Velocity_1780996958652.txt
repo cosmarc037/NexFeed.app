@@ -1,0 +1,248 @@
+Please update the **AI Auto-Sequence** so that when sequencing orders, it considers not only the **Future Dispatch target dates / status**, but also the **Velocity** of each SKU from the Future Dispatches data.
+
+The AI should use Velocity as an additional production-priority signal when deciding how to sequence and advance orders.
+
+---
+
+## 1. INCLUDE `VELOCITY` FROM FUTURE DISPATCHES AS PART OF THE AI’S SEQUENCING CONTEXT
+
+Please make sure the AI receives the **Velocity** value for each SKU/order from the Future Dispatches data.
+
+### Velocity values include:
+- `Stable`
+- `Less Stable`
+- `Erratic`
+
+### Goal
+Let the AI use not just the order’s target date / dispatch status, but also its demand stability when deciding sequence priority.
+
+### Expected result
+Velocity becomes a visible input into the AI’s sequencing decision.
+
+---
+
+## 2. TREAT VELOCITY AS A SECONDARY PRIORITY SIGNAL, NOT A REPLACEMENT FOR STATUS OR DATE
+
+Please make sure the AI uses Velocity as a **supporting signal**, not as a replacement for:
+- Critical / Urgent / Monitor / Sufficient
+- MTO actual avail dates
+- today-required / earlier-date priority
+
+### Required priority hierarchy
+The AI should still prioritize primarily by:
+1. **Critical / today-required / MTO / earlier-date needs**
+2. **Future Dispatch status**
+3. **Then Velocity as a supporting priority signal**
+
+### Goal
+Keep urgency/date logic primary, while using Velocity to refine decisions between otherwise similar or flexible orders.
+
+### Expected result
+Velocity helps the AI make better sequencing choices without overriding true deadline priority.
+
+---
+
+## 3. USE VELOCITY TO INFLUENCE HOW AGGRESSIVELY AN ORDER SHOULD BE ADVANCED OR BUFFERED
+
+Please make the AI interpret Velocity like this:
+
+- **Erratic**
+  - demand is unpredictable
+  - higher stockout / volatility risk
+  - bias earlier when feasible
+  - if flexible, consider advancing more aggressively
+
+- **Less Stable**
+  - moderate variability
+  - medium caution
+  - can be advanced when useful, but not as aggressively as Erratic
+
+- **Stable**
+  - predictable demand
+  - lower urgency amplification
+  - more scheduling flexibility
+  - lower need for precautionary early production
+
+### Goal
+Use Velocity to influence how cautious or proactive the AI should be when sequencing flexible orders.
+
+### Expected result
+Erratic SKUs are treated with more caution in sequencing than Stable SKUs.
+
+---
+
+## 4. APPLY VELOCITY ESPECIALLY WHEN PRIORITIZING FLEXIBLE / MTS ORDERS
+
+Velocity should be especially useful when the AI is deciding how to place:
+- MTS / flexible orders
+- Sufficient orders
+- Monitor orders
+- and other movable orders
+
+### Example behavior
+If two flexible orders have similar windows and neither is Critical:
+- `Erratic` should generally be favored earlier than `Stable`
+
+If two Monitor orders are otherwise similar:
+- `Erratic Monitor` should generally be treated with more caution than `Stable Monitor`
+
+### Goal
+Give the AI a better way to break ties or refine its prioritization among movable orders.
+
+### Expected result
+Velocity meaningfully affects flexible-order sequencing.
+
+---
+
+## 5. DO NOT LET VELOCITY OVERRIDE TRUE HARD PRIORITIES
+
+Please ensure Velocity does **not** override:
+- Critical = today
+- MTO actual-date immutability
+- earlier real-date priority
+- today-required production
+- true hard ceilings / hard constraints already enforced by the app
+
+### Goal
+Keep Velocity as an intelligent priority modifier, not a hard override.
+
+### Expected result
+An Erratic Sufficient order should not be placed ahead of a truly Critical or MTO-today order just because of Velocity.
+
+---
+
+## 6. LET VELOCITY IMPROVE THE AI’S STRATEGIC THINKING IN THE 3D ANALYSIS
+
+Please allow the AI to incorporate Velocity into its strategic reasoning when relevant.
+
+### For example
+If the line includes several:
+- Erratic flexible SKUs
+- or Less Stable monitor-risk SKUs
+
+the AI may reasonably justify:
+- earlier advancement
+- slack creation
+- risk containment
+- or selective front-loading
+
+### Goal
+Make the AI’s strategy analysis more aware of demand volatility, not just due dates.
+
+### Expected result
+The AI may reference volatility / stability risk as part of why it chose a certain sequencing strategy.
+
+---
+
+## 7. MAKE SURE VELOCITY IS VISIBLE IN THE AI’S RANKING DECISION
+
+Because the app is in pure-AI mode, the AI’s rank is the actual sequence.
+
+Please make sure Velocity is part of what the AI considers when assigning order rank.
+
+### Important
+If the AI decides:
+- an Erratic Monitor should be placed earlier than a Stable Monitor
+- or an Erratic Sufficient should be advanced earlier than a Stable Sufficient
+
+that should be reflected directly in the AI’s rank.
+
+### Goal
+Velocity should influence the actual sequence, not just the narrative.
+
+### Expected result
+The ranking reflects both urgency/date and velocity-aware risk handling.
+
+---
+
+## 8. KEEP THE FINAL CARD / NARRATIVE ALIGNMENT RULES INTACT
+
+Even with Velocity added, please preserve the existing alignment rules:
+
+- the AI’s rank must reflect the strategy
+- card metrics must still be app-computed
+- 3D labels and narrative must reflect realized outcome
+- no unsupported claims should appear in the card text
+
+### Goal
+Velocity should enrich the AI’s sequencing logic without reintroducing misalignment.
+
+### Expected result
+Velocity-aware strategies still remain fully aligned to the measured sequence result.
+
+---
+
+## IMPORTANT
+
+Please update the AI Auto-Sequence so it also considers **Velocity** from Future Dispatches when sequencing orders.
+
+### Velocity values:
+- `Stable`
+- `Less Stable`
+- `Erratic`
+
+### Required behavior:
+- use Velocity as a **secondary priority signal**
+- keep **Critical / actual dates / hard priorities** as the primary sequencing basis
+- use Velocity to refine how aggressively flexible/MTS orders should be advanced or buffered
+- favor earlier treatment of `Erratic` SKUs when feasible
+- allow the AI to reference Velocity in its strategic reasoning when relevant
+- ensure Velocity influences the actual AI rank, not just the write-up
+
+This is needed so the AI can better account for demand variability when deciding production priority, especially for flexible/MTS orders.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log Velocity usage in sequencing.
+
+```javascript
+console.debug('[Auto-Sequence Velocity Context]', {
+  line,
+  strategyId,
+  orders: lineOrders?.map(o => ({
+    orderId: o.id,
+    materialCode: o.materialCode,
+    status: o._n10dStatus,
+    velocity: o.velocity,
+    availDate: o.target_avail_date || o.avail_date,
+  })),
+});
+```
+
+```javascript
+console.debug('[Auto-Sequence Velocity Priority Effect]', {
+  line,
+  strategyId,
+  rankedOrders: finalRows?.map(r => ({
+    orderId: r.orderId || r.entityId,
+    finalRank: r.finalRank,
+    status: r.status,
+    velocity: r.velocity,
+    suggestedDate: r.suggestedDate,
+  })),
+});
+```
+
+```javascript
+console.debug('[Auto-Sequence Velocity-Aware Strategy Reasoning]', {
+  line,
+  strategyId,
+  velocityUsedAsSecondarySignal: true,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Velocity is included in the AI sequencing context
+2. ✅ Velocity is treated as a secondary priority signal
+3. ✅ Critical / MTO / today-required / earlier-date logic remains primary
+4. ✅ Erratic SKUs are treated more cautiously than Stable SKUs when feasible
+5. ✅ Velocity affects flexible/MTS sequencing decisions
+6. ✅ Velocity can appear in strategy reasoning when relevant
+7. ✅ AI rank reflects velocity-aware prioritization
+8. ✅ Cards and narrative remain aligned to realized outcome
+9. ✅ No UI errors or console errors are introduced

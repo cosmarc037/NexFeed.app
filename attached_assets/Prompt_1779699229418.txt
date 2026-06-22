@@ -1,0 +1,143 @@
+Please update the **order combination cap** from **180 MT** to **200 MT**.
+
+---
+
+## 1. UPDATE THE MAXIMUM COMBINE CAP
+
+The application currently uses a maximum combine cap of:
+
+- `180 MT`
+
+Please update this limit to:
+
+- `200 MT`
+
+### Expected result
+Orders should now be allowed to combine up to a maximum total of **200 MT** instead of **180 MT**.
+
+---
+
+## 2. APPLY THE NEW CAP TO ORDER COMBINATION LOGIC
+
+Please ensure the updated cap is used wherever the app evaluates whether multiple orders can be combined.
+
+This includes any logic that:
+- checks whether orders are eligible to be combined
+- blocks combinations that exceed the maximum allowed combined volume
+- calculates the total MT of a combined group
+- determines whether a new order can be added to an existing combined order/group
+
+### Expected result
+Any combination scenario that was previously blocked only because it exceeded **180 MT** but does not exceed **200 MT** should now be allowed.
+
+---
+
+## 3. USE 200 MT AS THE NEW THRESHOLD FOR COMBINED GROUPS
+
+Please treat **200 MT** as the new maximum total allowed volume for a combined order or combined group.
+
+### Rule
+- If combined total volume **≤ 200 MT** → combination may proceed, subject to all other combination rules
+- If combined total volume **> 200 MT** → combination must still be blocked
+
+### Expected result
+The app should consistently enforce **200 MT** as the new upper limit.
+
+---
+
+## 4. PRESERVE ALL OTHER COMBINATION RULES
+
+This request is only to change the maximum cap value.
+
+Please do **not** change other order combination logic unless required for consistency.
+
+Do not break or alter:
+- order combination eligibility criteria
+- compatibility checks
+- sequencing behavior
+- combined order history logging
+- UI display of combined groups
+- volume calculations
+- line-specific combination rules
+- existing auto-sequence combination behavior
+
+### Expected result
+Only the cap changes from **180 MT** to **200 MT**.
+
+---
+
+## 5. UPDATE ANY VALIDATION / ERROR MESSAGES THAT REFERENCE THE OLD LIMIT
+
+If the UI, validation layer, or notifications currently reference the old cap of **180 MT**, please update them to reflect the new cap of **200 MT**.
+
+### Examples
+If there are any messages like:
+- `Cannot combine orders beyond 180 MT`
+
+please update them to:
+- `Cannot combine orders beyond 200 MT`
+
+### Expected result
+Users should see the correct updated limit anywhere the combine cap is referenced.
+
+---
+
+## 6. UPDATE BOTH UI AND BACKEND / BUSINESS LOGIC
+
+Please ensure the new cap is applied consistently in:
+- frontend validation
+- backend/business-rule validation
+- auto-combine logic
+- manual combine logic
+- any combination preview or eligibility checks
+
+### Expected result
+There should be no mismatch where one layer uses **180 MT** and another uses **200 MT**.
+
+---
+
+## IMPORTANT
+
+Please preserve the existing combination behavior and only change the maximum allowed combined volume.
+
+The new rule should be:
+
+- **Maximum combine cap = 200 MT**
+
+This replaces the previous:
+- **180 MT**
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log combination cap checks using the updated threshold.
+
+```javascript
+console.debug('[Order Combine Cap Check]', {
+  combineCapMT: 200,
+  candidateCombinedVolumeMT,
+  withinCap: candidateCombinedVolumeMT <= 200,
+});
+```
+
+```javascript
+console.debug('[Order Combine Cap Validation]', {
+  previousCapMT: 180,
+  newCapMT: 200,
+  combinationAllowed,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ The order combination cap is updated from `180 MT` to `200 MT`
+2. ✅ Orders can now be combined up to a total of `200 MT`
+3. ✅ Combination is still blocked when the total exceeds `200 MT`
+4. ✅ Auto-combine logic uses the new `200 MT` cap
+5. ✅ Manual combine logic uses the new `200 MT` cap
+6. ✅ Validation and error messages no longer reference `180 MT`
+7. ✅ Existing combination rules and behaviors remain unchanged
+8. ✅ No UI errors or console errors are introduced

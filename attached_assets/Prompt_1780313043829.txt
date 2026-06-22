@@ -1,0 +1,171 @@
+Please update the **Approve Re-order** modal in the **Fulfillment (Demo)** workspace with the following formatting and layout improvements.
+
+---
+
+## 1. REMOVE DECIMAL PLACES FROM BATCH SIZE
+
+Please remove decimal places from the displayed **Batch Size** value in the modal.
+
+### Current issue
+It is currently shown like:
+- `4.000 MT`
+
+### Expected behavior
+Display it without decimal places, for example:
+- `4`
+
+### Expected result
+Batch Size should no longer show unnecessary decimal places.
+
+---
+
+## 2. DISPLAY PRODUCTION TIME USING `hrs`, NOT `h`
+
+Please update the Production Time label/value format.
+
+### Current issue
+It is shown like:
+- `Production Time: 0.42h`
+
+### Expected behavior
+Display it as:
+- `Production Time: 0.42 hrs`
+
+### Expected result
+Use `hrs` consistently for the modal’s production time display.
+
+---
+
+## 3. ALIGN THE LABELS AND VALUES PROPERLY IN THE RE-ORDER DETAILS SECTION
+
+Please improve the alignment of the key details in the modal so the labels and values feel properly structured.
+
+### Preferred structure
+Make the details align more like this:
+
+- `Product:                 [Name]`
+- `Volume to Produce:   8 MT`
+- `Production Time:     0.42 hrs`
+
+instead of:
+- `Product: [Name]`
+- `Volume to Produce: 8 MT`
+- `Production Time: 0.42 hrs`
+
+### Goal
+Make the details easier to scan and visually cleaner.
+
+### Expected result
+Labels should align consistently and values should appear in a structured, readable layout.
+
+---
+
+## 4. REMOVE THE `**` MARKERS FROM THE IMPACT ANALYSIS TEXT
+
+In the **Impact Analysis** section, please remove the visible `**` characters from the bolded headings.
+
+### Current issue
+The content currently shows literal text such as:
+- `**Insertion Position:**`
+- `**Production Impact:**`
+- `**Downstream Effects:**`
+- `**Deadline Risk:**`
+
+### Expected behavior
+Render these as clean headings without the visible markdown markers.
+
+### Expected result
+The section should show proper heading text like:
+- `Insertion Position:`
+- `Production Impact:`
+- `Downstream Effects:`
+- `Deadline Risk:`
+
+without displaying `**`.
+
+---
+
+## 5. RESTRUCTURE THE `RE-ORDER DETAILS` SECTION
+
+Please restructure the **Re-Order Details** section to this format:
+
+- `Product:`
+- `Volume to Produce:          Batch Size:`
+- `Production Time:            AI Avail Date:`
+
+### Important
+Please remove the line/field:
+- `Line: Line 1`
+
+for now.
+
+### Goal
+The modal should be cleaner and more focused on the details currently needed by the user.
+
+### Expected result
+The Re-Order Details section should be arranged as:
+
+- Product
+- first row: Volume to Produce + Batch Size
+- second row: Production Time + AI Avail Date
+
+with clean alignment
+
+---
+
+## 6. REMOVE THE `LINE` FIELD FROM THE MODAL FOR NOW
+
+Please remove the displayed line information from the **Re-Order Details** section for now.
+
+### Reason
+The line will be used differently later, so it should not be shown in the current modal layout.
+
+### Expected result
+The Re-Order Details section should no longer display:
+- `Line: Line 1`
+
+---
+
+## IMPORTANT
+
+Please update the **Approve Re-order** modal so that:
+
+- Batch Size has no decimal places
+- Production Time uses `hrs` instead of `h`
+- labels and values are properly aligned in a cleaner structured layout
+- the `**` markdown markers are removed from Impact Analysis headings
+- the Re-Order Details section is structured like:
+
+  - `Product:`
+  - `Volume to Produce:          Batch Size:`
+  - `Production Time:            AI Avail Date:`
+
+- remove the `Line` field from the modal for now
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log the updated modal formatting state.
+
+```javascript
+console.debug('[Approve Re-Order Modal Formatting]', {
+  batchSizeNoDecimals: true,
+  productionTimeUnit: 'hrs',
+  labelValueAlignmentImproved: true,
+  impactAnalysisMarkdownMarkersRemoved: true,
+  lineFieldRemoved: true,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Batch Size no longer shows decimal places
+2. ✅ Production Time is displayed using `hrs`
+3. ✅ Re-Order Details labels and values are properly aligned
+4. ✅ Impact Analysis headings no longer show visible `**`
+5. ✅ Re-Order Details are restructured into the requested layout
+6. ✅ Line field is removed from the modal
+7. ✅ No UI errors or console errors are introduced

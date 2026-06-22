@@ -1,0 +1,407 @@
+---
+
+Implement the following fixes to the Knowledge Base:
+
+---
+
+## FIX 1: HISTORY REVERT AND DELETE MUST PROPERLY RESTORE ORIGINAL DATA FROM SNAPSHOTS
+
+When deleting the active Manual Edit history or reverting to the File Upload history, the table should fully restore to the original uploaded file data. Currently, edited cell values persist even after the Manual Edit history is deleted or the File Upload history is reverted to.
+
+### THE PROBLEM
+
+If the user uploads a Knowledge Base file (e.g., Form = "P" for a row), then manually edits that cell (Form = "P" → "MP"), a Manual Edit history entry is created. But when the user:
+- **Deletes** the Manual Edit history (so File Upload becomes active), the table still shows "MP" instead of reverting to "P"
+- **Clicks Revert** on the File Upload history, the app shows "This is already the active version" error even when Manual Edit is the active one, OR it doesn't actually restore the original data
+
+This happens because:
+1. History entries are not storing complete independent snapshots of the data — they share object references or only store diffs
+2. When deleting the active history, the app doesn't load the next history's snapshot into the table
+3. When reverting, the app doesn't replace the table data with the target history's snapshot
+4. The table state has drifted from the history snapshots and is being treated as a separate mutable source of truth
+
+### THE FIX
+
+Every history entry must store a **complete deep-cloned snapshot** of ALL rows at the time of creation. The table display must ALWAYS be a direct reflection of the active history entry's snapshot.
+
+#### DEEP CLONE UTILITY
+
+Use this everywhere snapshots are created or restored to prevent shared references:
+
+```javascript
+const deepClone = (data) => JSON.parse(JSON.stringify(data));
+```
+
+#### WHEN UPLOADING A FILE — Store full snapshot of uploaded data
+
+```javascript
+function handleUploadComplete(filename, parsedData, recordCount) {
+  // Assign stable IDs and original indices
+  const dataWithIds = parsedData.map((row, index) => ({
+    ...row,
+    _rowId: row._rowId || `kb_row_${index}_${Date.now()}`,
+    _originalIndex: index
+  }));
+
+  // Set as current table data
+  setKbData(deepClone(dataWithIds));
+
+  // Create history entry with FULL deep-cloned snapshot
+  const uploadEntry = {
+    id: Date.now(),
+    type: 'file_upload',
+    timestamp: new Date().toISOString(),
+    summary: `Uploaded: ${filename} (${recordCount} records)`,
+    details: `File "${filename}" uploaded and applied as new Knowledge Base with ${recordCount} records.`,
+    snapshot: deepClone(dataWithIds), // COMPLETE independent copy of ALL rows
+    filename: filename,
+    user: getCurrentUser(),
+  };
+
+  addToHistory(uploadEntry);
+}
+```
+
+#### WHEN SAVING MANUAL EDITS — Store full snapshot of current table state after edits
+
+```javascript
+function handleSaveChanges() {
+  const errors = validateKnowledgeBase(kbData);
+  if (errors.length > 0) {
+    setValidationErrors(errors);
+    showNotification('error', `Cannot save. ${errors.length} validation error(s) found.`);
+    return;
+  }
+
+  const { summary, details } = changeTracker.generateChangeSummary();
+
+  const editEntry = {
+    id: Date.now(),
+    type: 'manual_edit',
+    timestamp: new Date().toISOString(),
+    summary: summary,
+    details: details,
+    snapshot: deepClone(kbData), // COMPLETE independent copy of ALL rows INCLUDING edits
+    user: getCurrentUser(),
+  };
+
+  addToHistory(editEntry);
+
+  setIsEditMode(false);
+  changeTracker.reset();
+  setValidationErrors([]);
+
+  showNotification('success', 'Knowledge Base saved successfully.');
+}
+```
+
+#### WHEN REVERTING — Replace entire table with target history's snapshot
+
+```javascript
+function handleRevert(entry) {
+  if (!entry.snapshot) {
+    showNotification('error', 'Cannot revert — no snapshot available.');
+    return;
+  }
+
+  // Load the EXACT snapshot from the target history entry
+  const restoredData = deepClone(entry.snapshot);
+  setKbData(restoredData);
+
+  // Create a new history entry recording the revert action
+  const revertEntry = {
+    id: Date.now(),
+    type: 'revert',
+    timestamp: new Date().toISOString(),
+    summary: `Reverted to version from ${formatDateTimeFull(entry.timestamp)}`,
+    details: `Knowledge Base reverted to: ${entry.summary}`,
+    snapshot: deepClone(restoredData), // Snapshot of the restored state
+    user: getCurrentUser(),
+  };
+
+  addToHistory(revertEntry);
+  showNotification('success', 'Knowledge Base reverted successfully.');
+}
+```
+
+#### WHEN DELETING ACTIVE HISTORY — Fall back to next entry's snapshot
+
+```javascript
+function handleDeleteWithActiveTransfer(entry, index) {
+  const isActive = index === 0;
+
+  showDeleteConfirmDialog(entry, isActive, async () => {
+    if (isActive) {
+      if (history.length > 1) {
+        // Transfer active to next history entry and load its EXACT snapshot
+        const nextEntry = history[1];
+        if (nextEntry && nextEntry.snapshot) {
+          const restoredData = deepClone(nextEntry.snapshot);
+          setKbData(restoredData);
+          showNotification('info',
+            `Active version deleted. Reverted to version from ${formatDateTimeFull(nextEntry.timestamp)}.`
+          );
+        }
+      } else {
+        // Deleting the ONLY entry — clear the Knowledge Base completely
+        setKbData([]);
+        showNotification('info',
+          'Knowledge Base history cleared. Upload a new file or add data manually.'
+        );
+      }
+    }
+
+    removeFromHistory(entry.id);
+  });
+}
+```
+
+#### VERIFY SNAPSHOTS ARE STORED CORRECTLY
+
+Add validation when adding to history:
+
+```javascript
+function addToHistory(entry) {
+  if (!entry.snapshot) {
+    console.warn('History entry has no snapshot:', entry);
+  }
+  if (entry.snapshot && entry.snapshot.length === 0 && entry.type !== 'revert') {
+    console.warn('History entry has empty snapshot:', entry);
+  }
+
+  // Ensure snapshot is a deep clone, not a reference
+  if (entry.snapshot) {
+    entry.snapshot = deepClone(entry.snapshot);
+  }
+
+  setHistory(prev => [entry, ...prev]);
+}
+```
+
+#### ALSO UPDATE localStorage SAVE/LOAD
+
+When saving history to localStorage, snapshots are already serialized. But when loading back, ensure deep clone:
+
+```javascript
+// When loading from localStorage
+function loadHistoryFromStorage() {
+  const stored = localStorage.getItem('kb_history');
+  if (stored) {
+    const parsed = JSON.parse(stored);
+    // Each entry's snapshot is already a plain object from JSON.parse
+    // but ensure we don't share references
+    return parsed.map(entry => ({
+      ...entry,
+      snapshot: entry.snapshot ? deepClone(entry.snapshot) : null
+    }));
+  }
+  return [];
+}
+
+// When loading the active entry's data on page load
+function initializeFromHistory(historyEntries) {
+  if (historyEntries.length > 0) {
+    const activeEntry = historyEntries[0]; // Most recent = active
+    if (activeEntry.snapshot) {
+      setKbData(deepClone(activeEntry.snapshot));
+    }
+  }
+}
+```
+
+---
+
+## FIX 2: ROWS MUST STAY IN THEIR ORIGINAL POSITION AFTER ANY TABLE CHANGE
+
+When edits, deletes, or reverts happen, rows shift their positions in the table. Rows should always stay at their original position from the uploaded file.
+
+### THE PROBLEM
+
+After editing a cell and saving, or after reverting/deleting a history entry, the table re-renders and rows move to different positions. This likely happens because:
+1. The table is being re-sorted by a field like FG Material Code after state updates
+2. Row order is not being preserved through snapshot save/restore cycles
+3. React is reordering DOM nodes because keys are based on array index instead of stable identifiers
+
+### THE FIX
+
+#### ASSIGN STABLE IDENTIFIERS ON FILE UPLOAD
+
+When data is first parsed from the uploaded file, assign stable properties that never change:
+
+```javascript
+function assignStableIds(data) {
+  return data.map((row, index) => ({
+    ...row,
+    _rowId: row._rowId || `kb_row_${index}_${Date.now()}`,
+    _originalIndex: row._originalIndex ?? index // Preserves original file order
+  }));
+}
+```
+
+Call this when uploading:
+
+```javascript
+const dataWithIds = assignStableIds(parsedData);
+```
+
+#### PRESERVE STABLE IDs THROUGH ALL OPERATIONS
+
+When editing cells, do NOT remove or modify `_rowId` or `_originalIndex`:
+
+```javascript
+function handleCellChange(rowId, field, newValue) {
+  setKbData(prev => {
+    return prev.map(row => {
+      if (row._rowId === rowId) {
+        const oldValue = row[field];
+        if (oldValue !== newValue) {
+          trackChange('modify', row, field, oldValue, newValue);
+        }
+        // Spread preserves _rowId and _originalIndex
+        return { ...row, [field]: newValue };
+      }
+      return row;
+    });
+  });
+}
+```
+
+When creating snapshots, `_rowId` and `_originalIndex` are included automatically because they're part of the row object.
+
+#### DO NOT RE-SORT AFTER EDITS, REVERTS, OR DELETES
+
+Search and remove any sort calls that happen automatically on state update:
+
+```javascript
+// REMOVE or GUARD these patterns:
+// kbData.sort((a, b) => ...)  ← REMOVE if called on render or state update
+// setSortedData(kbData.sort(...))  ← REMOVE
+// useEffect(() => { setKbData(prev => [...prev].sort(...)) }, [kbData])  ← REMOVE
+
+// Only sort when user explicitly clicks a column header to sort
+// Never auto-sort on cell change, save, revert, or delete
+```
+
+#### ALWAYS SORT DISPLAY DATA BY _originalIndex
+
+When rendering the table, sort by `_originalIndex` to ensure original file order is always maintained:
+
+```javascript
+const sortedDisplayData = useMemo(() => {
+  return [...kbData].sort((a, b) => {
+    return (a._originalIndex ?? 0) - (b._originalIndex ?? 0);
+  });
+}, [kbData]);
+```
+
+If search/filter is applied, filter the already-sorted data:
+
+```javascript
+const filteredData = useMemo(() => {
+  if (!searchTerm.trim()) return sortedDisplayData;
+  const term = searchTerm.toLowerCase();
+  return sortedDisplayData.filter(row =>
+    Object.entries(row).some(([key, val]) => {
+      if (key.startsWith('_')) return false; // Skip internal fields
+      return String(val).toLowerCase().includes(term);
+    })
+  );
+}, [sortedDisplayData, searchTerm]);
+```
+
+#### DISPLAY ROW NUMBER FROM _originalIndex, NOT ARRAY INDEX
+
+In the table's `#` column, use the stable original index:
+
+```jsx
+<tbody>
+  {filteredData.map((row) => (
+    <tr key={row._rowId}>
+      <td className="kb-row-number-cell">{(row._originalIndex ?? 0) + 1}</td>
+      <td>{row.fgMaterialCode}</td>
+      <td>{row.fgItemDescription}</td>
+      <td>{row.sfg1MaterialCode}</td>
+      <td>{row.sfgItemDescription}</td>
+      <td>{row.form}</td>
+      <td>{row.batchFm1}</td>
+      <td>{row.batchFm2}</td>
+      <td>{row.batchFm3}</td>
+    </tr>
+  ))}
+</tbody>
+```
+
+#### USE STABLE _rowId AS REACT KEY
+
+This prevents React from shuffling DOM nodes:
+
+```jsx
+// CORRECT — stable key
+<tr key={row._rowId}>
+
+// WRONG — index-based key causes re-ordering issues
+<tr key={index}>
+```
+
+#### WHEN INSERTING NEW ROWS, ASSIGN NEW STABLE IDs
+
+```javascript
+function handleInsertRow(afterIndex) {
+  const newRow = {
+    _rowId: `kb_row_new_${Date.now()}`,
+    _originalIndex: afterIndex + 0.5, // Place between existing rows
+    fgMaterialCode: '',
+    fgItemDescription: '',
+    // ... other empty fields
+  };
+
+  setKbData(prev => {
+    const copy = [...prev];
+    copy.splice(afterIndex + 1, 0, newRow);
+    return copy;
+  });
+}
+```
+
+#### WHEN DELETING ROWS, DO NOT RE-INDEX REMAINING ROWS
+
+```javascript
+function handleDeleteRow(rowId) {
+  setKbData(prev => prev.filter(row => row._rowId !== rowId));
+  // Do NOT re-assign _originalIndex to remaining rows
+  // Row numbers may now have gaps (e.g., 1, 2, 4, 5) — this is correct behavior
+}
+```
+
+---
+
+## VERIFICATION
+
+### History Revert Restores Original Data
+1. ✅ Upload file with Form = "P" for a row → File Upload history created
+2. ✅ Edit that cell to Form = "MP" and save → Manual Edit history created with "MP"
+3. ✅ Delete the Manual Edit history → File Upload becomes active → table shows "P" (not "MP")
+4. ✅ Re-edit to "MP" again → save → Manual Edit history created
+5. ✅ Click Revert on File Upload history → table shows "P" → new Revert history created
+6. ✅ All 353 records restored exactly as originally uploaded after revert
+7. ✅ No "This is already the active version" error when reverting to a non-active entry
+
+### History Delete Cascade
+8. ✅ Delete active Manual Edit → next entry (File Upload) becomes active → table loads File Upload snapshot
+9. ✅ Delete the only remaining history entry → table clears to empty → warning shown
+10. ✅ After clearing, user can upload a new file
+
+### Snapshots Are Independent
+11. ✅ Editing a cell in the table does NOT modify any history entry's snapshot
+12. ✅ Each history entry's snapshot is a complete independent copy of all rows
+13. ✅ Loading from localStorage correctly restores snapshots without shared references
+
+### Row Position Stability
+14. ✅ Edit cell in row 7 → save → row stays at position 7
+15. ✅ Revert to File Upload → row 7 product stays at row 7
+16. ✅ Delete active history → rows maintain their original positions
+17. ✅ Table does not re-sort after any operation (edit, save, revert, delete)
+18. ✅ Row `#` column shows original file order numbers, not current array indices
+19. ✅ Search/filter results maintain relative order from original file
+20. ✅ Inserted rows appear at the correct position without shifting existing rows
+21. ✅ Deleted rows leave gaps in numbering — remaining rows do not re-number

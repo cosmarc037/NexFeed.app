@@ -1,0 +1,300 @@
+```
+Fix the After table to match the compact look of the Before table:
+
+---
+
+## FIX: AFTER TABLE — REMOVE INNER CONTAINER LOOK
+
+The After table currently has extra padding, card-like rows, or nested container styling that makes it look different from the Before table. Make both tables visually identical except for the drag handles and movement icons.
+
+### REMOVE CARD/CONTAINER STYLING FROM AFTER TABLE ROWS
+
+```css
+/* REMOVE any of these if they exist on After table rows: */
+.auto-sequence-row-after {
+  /* REMOVE: */
+  /* background: #ffffff; */
+  /* border: 1px solid #e5e7eb; */
+  /* border-radius: 8px; */
+  /* margin: 4px 0; */
+  /* padding: 12px; */
+  /* box-shadow: ...; */
+}
+
+/* After table rows — SAME as Before table rows */
+.auto-sequence-row-after {
+  background: #ffffff;
+  border: none;
+  border-radius: 0;
+  margin: 0;
+  box-shadow: none;
+}
+
+.auto-sequence-row-after:hover {
+  background: #fafafa;
+}
+
+/* After table cells — SAME padding as Before */
+.auto-sequence-table-after td {
+  padding: 10px 10px;
+  border-bottom: 1px solid #f3f4f6;
+  vertical-align: middle;
+  font-size: 12px;
+  color: #374151;
+}
+
+/* After table header — SAME as Before */
+.auto-sequence-table-after th {
+  padding: 8px 10px;
+  text-align: left;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  color: #6b7280;
+  background: #f9fafb;
+  border-bottom: 1px solid #e5e7eb;
+  white-space: nowrap;
+}
+
+/* Both tables — identical base styling */
+.auto-sequence-table {
+  width: 100%;
+  min-width: 1100px;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.auto-sequence-table td {
+  padding: 10px 10px;
+  border-bottom: 1px solid #f3f4f6;
+  vertical-align: middle;
+  font-size: 12px;
+  color: #374151;
+}
+
+.auto-sequence-table th {
+  padding: 8px 10px;
+  text-align: left;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  color: #6b7280;
+  background: #f9fafb;
+  border-bottom: 1px solid #e5e7eb;
+  white-space: nowrap;
+}
+
+/* Both tables — same background */
+.auto-sequence-table-before,
+.auto-sequence-table-after {
+  background: #ffffff;
+}
+
+/* Rows — no extra spacing or borders between them */
+.auto-sequence-row-before,
+.auto-sequence-row-after {
+  background: #ffffff;
+  border: none;
+  margin: 0;
+  box-shadow: none;
+}
+
+.auto-sequence-row-before:hover,
+.auto-sequence-row-after:hover {
+  background: #fafafa;
+}
+
+/* Drag handle column — minimal width, no extra padding */
+.as-col-drag {
+  width: 24px;
+  text-align: center;
+  padding: 0 4px;
+}
+
+.as-drag-handle {
+  cursor: grab;
+  color: #d1d5db;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.as-drag-handle:hover {
+  color: #6b7280;
+}
+
+/* Prio badges — same size in both tables */
+.as-prio-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: 700;
+  background: #f3f4f6;
+  color: #374151;
+  border: 1px solid #d1d5db;
+}
+
+.as-prio-badge-after {
+  background: #f3f4f6;
+  color: #374151;
+  border-color: #d1d5db;
+}
+
+/* Description — compact */
+.as-desc-main {
+  font-size: 12px;
+  color: #1a1a1a;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.as-sub-text {
+  font-size: 10px;
+  color: #9ca3af;
+  margin-top: 1px;
+  line-height: 1.3;
+}
+
+/* Movement icon — small and inline */
+.as-desc-with-movement {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.as-movement-icon {
+  flex-shrink: 0;
+  font-size: 8px;
+  margin-top: 4px;
+}
+
+.as-movement-icon-up {
+  color: #16a34a;
+}
+
+.as-movement-icon-down {
+  color: #dc2626;
+}
+
+/* Planned order — compact */
+.as-col-planned div:first-child {
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+/* Volume */
+.as-col-volume {
+  white-space: nowrap;
+}
+
+/* Production time — compact */
+.as-col-prod div:first-child {
+  line-height: 1.4;
+}
+
+/* Placeholder text */
+.as-placeholder {
+  color: #d1d5db;
+  font-style: italic;
+  font-size: 11px;
+}
+
+/* Table panel — both take equal space */
+.auto-sequence-table-panel {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Table wrapper */
+.auto-sequence-table-wrapper {
+  overflow-y: auto;
+  flex: 1;
+}
+
+/* Labels */
+.auto-sequence-table-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  font-size: 13px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.auto-sequence-label-before {
+  background: #f9fafb;
+  color: #6b7280;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.auto-sequence-label-after {
+  background: #fff7ed;
+  color: #92400e;
+  border-bottom: 1px solid #fed7aa;
+}
+
+/* Divider */
+.auto-sequence-divider {
+  width: 2px;
+  flex-shrink: 0;
+  background: #e5e7eb;
+}
+```
+
+### ALSO CHECK — REMOVE ANY WRAPPER/CARD AROUND INDIVIDUAL ROWS
+
+If the After table rows are wrapped in individual card-like containers, remove that:
+
+```jsx
+{/* WRONG — rows inside cards */}
+{sequencedOrders.map((order) => (
+  <div className="some-card-wrapper">  {/* REMOVE THIS WRAPPER */}
+    <tr>...</tr>
+  </div>
+))}
+
+{/* CORRECT — rows directly in tbody */}
+<tbody>
+  {sequencedOrders.map((order) => (
+    <tr key={order.id} className="auto-sequence-row-after">
+      {/* ... cells ... */}
+    </tr>
+  ))}
+</tbody>
+```
+
+---
+
+## VERIFICATION
+
+### Visual match
+1. ✅ Before and After tables look identical in styling
+2. ✅ Same row height in both tables
+3. ✅ Same cell padding in both tables
+4. ✅ Same font sizes in both tables
+5. ✅ Same border style (thin bottom border per row)
+6. ✅ No card/container look around After table rows
+7. ✅ No extra margin/padding between After table rows
+8. ✅ No box shadows on After table rows
+9. ✅ No rounded corners on After table rows
+
+### Functionality preserved
+10. ✅ Drag handles still work in After table
+11. ✅ Text selection still works in both tables
+12. ✅ Hover effect works on both tables
+13. ✅ Start date/time pickers still accessible in After table
+
+### Compact
+14. ✅ Both tables use same compact row spacing
+15. ✅ Prio badges same size (24px)
+16. ✅ Movement icons small (8px) and subtle
+17. ✅ Sub-text (category, SFG) tight spacing
+```

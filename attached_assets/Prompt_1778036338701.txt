@@ -1,0 +1,244 @@
+```
+Fix the per-line summary "Total Vol After (MT)" so it exactly matches the final displayed row volumes in the After table, especially for combined orders.
+
+---
+
+## PROBLEM TO FIX
+
+The per-line summary is still incorrect for combined orders.
+
+Example from the current UI:
+- After table shows the combined order volume as **73 MT**
+- But the line summary shows **Total Vol After = 75 MT**
+
+This is incorrect.
+
+The summary must match the final displayed After-table row values.
+
+If the final After table shows:
+- one combined row at 73 MT
+
+then Total Vol After for that line must be:
+- **73.0 MT**
+
+not 75.0.
+
+This means the summary is currently summing the wrong source value for the combined order.
+
+---
+
+## OBJECTIVE
+
+Make the per-line summary "Total Vol After (MT)" use the exact final displayed row volume from the After table.
+
+This applies especially to:
+- combined orders
+- app-adjusted orders
+- override-volume orders
+
+The summary must not use stale raw totals or outdated internal basis values once the final After row is already resolved and displayed.
+
+---
+
+## 1. USE THE FINAL DISPLAYED AFTER-TABLE VOLUME AS THE SOURCE OF TRUTH
+
+For the After summary:
+- sum the final order rows currently shown in the After table for that line
+- use the same volume value the user sees in the row
+
+Do not use:
+- pre-combine raw totals
+- child order raw volumes
+- stale `_combined_basis_volume`
+- stale `_combined_effective_volume` if it no longer matches the displayed row
+- old app-adjusted volume from before the final row render
+
+If the row displays `73 MT`, the summary must use `73`.
+
+---
+
+## 2. ADD A HELPER FOR FINAL DISPLAYED ORDER VOLUME
+
+Create or update a helper that prioritizes the final displayed row volume, not stale internal values.
+
+### Suggested helper:
+```javascript
+function getFinalDisplayedOrderVolume(order) {
+  const candidates = [
+    order.display_volume_mt,
+    order._displayVolumeMT,
+    order.final_volume_mt,
+    order._finalVolumeMT,
+    order.volume_override,
+    order.total_volume_mt,
+    order.volume_mt,
+    order.volume,
+  ];
+
+  for (const val of candidates) {
+    const parsed = parseFloat(val);
+    if (!Number.isNaN(parsed)) {
+      return Number(parsed.toFixed(2));
+    }
+  }
+
+  return 0;
+}
+```
+
+Important:
+- whichever field is actually powering the visible `Volume (MT)` cell in the After table should be used first
+- align this helper with the real rendered row value
+- if necessary, explicitly store a final display volume field during row generation
+
+---
+
+## 3. FOR COMBINED ORDERS, USE THE FINAL COMBINED DISPLAYED VOLUME ONLY
+
+If an order is a combined order:
+- do not resummarize from child orders
+- do not re-add deleted child volumes
+- do not use stale combined basis totals
+- only use the final combined row volume shown in the After table
+
+### Example:
+If the combined row in After shows:
+- `73 MT`
+
+then summary contribution for that combined row = `73`
+
+not:
+- 75
+- 70 + 3 + adjustment
+- any stale pre-render calculation
+
+---
+
+## 4. CALCULATE TOTAL VOL AFTER DIRECTLY FROM THE ACTUAL AFTER ROWS
+
+Use the exact line rows shown in the After table and sum their final displayed volumes.
+
+### Suggested helper:
+```javascript
+function calculateLineTotalDisplayedMT(orders) {
+  return Number(
+    (orders || []).reduce((sum, order) => {
+      return sum + getFinalDisplayedOrderVolume(order);
+    }, 0).toFixed(2)
+  );
+}
+```
+
+Then:
+```javascript
+const totalVolAfter = calculateLineTotalDisplayedMT(afterOrdersForLine);
+```
+
+Where:
+- `afterOrdersForLine` must be the exact final rendered rows for that line in the After table
+
+---
+
+## 5. MAKE SURE CHILD COMBINED ORDERS ARE NOT STILL BEING COUNTED IN SUMMARY
+
+A likely cause of the mismatch is that:
+- the parent combined order is shown in After
+- but one or more child orders are still indirectly contributing to the line summary totals
+
+Fix this by ensuring:
+- only the final visible After rows are included in per-line after-summary
+- child orders that were merged/removed do not continue contributing to summary totals
+
+If needed, explicitly filter out:
+- hidden combined children
+- merged/deleted rows
+- child rows represented by the final parent combined row
+
+---
+
+## 6. ALIGN SUMMARY TOTALS WITH THE EXACT DISPLAYED TABLE STATE
+
+The summary should reflect:
+- what the user sees in the After table right now
+
+That means:
+- if a row is visible and shows 73 MT → count 73
+- if a row is hidden/merged/deleted → do not count it
+- if volume override changed the visible row → count the override value
+- if app adjustment changed the visible row → count the adjusted displayed value
+
+The summary must behave like a direct sum of the visible table rows.
+
+---
+
+## 7. OPTIONAL: STORE FINAL DISPLAY VOLUME WHEN BUILDING ROWS
+
+If the app currently computes the visible row volume only during rendering, store it explicitly during row generation.
+
+### Example:
+```javascript
+const finalRow = {
+  ...order,
+  _displayVolumeMT: computedDisplayedVolume,
+};
+```
+
+Then:
+- render the table from `_displayVolumeMT`
+- compute summary totals from `_displayVolumeMT`
+
+This ensures both table and summary use the same source of truth.
+
+---
+
+## 8. ADD DEBUG LOGGING TO TRACE THE AFTER SUMMARY
+
+Temporarily log:
+
+```javascript
+console.debug('[After Summary Volume Check]', {
+  line,
+  afterRows: (afterOrdersForLine || []).map(order => ({
+    orderId: order.id,
+    item: order.item_description,
+    displayedVolume: getFinalDisplayedOrderVolume(order),
+    rawVolume: order.total_volume_mt,
+    overrideVolume: order.volume_override,
+    combinedBasis: order._combined_basis_volume,
+    combinedEffective: order._combined_effective_volume,
+  })),
+  totalVolAfter,
+});
+```
+
+This should help verify:
+- the combined row is contributing 73
+- hidden child rows are not being counted
+- stale values are not leaking into the summary
+
+---
+
+## 9. VERIFY AGAINST THE CURRENT EXAMPLE
+
+Current expected result:
+- After table for Line 1 shows one combined row = **73 MT**
+- Therefore:
+  - `Total Vol After (MT)` for Line 1 must be **73.0**
+
+Not:
+- `75.0`
+
+---
+
+## 10. VERIFICATION
+
+### Summary correctness
+1. ✅ Total Vol After is calculated from final visible After-table rows only
+2. ✅ Combined orders contribute only their final displayed row volume
+3. ✅ Hidden/deleted child combined orders do not continue affecting summary totals
+4. ✅ Stale raw or internal pre-render volumes are no longer used
+
+### UI consistency
+5. ✅ If the After table row shows 73 MT, the line summary also reflects 73.0 MT
+6. ✅ Summary totals now match the visible table exactly
+7. ✅ Overrides and app-adjusted displayed values are respected consistently

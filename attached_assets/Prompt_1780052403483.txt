@@ -1,0 +1,117 @@
+Please update the **Suggested Pre-orders** section text in the **Fulfillment (Demo)** workspace so it reflects that these generated orders are intended to **replenish/refill inventory**, not directly describe the original order being fulfilled from stock.
+
+---
+
+## 1. UPDATE THE SUGGESTED PRE-ORDERS HEADER TEXT
+
+The current header/helper text says something like:
+
+- `these orders can be fulfilled from on-hand inventory`
+
+That wording describes the **original order demand being satisfied from inventory**, but the rows shown in the container are actually the **generated pre-orders** created to replenish/refill the inventory that would be used.
+
+### Expected result
+Please revise the header/helper text so it reflects the real meaning of the generated rows.
+
+---
+
+## 2. MAKE THE TEXT EXPLAIN THAT THESE ARE REPLENISHMENT / REFILL ORDERS
+
+The orders shown inside the **Suggested Pre-orders** container are not the original fulfilled orders.
+
+They are the **generated replenishment/pre-production orders** that appear when the system detects that the original order can be satisfied using on-hand inventory.
+
+### Goal
+The section label should clearly communicate that these suggested pre-orders are intended to:
+- refill inventory
+- replenish stock
+- or replace the inventory used to satisfy the original order
+
+### Expected result
+Users should immediately understand that:
+- inventory is being used to satisfy an original order
+- and these suggested pre-orders are the replenishment side of that decision
+
+---
+
+## 3. REVISE THE HELPER TEXT TO SOMETHING INVENTORY-REPLENISHMENT ORIENTED
+
+Please replace the current helper text with wording that better reflects replenishment.
+
+### Acceptable wording examples
+Any clear equivalent is acceptable, such as:
+
+- `these orders can replenish on-hand inventory`
+- `these orders can refill the on-hand inventory`
+- `these suggested orders can replenish inventory used for fulfillment`
+- `these pre-orders are generated to replenish inventory after fulfillment`
+
+### Preferred direction
+Use wording that emphasizes:
+- replenishment
+- refill
+- replacement of inventory used for fulfillment
+
+### Expected result
+The helper text should no longer imply that the rows themselves are the orders being fulfilled from inventory.
+
+---
+
+## 4. KEEP THE EXISTING CONTAINER PURPOSE AND STRUCTURE
+
+Please keep the section as:
+- `Suggested Pre-orders`
+- or the existing equivalent title
+
+This request is specifically to improve the supporting/helper text after the title.
+
+### Expected result
+The section still clearly reads as a pre-order suggestion area, but the subtext/message is now semantically correct.
+
+---
+
+## 5. APPLY THIS ONLY TO THE FULFILLMENT (DEMO) PRE-ORDER SUGGESTION SECTION
+
+This wording update should apply specifically to the **Suggested Pre-orders** section in the **Fulfillment (Demo)** workspace.
+
+### Expected result
+The demo fulfillment feature is easier to understand and the wording matches the actual business logic.
+
+---
+
+## IMPORTANT
+
+Please revise the **Suggested Pre-orders** helper text so it explains that the listed rows are **replenishment/refill orders**, not the original orders being fulfilled from inventory.
+
+The current wording:
+- `these orders can be fulfilled from on-hand inventory`
+
+should be replaced with something more accurate, such as:
+- `these orders can replenish on-hand inventory`
+
+or an equivalent replenishment-oriented message.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log the updated section text.
+
+```javascript
+console.debug('[Demo Suggested Pre-Orders Header Text]', {
+  section: 'suggested_preorders',
+  oldHelperText,
+  newHelperText,
+  meaning: 'inventory_replenishment',
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ The Suggested Pre-orders helper text is updated
+2. ✅ The new wording explains replenishment/refill intent
+3. ✅ The helper text no longer incorrectly implies that the listed rows are the original fulfilled orders
+4. ✅ The section title/structure remains intact
+5. ✅ No UI errors or copy regressions are introduced

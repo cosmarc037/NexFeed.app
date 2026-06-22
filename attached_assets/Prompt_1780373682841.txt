@@ -1,0 +1,342 @@
+Please enhance the **Auto-Sequence** feature so that AI sequencing is more faithful, transparent, and constraint-aware, using stable IDs / production-entity IDs as the basis for ranking, and adding an expandable explanation view below the preview table.
+
+---
+
+# 1. USE STABLE BACKEND IDS / PRODUCTION-ENTITY IDS AS THE AI REFERENCE KEY
+
+Please revise the auto-sequence flow so the AI sequences using stable backend identifiers instead of relying on row order, product names, or other unstable references.
+
+### Important
+Use a unique stable identifier for each sequencing entity, such as:
+- `order_id`
+- `entity_id`
+- `production_group_id`
+- or other true backend-stable unique ID
+
+### Important note about combined orders
+If combining happens before AI sequencing, then the AI should rank the **post-combination production entities**, not only the raw individual orders.
+
+### Expected result
+Every AI sequencing recommendation is tied to a stable unique identifier that can be traced cleanly from:
+- AI output
+- preview table
+- final apply-to-schedule
+- logging/history
+
+---
+
+# 2. MAKE THE AI RETURN A STRUCTURED RANKED LIST USING IDS
+
+Please change the AI sequencing output so it returns structured ranked entities by ID, instead of only descriptive/narrative sequencing intent.
+
+### Expected output structure
+The AI should return something like:
+- entity/order ID
+- rank
+- reason
+- strategy name
+- primary goal
+
+### Goal
+Make the AI recommendation explicit, structured, and easy to apply consistently.
+
+### Expected result
+The app can directly map AI recommendations to specific orders/entities and sort them accordingly.
+
+---
+
+# 3. DISTINGUISH BETWEEN `AI RANK` AND `FINAL RANK`
+
+Please introduce a distinction between:
+- `AI Rank` = what the AI initially suggested
+- `Final Rank` = the final sequence after deterministic refinement / constraint enforcement
+
+### Goal
+Allow the system to be both:
+- faithful to the AI
+- and operationally safe under real business rules
+
+### Expected result
+The app can transparently show when:
+- the AI suggestion was accepted as-is
+or
+- the app had to adjust it because of hard constraints
+
+---
+
+# 4. SORT THE PREVIEW TABLE BY THE FINAL RESOLVED ORDER, NOT JUST SHOW A RANK COLUMN
+
+Please ensure the preview table is actually rendered in the final resolved sequence order.
+
+### Important
+Do not keep rows in their old/original order while only attaching rank metadata.
+
+### Required behavior
+If the final resolved order is:
+1. entity 104
+2. entity 101
+3. entity 102
+4. entity 103
+
+then the preview table should display rows in exactly that order.
+
+### Goal
+The preview should visually match the actual sequence the app intends to apply.
+
+### Expected result
+Users can trust that the previewed order is the sequence that will actually be committed.
+
+---
+
+# 5. APPLY TO SCHEDULE USING THE EXACT SAME SORTED DATASET SHOWN IN THE PREVIEW
+
+Please make sure the exact dataset/array shown in the preview is the same dataset/array used when applying the selected strategy.
+
+### Important
+Do not let the app:
+- preview one ordered array
+- but apply a different internally recomputed array
+
+### Expected result
+The sequence shown in preview is the same sequence written to:
+- `priority_seq`
+- target dates
+- applied schedule ordering
+
+---
+
+# 6. GIVE THE AI EXPLICIT CONTEXT ABOUT HARD CONSTRAINT ENFORCEMENT
+
+Please improve the AI prompt/context so the AI is aware of the app’s real sequencing constraints before it proposes strategies.
+
+### The AI should be informed about constraints such as:
+- in-production orders cannot be moved
+- critical / MTO orders may need protected windows
+- shutdown lines cannot receive orders
+- eligible/ineligible destination lines
+- combined-order behavior / grouped production entities
+- line-based run-rate behavior
+- source/generated order dependencies where relevant
+- other existing sequencing rules enforced by the app
+
+### Goal
+The AI should strategize with knowledge of the app’s real-world constraints so fewer large corrections are needed later.
+
+### Expected result
+AI-generated strategies become more realistic, better aligned with the refinement layer, and more trustworthy.
+
+---
+
+# 7. KEEP DETERMINISTIC CONSTRAINT ENFORCEMENT, BUT MAKE IT MORE TRANSPARENT
+
+Please keep the deterministic refinement layer that enforces hard business rules.
+
+### Important
+This request is **not** to remove safety/constraint enforcement.
+
+### Instead
+Make the final outcome more transparent by recording where the system changed the AI’s original suggestion.
+
+### Expected result
+The app still protects operational rules, but users can see when and why adjustments happened.
+
+---
+
+# 8. ADD A COLLAPSIBLE TRANSPARENCY TABLE BELOW THE PREVIEW TABLE
+
+Please add a collapsible table/section below the auto-sequence preview table for transparency.
+
+### Suggested section names
+Examples:
+- `AI vs Final Sequence`
+- `Sequence Adjustment Details`
+- `Why Orders Moved`
+- `Constraint Adjustments`
+
+### Goal
+Users can optionally expand it to understand how the sequence was derived and why some orders moved.
+
+### Expected result
+The main preview stays clean, while users who want detail can inspect the sequencing decisions.
+
+---
+
+# 9. SHOW ORDER MOVEMENT / ADJUSTMENT DETAILS IN THE COLLAPSIBLE TABLE
+
+Please make the collapsible transparency table show sequencing details such as:
+- `Final Rank`
+- `AI Rank`
+- `Entity / Order ID`
+- `Product`
+- `Current Line`
+- `Proposed Line` if relevant
+- `Moved?`
+- `Adjusted by Rules?`
+- `Reason`
+- `Constraint Note`
+
+### Goal
+Help users understand:
+- what the AI originally proposed
+- what the final sequence became
+- and why anything changed
+
+### Expected result
+Users get a clear, auditable explanation of the sequence decisions.
+
+---
+
+# 10. LOG WHY FINAL RANK DIFFERS FROM AI RANK
+
+If the final sequence differs from the AI suggestion, please explicitly track and expose the reason.
+
+### Example reasons
+- in-production order locked
+- critical deadline protection
+- shutdown-line restriction
+- combined-entity constraint
+- generated/source-order dependency
+- line eligibility constraint
+- deterministic sequencing rule adjustment
+
+### Expected result
+Differences between `AI Rank` and `Final Rank` are explainable and traceable.
+
+---
+
+# 11. SHOW FINAL SEQUENCE AS THE DEFAULT USER VIEW, WITH AI TRANSPARENCY AS OPTIONAL DETAIL
+
+Please keep the main preview focused on:
+- the final resolved order that will actually be applied
+
+Then expose the AI-vs-final difference in the collapsible transparency section.
+
+### Goal
+Avoid overwhelming the main preview while still giving power users and reviewers visibility into the sequencing logic.
+
+### Expected result
+The preview remains clean and actionable, with deeper detail available on demand.
+
+---
+
+# 12. APPLY THIS TO AUTO-SEQUENCE ACROSS ALL RELEVANT ORDER VIEWS / LINES
+
+Please apply this improvement to the auto-sequence behavior across all relevant lines and feedmills where the feature is used.
+
+### Scope
+This includes:
+- `All Feedmills`
+- `Feedmill 1`
+- `Feedmill 2`
+- `Feedmill 3`
+- `Powermix`
+- and all lines from `Line 1` to `Line 7`
+
+### Expected result
+AI sequencing becomes more faithful and transparent across the full scheduling workflow.
+
+---
+
+# IMPORTANT
+
+Please implement the following improvements to **Auto-Sequence**:
+
+## Structured AI sequencing
+- use stable backend IDs / entity IDs
+- have AI return structured ranked IDs/entities
+- distinguish between:
+  - `AI Rank`
+  - `Final Rank`
+
+## Faithful preview/apply behavior
+- sort the preview table by the final resolved sequence
+- use the exact same sorted dataset for Apply to Schedule
+
+## Better AI strategy quality
+- give the AI explicit context about the app’s hard constraints so it can produce more realistic strategies
+
+## Transparency
+- add a collapsible explanation table below the preview table
+- show:
+  - AI Rank
+  - Final Rank
+  - ID
+  - Product
+  - moved/adjusted status
+  - reason
+  - constraint note
+
+This should make the auto-sequence feature:
+- more faithful to the AI
+- safer under operational rules
+- and more transparent to the user
+
+---
+
+# DEBUG LOGGING
+
+Temporarily log AI ranking vs final ranking and preview/apply dataset consistency.
+
+```javascript
+console.debug('[Auto-Sequence AI Structured Ranking]', {
+  strategyName,
+  primaryGoal,
+  entitiesReturnedByAI: aiSequence?.map(e => ({
+    entityId: e.entityId || e.orderId,
+    aiRank: e.rank,
+    reason: e.reason,
+  })),
+});
+```
+
+```javascript
+console.debug('[Auto-Sequence AI vs Final Rank]', {
+  entityId,
+  aiRank,
+  finalRank,
+  adjustedByRules: aiRank !== finalRank,
+  adjustmentReason,
+});
+```
+
+```javascript
+console.debug('[Auto-Sequence Preview Dataset Consistency]', {
+  strategyId,
+  previewEntityOrder: previewRows?.map(r => r.entityId || r.orderId),
+  applyEntityOrder: applyRows?.map(r => r.entityId || r.orderId),
+  exactMatch:
+    JSON.stringify(previewRows?.map(r => r.entityId || r.orderId)) ===
+    JSON.stringify(applyRows?.map(r => r.entityId || r.orderId)),
+});
+```
+
+```javascript
+console.debug('[Auto-Sequence Constraint-Aware AI Context]', {
+  includesConstraints: [
+    'in_production_locked',
+    'critical_or_mto',
+    'shutdown_lines',
+    'line_eligibility',
+    'combined_entities',
+    'run_rate_behavior',
+    'generated_source_dependencies',
+  ],
+});
+```
+
+---
+
+# VERIFICATION
+
+1. ✅ AI sequences using stable backend/entity IDs
+2. ✅ AI returns structured ranked entities, not only narrative sequencing
+3. ✅ `AI Rank` and `Final Rank` are both tracked
+4. ✅ Preview table is actually sorted by the final resolved sequence
+5. ✅ Apply to Schedule uses the same sorted dataset shown in preview
+6. ✅ AI is given explicit context about hard sequencing constraints
+7. ✅ Deterministic refinement still works
+8. ✅ A collapsible transparency table appears below the preview table
+9. ✅ The transparency table shows AI Rank vs Final Rank and reasons for changes
+10. ✅ Users can understand why a row moved or was adjusted
+11. ✅ The improvement works across all relevant lines/feedmills
+12. ✅ No UI errors or console errors are introduced

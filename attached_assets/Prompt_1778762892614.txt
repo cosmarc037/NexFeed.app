@@ -1,0 +1,134 @@
+Please fix the source-to-generated synchronization bug for Powermix split orders.
+
+There is still an issue where editing the Line 5 source order does not update the linked generated order.
+
+This is now confirmed in the UI.
+
+---
+
+## CONFIRMED ISSUE
+
+The source Line 5 order was edited, but the generated order still retained old values.
+
+Example from the current UI:
+
+### Source Line 5 order
+Planned orders now show:
+- 5844098
+- 5844238
+- 5844460
+
+### Generated order
+Still shows:
+- 5844096
+- 5844238
+
+This means the generated order is not synchronizing correctly from the edited source Line 5 order.
+
+---
+
+## REQUIRED BEHAVIOR
+
+Whenever a user edits a source Line 5 order that has a linked generated order, the generated order must automatically update its inherited/source-controlled fields.
+
+### Fields that must sync from source Line 5 order
+- Planned Order (FG)
+- Planned Order (SFG)
+- Volume (MT)
+
+### Sync rule
+If the source Line 5 order changes:
+1. find the linked generated order
+2. copy the latest Planned Order (FG)
+3. copy the latest Planned Order (SFG)
+4. if source Volume changes:
+   - recalculate split using Powermix Split percentage
+   - resolve batch from Powermix Split
+   - adjust generated quantity if needed
+5. immediately update the generated row in UI/state
+
+---
+
+## IMPORTANT
+
+This synchronization must not happen only during initial creation of the generated order.
+
+It must also happen on later edits to the source Line 5 order.
+
+Please check whether the current code only applies inheritance during row creation and fails to re-sync after edits.
+
+---
+
+## WHAT TO CHECK
+
+Please audit the update flow for the following possible failures:
+
+1. source row edit does not trigger generated-row sync
+2. sync listener/watcher is missing for planned order fields
+3. sync only handles volume but not planned order
+4. generated row is found by stale linkage or wrong ID
+5. UI updates source state but generated row state is not refreshed
+6. sync requires save/reload and is not applying live
+7. sync logic reads old cached source values instead of latest edited values
+
+---
+
+## REQUIRED UI RESULT
+
+If the user edits the Line 5 source order’s planned orders, the generated order should immediately reflect the latest values.
+
+Using the example above:
+- if source changes to 5844098 / 5844238
+- generated order must stop showing the old value 5844096
+- it must update to the latest source values
+
+Do not leave stale planned order values in the generated row.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log:
+
+```javascript
+console.debug('[Powermix Source Edit Detected]', {
+  sourceOrderId,
+  plannedOrderFgBefore,
+  plannedOrderFgAfter,
+  plannedOrderSfgBefore,
+  plannedOrderSfgAfter,
+  volumeBefore,
+  volumeAfter,
+});
+
+javascript
+Run Code
+Copy code
+console.debug('[Powermix Generated Sync Attempt]', {
+  sourceOrderId,
+  generatedOrderId,
+  linkedOrderFound,
+  copiedPlannedOrderFg,
+  copiedPlannedOrderSfg,
+  copiedVolume,
+});
+
+javascript
+Run Code
+Copy code
+console.debug('[Powermix Generated Sync Result]', {
+  generatedOrderId,
+  finalPlannedOrderFg,
+  finalPlannedOrderSfg,
+  finalVolume,
+  uiUpdated,
+});
+
+VERIFICATION
+✅ Editing a Line 5 source order triggers sync to the linked generated order
+✅ Generated order Planned Order (FG) updates when source Planned Order (FG) changes
+✅ Generated order Planned Order (SFG) updates when source Planned Order (SFG) changes
+✅ Generated order Volume updates when source Volume changes
+✅ Sync uses the correct linked source/generated order relationship
+✅ Generated order no longer displays stale planned order values after source edits
+✅ UI reflects the updated values without requiring refresh

@@ -1,0 +1,192 @@
+```
+Implement the following changes to the NexFeed Overview tab:
+
+---
+
+## 1. REMOVE SMART PRODUCTION SUMMARY
+
+Remove the existing "Smart Production Summary" section entirely.
+
+---
+
+## 2. RENAME PRODUCTION INSIGHT → SMART PRODUCTION INSIGHT
+
+Move the Production Insight from the bottom (below charts) to the TOP (where Smart Production Summary was — above the key metrics cards). Rename to "Smart Production Insight".
+
+---
+
+## 3. UPDATED OVERVIEW TAB LAYOUT
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                                                             │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │ ✨ Smart Production Insight  ▶        ↻ Refresh      │   │
+│  └──────────────────────────────────────────────────────┘   │
+│                                                             │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐      │
+│  │Total     │ │Active    │ │Complete  │ │Urgent    │      │
+│  │Orders    │ │Orders    │ │Orders    │ │Orders    │      │
+│  │ 99       │ │ 95       │ │ 3        │ │ 0        │      │
+│  └──────────┘ └──────────┘ └──────────┘ └──────────┘      │
+│                                                             │
+│  Line Status Monitoring                                     │
+│  [March 2026 ▼]    [📄 Export Report]                       │
+│                                                             │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐      │
+│  │ FM1      │ │ FM2      │ │ FM3      │ │ PMX      │      │
+│  │ [bars]   │ │ [bars]   │ │ [bars]   │ │ [bars]   │      │
+│  └──────────┘ └──────────┘ └──────────┘ └──────────┘      │
+│                                                             │
+│  ■ Completed ■ In Progress ■ On Hold ■ Cancelled ■ Sched   │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+Order from top to bottom:
+1. ✨ Smart Production Insight (collapsible)
+2. Key metrics cards (Total Orders, Active, Complete, Urgent)
+3. Line Status Monitoring (month dropdown, export, charts, legend)
+
+---
+
+## 4. COLLAPSIBLE — COLLAPSED BY DEFAULT
+
+### COLLAPSED STATE (DEFAULT)
+
+```
+┌──────────────────────────────────────────────────────────┐
+│ ✨ Smart Production Insight  ▶          ↻ Refresh        │
+└──────────────────────────────────────────────────────────┘
+```
+
+- Single line header
+- Content hidden
+- ▶ arrow indicates collapsed
+
+### EXPANDED STATE
+
+```
+┌──────────────────────────────────────────────────────────┐
+│ ✨ Smart Production Insight  ▼          ↻ Refresh        │
+├──────────────────────────────────────────────────────────┤
+│                                                          │
+│  📊 Production Overview                                  │
+│  In March 2026, the feed production saw a total of...    │
+│                                                          │
+│  ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─                   │
+│                                                          │
+│  ⚖ Feedmill Utilization                                 │
+│  The feedmill utilization reflects...                    │
+│                                                          │
+│  ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─                   │
+│                                                          │
+│  📈 Completion Rate                                      │
+│  ...                                                     │
+│                                                          │
+│  ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─                   │
+│                                                          │
+│  ⚠ Attention Areas                                      │
+│  ...                                                     │
+│                                                          │
+│  ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─                   │
+│                                                          │
+│  💡 Recommendations                                      │
+│  ...                                                     │
+│                                                          │
+└──────────────────────────────────────────────────────────┘
+```
+
+### HEADER
+
+| Property | Value |
+|---|---|
+| Background | Light grey (#f9fafb) |
+| Border | 1px solid #e5e7eb |
+| Border-radius | 8px (collapsed) or 8px 8px 0 0 (expanded) |
+| Padding | 12px 16px |
+| Display | Flex, space-between, align-items center |
+| Cursor | Pointer (entire header clickable to toggle) |
+| Margin-bottom | 16px (space between insight and key metrics cards) |
+
+**Left side:**
+
+| Element | Styling |
+|---|---|
+| ✨ icon | 14px |
+| "Smart Production Insight" | 13px, font-weight 700, dark text (#1a1a1a) |
+| Arrow ▶/▼ | 10px, grey (#6b7280), margin-left 8px |
+
+**Right side:**
+
+| Element | Styling |
+|---|---|
+| "↻ Refresh" | 12px, orange (#fd5108), cursor pointer |
+| Hover | Darker orange (#c2410c) |
+| On click | Regenerate AI insight (does NOT toggle collapse) |
+
+### EXPANDED CONTENT
+
+| Property | Value |
+|---|---|
+| Background | Light grey (#f9fafb) |
+| Border | 1px solid #e5e7eb (continues from header) |
+| Border-top | None (seamless with header) |
+| Border-radius | 0 0 8px 8px |
+| Padding | 16px 20px |
+| Max-height | 400px |
+| Overflow-y | Auto (scrollable) |
+| Animation | Slide down, 200ms ease |
+
+### CONTENT TEXT
+
+| Property | Value |
+|---|---|
+| Font size | 11px |
+| Font weight | 400 |
+| Color | Dark grey (#4b5563) |
+| Line height | 1.7 |
+| Topic headings | 11px, font-weight 700, dark text (#1a1a1a), own line |
+| Separator | 1px dashed #e5e7eb, margin 10px 0 |
+
+### SCROLLBAR
+
+```css
+.smart-insight-content::-webkit-scrollbar {
+  width: 6px;
+}
+
+.smart-insight-content::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.03);
+  border-radius: 3px;
+}
+
+.smart-insight-content::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 3px;
+}
+```
+
+---
+
+## 5. BEHAVIOR
+
+| Action | Result |
+|---|---|
+| Click header (anywhere) | Toggle collapse/expand |
+| Click ↻ Refresh | Regenerate AI content only, does NOT toggle collapse |
+| First expand | AI content generates on first expand |
+| After first load | Content persists until Refresh is clicked |
+| Month dropdown change | AI content regenerates automatically if expanded |
+
+---
+
+## 6. REMOVE OLD PRODUCTION INSIGHT FROM BOTTOM
+
+After moving the insight to the top, remove the old Production Insight container that was below the charts. There should be NO AI insight below the charts anymore.
+
+Search and remove:
+- Old "Production Insight" container below the legend
+- Its state, AI generation logic (reuse for the new top position)
+- Any duplicate rendering
+```

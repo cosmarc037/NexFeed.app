@@ -1,0 +1,374 @@
+The `"Not found"` error means the apply is trying to update or create an order with an ID that doesn't exist in the DB. This happens when:
+
+1. The `_combinedFrom` array contains IDs of **old lead orders** (generated records) instead of **real original orders**
+2. Or the child ID was already deleted/moved
+
+Let me trace the exact issue:
+
+**When combining with an existing combined order:**
+- Existing in DB: Lead X (generated, `original_order_ids: [A, B]`), Child A, Child B
+- New Order C matches
+- Algorithm should combine: A + B + C → New Lead Y
+- But `_combinedFrom` might contain Lead X's ID instead of A and B's IDs
+
+```
+Fix the apply — ensure _combinedFrom ONLY contains real original order IDs, never generated lead IDs:
+
+---
+
+## 1. ADD DEFENSIVE VALIDATION BEFORE ANY DB OPERATION
+
+```javascript
+async function applySequencedResultsToDB(sequencedResults, options = {}) {
+  const { label = 'Auto-sequence' } = options;
+  
+  const combinedLeadMap = {};
+  const oldLeadsToDelete = new Set();
+  
+  // Get current DB state ONCE at the start
+  const currentDbOrders = queryClient.getQueryData(["orders"]) || [];
+  const dbOrderIds = new Set(currentDbOrders.map(o => String(o.id)));
+  
+  console.log(`=== ${label} ===`);
+  console.log(`  DB has ${currentDbOrders.length} orders`);
+  
+  for (const [line, lineOrders] of Object.entries(sequencedResults)) {
+    if (!lineOrders || lineOrders.length === 0) continue;
+    
+    // Get In Production offset
+    const inProductionOnLine = currentDbOrders.filter(o =>
+      normalizeLine(o.feedmill_line) === line &&
+      (o.status === 'In Production' || o.status === 'On-going')
+    );
+    let prioCounter = inProductionOnLine.length + 1;
+    
+    for (const order of lineOrders) {
+      if (order.status === 'In Production' || order.status === 'On-going') continue;
+      
+      if (order._isCombined && order._combinedFrom && order._combinedFrom.length > 1) {
+        // === COMBINED ORDER ===
+        
+        // Collect old lead IDs to delete
+        if (order._oldLeadIdsToDelete) {
+          order._oldLeadIdsToDelete.forEach(id => oldLeadsToDelete.add(String(id)));
+        }
+        
+        // CRITICAL: Validate every child ID exists in the DB
+        // Filter out any IDs that are generated leads or don't exist
+        const validChildren = [];
+        const invalidChildren = [];
+        
+        for (const sub of order._combinedFrom) {
+          const subIdStr = String(sub.id);
+          
+          // Check if this ID exists in DB
+          if (!dbOrderIds.has(subIdStr)) {
+            console.warn(`    [Invalid child] ${subIdStr} NOT in DB — skipping`);
+            invalidChildren.push(sub);
+            continue;
+          }
+          
+          // Check if this is actually a generated lead (not an original order)
+          const dbOrder = currentDbOrders.find(o => String(o.id) === subIdStr);
+          if (dbOrder && dbOrder.original_order_ids && dbOrder.original_order_ids.length > 0 && !dbOrder.parent_id) {
+            // This is a LEAD order — we should use its CHILDREN instead
+            console.warn(`    [Lead detected] ${subIdStr} is a lead — resolving to its children`);
+            
+            const leadChildren = currentDbOrders.filter(o => String(o.parent_id) === subIdStr);
+            if (leadChildren.length > 0) {
+              leadChildren.forEach(child => {
+                validChildren.push({
+                  id: child.id,
+                  fpr: child.fpr,
+                  volume: parseFloat(child.volume) || parseFloat(child.total_volume_mt) || 0,
+                  total_volume_mt: child.total_volume_mt,
+                  item_description: child.item_description,
+                  form: child.form,
+                  material_code_fg: child.material_code_fg,
+                  material_code_sfg: child.material_code_sfg,
+                  planned_order_fg: child.planned_order_fg,
+                  planned_order_sfg: child.planned_order_sfg,
+                  batch_size: child.batch_size,
+                  batches: child.batches,
+                  production_time: child.production_time,
+                  target_avail_date: child.target_avail_date,
+                  category: child.category,
+                  status: child.status,
+                  line: normalizeLine(child.feedmill_line),
+                });
+              });
+              // Track this lead for deletion
+              oldLeadsToDelete.add(subIdStr);
+            } else {
+              // Lead has no children in DB — treat it as a regular order
+              console.warn(`    [Lead no children] ${subIdStr} — treating as regular`);
+              validChildren.push(sub);
+            }
+            continue;
+          }
+          
+          // Regular order — valid
+          validChildren.push(sub);
+        }
+        
+        console.log(`    [Combined] Valid: ${validChildren.length}, Invalid: ${invalidChildren.length}`);
+        
+        if (validChildren.length < 2) {
+          // Not enough valid children to combine
+          // Treat remaining as regular orders
+          console.warn(`    [Skip combine] Only ${validChildren.length} valid children — not enough to combine`);
+          
+          for (const child of validChildren) {
+            try {
+              await updateOrderMutation.mutateAsync({
+                id: child.id,
+                data: {
+                  feedmill_line: line,
+                  priority_seq: prioCounter,
+                  parent_id: null,
+                  volume_override: null,
+                  original_order_ids: null,
+                  status: 'Planned',
+                }
+              });
+              prioCounter++;
+            } catch (err) {
+              console.error(`    [Error] Update ${child.id}:`, err);
+            }
+          }
+          continue;
+        }
+        
+        // Calculate volume from VALID children only
+        const combinedVolume = validChildren.reduce((sum, sub) => {
+          return sum + (parseFloat(sub.volume) || parseFloat(sub.total_volume_mt) || 0);
+        }, 0);
+        
+        const volumeOverride = combinedVolume > 0 ? combinedVolume : null;
+        const validChildIds = validChildren.map(sub => sub.id);
+        const firstChild = validChildren[0];
+        
+        // Find the first child's full data from DB for creating the lead
+        const firstChildDb = currentDbOrders.find(o => String(o.id) === String(firstChild.id)) || firstChild;
+        
+        console.log(`    [Creating lead] ${firstChildDb.item_description}, ${volumeOverride} MT, ${validChildIds.length} children`);
+        
+        // Create NEW lead
+        try {
+          const newLead = await createOrderMutation.mutateAsync({
+            data: {
+              fpr: firstChildDb.fpr,
+              feedmill_line: line,
+              priority_seq: prioCounter,
+              material_code_fg: firstChildDb.material_code_fg,
+              material_code_sfg: firstChildDb.material_code_sfg,
+              item_description: firstChildDb.item_description,
+              form: firstChildDb.form,
+              batch_size: firstChildDb.batch_size,
+              run_rate: firstChildDb.run_rate,
+              category: firstChildDb.category,
+              color: firstChildDb.color,
+              diameter: firstChildDb.diameter,
+              formula_version: firstChildDb.formula_version,
+              changeover: firstChildDb.changeover,
+              planned_order_fg: firstChildDb.planned_order_fg,
+              planned_order_sfg: firstChildDb.planned_order_sfg,
+              target_avail_date: order.target_avail_date || firstChildDb.target_avail_date,
+              volume_override: volumeOverride,
+              original_order_ids: validChildIds,
+              parent_id: null,
+              status: 'Planned',
+              total_volume_mt: volumeOverride,
+            }
+          });
+          
+          const newLeadId = newLead.id;
+          combinedLeadMap[order.id] = newLeadId;
+          console.log(`    [Lead created] ${newLeadId}`);
+          
+          // Update ALL valid children
+          for (const child of validChildren) {
+            const childDb = currentDbOrders.find(o => String(o.id) === String(child.id));
+            const originalStatus = childDb?.status || child.status || 'Plotted';
+            
+            try {
+              await updateOrderMutation.mutateAsync({
+                id: child.id,
+                data: {
+                  parent_id: newLeadId,
+                  feedmill_line: line,
+                  priority_seq: null,
+                  status: 'Combined with other PO',
+                  pre_combine_status: originalStatus,
+                  pre_combine_line: childDb?.feedmill_line || child.line,
+                  pre_combine_prio: childDb?.priority_seq || null,
+                  pre_combine_partner_id: childDb?.cut_partner_id || childDb?.split_from_id || null,
+                  pre_combine_original_volume: parseFloat(childDb?.volume || child.volume),
+                }
+              });
+              console.log(`      [Child] ${child.id}: "${originalStatus}" → "Combined with other PO"`);
+            } catch (err) {
+              console.error(`      [Error] Child ${child.id}:`, err);
+            }
+          }
+          
+          prioCounter++;
+          
+        } catch (err) {
+          console.error(`    [Error] Create lead failed:`, err);
+          // Fallback: place children as regular orders
+          for (const child of validChildren) {
+            try {
+              await updateOrderMutation.mutateAsync({
+                id: child.id,
+                data: {
+                  feedmill_line: line,
+                  priority_seq: prioCounter,
+                  parent_id: null,
+                  status: 'Planned',
+                }
+              });
+              prioCounter++;
+            } catch (innerErr) {
+              console.error(`      [Fallback error] ${child.id}:`, innerErr);
+            }
+          }
+        }
+        
+      } else {
+        // === REGULAR ORDER ===
+        const orderIdStr = String(order.id);
+        
+        // Skip if this is an old lead that will be deleted
+        if (oldLeadsToDelete.has(orderIdStr)) {
+          console.log(`    [Skip] ${orderIdStr} is an old lead — will be deleted`);
+          continue;
+        }
+        
+        // Skip if ID doesn't exist in DB (generated temp ID)
+        if (!dbOrderIds.has(orderIdStr) && !orderIdStr.startsWith('__combined_')) {
+          console.warn(`    [Skip] ${orderIdStr} not in DB`);
+          continue;
+        }
+        
+        // Skip temp combined IDs that weren't processed above
+        if (orderIdStr.startsWith('__combined_')) {
+          console.warn(`    [Skip] ${orderIdStr} is temp combined ID`);
+          continue;
+        }
+        
+        const updateData = {
+          feedmill_line: line,
+          priority_seq: prioCounter,
+          parent_id: null,
+          volume_override: null,
+          original_order_ids: null,
+          status: 'Planned',
+        };
+        
+        // N10D dates
+        if (order._category === 'B' || order._category === 'C') {
+          if (order._targetDate) {
+            updateData.target_avail_date = order._targetDate;
+          }
+        }
+        if (order._category === 'D' && order._targetDate) {
+          updateData.target_avail_date = order._targetDate;
+        }
+        
+        try {
+          await updateOrderMutation.mutateAsync({
+            id: order.id,
+            data: updateData
+          });
+        } catch (err) {
+          console.error(`    [Error] Update ${order.id}:`, err);
+        }
+        
+        prioCounter++;
+      }
+    }
+  }
+  
+  // Delete old leads
+  console.log(`  [Deleting] ${oldLeadsToDelete.size} old leads`);
+  for (const oldLeadId of oldLeadsToDelete) {
+    // Don't delete if it's also a valid child somewhere
+    const isAlsoChild = false; // old leads are never children
+    
+    try {
+      await deleteOrderMutation.mutateAsync(oldLeadId);
+      console.log(`    [Deleted] ${oldLeadId}`);
+    } catch (err) {
+      // May already be gone — OK
+      console.warn(`    [Warn] Delete ${oldLeadId}:`, err?.message || err);
+    }
+  }
+  
+  // Refetch
+  await queryClient.invalidateQueries({ queryKey: ["orders"] });
+  await new Promise(resolve => setTimeout(resolve, 500));
+  
+  // Cascade
+  for (const [line, lineOrders] of Object.entries(sequencedResults)) {
+    if (!lineOrders || lineOrders.length === 0) continue;
+    
+    const topLevel = lineOrders
+      .filter(o => {
+        if (o.status === 'In Production' || o.status === 'On-going') return false;
+        if (oldLeadsToDelete.has(String(o.id))) return false;
+        if (String(o.id).startsWith('__combined_')) return !!combinedLeadMap[o.id];
+        return true;
+      })
+      .map((o, i) => {
+        const realId = combinedLeadMap[o.id] || o.id;
+        return { ...o, id: realId, priority_seq: i + 1, feedmill_line: line };
+      });
+    
+    if (topLevel.length > 0) {
+      await cascadeSchedule(topLevel, 0);
+    }
+  }
+  
+  // Final refetch
+  await queryClient.invalidateQueries({ queryKey: ["orders"] });
+  
+  const totalOrders = Object.values(sequencedResults).reduce((s, lo) => s + lo.length, 0);
+  const combinedCount = Object.keys(combinedLeadMap).length;
+  const linesUsed = Object.keys(sequencedResults).filter(l => (sequencedResults[l] || []).length > 0).length;
+  
+  return { totalOrders, combinedCount, linesUsed };
+}
+```
+
+---
+
+## VERIFICATION
+
+### No more "Not found" errors
+1. ✅ Every child ID validated against DB before any operation
+2. ✅ If child ID not in DB → skipped with warning
+3. ✅ If child is actually a lead → resolved to its real children
+4. ✅ Old leads tracked and deleted AFTER all operations
+5. ✅ Try/catch around EVERY mutation — no crash on single failure
+
+### Lead resolution
+6. ✅ If _combinedFrom contains a lead ID → detects via original_order_ids check
+7. ✅ Resolves lead to its actual children from DB
+8. ✅ Adds lead ID to oldLeadsToDelete
+9. ✅ If lead has no children in DB → treats as regular order (fallback)
+
+### Combine still works
+10. ✅ New lead created with valid child IDs only
+11. ✅ Combined volume calculated from valid children
+12. ✅ All children get parent_id = new lead ID
+13. ✅ Status: lead = "Planned", children = "Combined with other PO"
+14. ✅ pre_combine_status saved on each child
+
+### Edge cases
+15. ✅ Less than 2 valid children → skip combine, place as regular orders
+16. ✅ Create lead fails → fallback to placing children individually
+17. ✅ Temp __combined_ IDs handled gracefully
+18. ✅ Old leads not accidentally updated as regular orders
+19. ✅ Comprehensive console logging for debugging
+```

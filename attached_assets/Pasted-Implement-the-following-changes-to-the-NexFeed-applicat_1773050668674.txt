@@ -1,0 +1,268 @@
+Implement the following changes to the NexFeed application:
+
+---
+
+## 1. VOLUME (MT) — EDITABLE VIA OVERRIDE MECHANISM
+
+Make the Volume (MT) column editable via an override mechanism:
+
+**Override Mechanism:**
+- By default, both Suggested Volume and Original Volume are read-only (locked).
+- A small lock icon is displayed next to the Suggested Volume value.
+- When the user clicks the lock icon, a confirmation dialog appears:
+  "You are about to override the Suggested Volume. This will affect Number of Batches, Number of Bags, Production Hours, and Completion Date. Type 'Confirm' to proceed."
+  Input field: User must type "Confirm" (case-insensitive).
+  Buttons: [Proceed] (disabled until "Confirm" is typed) [Cancel]
+- Upon confirmation, the field unlocks and the user can enter a custom Suggested Volume value.
+- The lock icon changes to an "unlocked" state to indicate the value has been overridden.
+
+**After Override:**
+- All downstream fields recalculate based on the new Suggested Volume:
+  - Number of Batches = new Suggested Volume / Batch Size
+  - Number of Bags = new Suggested Volume / 50 * 1000
+  - Production Hours = new Suggested Volume / Run Rate (if Run Rate exists)
+  - Completion Date recalculates, then cascades to all downstream orders in the same feedmill line.
+
+**Batch Size multiple warning:**
+- If the user-entered value is NOT a multiple of the Batch Size, display a small warning icon (⚠) next to the Suggested Volume with a tooltip: "This volume is not a multiple of the Batch Size ([X])."
+- The warning is informational only — it does NOT block the override.
+
+**Display after override (3 lines):**
+- Line 1: [User-entered Volume] MT (bold/prominent, with ⚠ if not a multiple of Batch Size)
+- Line 2: "Original: [X] MT | System Suggested: [Y] MT" (smaller, grey text #a1a8b3)
+
+**Display when NOT overridden (2 lines — current behavior):**
+- Line 1: [Suggested Volume] MT (bold/prominent)
+- Line 2: "Original: [X] MT" (smaller, grey text)
+
+**Editability by status:**
+- Plotted, Cut, Combine, Hold: Override mechanism available
+- In production, On-going *, Done, Cancel PO: Read-only (no override)
+
+**Volume values display as whole numbers — no decimal places.**
+
+---
+
+## 2. COMPLETION DATE — EDITABLE VIA OVERRIDE MECHANISM
+
+Make the Completion Date column editable via an override mechanism:
+
+**Override Mechanism:**
+- By default, Completion Date is read-only (locked, calculated output).
+- A small lock icon is displayed next to the Completion Date value.
+- When the user clicks the lock icon, a confirmation dialog appears:
+  Title: "Override Completion Date"
+  Message: "You are about to override the calculated Completion Date. Please be aware of the following:"
+  
+  Tradeoff list displayed in the dialog:
+  • "The Completion Date will no longer auto-calculate based on Start Date, Production Hours, and Changeover Time."
+  • "All downstream orders in this feedmill line will have their Start Date/Time and Completion Date recalculated based on your new date."
+  • "If you later edit Start Date, Start Time, or Volume, the Completion Date will NOT auto-recalculate — it will retain your overridden value until you remove the override."
+  
+  Input field: User must type "Confirm" (case-insensitive).
+  Buttons: [Proceed] (disabled until "Confirm" is typed) [Cancel]
+
+- Upon confirmation, date and time pickers open allowing the user to set a custom Completion Date and time.
+- The lock icon changes to an "unlocked" state.
+
+**After Override:**
+- The overridden Completion Date is stored and used as the basis for the next order's Start Date/Time in the scheduling cascade.
+- All downstream orders in the same feedmill line recalculate accordingly.
+- The Completion Date remains fixed at the user's value and does NOT auto-recalculate when Start Date, Start Time, Volume, or Production Hours change — UNTIL the user removes the override.
+
+**Removing the override:**
+- When the Completion Date is in overridden/unlocked state, clicking the unlock icon shows a confirmation: "Revert to auto-calculated Completion Date?"
+  Buttons: [Revert] [Cancel]
+- Upon revert, the Completion Date recalculates from Start Date/Time + Production Hours + Changeover Time, the lock icon returns to locked state, and downstream orders recascade.
+
+**Display after override:**
+- Line 1: [Overridden Date] MMMM DD, YYYY
+- Line 2: "Time: HH:MM AM/PM | ✎ Overridden" (smaller, grey text, with a pencil icon or "Overridden" label to indicate manual value)
+
+**Editability by status:**
+- Plotted, Cut, Combine, Hold: Override mechanism available
+- In production, On-going *, Done, Cancel PO: Read-only (no override)
+
+---
+
+## 3. END DATE — EDITABLE ONLY WHEN DONE
+
+Update the End Date editability rules:
+
+- Done: Override mechanism available (auto-populated with current date/time when status changes to Done; user can override via lock icon + "Confirm" dialog as currently defined)
+- All other statuses (Plotted, In production, On-going *, Cut, Combine, Hold, Cancel PO): Read-only
+
+This replaces the previous rule where End Date was directly editable during "In production" and "On-going *" statuses. End Date is now ONLY editable (via override) when the order status is "Done".
+
+---
+
+## 4. READINESS COLUMN — MOVE BETWEEN PRIO AND FPR
+
+Move the Readiness column from its current position (between Tags and Actions) to between Prio and FPR.
+
+**Updated column order (left to right):**
+Prio | Readiness | FPR | Planned Order [FG | SFG] | Production Order [FG1 | SFG1] | Material Code (SFG) | Material Code (FG) | Item Description | Form | Volume (MT) | Batch Size | Number of Batches | Number of Bags | Production Time | HA Info | HA Prep | Status | Start Date | Start Time | Avail Date | Completion Date | FPR Notes | Special Remarks | Threads | Sacks | Markings | Tags | End Date | Actions
+
+Total: 29 columns (unchanged count, just repositioned).
+
+**Readiness is now part of Group A — Order Details:**
+Group A columns become: Prio, Readiness, FPR, Planned Order [FG | SFG], Production Order [FG1 | SFG1], Material Code (SFG), Material Code (FG), Item Description
+Background tint: Grey Tint 3 (#f5f7f8)
+
+**Group H — Completion & Tracking updated to:**
+Columns: End Date, Actions
+Background tint: White (#ffffff)
+
+---
+
+## 5. READINESS ICON — HOVER TOOLTIP WITH MISSING DETAILS
+
+Add a hover tooltip to the Readiness status icon that displays which specific fields are missing or invalid.
+
+**Behavior:**
+- When the user hovers over the Readiness icon (Red X, Orange Warning, or Green Check), a tooltip appears listing the relevant details.
+
+**Red X (Tier 1) tooltip:**
+Title: "Missing Critical Details"
+Body: A bullet list of ONLY the fields that are currently missing or invalid. Examples:
+  • "Start Date is blank"
+  • "Start Time is blank"
+  • "Avail Date is not a valid date"
+  • "Production Hours is blank"
+  • "Suggested Volume is 0 or blank"
+
+Do NOT list fields that are already valid. Only show what's actually missing.
+
+**Orange Warning (Tier 2) tooltip:**
+Title: "HA Info Incomplete"
+Body: A bullet list of ONLY the HA-related fields that are incomplete. Examples:
+  • "HA Available is blank"
+  • "HA Available (3) does not equal Number of Batches (5)"
+  • "SCADA is blank"
+  • "PV is blank"
+  • "HA Prep is not set to Done"
+
+**Green Check (Tier 3) tooltip:**
+Title: "Ready to Produce"
+Body: "All required details are complete."
+
+**Design:**
+- Tooltip appears on hover with a slight delay (200ms) to avoid accidental triggers.
+- Tooltip uses the app's standard tooltip styling: Dark Grey (#2e343a) background, White (#ffffff) text, rounded corners, subtle shadow.
+- Tooltip is positioned above or to the right of the icon, avoiding table overflow issues.
+- Tooltip auto-dismisses when the mouse leaves the icon.
+
+---
+
+## 6. ANALYTICS TAB — SMART INSIGHT BELOW EACH CHART
+
+In the Analytics tab, add a Smart Insight section directly below each individual chart or analysis visualization.
+
+**Behavior:**
+- Each chart (Volume distribution bar chart, Orders by Feedmill Line pie chart, Top 5 most ordered items, Orders by Form type, Line utilization, demand trends line chart) has its own dedicated Smart Insight paragraph displayed directly beneath it.
+- Each Smart Insight is generated independently by calling the AI with context specific to that chart's data.
+- Each Smart Insight section has its own individual refresh button (circular arrow icon) to regenerate just that chart's insight without affecting others.
+
+**Display:**
+- Label: "Smart Insight" (small, bold, Dark Grey #2e343a text) positioned above the insight text.
+- Insight text: Natural language paragraph (1–3 sentences) providing contextual interpretation of the chart data, trends, or actionable recommendations.
+- Refresh button: Small icon button to the right of the "Smart Insight" label. Tooltip: "Refresh this insight"
+- Loading state: While the AI is generating, show a subtle skeleton placeholder or "Generating insight..." text.
+- Error state: If the AI call fails, display "Smart insight unavailable. Click refresh to retry."
+
+**Design:**
+- Light background card (White #ffffff or Grey Tint 3 #f5f7f8) with subtle border or shadow to visually separate the insight from the chart above.
+- Consistent spacing between chart bottom and insight card top.
+- Insight card has padding for readability.
+
+**AI Context per Chart:**
+- Each AI call sends the relevant data for that specific chart (e.g., volume distribution data for the bar chart, feedmill line order counts for the pie chart).
+- The system prompt instructs the AI to provide a brief, actionable insight about the specific data shown in the chart.
+
+---
+
+## 7. DECIMAL FORMATTING RULES (GLOBAL)
+
+Apply the following decimal formatting rules globally across the application:
+
+**No decimal places (whole numbers):**
+- Volume (MT) — both Suggested Volume and Original Volume (e.g., "20 MT", "19 MT")
+- Number of Batches (e.g., "5")
+- Number of Bags (e.g., "400")
+
+**Always 2 decimal places:**
+- Production Hours (e.g., "2.00 hrs")
+- Changeover Time (e.g., "0.17")
+- Run Rate (e.g., "21.23")
+
+This applies across all views: interactive table, export, analytics, tooltips, modals, and any other display.
+
+---
+
+## 8. PROD REMARK — NOT MAPPED
+
+The SAP column "Prod Remark" must be completely ignored during file parsing. It is NOT mapped to any field in the application — not to FPR Notes, not to Special Remarks, not to any other column. The value is discarded upon upload.
+
+FPR Notes and Special Remarks both start as blank fields on upload and are only populated by user input within the application.
+
+---
+
+## 9. DRAG AND DROP — ROW-LEVEL DRAGGING
+
+Update the drag-and-drop implementation so that users can initiate a drag from ANYWHERE on the row, not just the first column or a grip handle icon.
+
+**Implementation:**
+1. Make the entire row a draggable target. When the user clicks and holds anywhere on a row (except on interactive elements), the drag operation begins.
+
+2. Keep the drag handle icon (grip dots/lines) visible on the left side of each row (before the Prio column) as a VISUAL INDICATOR of draggability, but do NOT restrict the drag initiation to only that icon.
+
+3. On drag start:
+   - Apply a slight elevation/shadow effect to the dragged row as a visual preview.
+   - Optionally reduce opacity of the original row position to indicate displacement.
+
+4. Exclude interactive elements from triggering drag:
+   - Dropdowns (Status, HA Prep)
+   - Text input fields (FG1, HA Available, SCADA, PV, FPR Notes, Special Remarks)
+   - Calendar/time pickers (Start Date, Start Time)
+   - Buttons (History button, lock icons)
+   - Any clickable links or popovers
+   
+   These elements should handle their own click/focus events normally without initiating a drag.
+
+5. On drop:
+   - Place the row at its new position.
+   - Re-sequence Prio numbers automatically.
+   - Trigger the scheduling cascade to recalculate Start Date/Time and Completion Date for all affected orders within the same feedmill line.
+
+6. Combined orders: When the lead order row is dragged, all combined orders in the group move together as a block. Individual non-lead combined orders cannot be dragged separately.
+
+7. Recently Completed section rows (top 3 Done orders) are NOT draggable.
+
+8. Cursor: Show `grab` cursor on hover over draggable row areas (excluding interactive elements). Show `grabbing` cursor while dragging.
+
+9. Persist reordered positions in browser local storage so they survive page refreshes within the session.
+
+---
+
+## 10. SMART ASSISTANT CHATBOT — NEW CHAT BUTTON
+
+Add a "New Chat" button to the Smart Assistant chat panel.
+
+**Placement:**
+- Located in the chat panel header bar, aligned to the right (next to the close/dismiss button).
+- Icon: A pencil-on-paper or plus icon (representing a fresh conversation).
+- Tooltip on hover: "Start a new conversation"
+
+**Behavior:**
+- When clicked, clears the entire message history in the chat panel.
+- Resets the conversation context sent to Azure OpenAI (starts a fresh message history array).
+- Re-displays the 3 starter questions:
+  1. "Which orders are urgent and need immediate attention?"
+  2. "What is the current capacity status of all feedmill lines?"
+  3. "Can you summarize today's production schedule?"
+- No confirmation dialog needed — clicking the button immediately starts a fresh chat.
+
+**Design:**
+- Subtle icon button style (no fill, just icon), matching the chat panel's header styling.
+- Uses Dark Grey (#2e343a) icon color by default, Orange (#fd5108) on hover.
+- Should not be confused with the close/dismiss button — keep clear visual separation between them.

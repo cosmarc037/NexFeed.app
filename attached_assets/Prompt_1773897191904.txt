@@ -1,0 +1,175 @@
+```
+Implement the following fix to the NexFeed application:
+
+---
+
+## FIX: NEXT 10 DAYS — TARGET DATE CALCULATION AND STATUS
+
+The target date calculation is broken. All products show "Stock Sufficient" 
+with no target dates. Fix the calculation logic.
+
+---
+
+### THE BUG
+
+Current behavior (ALL wrong):
+- ALL products show status "Stock Sufficient"
+- ALL target dates show "—"
+- Products with positive Bal. to produce are incorrectly marked as Stock Sufficient
+
+### CORRECT LOGIC
+
+**Step 1: Determine if production is needed**
+
+```
+if (bal_to_produce > 0 OR bal_to_produce is not blank/null) {
+  // Production IS needed
+  status = "Needs Production"
+  // Calculate target date (Step 2)
+}
+
+if (bal_to_produce <= 0 OR bal_to_produce is blank/null/empty) {
+  // Production is NOT urgently needed
+  status = "Stock Sufficient"
+  target_date = null (show "—")
+}
+```
+
+**IMPORTANT: The Bal. to produce column in the uploaded file may be:**
+- A positive number (e.g., 79.0) → Needs Production
+- A negative number (e.g., -166.2) → Stock Sufficient
+- Blank/empty → Stock Sufficient
+- Zero → Stock Sufficient
+
+**Only POSITIVE Bal. to produce = Needs Production.**
+
+**Step 2: Calculate target date (only for "Needs Production" products)**
+
+Use the cumulative loading algorithm:
+
+```
+function calculateTargetDate(product) {
+  const dueForLoading = product.due_for_loading;
+  const inventory = product.inventory;
+  const dailyValues = product.daily_values; // [{date, value}, ...]
+  
+  let cumulative = dueForLoading;
+  let previousDate = null;
+  
+  for (const day of dailyValues) {
+    // Skip days with no demand
+    if (!day.value || day.value === 0) {
+      previousDate = day.date;
+      continue;
+    }
+    
+    const newCumulative = cumulative + day.value;
+    
+    if (newCumulative > inventory) {
+      // Would overshoot inventory — stop here
+      // Target date = previous date (last day before overstocking)
+      if (previousDate) {
+        return previousDate;
+      } else {
+        // First day already overshoots
+        const dayBefore = subtractOneDay(day.date);
+        return dayBefore;
+      }
+    }
+    
+    if (newCumulative === inventory) {
+      // Exact match
+      return day.date;
+    }
+    
+    cumulative = newCumulative;
+    previousDate = day.date;
+  }
+  
+  // Never reached inventory — target = last date in range
+  return dailyValues[dailyValues.length - 1].date;
+}
+```
+
+---
+
+### EXPECTED RESULTS FOR THE CURRENT DATA
+
+| Material Code | Item Description | Due for Loading | Inventory | Bal. to Produce | Status | Target Date |
+|---|---|---|---|---|---|---|
+| 1000000000543 | Salto Stag Developer P 1kg (Bundle) | 1.4 | 23.9 | 17.9 | Needs Production | Mar 28 |
+| 1000000000934 | Gallimax Pigeon Pellet, 50kg | 2.5 | 27.3 | 6.8 | Needs Production | Mar 28 |
+| 1000000000915 | Salto Baby Stag w/Grits | 25.2 | 23.4 | blank | Stock Sufficient | — |
+| 1000000000039 | Gallimax 2 Plus Ready Mix | 455.3 | 759.3 | blank | Stock Sufficient | — |
+| 1000000000594 | Gall 21 Chicken Layer P | 24.0 | 0.7 | blank | Stock Sufficient | — |
+| 1000000000219 | Gallimax 3 Maintenance | 46.3 | 74.9 | blank | Stock Sufficient | — |
+| 1000000000233 | Elite XP GestaPrime | 15.8 | 48.2 | 1.1 | Needs Production | Mar 28 |
+| 1000000000237 | Elite XP Lactatex | 32.5 | 89.7 | 1.2 | Needs Production | Mar 28 |
+| 1000000000235 | Elite XP GestaPro | 28.4 | 72.5 | blank | Stock Sufficient | — |
+| 1000000000240 | Elite XP Pre-startex | 37.8 | 153.1 | 39.2 | Needs Production | Mar 28 |
+| 1000000000244 | Elite XP Growex 2 | 68.5 | 215.4 | 38.9 | Needs Production | Mar 28 |
+| 1000000000241 | Elite XP Startex | 92.3 | 310.6 | 79.0 | Needs Production | Mar 28 |
+| 1000000000939 | Classic Hog Growex | 20.5 | 217.6 | 140.3 | Needs Production | Mar 28 |
+| 1000000000517 | Ave Max Duck Layex 50 kg | 38.7 | 95.3 | blank | Stock Sufficient | — |
+| 1000000000528 | Ave Max Duck Layex 2 Pellet | 194.2 | 181.5 | blank | Stock Sufficient | — |
+| 1000000000043 | Basic Broiler Finex Crumble | 158.4 | 342.8 | blank | Stock Sufficient | — |
+| 1000000000011 | Poultry Sol Broiler Booster | 95.6 | 285.3 | 48.6 | Needs Production | Mar 28 |
+| 1000000000012 | Poultry Sol Broiler Starter | 127.8 | 376.4 | blank | Stock Sufficient | — |
+| 1000000000013 | Poultry Sol Broiler Finisher | 217.7 | 405.9 | blank | Stock Sufficient | — |
+| 1000000001497 | Poultry Express Chicken Layer | 85.2 | 198.5 | 0.6 | Needs Production | Mar 28 |
+
+---
+
+### STATUS BADGE STYLING
+
+**"Needs Production":**
+- Badge background: Amber (#fef3c7)
+- Badge text: Dark amber (#92400e)
+- In the preview table AND in the interactive table's avail date cell
+
+**"Stock Sufficient":**
+- Badge background: Green (#dcfce7)
+- Badge text: Dark green (#166534)
+
+---
+
+### PREVIEW TABLE — SHOW DAILY VALUES
+
+The current preview table is missing the daily date columns. Include them:
+
+| Material Code | Category | Item Description | Due for Loading | Mar-18 | Mar-19 | Mar-20 | Mar-21 | Mar-22 | Mar-23 | Mar-24 | Mar-25 | Mar-26 | Mar-27 | Mar-28 | Inventory | Bal. to Produce | Target Date | Status |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+
+- All date columns from the uploaded file should be displayed.
+- Empty cells display as blank (not 0).
+- The table should be horizontally scrollable to accommodate the many columns.
+
+---
+
+### INTERACTIVE TABLE — AVAIL DATE DISPLAY
+
+For orders matched with Next 10 Days data:
+
+**Needs Production (has target date):**
+```
+┌─────────────────────────────────┐
+│ prio replenish                  │   ← orange text
+│ 📊 Target: Mar 28              │   ← blue text (#3b82f6), 10px
+└─────────────────────────────────┘
+```
+
+**Stock Sufficient (no target date):**
+```
+┌─────────────────────────────────┐
+│ safety stocks                   │   ← orange text
+│ 📊 Stock sufficient             │   ← green text (#43a047), 10px, italic
+└─────────────────────────────────┘
+```
+
+**No match found:**
+```
+┌─────────────────────────────────┐
+│ prio replenish                  │   ← orange text, no secondary line
+└─────────────────────────────────┘
+```
+```

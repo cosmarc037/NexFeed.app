@@ -1,0 +1,150 @@
+Please fix the **auto-sequence apply-to-schedule avail date override issue** so that the final schedule follows the **preview-selected avail dates**, not the existing avail dates coming from linked generated/source orders.
+
+---
+
+## 1. USE THE PREVIEW-SELECTED AVAIL DATE AS THE FINAL SOURCE OF TRUTH DURING APPLY
+
+There is currently a case where the schedule does not follow the avail dates shown in the selected auto-sequence preview.
+
+### Likely root cause
+During **Apply to Schedule**, the app appears to be using the linked order’s own existing avail date (for example from a generated/source order relationship) instead of preserving the avail date shown in the selected preview.
+
+### Required rule
+When the user applies a selected preview, the final schedule must use the **preview-selected avail date** for that row.
+
+### Expected result
+The final applied schedule should reflect the exact avail date shown in the selected preview.
+
+---
+
+## 2. DO NOT OVERRIDE THE PREVIEW DATE WITH THE GENERATED/SOURCE ORDER’S EXISTING AVAIL DATE
+
+Please prevent the apply step from replacing the preview’s chosen date with the underlying order’s current stored avail date.
+
+### Important
+Even if a linked generated/source order already has an existing avail date, that date must not override the selected preview result.
+
+### Example
+If:
+- the linked/generated/source order currently has `June 06`
+but
+- the selected preview shows `June 07`
+
+then after Apply to Schedule, the schedule must use:
+- `June 07`
+
+not:
+- `June 06`
+
+### Expected result
+The preview-selected date wins over the linked order’s existing avail date during apply.
+
+---
+
+## 3. TREAT THE SELECTED PREVIEW AS THE COMMITTED RESULT
+
+Once the user selects an auto-sequence preview and clicks **Apply to Schedule**, that preview should become the committed result.
+
+### Goal
+Avoid partial fallback to original/generated/source-order values during apply.
+
+### Expected result
+The applied schedule must follow the selected preview, not silently revert to other stored order-date fields.
+
+---
+
+## 4. APPLY THIS TO ORDERS WITH GENERATED / SOURCE ORDER RELATIONSHIPS AS WELL
+
+Please make sure this fix covers cases where the order has:
+- generated-order linkage
+- source-order linkage
+- split relationships
+- mirrored/generated scheduling relationships
+
+### Expected result
+Even for linked/generated/source orders, the applied schedule must still respect the preview-selected avail date.
+
+---
+
+## 5. KEEP CHRONOLOGICAL SORTING BASED ON THE PREVIEW-SELECTED DATES
+
+Once the preview-selected dates are applied, the final schedule should still sort rows chronologically by those applied avail dates.
+
+### Expected result
+The order of the rows after apply should be based on:
+- the preview-selected avail dates
+not
+- any overridden underlying generated/source-order dates
+
+---
+
+## IMPORTANT
+
+Please enforce this rule:
+
+> During Apply to Schedule, the app must use the **avail date shown in the selected preview**, not the existing avail date from the linked generated/source order.
+
+If preview says:
+- `June 07`
+
+then the final schedule must also say:
+- `June 07`
+
+even if the linked/generated/source order currently has:
+- `June 06`
+
+The preview result must be the final source of truth.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log preview-date preservation vs linked-order date override.
+
+```javascript
+console.debug('[Apply Schedule - Preview Date Preservation]', {
+  line,
+  feedmill,
+  orderId,
+  previewAvailDate,
+  linkedOrderExistingAvailDate,
+  finalAppliedAvailDate,
+  usedPreviewAvailDate: String(finalAppliedAvailDate) === String(previewAvailDate),
+  wronglyOverriddenByLinkedOrder:
+    String(finalAppliedAvailDate) === String(linkedOrderExistingAvailDate) &&
+    String(previewAvailDate) !== String(linkedOrderExistingAvailDate),
+});
+```
+
+```javascript
+console.debug('[Apply Schedule - Linked Order Override Check]', {
+  line,
+  feedmill,
+  orderId,
+  hasGeneratedOrSourceLink,
+  previewAvailDate,
+  storedUnderlyingAvailDate,
+  finalAppliedAvailDate,
+});
+```
+
+```javascript
+console.debug('[Apply Schedule - Final Date Sort Basis]', {
+  line,
+  feedmill,
+  appliedOrderIds,
+  appliedAvailDates,
+  sortingBasedOnPreviewSelectedDates: true,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Apply to Schedule uses the avail date shown in the selected preview
+2. ✅ Linked generated/source order dates no longer override the preview result
+3. ✅ Orders with generated/source relationships still preserve the preview-selected avail date
+4. ✅ Final schedule rows are sorted chronologically by the applied preview-selected dates
+5. ✅ Example: preview `June 07` stays `June 07` after apply, even if linked order date was `June 06`
+6. ✅ No UI errors or console errors are introduced

@@ -1,0 +1,436 @@
+```
+Implement the following fixes to the NexFeed application:
+
+---
+
+## FIX 1: NEXT 10 DAYS PREVIEW — SHOW DAILY DATE COLUMNS AND FIX TARGET DATE CALCULATION
+
+The preview table is missing the daily date columns (Mar-18, Mar-19, etc.) and all target dates show "—" even for products that need production. Both must be fixed.
+
+---
+
+### SHOW DAILY DATE COLUMNS
+
+The preview table MUST display ALL columns from the uploaded file, including the rolling daily date columns.
+
+**Expected preview table columns (left to right):**
+```
+Material Code | Category | Item Description | Due for Loading | 
+Mar-18 | Mar-19 | Mar-20 | Mar-21 | Mar-22 | Mar-23 | Mar-24 | 
+Mar-25 | Mar-26 | Mar-27 | Mar-28 | 
+Inventory | Bal. to Produce | Target Date | Status
+```
+
+**Date column parsing:**
+- The uploaded Excel file has columns with date-formatted headers like "Mar-18", "26-Feb", "1-Mar", etc.
+- These are ROLLING — they change with every upload (daily).
+- The parser must:
+  1. Read ALL column headers from the uploaded file.
+  2. Attempt to parse each header as a date.
+  3. Any header that successfully parses as a date → treat as a daily demand column.
+  4. Store both the parsed date object AND the original header text.
+  5. Display the original header text in the preview table.
+  6. Use the parsed date object for target date calculations.
+
+**Common date header formats to handle:**
+- "Mar-18", "Mar-19" (Month abbreviation + day)
+- "26-Feb", "1-Mar" (Day + Month abbreviation)
+- "3/18", "3/19" (M/DD numeric)
+- "2026-03-18" (ISO format)
+- Any Excel date serial number that gets parsed as a date string
+
+**Parser pseudocode:**
+```
+function parseColumns(headers) {
+  const fixedColumns = ['Material Code', 'Category', 'Item Description', 
+    'Due for loading', 'Inventory', 'Bal. to produce'];
+  
+  const dateColumns = [];
+  
+  for (const header of headers) {
+    // Skip known fixed columns (case-insensitive)
+    if (fixedColumns.some(fc => fc.toLowerCase() === header.toLowerCase())) {
+      continue;
+    }
+    
+    // Try to parse as date
+    const parsed = tryParseDate(header);
+    if (parsed) {
+      dateColumns.push({
+        originalHeader: header,
+        parsedDate: parsed,
+        columnIndex: headers.indexOf(header)
+      });
+    }
+  }
+  
+  // Sort date columns chronologically
+  dateColumns.sort((a, b) => a.parsedDate - b.parsedDate);
+  
+  return { fixedColumns, dateColumns };
+}
+```
+
+**Preview table display:**
+- Date columns displayed between "Due for Loading" and "Inventory".
+- Empty cells in date columns: display as blank (not "0").
+- Negative Bal. to Produce: display as blank.
+- Table is horizontally scrollable.
+
+**Red highlighting in preview table:**
+- For each row, calculate running cumulative: Due for Loading + each day's value.
+- When cumulative >= Inventory, that cell and all subsequent date cells get red tint:
+  - Background: #fef2f2
+  - Text: #e53935
+- If Due for Loading itself >= Inventory, Due for Loading cell and ALL date cells are red.
+
+---
+
+### FIX TARGET DATE CALCULATION
+
+The target date must be calculated using the daily date columns. Currently all target dates show "—" because the calculation is likely not receiving the daily values.
+
+**Ensure the calculation receives the parsed daily values:**
+
+```
+function calculateTargetDate(product) {
+  const dueForLoading = product.due_for_loading;
+  const inventory = product.inventory;
+  const dailyValues = product.daily_values; // MUST be populated from date columns
+  
+  // Debug: log to verify data is present
+  console.log('Product:', product.item_description);
+  console.log('Due:', dueForLoading, 'Inventory:', inventory);
+  console.log('Daily values:', dailyValues);
+  
+  // Stock Sufficient: Due for loading already >= Inventory
+  if (dueForLoading >= inventory) {
+    return { targetDate: null, status: 'stock_sufficient', note: null };
+  }
+  
+  // Needs Production: calculate target date
+  let cumulative = dueForLoading;
+  let previousDate = null;
+  
+  for (const day of dailyValues) {
+    const dayValue = day.value || 0;
+    
+    if (dayValue === 0) {
+      previousDate = day.date;
+      continue;
+    }
+    
+    const newCumulative = cumulative + dayValue;
+    
+    if (newCumulative >= inventory) {
+      // This day meets/exceeds inventory — red zone starts here
+      // Target date = the day BEFORE this
+      if (previousDate) {
+        return { targetDate: previousDate, status: 'needs_production', note: null };
+      } else {
+        const dayBefore = subtractOneDay(dailyValues[0].date);
+        return { targetDate: dayBefore, status: 'needs_production', note: null };
+      }
+    }
+    
+    cumulative = newCumulative;
+    previousDate = day.date;
+  }
+  
+  // Never reached inventory within 10 days
+  return {
+    targetDate: dailyValues[dailyValues.length - 1].date,
+    status: 'needs_production',
+    note: 'Inventory target unlikely to be met within the next 10 days. Production should start as early as possible.'
+  };
+}
+```
+
+**IMPORTANT: Verify that `product.daily_values` is being populated.**
+
+The issue is likely that the parser is storing the date column values but NOT passing them to the target date calculation function. Ensure:
+
+1. When parsing the uploaded file, for each row, extract the values from ALL date columns.
+2. Store them as an array: `daily_values: [{ date: parsedDate, value: cellValue }, ...]`
+3. Pass this array to `calculateTargetDate()`.
+
+**Expected target dates for current data:**
+
+| Product | Target Date | Reason |
+|---|---|---|
+| Gallimax 3 Maintenance | Mar 19 | Cumulative exceeds 74.9 at Mar-20 (46.3+18.0+16.3=80.6), so target = Mar 19 |
+| Gallimax 2 Plus Ready Mix | Mar 23 | Cumulative exceeds 759.3 at Mar-24 |
+| Ave Max Duck Layex 50 kg | Mar 23 | Calculate from daily values |
+| Basic Broiler Finex Crumble | Mar 24 | Calculate from daily values |
+| Poultry Sol Broiler Finisher | Mar 23 | Calculate from daily values |
+| Elite XP GestaPro | Mar 23 | Calculate from daily values |
+| Salto Stag Developer | Mar 28 | Never reaches, last date |
+| Gallimax Pigeon Pellet | Mar 28 | Never reaches, last date |
+| Elite XP Startex | Mar 28 | Never reaches, last date |
+| And so on... | | |
+
+---
+
+## FIX 2: AUTO-SEQUENCE — CORRECT SEQUENCING LOGIC
+
+The auto-sequence must NOT re-sort all orders by effective date. Instead, it must:
+
+1. KEEP dated orders (actual avail dates) in their current positions.
+2. ONLY move non-dated orders (prio replenish, safety stocks) to their correct chronological position based on their inferred target dates from Next 10 Days.
+
+---
+
+### THE CORRECT AUTO-SEQUENCE ALGORITHM
+
+```
+function autoSequence(orders, next10DaysData) {
+  
+  // STEP 1: Separate dated and non-dated orders
+  const datedOrders = []; // orders with actual avail dates — KEEP positions
+  const nonDatedOrders = []; // prio replenish, safety stocks — TO BE INSERTED
+  
+  for (const order of orders) {
+    if (isDateValue(order.avail_date)) {
+      datedOrders.push({ ...order, effectiveDate: parseDate(order.avail_date) });
+    } else {
+      // Look up target date from Next 10 Days
+      let effectiveDate = null;
+      let stockStatus = 'none';
+      let note = null;
+      
+      if (next10DaysData) {
+        const match = next10DaysData.find(
+          s => s.material_code === order.material_code_fg
+        );
+        if (match && match.target_date) {
+          effectiveDate = parseDate(match.target_date);
+          stockStatus = 'needs_production';
+          note = match.note || null;
+        } else if (match && match.status === 'stock_sufficient') {
+          stockStatus = 'stock_sufficient';
+        }
+      }
+      
+      nonDatedOrders.push({ 
+        ...order, 
+        effectiveDate, 
+        stockStatus,
+        note
+      });
+    }
+  }
+  
+  // STEP 2: Sort dated orders by their current position (preserve order)
+  // They are already in the order they appear in the interactive table.
+  // DO NOT re-sort them.
+  
+  // STEP 3: Sort non-dated orders into categories
+  const targetedNonDated = nonDatedOrders
+    .filter(o => o.effectiveDate !== null)
+    .sort((a, b) => a.effectiveDate - b.effectiveDate);
+  
+  const gapFillers = nonDatedOrders
+    .filter(o => o.effectiveDate === null && o.stockStatus !== 'stock_sufficient');
+  
+  const stockSufficient = nonDatedOrders
+    .filter(o => o.stockStatus === 'stock_sufficient');
+  
+  // STEP 4: Build the final sequence by INSERTING non-dated orders
+  // among the dated orders based on target dates
+  
+  const result = [];
+  let datedIndex = 0;
+  let targetedIndex = 0;
+  
+  while (datedIndex < datedOrders.length || targetedIndex < targetedNonDated.length) {
+    
+    // Check if the next targeted non-dated order should go BEFORE the next dated order
+    if (targetedIndex < targetedNonDated.length) {
+      const nextTargeted = targetedNonDated[targetedIndex];
+      
+      if (datedIndex < datedOrders.length) {
+        const nextDated = datedOrders[datedIndex];
+        
+        if (nextTargeted.effectiveDate < nextDated.effectiveDate) {
+          // Non-dated order's target is BEFORE the next dated order
+          // INSERT it before the dated order
+          result.push(nextTargeted);
+          targetedIndex++;
+          continue;
+        } else if (nextTargeted.effectiveDate.getTime() === nextDated.effectiveDate.getTime()) {
+          // Same date — dated order goes first
+          result.push(nextDated);
+          datedIndex++;
+          continue;
+        } else {
+          // Dated order goes first
+          result.push(nextDated);
+          datedIndex++;
+          continue;
+        }
+      } else {
+        // No more dated orders, add remaining targeted
+        result.push(nextTargeted);
+        targetedIndex++;
+        continue;
+      }
+    }
+    
+    if (datedIndex < datedOrders.length) {
+      result.push(datedOrders[datedIndex]);
+      datedIndex++;
+    }
+  }
+  
+  // STEP 5: Add gap fillers after all dated/targeted orders
+  result.push(...gapFillers);
+  
+  // STEP 6: Add stock sufficient at the very bottom
+  result.push(...stockSufficient);
+  
+  // STEP 7: Re-number prio
+  result.forEach((order, index) => {
+    order.prio = index + 1;
+  });
+  
+  return result;
+}
+```
+
+---
+
+### EXAMPLE WITH YOUR DATA
+
+**Current interactive table (Line 1):**
+```
+Prio 1: Salto Conditioner       | Avail: Mar 22
+Prio 2: Gallimax Pigeon Pellet  | Avail: prio replenish
+Prio 3: Elite XP Startex 80MT   | Avail: prio replenish
+Prio 4: Gall 21 Chicken Layer   | Avail: safety stocks
+Prio 5: Gallimax 3 Maintenance  | Avail: safety stocks
+Prio 6: Elite XP Startex 80MT   | Avail: safety stocks
+Prio 7: Elite XP Startex 5MT    | Avail: safety stocks
+Prio 8: Elite XP Startex 10MT   | Avail: safety stocks
+Prio 9: Elite XP Startex 30MT   | Avail: safety stocks
+Prio 10: Elite XP Startex 20MT  | Avail: safety stocks
+```
+
+**Next 10 Days target dates (after fix):**
+```
+Gallimax 3 Maintenance  → Target: Mar 19
+Gallimax Pigeon Pellet  → Target: Mar 28
+Elite XP Startex        → Target: Mar 28
+Gall 21 Chicken Layer   → Stock Sufficient
+```
+
+**Auto-sequence analysis:**
+
+Step 1: Dated orders (keep positions):
+```
+Salto Conditioner | Avail: Mar 22 (actual)
+```
+
+Step 2: Non-dated with targets:
+```
+Gallimax 3 Maintenance  | Target: Mar 19
+Gallimax Pigeon Pellet  | Target: Mar 28
+Elite XP Startex 80MT   | Target: Mar 28
+Elite XP Startex 80MT   | Target: Mar 28
+Elite XP Startex 5MT    | Target: Mar 28
+Elite XP Startex 10MT   | Target: Mar 28
+Elite XP Startex 30MT   | Target: Mar 28
+Elite XP Startex 20MT   | Target: Mar 28
+```
+
+Step 3: Stock sufficient:
+```
+Gall 21 Chicken Layer | Stock Sufficient
+```
+
+Step 4: Build sequence by inserting:
+```
+Gallimax 3 Maint (Mar 19) < Salto Cond (Mar 22) → insert BEFORE
+```
+
+**Correct auto-sequence output:**
+```
+Prio 1:  Gallimax 3 Maintenance  | safety stocks  | Target: Mar 19  ← INSERTED before Mar 22
+Prio 2:  Salto Conditioner       | Avail: Mar 22  ← dated, kept in relative position
+Prio 3:  Gallimax Pigeon Pellet  | prio replenish | Target: Mar 28  ← after Mar 22
+Prio 4:  Elite XP Startex 80MT   | prio replenish | Target: Mar 28
+Prio 5:  Elite XP Startex 80MT   | safety stocks  | Target: Mar 28
+Prio 6:  Elite XP Startex 5MT    | safety stocks  | Target: Mar 28
+Prio 7:  Elite XP Startex 10MT   | safety stocks  | Target: Mar 28
+Prio 8:  Elite XP Startex 30MT   | safety stocks  | Target: Mar 28
+Prio 9:  Elite XP Startex 20MT   | safety stocks  | Target: Mar 28
+Prio 10: Gall 21 Chicken Layer   | safety stocks  | Stock Sufficient ← LAST
+```
+
+---
+
+## FIX 3: AUTO-SEQUENCE TABLE — MATCH MAIN TABLE BEHAVIOR
+
+The auto-sequence preview table must behave identically to the main interactive table for scheduling fields.
+
+**Start Date and Start Time:**
+- If the order has a user-set start date/time in the main table → show it.
+- If blank in the main table → show placeholder "Set start date" / "Set start time" in grey italic.
+- The auto-sequence does NOT auto-generate start dates/times.
+
+**Completion Date:**
+- Same cascade rules as the main table:
+  - If order has start date/time → Completion = Start + Production Hours
+  - If no start but previous order has completion → Completion = Previous Completion + Changeover + Production Hours
+  - If neither → blank placeholder "Set completion"
+
+**Editable in auto-sequence table:**
+- Start Date: Clickable, opens date picker.
+- Start Time: Clickable, opens 12-hour time picker with AM/PM.
+- Same edit controls as the main table (calendar icon, clock icon, Done/Cancel buttons).
+- When user edits start date/time, completion dates cascade downstream.
+
+---
+
+## FIX 4: RE-ANALYZE BUTTON
+
+Add a "Re-analyze" button to the auto-sequence modal.
+
+**Button:**
+- Label: "🔄 Re-analyze"
+- Position: Top area of the modal, near the summary bar.
+- Style: Orange outline (#fd5108), orange text. Hover: filled orange, white text.
+
+**Behavior:**
+1. Re-runs the auto-sequence analysis.
+2. ONLY re-sorts the non-dated orders (prio replenish, safety stocks).
+3. Dated orders (actual avail dates) STAY in their current positions.
+4. Takes into account:
+   - Any start dates/times the user has set in the preview.
+   - Current order positions (if user dragged orders).
+   - Updated completion dates from cascade.
+5. Preserves user-set start dates/times (does not clear them).
+6. Shows a notification when complete:
+   ```
+   🔄 Re-analyzed: [X] orders repositioned.
+   ```
+
+**When to use:**
+- After user sets start dates/times.
+- After user drags orders in the preview.
+- Anytime user wants AI to re-evaluate.
+
+---
+
+## FIX 5: AUTO-SEQUENCE MODAL — COMPLETE BUTTON SET
+
+```
+[🔄 Re-analyze]  [Reset to Original]  [Apply to Schedule]  [Cancel]
+```
+
+| Button | Style | Behavior |
+|---|---|---|
+| 🔄 Re-analyze | Orange outline | Re-sorts non-dated orders only |
+| Reset to Original | Grey outline | Reverts to AI's initial sequence, discards user edits |
+| Apply to Schedule | Orange filled | Applies current preview to main table |
+| Cancel | Grey outline | Closes modal, no changes |
+```

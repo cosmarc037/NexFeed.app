@@ -1,0 +1,295 @@
+Please update the **Orders at Risk** logic for the **5:00 PM allowance rule** so that it applies only when it is already the order’s **Avail Date**, not to all future-dated orders.
+
+---
+
+## 1. REVISE THE 5:00 PM ALLOWANCE RULE FOR “ORDERS AT RISK”
+
+The current 5:00 PM allowance logic appears to be too broad.
+
+Right now, it may be counting orders as at risk even when:
+- their projected completion is on a future day
+- or their Avail Date is still in the future
+- even though they are not actually in same-day deadline pressure
+
+Please refine the rule.
+
+### New intended business rule
+An order should be considered **at risk** under the **5:00 PM allowance rule** only if:
+
+- it is already the order’s **Avail Date**
+- and the order’s projected completion time is **later than 5:00 PM**
+
+### Expected result
+The 5:00 PM risk rule should only apply to orders that are due **today**, not to orders whose Avail Date is still in the future.
+
+---
+
+## 2. DO NOT COUNT FUTURE-DATED ORDERS UNDER THE 5:00 PM RULE
+
+Please make sure the app does **not** count an order as at risk under the 5:00 PM rule just because its estimated completion time is on a later date/time that happens to be after 5:00 PM.
+
+### Example of what should NOT happen
+If an order has:
+- `Avail Date = May 28`
+- `Estimated Completion = May 26, 2026, 4:25 AM`
+
+that order should **not** be counted as at risk under the 5:00 PM allowance rule, because:
+- it is **not yet** the order’s Avail Date
+- there is no same-day 5:00 PM deadline pressure yet
+
+The same applies to future-dated orders such as:
+- Avail Date = `June 5`
+- Estimated Completion = `May 26, 2026, 8:54 AM`
+- Avail Date = `June 5`
+- Estimated Completion = `May 26, 2026, 1:06 PM`
+
+These should **not** be treated as 5:00 PM risk cases.
+
+### Expected result
+Future-dated orders are excluded from the 5:00 PM allowance risk condition.
+
+---
+
+## 3. APPLY THE 5:00 PM RULE ONLY WHEN AVAIL DATE = TODAY
+
+Please use this refined rule:
+
+### At-risk under 5:00 PM allowance if:
+- `Order Avail Date = Today`
+- and `Projected Completion Time > 5:00 PM`
+
+### Not at risk under this rule if:
+- `Order Avail Date > Today`
+- even if the projected completion time is later than 5:00 PM on some earlier or different date
+- unless the order is separately at risk for other existing reasons such as deadline miss or Critical status
+
+### Expected result
+The 5:00 PM allowance condition should behave as a **same-day due-date pressure rule**.
+
+---
+
+## 4. KEEP EXISTING DEADLINE-BASED RISK LOGIC INTACT
+
+Please preserve the existing Orders at Risk logic for:
+- Critical orders
+- Urgent orders that the simulation confirms will actually be late
+- orders whose projected completion exceeds their target avail date
+- non-flagged orders pushed late by the sequence
+
+This request is only to refine the newly added 5:00 PM rule.
+
+### Important
+Do not remove or weaken the existing deadline-based risk logic.
+
+### Expected result
+The app should still count orders at risk for:
+- overdue / deadline-based reasons
+- sequence-caused lateness
+while applying the 5:00 PM rule only in the correct same-day scenario
+
+---
+
+## 5. USE THE CURRENT DATE AND PROJECTED COMPLETION TO EVALUATE SAME-DAY RISK
+
+Please evaluate the refined 5:00 PM rule using:
+
+- the order’s **Avail Date**
+- the **current date**
+- the projected completion time from the sequencing/timing simulation
+
+### Intended logic
+If:
+- `Avail Date = Today`
+- and the projected completion of that order is later than `5:00 PM`
+
+then:
+- mark it as at risk
+
+### Example
+If:
+- Avail Date = `May 25`
+- Today = `May 25`
+- Current time = `4:00 PM`
+- Production time = `3 hours`
+- Projected completion = `7:00 PM`
+
+then:
+- the order should be considered **at risk**
+
+because it is already due today and will exceed the 5:00 PM allowance time.
+
+---
+
+## 6. SAMPLE SCENARIOS TO ENFORCE
+
+### Example A — Same-day, exceeds 5:00 PM → at risk
+- Today = `May 25`
+- Avail Date = `May 25`
+- Projected Completion = `May 25, 7:00 PM`
+
+Result:
+- ✅ At risk under the 5:00 PM allowance rule
+
+---
+
+### Example B — Same-day, finishes before or at 5:00 PM → not at risk under this rule
+- Today = `May 25`
+- Avail Date = `May 25`
+- Projected Completion = `May 25, 4:45 PM`
+
+Result:
+- ❌ Not at risk under the 5:00 PM allowance rule
+
+If projected completion is:
+- `May 25, 5:00 PM`
+
+Result:
+- ❌ Still not at risk under this specific rule
+
+---
+
+### Example C — Future avail date, completes after 5:00 PM on another day → not at risk under this rule
+- Today = `May 25`
+- Avail Date = `May 28`
+- Projected Completion = `May 26, 6:30 PM`
+
+Result:
+- ❌ Not at risk under the 5:00 PM allowance rule
+
+This order may still be evaluated under other normal risk rules, but not under this specific 5:00 PM same-day condition.
+
+---
+
+### Example D — Future avail date, completes before avail date → not at risk
+- Today = `May 25`
+- Avail Date = `June 5`
+- Projected Completion = `May 26, 8:54 AM`
+
+Result:
+- ❌ Not at risk under the 5:00 PM allowance rule
+
+---
+
+## 7. INCLUDE THIS REFINED RULE IN THE VISIBLE “ORDERS AT RISK” COUNT
+
+If an order meets the refined 5:00 PM same-day condition, it should still be included in the visible **Orders at Risk** count.
+
+### Important
+Please continue using a deduplicated risk set so the same order is not counted twice if it is already at risk for another reason.
+
+### Expected result
+The card count should now reflect:
+- the existing risk conditions
+- plus same-day orders due today that are projected to finish after 5:00 PM
+
+---
+
+## 8. UPDATE THE AI REASONING / BREAKDOWN TO MATCH THE REFINED RULE
+
+Please update the **AI reasoning** and risk breakdown wording so the 5:00 PM reason is explained correctly.
+
+### Goal
+Users should understand that this risk applies specifically when:
+- the order is due today
+- and it is projected to finish after the 5:00 PM allowance time
+
+### Suggested wording
+- `1 order is due today and projected to complete after the 5:00 PM allowance time`
+- `Risk includes orders whose Avail Date is today but whose projected completion exceeds 5:00 PM`
+- `Orders at risk: 2 (1 delayed, 1 exceeds same-day 5:00 PM allowance)`
+
+### Expected result
+The reasoning should not imply that all future orders finishing after 5:00 PM are at risk.
+
+---
+
+## 9. LET THIS AFFECT STRATEGY COMPARISON THROUGH THE EXISTING RISK METRIC
+
+Please keep this refined 5:00 PM logic within the existing **Orders at Risk** metric used by strategy cards and strategy scoring.
+
+### Expected result
+If one strategy causes more same-day due orders to finish after 5:00 PM, that should increase its Orders at Risk count compared with a safer strategy.
+
+---
+
+## IMPORTANT
+
+Please use this corrected rule:
+
+> An order is at risk under the **5:00 PM allowance** only if:
+> - its **Avail Date is today**
+> - and its **projected completion time is later than 5:00 PM**
+
+Do **not** count future-dated orders under this specific 5:00 PM rule just because they have completion timestamps on later dates/times.
+
+Keep all existing deadline-based and Critical/Urgent risk logic intact.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log the refined same-day 5:00 PM risk evaluation.
+
+```javascript
+console.debug('[Orders At Risk - Same Day 5PM Rule]', {
+  orderId,
+  todayDate,
+  availDate,
+  projectedCompletionDatetime,
+  isSameDayAvailDate: availDate === todayDate,
+  exceedsFivePm:
+    projectedCompletionDatetime &&
+    (
+      new Date(projectedCompletionDatetime).getHours() > 17 ||
+      (
+        new Date(projectedCompletionDatetime).getHours() === 17 &&
+        new Date(projectedCompletionDatetime).getMinutes() > 0
+      )
+    ),
+  includedUnderFivePmRule:
+    availDate === todayDate &&
+    projectedCompletionDatetime &&
+    (
+      new Date(projectedCompletionDatetime).getHours() > 17 ||
+      (
+        new Date(projectedCompletionDatetime).getHours() === 17 &&
+        new Date(projectedCompletionDatetime).getMinutes() > 0
+      )
+    ),
+});
+```
+
+```javascript
+console.debug('[Orders At Risk - Excluded Future Avail Date]', {
+  orderId,
+  todayDate,
+  availDate,
+  projectedCompletionDatetime,
+  excludedFromFivePmRule: availDate !== todayDate,
+});
+```
+
+```javascript
+console.debug('[Orders At Risk Summary]', {
+  ordersAtRiskCount,
+  overdueCount,
+  delayedCount,
+  sameDayFivePmRiskCount,
+  severityLabel: ordersAtRiskCount > 0 ? 'High' : 'Low',
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Existing Orders at Risk logic for Critical, Urgent, and deadline misses remains intact
+2. ✅ The 5:00 PM rule applies only when the order’s **Avail Date = Today**
+3. ✅ An order due today and projected to finish after **5:00 PM** is counted as at risk
+4. ✅ An order due today and projected to finish at or before **5:00 PM** is not counted under this rule
+5. ✅ An order with a future Avail Date is not counted under the 5:00 PM rule
+6. ✅ Future-dated orders with projected completions such as `4:25 AM`, `8:54 AM`, or `1:06 PM` are not incorrectly counted under the 5:00 PM rule
+7. ✅ Orders are still deduplicated if they qualify under multiple risk conditions
+8. ✅ AI reasoning correctly explains same-day 5:00 PM allowance risk
+9. ✅ Strategy cards reflect the corrected Orders at Risk count
+10. ✅ No UI errors or console errors are introduced

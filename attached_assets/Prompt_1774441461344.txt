@@ -1,0 +1,315 @@
+```
+Implement the following fixes to the NexFeed application:
+
+---
+
+## SCOPE — ONLY THESE TWO COMPONENTS
+
+Apply fixes ONLY to:
+- ✅ Impact Analysis (Add New Order dialog)
+- ✅ Safety Stock Insights (Next 10 Days tab)
+
+Do NOT touch:
+- ❌ Production Insights
+- ❌ Auto-Sequence Analysis
+- ❌ Smart Insights (Analytics)
+- ❌ Any other AI output
+
+---
+
+## 1. FIX: BOLD RENDERING — IMPACT ANALYSIS AND SAFETY STOCK INSIGHTS
+
+Both components are rendering ALL text as bold. Fix so only section headers and product names are bold.
+
+### CHECK CSS
+
+```css
+/* Impact Analysis container — regular weight */
+.impact-analysis-text {
+  font-weight: 400 !important;
+  font-size: 12px;
+  color: #4b5563;
+  line-height: 1.7;
+}
+
+.impact-analysis-text strong {
+  font-weight: 700 !important;
+  color: #1a1a1a;
+}
+
+/* Safety Stock Insights container — regular weight */
+.safety-stock-text {
+  font-weight: 400 !important;
+  font-size: 12px;
+  color: #4b5563;
+  line-height: 1.7;
+}
+
+.safety-stock-text strong {
+  font-weight: 700 !important;
+  color: #1a1a1a;
+}
+```
+
+### CHECK COMPONENT RENDERING
+
+```jsx
+// WRONG — wrapping in bold tag
+<strong>{aiText}</strong>
+<b>{aiText}</b>
+
+// WRONG — parent has font-weight: bold
+<div style={{ fontWeight: 'bold' }}>{aiText}</div>
+<div style={{ fontWeight: 600 }}>{aiText}</div>
+
+// CORRECT — regular weight container, parsed HTML inside
+<div 
+  className="impact-analysis-text" 
+  style={{ fontWeight: 400 }}
+  dangerouslySetInnerHTML={{ __html: parseMarkdown(aiText) }} 
+/>
+```
+
+### MARKDOWN PARSER
+
+```javascript
+function parseMarkdown(rawText) {
+  let html = rawText;
+  
+  // Convert **text** to <strong>
+  html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+  
+  // Line breaks
+  html = html.replace(/\n\n/g, '<br><br>');
+  html = html.replace(/\n/g, '<br>');
+  
+  // Bullets on own line
+  html = html.replace(/• /g, '<br>• ');
+  
+  // Clean leading <br>
+  html = html.replace(/^<br>/, '');
+  
+  // Clean triple breaks
+  html = html.replace(/<br><br><br>/g, '<br><br>');
+  
+  return html;
+}
+```
+
+---
+
+## 2. FIX: IMPACT ANALYSIS — PUNCTUATION AND STRUCTURE
+
+Update the Impact Analysis AI prompt to enforce proper formatting:
+
+```
+FORMAT RULES FOR IMPACT ANALYSIS:
+
+1. Each section header on its OWN LINE, bold, with colon, 
+   followed by a NEW LINE before content:
+   
+   📍 **Insertion Position:**
+   (blank line)
+   Content here...
+   
+   ⏱ **Production Impact:**
+   (blank line)
+   Content here...
+
+2. ONLY bold the section header text — NOT the content
+3. Content must be regular weight
+4. Use these punctuation marks:
+   - Colon (:) after labels
+   - Comma (,) in lists
+   - Em-dash (—) for asides
+   - Period (.) at end of every sentence
+5. Keep paragraphs to 2-3 sentences
+6. Use product names only — no material codes
+
+EXAMPLE:
+
+📍 **Insertion Position:**
+This order will be inserted at Priority 2, between Salto 
+Conditioner (March 22) and Gallimax Pigeon Pellet (March 28), 
+based on its availability date of March 23.
+
+⏱ **Production Impact:**
+Production time: 0.40 hours, plus changeover: 0.17 hours — 
+totaling 0.57 hours added to Line 1.
+
+⚠ **Downstream Effects:**
+9 orders will shift down by one position. Salto Conditioner 
+moves from Priority 2 to 3, Gallimax Pigeon Pellet from 
+Priority 3 to 4, and so on through Priority 11.
+
+📅 **Deadline Risk:**
+No start dates are currently set — completion dates cannot 
+be calculated until a start date is configured for Priority 1.
+```
+
+---
+
+## 3. FIX: SAFETY STOCK INSIGHTS — SCROLLABLE CONTAINER
+
+### CONTAINER
+
+```css
+.safety-stock-insights-content {
+  max-height: 400px;
+  overflow-y: auto;
+  padding-right: 8px;
+}
+
+.safety-stock-insights-content::-webkit-scrollbar {
+  width: 6px;
+}
+
+.safety-stock-insights-content::-webkit-scrollbar-track {
+  background: #f3f4f6;
+  border-radius: 3px;
+}
+
+.safety-stock-insights-content::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 3px;
+}
+
+.safety-stock-insights-content::-webkit-scrollbar-thumb:hover {
+  background: #9ca3af;
+}
+```
+
+### LAYOUT
+
+```
+┌─ ✨ Safety Stock Insights ─────────────── ↻ Refresh ─┐
+│                                                       │
+│  ┌─ Scrollable (max 400px) ────────────────────────┐  │
+│  │  A) Overview                                    │  │
+│  │  Content...                                     │  │
+│  │                                                 │  │
+│  │  B) Urgent...                                   │  │
+│  │  • Product 1...                                 │▐ │
+│  │  • Product 2...                                 │▐ │
+│  │                                                 │▐ │
+│  │  C) Production Needed...                        │  │
+│  │  ...                                            │  │
+│  └─────────────────────────────────────────────────┘  │
+│                                                       │
+└───────────────────────────────────────────────────────┘
+```
+
+Header "✨ Safety Stock Insights" and "↻ Refresh" stay FIXED. Only content scrolls.
+
+---
+
+## 4. FIX: SAFETY STOCK INSIGHTS — FORMATTING AND PUNCTUATION
+
+Update the Safety Stock Insights AI prompt:
+
+```
+FORMAT RULES FOR SAFETY STOCK INSIGHTS:
+
+1. Section headers — own line, bold, blank line before content:
+   
+   **A) Overview**
+   
+   Content here...
+   
+   **B) Urgent — Production Needed Soon**
+   
+   Content here...
+
+2. Each bullet product — own line, blank line between products:
+   
+   • **Product Name** — Target: March 22, 2026.
+     Demand: 127.8 MT | Inventory: 376.4 MT | Buffer: 66%.
+     Brief urgency note.
+   
+   • **Product Name** — Target: March 23, 2026.
+     Demand: 217.7 MT | Inventory: 405.9 MT | Buffer: 46%.
+     Brief urgency note.
+
+3. ONLY bold:
+   - Section headers
+   - Product names within bullets
+   - NOTHING else
+
+4. Punctuation:
+   - Colon (:) after labels — "Target:", "Demand:", "Inventory:", "Buffer:"
+   - Pipe (|) between data points — "Demand: X MT | Inventory: X MT"
+   - Em-dash (—) after product name — "**Product** — Target:..."
+   - Period (.) end of every sentence
+   - Comma (,) in lists
+
+5. Skip sections with zero products — do NOT show them
+
+6. No material codes anywhere
+
+EXAMPLE:
+
+**A) Overview**
+
+There are 20 products in the analysis. Production is needed 
+for 17 products, while 3 have sufficient stock. The total 
+deficit across all products is approximately 403 MT.
+
+**B) Urgent — Production Needed Soon**
+
+These products need immediate attention:
+
+• **Poultry Sol Broiler Starter Cr MD 50kg** — Target: March 22, 2026.
+  Demand: 127.8 MT | Inventory: 376.4 MT | Buffer: 66%.
+  Approaching target date — schedule production promptly.
+
+• **Poultry Sol Broiler Finisher MP MD 50kg** — Target: March 23, 2026.
+  Demand: 217.7 MT | Inventory: 405.9 MT | Buffer: 46%.
+  High volume demand with limited buffer.
+
+**C) Production Needed**
+
+These products require production within the next 4-7 days:
+
+• **Elite XP Startex, Mini-pellet 50kg** — Target: March 28, 2026.
+  Demand: 92.3 MT | Inventory: 310.6 MT | Buffer: 70%.
+  Moderate buffer but high total volume.
+
+• **Classic Hog Growex, Pellet 50kg** — Target: March 28, 2026.
+  Demand: 20.5 MT | Inventory: 217.6 MT | Buffer: 91%.
+  Comfortable buffer — schedule within normal cycle.
+
+**D) Stock Sufficient — No Immediate Action**
+
+These products have adequate inventory:
+
+• **Gall 21 Chicken Layer P (Breeder) 50Kg** —
+  Inventory: 0.7 MT | Demand: 24.0 MT.
+  Currently sufficient, no production needed.
+
+• **Ave Max Duck Layex 2 Pellet, 50kg** —
+  Inventory: 181.5 MT | Demand: 194.2 MT.
+  Ample inventory, no immediate action needed.
+
+**E) SAP Order Match**
+
+All 20 products are matched with SAP orders. No discrepancies found.
+```
+
+---
+
+## 5. VERIFY AFTER FIX
+
+### Impact Analysis:
+1. Section headers (📍, ⏱, ⚠, 📅) — bold with colon
+2. Content paragraphs — regular weight, NOT bold
+3. Proper line breaks between sections
+4. Colons, commas, em-dashes, periods all present
+
+### Safety Stock Insights:
+1. Section headers (A, B, C, D, E) — bold
+2. Product names in bullets — bold
+3. Everything else — regular weight, NOT bold
+4. Each bullet on its own line with spacing between
+5. Scrollable container — scrollbar appears when content exceeds 400px
+6. Header stays fixed above scroll
+```

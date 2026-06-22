@@ -1,0 +1,185 @@
+```
+Fix: Keep the tooltip on the insight cell but fix its positioning:
+
+---
+
+## 1. KEEP title ATTRIBUTE FOR QUICK HOVER
+
+```jsx
+<td className="as-col-insight">
+  {isLoadingInsight ? (
+    <span className="as-insight-loading">
+      <span className="as-insight-dot-1">·</span>
+      <span className="as-insight-dot-2">·</span>
+      <span className="as-insight-dot-3">·</span>
+    </span>
+  ) : insight ? (
+    <div className="as-insight-cell" title={insight}>
+      <span className="as-insight-icon">💡</span>
+      <div className="as-insight-text-wrapper">
+        <span className="as-insight-text">
+          {showFullInsight ? insight : displayInsight}
+        </span>
+        {hasMore && (
+          <button
+            className="as-insight-more"
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowFullInsight(!showFullInsight);
+            }}
+          >
+            {showFullInsight ? 'less' : 'more'}
+          </button>
+        )}
+      </div>
+    </div>
+  ) : (
+    <span className="as-insight-empty">—</span>
+  )}
+</td>
+```
+
+The `title={insight}` stays on the cell div — this is the browser's native tooltip. It can't be styled, but it won't clip since the browser positions it automatically.
+
+---
+
+## 2. BUT — THE SNIP SHOWS A CUSTOM STYLED TOOLTIP (DARK BACKGROUND)
+
+That dark tooltip in the snip is NOT a native `title` attribute — it's a custom tooltip component. If the app uses a custom tooltip, fix its positioning:
+
+```css
+/* If using a custom tooltip, ensure it doesn't clip at the top */
+.as-insight-cell {
+  position: relative;
+}
+
+/* Custom tooltip — position BELOW the cell, not above */
+.as-insight-cell::after {
+  /* If this is how the tooltip is rendered */
+  content: attr(data-tooltip);
+  position: absolute;
+  
+  /* Position BELOW the cell, not above */
+  top: 100%;
+  left: 0;
+  margin-top: 4px;
+  
+  /* Never go above the viewport */
+  z-index: 9999;
+  
+  /* Styling */
+  background: #1f2937;
+  color: #ffffff;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 11px;
+  line-height: 1.6;
+  max-width: 300px;
+  word-break: break-word;
+  white-space: normal;
+  
+  /* Hidden by default */
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s;
+}
+
+.as-insight-cell:hover::after {
+  opacity: 1;
+}
+```
+
+---
+
+## 3. OR — IF THE APP USES A TOOLTIP LIBRARY (e.g., Tippy, React Tooltip)
+
+```jsx
+<div 
+  className="as-insight-cell"
+  data-tooltip-id="insight-tooltip"
+  data-tooltip-content={insight}
+  data-tooltip-place="bottom"
+>
+  <span className="as-insight-icon">💡</span>
+  <div className="as-insight-text-wrapper">
+    <span className="as-insight-text">
+      {showFullInsight ? insight : displayInsight}
+    </span>
+    {hasMore && (
+      <button
+        className="as-insight-more"
+        onClick={(e) => {
+          e.stopPropagation();
+          setShowFullInsight(!showFullInsight);
+        }}
+      >
+        {showFullInsight ? 'less' : 'more'}
+      </button>
+    )}
+  </div>
+</div>
+```
+
+Key: `data-tooltip-place="bottom"` ensures it always shows BELOW, never clipped at the top.
+
+---
+
+## 4. SAFEST APPROACH — USE title BUT ALSO KEEP "more" FOR FULL TEXT
+
+```jsx
+<td className="as-col-insight">
+  {isLoadingInsight ? (
+    <span className="as-insight-loading">
+      <span className="as-insight-dot-1">·</span>
+      <span className="as-insight-dot-2">·</span>
+      <span className="as-insight-dot-3">·</span>
+    </span>
+  ) : insight ? (
+    <div className="as-insight-cell" title={insight}>
+      <span className="as-insight-icon">💡</span>
+      <div className="as-insight-text-wrapper">
+        <span className="as-insight-text">
+          {showFullInsight ? insight : displayInsight}
+        </span>
+        {hasMore && (
+          <button
+            className="as-insight-more"
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowFullInsight(!showFullInsight);
+            }}
+          >
+            {showFullInsight ? 'less' : 'more'}
+          </button>
+        )}
+      </div>
+    </div>
+  ) : (
+    <span className="as-insight-empty">—</span>
+  )}
+</td>
+```
+
+This gives users TWO ways to see the full text:
+- Hover → native browser tooltip (always positioned correctly by the browser)
+- Click "more" → inline expansion (text wraps within the cell)
+
+---
+
+## VERIFICATION
+
+### Tooltip present
+1. ✅ title={insight} kept on the cell div
+2. ✅ Browser positions the native tooltip automatically — no clipping
+3. ✅ Shows full insight text on hover
+
+### "More" also works
+4. ✅ Clicking "more" expands text inline within the cell
+5. ✅ Clicking "less" collapses back
+6. ✅ Text wraps properly — no overflow
+
+### No dark custom tooltip overlapping header
+7. ✅ If using custom tooltip library, set place="bottom"
+8. ✅ Native title attribute doesn't have the dark background issue
+9. ✅ Tooltip never clips at the top of the modal
+```

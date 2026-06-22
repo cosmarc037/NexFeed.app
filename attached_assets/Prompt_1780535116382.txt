@@ -1,0 +1,265 @@
+Please update the **Auto-Sequence AI** so that the sequencing is **AI-driven**, **complete**, and **correctly sorted**, with all important scheduling considerations fed directly into the AI, including **Critical orders from future dispatches**, and with **little to no deterministic refinement** affecting the final sequence.
+
+---
+
+## 1. FEED ALL RELEVANT SCHEDULING CONSIDERATIONS DIRECTLY INTO THE AI
+
+Please make sure the AI receives all important sequencing context up front, so it can make the sequencing decision itself.
+
+### This should include, at minimum:
+- current lineup of orders
+- future dispatch status / urgency status
+  - `Critical`
+  - `Urgent`
+  - `Monitor`
+  - `Sufficient`
+- avail dates / deadlines / target dates
+- changeovers
+- material / category / color / diameter / form grouping context
+- production time / run rate context
+- current line and line constraints
+- future dispatch pressure
+- underloaded production day context
+- line/day workload context
+- any existing clustering / adjacency considerations
+- generated / linked / combined entity relationships where applicable
+- any other important sequencing considerations already known by the app
+
+### Goal
+The AI should have enough operational context to do the real sequencing itself.
+
+### Expected result
+The sequence should come from the AI’s actual reasoning, not from later correction.
+
+---
+
+## 2. MAKE SURE CRITICAL ORDERS ARE INCLUDED IN THE AI ANALYSIS
+
+Please ensure that **Critical orders are always included in the AI sequencing input and output**.
+
+### Important
+The AI should not miss or omit Critical orders from its ranked response.
+
+### Required behavior
+If an order is marked as **Critical** in future dispatches, the AI must:
+- recognize it as Critical
+- include it in the ranked output
+- and sequence it accordingly
+
+### Goal
+Critical orders should not be left out of the AI sequence.
+
+### Expected result
+No Critical order should disappear from the AI-ranked result.
+
+---
+
+## 3. USE FUTURE DISPATCH STATUS AS A CORE AI SIGNAL
+
+Please make the AI explicitly use the order’s future-dispatch status as a core part of sequencing.
+
+### Required interpretation
+The AI should understand the business meaning of these statuses:
+
+- **Critical**  
+  Highest urgency; should be prioritized as immediate / today priority where applicable
+
+- **Urgent**  
+  Should be prioritized early
+
+- **Monitor**  
+  Can be advanced proactively when useful
+
+- **Sufficient**  
+  Has more scheduling flexibility
+
+### Goal
+The AI should know which orders are more urgent just from the future-dispatch status.
+
+### Expected result
+The sequencing reflects the actual urgency state of the orders.
+
+---
+
+## 4. HAVE THE AI RETURN A COMPLETE RANKED LIST FOR ALL INPUT ORDERS / ENTITIES
+
+Please require the AI to return a ranked result for **every provided order/entity**.
+
+### Important
+If 20 orders/entities are sent into the AI, then 20 orders/entities must come back in the response.
+
+### Goal
+Avoid cases where omitted orders fall out of the analysis and then get placed incorrectly later.
+
+### Expected result
+The AI output is complete and covers the full sequence set.
+
+---
+
+## 5. USE THE AI’S RANK AS THE BASIS FOR THE FINAL SORT ORDER
+
+Please make the final preview and final applied sequence use the AI’s resolved **rank** as the basis for ordering.
+
+### Required behavior
+If the AI returns ranks like:
+- Rank 1
+- Rank 2
+- Rank 3
+- Rank 4
+
+then the preview table and the final schedule should be sorted in that same order.
+
+### Goal
+The visible order should match the AI sequence directly.
+
+### Expected result
+The AI rank becomes the actual basis for the final order.
+
+---
+
+## 6. MAKE SURE THE FINAL SORTING IS CORRECT
+
+Please ensure the final sorting is correct and coherent.
+
+### This means:
+- the preview must visually match the AI-ranked order
+- the applied schedule must use that same order
+- critical / urgent / monitor / sufficient behavior should be reflected in the AI rank
+- earlier / more urgent orders should not appear lower in the table without valid AI explanation
+
+### Goal
+The final result should look properly sorted and logically sequenced.
+
+### Expected result
+No visibly broken ordering where high-priority or earlier-urgency orders sit far below less urgent/later ones without justification.
+
+---
+
+## 7. REDUCE DETERMINISTIC REFINEMENT TO LITTLE OR NONE
+
+Please minimize deterministic refinement so it does not materially reshape the AI’s sequence.
+
+### Important
+The goal is:
+- little to no deterministic refinement included in actual sequencing
+
+### This means
+Do not let rule-based post-processing take over the order after the AI has already ranked it, except only for the absolute minimum needed to validate output integrity if unavoidable.
+
+### Goal
+The final sequence should remain genuinely AI-driven.
+
+### Expected result
+The app should not be quietly re-sequencing the lineup after the AI responds.
+
+---
+
+## 8. IF ANY MINIMAL NON-AI CHECK REMAINS, IT SHOULD ONLY BE FOR OUTPUT COMPLETENESS / STRUCTURAL INTEGRITY — NOT RE-SEQUENCING
+
+If any code-side validation must remain, it should be limited to:
+- ensuring the AI returned all provided IDs/entities
+- ensuring the structured response is complete/valid
+
+### Important
+This should **not** become deterministic resequencing.
+
+### Expected result
+Any remaining code-side logic is only validating completeness, not deciding the order.
+
+---
+
+## 9. KEEP PREVIEW AND APPLY FULLY ALIGNED TO THE AI RESULT
+
+Please ensure:
+- preview order
+- final applied order
+- displayed rank
+- sequence insight
+
+all reflect the same AI-ranked output.
+
+### Goal
+Users should see and apply the same AI-driven sequence.
+
+### Expected result
+No drift between preview and apply.
+
+---
+
+## IMPORTANT
+
+Please update Auto-Sequence so that:
+
+- **sorting is correct**
+- **all important sequencing considerations are fed directly into the AI**
+- **Critical orders are included and recognized**
+- **future dispatch status is used by the AI**
+- **the AI sequences the orders and its rank becomes the basis for final sorting**
+- **little to no deterministic refinement is included**
+- **any remaining code-side logic is only for output completeness / integrity, not resequencing**
+
+The goal is for the sequence to be truly **AI-driven**, complete, and visibly correct.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log AI input completeness, AI output completeness, final rank sort, and deterministic usage level.
+
+```javascript
+console.debug('[Auto-Sequence AI Full Context Input]', {
+  strategyId,
+  includesFutureDispatchStatus: true,
+  includesAvailDates: true,
+  includesChangeovers: true,
+  includesLineupContext: true,
+  includesRunRates: true,
+  includesUnderloadedDayContext: true,
+});
+```
+
+```javascript
+console.debug('[Auto-Sequence AI Output Completeness]', {
+  inputEntityIds,
+  outputEntityIds,
+  exactCoverage:
+    JSON.stringify([...inputEntityIds].sort()) ===
+    JSON.stringify([...outputEntityIds].sort()),
+});
+```
+
+```javascript
+console.debug('[Auto-Sequence Final AI Rank Sort]', {
+  strategyId,
+  finalRows: finalRows?.map(r => ({
+    entityId: r.entityId || r.orderId,
+    aiRank: r.aiRank,
+    urgency: r.urgency,
+    availDate: r.availDate,
+  })),
+  sortedByAiRank: true,
+});
+```
+
+```javascript
+console.debug('[Auto-Sequence Deterministic Influence]', {
+  strategyId,
+  deterministicRefinementUsed: false,
+  onlyOutputIntegrityValidationAllowed: true,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ All important sequencing considerations are fed into the AI
+2. ✅ Future dispatch status is included as a core AI input
+3. ✅ Critical orders are included in the AI analysis and output
+4. ✅ AI returns a complete ranked list for all input orders/entities
+5. ✅ Final preview is sorted by AI rank
+6. ✅ Applied schedule follows the same AI-ranked order
+7. ✅ Sorting is visibly correct and coherent
+8. ✅ Little to no deterministic refinement affects the final sequence
+9. ✅ Any remaining code-side logic is only for output completeness, not resequencing
+10. ✅ No UI errors or console errors are introduced

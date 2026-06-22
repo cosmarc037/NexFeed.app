@@ -1,0 +1,234 @@
+```
+Implement the following fix:
+
+---
+
+## FIX: ORDER TABLE — REPLACE "STOCK SUFFICIENT" WITH ACTUAL DATE
+
+After approving the auto-sequence, the order table's Avail Date column still shows "Stock sufficient" instead of the actual date. Fix so the actual N10D date is applied.
+
+---
+
+### THE PROBLEM
+
+After clicking "Apply to Schedule":
+- Auto-sequence correctly assigned dates
+- But the order table still shows "Stock sufficient ⚠" instead of the date
+- The text "Stock sufficient" is being written to the avail_date field instead of the actual date
+
+---
+
+### THE FIX
+
+### STEP 1: WHEN APPLYING AUTO-SEQUENCE — WRITE ACTUAL DATES
+
+```javascript
+function applyAutoSequence(sortedOrders) {
+  sortedOrders.forEach((order, index) => {
+    order.prio = index + 1;
+    
+    // For non-dated orders, ALWAYS write the actual date
+    if (order._availData && order._availData.displayDate) {
+      if (order._availData.source === 'n10d' || 
+          order._availData.source === 'n10d_last_day') {
+        // Write the actual date, NOT "Stock sufficient"
+        order.avail_date = order._availData.displayDate;
+      }
+    }
+  });
+}
+```
+
+### STEP 2: ALSO FIX THE ORDER TABLE AVAIL DATE DISPLAY
+
+The order table renders the avail_date field. If the value is still "Stock sufficient" from old data, convert it to the actual N10D date:
+
+```javascript
+function renderAvailDateCell(order, n10dData, dailyColumns, today) {
+  let displayValue = order.avail_date;
+  let sublabel = null;
+  let icon = null;
+  
+  // If avail_date is "Stock sufficient" — this is wrong, replace with actual date
+  if (displayValue && displayValue.toLowerCase().includes('stock sufficient')) {
+    // Look up actual date from N10D
+    const product = n10dData?.find(
+      p => String(p.material_code_fg) === String(order.material_code_fg)
+    );
+    
+    if (product) {
+      if (product.availDate) {
+        displayValue = formatDateFull(product.availDate);
+      } else if (dailyColumns && dailyColumns.length > 0) {
+        // Sufficient — use last day of 10-day window
+        const lastDay = dailyColumns[dailyColumns.length - 1].date;
+        displayValue = formatDateFull(lastDay);
+      }
+    }
+    
+    // Restore original sublabel
+    sublabel = order._originalAvailDate || 'safety stocks';
+    
+    // Also fix the stored value
+    order.avail_date = displayValue;
+  }
+  
+  // Normal prio replenish / safety stocks with date
+  if (displayValue !== 'prio replenish' && displayValue !== 'safety stocks') {
+    // It's a date — show it
+    const iconData = getAvailDateIcon(order, n10dData, dailyColumns, today);
+    
+    return (
+      <td>
+        <span>{displayValue}</span>
+        {order._originalAvailDate && (
+          <div style={{ fontSize: '10px', color: '#ea580c' }}>
+            {order._originalAvailDate}
+          </div>
+        )}
+        {iconData && (
+          <span className="avail-date-icon" style={{ color: iconData.color }}>
+            {iconData.icon}
+          </span>
+        )}
+      </td>
+    );
+  }
+  
+  // Still showing original prio replenish / safety stocks (not yet auto-sequenced)
+  // ... existing rendering
+}
+```
+
+### STEP 3: SCAN AND FIX ANY EXISTING "STOCK SUFFICIENT" VALUES
+
+When N10D data loads or "Re-apply to Existing Orders" is clicked, scan all orders and fix any that still have "Stock sufficient" as their avail_date:
+
+```javascript
+function fixStockSufficientLabels(allOrders, n10dData, dailyColumns, today) {
+  allOrders.forEach(order => {
+    if (order.avail_date && 
+        typeof order.avail_date === 'string' &&
+        order.avail_date.toLowerCase().includes('stock sufficient')) {
+      
+      // Store original label if not stored
+      if (!order._originalAvailDate) {
+        order._originalAvailDate = 'safety stocks';
+      }
+      
+      // Look up actual date from N10D
+      const product = n10dData?.find(
+        p => String(p.material_code_fg) === String(order.material_code_fg)
+      );
+      
+      if (product) {
+        if (product.availDate) {
+          order.avail_date = formatDateFull(product.availDate);
+        } else if (dailyColumns && dailyColumns.length > 0) {
+          const lastDay = dailyColumns[dailyColumns.length - 1].date;
+          order.avail_date = formatDateFull(lastDay);
+        }
+      }
+    }
+  });
+}
+```
+
+### CALL THE FIX AT THESE POINTS
+
+```javascript
+// When N10D uploads
+async function handleN10DUpload(file) {
+  const parsedData = parseN10DFile(file);
+  setN10dData(parsedData);
+  
+  // Fix any existing "Stock sufficient" labels
+  fixStockSufficientLabels(allOrders, parsedData, dailyColumns, new Date());
+  
+  autoGenerateTemplates(parsedData, allOrders, new Date(), dailyColumns);
+  updateNonDatedOrderAvailDates(allOrders, parsedData, dailyColumns, new Date());
+}
+
+// When Re-apply is clicked
+async function handleReapplyToOrders() {
+  const updatedProducts = recalculateN10DStatuses(n10dData, new Date());
+  
+  fixStockSufficientLabels(allOrders, updatedProducts, dailyColumns, new Date());
+  
+  autoGenerateTemplates(updatedProducts, allOrders, new Date(), dailyColumns);
+  updateAvailDateIcons(allOrders, updatedProducts);
+  updateNonDatedOrderAvailDates(allOrders, updatedProducts, dailyColumns, new Date());
+}
+
+// When auto-sequence is applied
+function applyAutoSequence(sortedOrders) {
+  sortedOrders.forEach((order, index) => {
+    order.prio = index + 1;
+    
+    // NEVER write "Stock sufficient" to avail_date
+    // ALWAYS write actual date
+    if (order._availData && order._availData.displayDate) {
+      order.avail_date = order._availData.displayDate;
+      
+      // Store original label for reference
+      if (!order._originalAvailDate && 
+          (order.avail_date === 'prio replenish' || order.avail_date === 'safety stocks')) {
+        order._originalAvailDate = order.avail_date;
+      }
+    }
+  });
+  
+  // Double check — scan for any remaining "Stock sufficient"
+  fixStockSufficientLabels(sortedOrders, n10dData, dailyColumns, new Date());
+}
+```
+
+---
+
+### VISUAL — AFTER FIX
+
+```
+┌──────┬────────────────────────┬──────────┬─────────────────┐
+│ Prio │ Item Description       │ Volume   │ Avail Date      │
+├──────┼────────────────────────┼──────────┼─────────────────┤
+│  1   │ Gall 21 Chicken Layer  │ 39 MT    │ Mar 31, 2026    │
+│      │                        │          │ safety stocks   │
+├──────┼────────────────────────┼──────────┼─────────────────┤
+│  2   │ Gallimax 3 Maintenance │ 80 MT    │ Mar 31, 2026    │
+│      │                        │          │ safety stocks   │
+├──────┼────────────────────────┼──────────┼─────────────────┤
+│  3   │ Salto Conditioner      │  3 MT    │ Apr 11, 2026    │
+│      │                        │          │ TLD | Apr 11    │
+├──────┼────────────────────────┼──────────┼─────────────────┤
+│  4   │ Gallimax Pigeon Pellet │ 24 MT    │ Apr 9, 2026     │
+│      │                        │          │ prio replenish  │
+├──────┼────────────────────────┼──────────┼─────────────────┤
+│  5   │ Elite XP Startex       │ 80 MT    │ Apr 9, 2026     │
+│      │                        │          │ safety stocks   │
+└──────┴────────────────────────┴──────────┴─────────────────┘
+```
+
+NOT:
+```
+│  4   │ Gallimax Pigeon Pellet │ 24 MT    │ Stock sufficient ⚠ │  ← WRONG
+│  5   │ Elite XP Startex       │ 80 MT    │ Stock sufficient ⚠ │  ← WRONG
+```
+
+---
+
+### VERIFICATION
+
+1. Apply auto-sequence
+   - ✅ All orders show actual dates in Avail Date column
+   - ✅ NO "Stock sufficient" text anywhere
+   - ✅ Original label shown as subtitle (prio replenish / safety stocks)
+
+2. Order table after apply
+   - ✅ Avail Date shows actual dates
+   - ✅ NO "Stock sufficient" text
+   - ✅ Icons still show correctly
+
+3. Upload new N10D
+   - ✅ Any remaining "Stock sufficient" labels automatically replaced with dates
+   - ✅ Dates update to match new N10D data
+```

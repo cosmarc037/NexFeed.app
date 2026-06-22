@@ -1,0 +1,366 @@
+```
+Fix the combined order apply — ensure children get parent_id correctly:
+
+---
+
+## 1. FIX THE SHARED APPLY FUNCTION — HANDLE ID MATCHING AND PENDING ORDERS
+
+```javascript
+async function applySequencedResultsToDB(sequencedResults, options = {}) {
+  const { label = 'Auto-sequence' } = options;
+  
+  // Separate pending (new) orders from existing orders
+  const pendingPayloads = [];
+  const existingPayloads = [];
+  
+  // Track combined groups separately — children need lead's REAL DB ID
+  const combinedGroups = []; // { leadOrder, childOrders, line, prio }
+  
+  for (const [line, lineOrders] of Object.entries(sequencedResults)) {
+    if (!lineOrders || lineOrders.length === 0) continue;
+    
+    let prioCounter = 1;
+    
+    for (const order of lineOrders) {
+      
+      if (order._isCombined && order._combinedFrom && order._combinedFrom.length > 1) {
+        // Store combined group for later processing
+        combinedGroups.push({
+          leadOrder: order,
+          allSubOrders: order._combinedFrom,
+          line,
+          prio: prioCounter
+        });
+        prioCounter++;
+        
+      } else {
+        // Regular order
+        const updateData = {
+          feedmill_line: line,
+          priority_seq: prioCounter,
+        };
+        
+        // Clear any previous combine state
+        updateData.parent_id = null;
+        updateData.volume_override = null;
+        updateData.original_order_ids = null;
+        
+        const isPending = String(order.id).startsWith('__pending_');
+        
+        if (isPending) {
+          pendingPayloads.push({ order, data: updateData });
+        } else {
+          existingPayloads.push({ id: order.id, data: updateData });
+        }
+        
+        prioCounter++;
+      }
+    }
+  }
+  
+  console.log(`=== ${label} ===`);
+  console.log(`  Regular: ${existingPayloads.length} existing, ${pendingPayloads.length} pending`);
+  console.log(`  Combined groups: ${combinedGroups.length}`);
+  
+  // Step 1: Update regular existing orders
+  if (existingPayloads.length > 0) {
+    const BATCH_SIZE = 10;
+    for (let i = 0; i < existingPayloads.length; i += BATCH_SIZE) {
+      const batch = existingPayloads.slice(i, i + BATCH_SIZE);
+      await Promise.all(
+        batch.map(p => {
+          console.log(`  [Update] Order ${p.id}:`, JSON.stringify(p.data));
+          return updateOrderMutation.mutateAsync({ id: p.id, data: p.data });
+        })
+      );
+    }
+  }
+  
+  // Step 2: Create pending orders (if any from upload flow)
+  // This returns a map of __pending_id → real DB id
+  const pendingIdMap = {};
+  if (pendingPayloads.length > 0) {
+    for (const pp of pendingPayloads) {
+      const created = await createOrderMutation.mutateAsync({
+        data: {
+          ...pp.order,
+          ...pp.data,
+          // Remove internal fields
+          _isCombined: undefined,
+          _combinedFrom: undefined,
+          _movement: undefined,
+          _movementDelta: undefined,
+          _originalPrio: undefined,
+          _movedFromLine: undefined,
+          _originalLine: undefined,
+          _combinedFromLines: undefined,
+        }
+      });
+      pendingIdMap[pp.order.id] = created.id;
+      console.log(`  [Create] ${pp.order.id} → ${created.id}`);
+    }
+  }
+  
+  // Step 3: Process combined groups — this is where the fix is critical
+  for (const group of combinedGroups) {
+    const { leadOrder, allSubOrders, line, prio } = group;
+    
+    // Resolve lead ID (might be pending)
+    const leadId = String(leadOrder.id).startsWith('__pending_')
+      ? pendingIdMap[leadOrder.id]
+      : leadOrder.id;
+    
+    if (!leadId) {
+      console.error(`  [Error] Could not resolve lead ID for: ${leadOrder.id}`);
+      continue;
+    }
+    
+    // Resolve ALL sub-order IDs (some might be pending)
+    const resolvedSubIds = allSubOrders.map(sub => {
+      const subId = String(sub.id).startsWith('__pending_')
+        ? pendingIdMap[sub.id]
+        : sub.id;
+      return subId;
+    }).filter(Boolean);
+    
+    // Get children (all sub-orders except the lead)
+    const childSubOrders = allSubOrders.filter(sub => {
+      const resolvedId = String(sub.id).startsWith('__pending_')
+        ? pendingIdMap[sub.id]
+        : sub.id;
+      // Compare as strings to avoid type mismatch
+      return String(resolvedId) !== String(leadId);
+    });
+    
+    const combinedVolume = parseFloat(leadOrder.volume) || 0;
+    
+    console.log(`  [Combined] Lead: ${leadId}, Children: ${childSubOrders.length}, Volume: ${combinedVolume}`);
+    console.log(`    All sub IDs: ${resolvedSubIds.join(', ')}`);
+    
+    // Update LEAD order
+    await updateOrderMutation.mutateAsync({
+      id: leadId,
+      data: {
+        feedmill_line: line,
+        priority_seq: prio,
+        volume_override: combinedVolume,
+        original_order_ids: resolvedSubIds,
+        parent_id: null,
+      }
+    });
+    console.log(`    [Lead updated] ${leadId}: volume_override=${combinedVolume}, original_order_ids=[${resolvedSubIds.join(',')}]`);
+    
+    // Update EACH child order
+    for (const child of childSubOrders) {
+      const childId = String(child.id).startsWith('__pending_')
+        ? pendingIdMap[child.id]
+        : child.id;
+      
+      if (!childId) {
+        console.error(`    [Error] Could not resolve child ID: ${child.id}`);
+        continue;
+      }
+      
+      await updateOrderMutation.mutateAsync({
+        id: childId,
+        data: {
+          parent_id: leadId,
+          feedmill_line: line,
+          priority_seq: null,
+        }
+      });
+      console.log(`    [Child updated] ${childId}: parent_id=${leadId}`);
+    }
+  }
+  
+  // Step 4: Refetch
+  await queryClient.invalidateQueries({ queryKey: ["orders"] });
+  await new Promise(resolve => setTimeout(resolve, 500));
+  
+  // Step 5: Cascade per line
+  for (const [line, lineOrders] of Object.entries(sequencedResults)) {
+    if (!lineOrders || lineOrders.length === 0) continue;
+    
+    // Only top-level orders for cascade (not children)
+    const topLevel = lineOrders.map((o, i) => {
+      const resolvedId = String(o.id).startsWith('__pending_')
+        ? pendingIdMap[o.id] || o.id
+        : o.id;
+      return {
+        ...o,
+        id: resolvedId,
+        priority_seq: i + 1,
+        feedmill_line: line,
+      };
+    });
+    
+    console.log(`  [Cascade] ${line}: ${topLevel.length} orders`);
+    await cascadeSchedule(topLevel, 0);
+  }
+  
+  // Step 6: Final refetch
+  await queryClient.invalidateQueries({ queryKey: ["orders"] });
+  
+  // Return stats
+  const totalOrders = Object.values(sequencedResults).reduce((s, lo) => s + lo.length, 0);
+  const combinedCount = combinedGroups.length;
+  const linesUsed = Object.keys(sequencedResults).filter(l =>
+    (sequencedResults[l] || []).length > 0
+  ).length;
+  
+  return { totalOrders, combinedCount, linesUsed };
+}
+```
+
+---
+
+## 2. FIX ID COMPARISON — STRING COERCION
+
+The root cause of children not matching could be type mismatch. Ensure all ID comparisons use string coercion:
+
+```javascript
+// In the combine algorithm — when storing _combinedFrom, ensure IDs are preserved exactly
+baseOrder._combinedFrom = combineGroup.orders.map(o => ({
+  id: o.id,  // Keep original type — could be number or string
+  line: o._originalLine,
+  fpr: o.fpr,
+  volume: o.volume,
+  item_description: o.item_description,
+  form: o.form,
+  material_code_fg: o.material_code_fg,
+  planned_order_fg: o.planned_order_fg,
+  planned_order_sfg: o.planned_order_sfg,
+  batch_size: o.batch_size,
+  batches: o.batches,
+  production_time: o.production_time,
+  target_avail_date: o.target_avail_date,
+  category: o.category
+}));
+```
+
+---
+
+## 3. VERIFY WITH LOGGING — ADD DIAGNOSTIC CHECK
+
+```javascript
+// Add this right before executing combined group mutations
+for (const group of combinedGroups) {
+  const { leadOrder, allSubOrders } = group;
+  
+  console.log(`  [Diagnostic] Combined group: ${leadOrder.item_description}`);
+  console.log(`    Lead ID: ${leadOrder.id} (type: ${typeof leadOrder.id})`);
+  console.log(`    Sub-orders:`);
+  allSubOrders.forEach((sub, i) => {
+    console.log(`      ${i}: id=${sub.id} (type: ${typeof sub.id}), volume=${sub.volume}`);
+  });
+  
+  // Check for duplicate IDs
+  const idSet = new Set(allSubOrders.map(s => String(s.id)));
+  if (idSet.size !== allSubOrders.length) {
+    console.error(`    [WARNING] Duplicate IDs in _combinedFrom!`);
+  }
+  
+  // Check lead is in _combinedFrom
+  const leadInSubs = allSubOrders.some(s => String(s.id) === String(leadOrder.id));
+  if (!leadInSubs) {
+    console.error(`    [WARNING] Lead ID ${leadOrder.id} not found in _combinedFrom!`);
+  }
+}
+```
+
+---
+
+## 4. USE SHARED FUNCTION IN ALL THREE HANDLERS
+
+```javascript
+// Upload apply
+async function handleUploadApplySequence(sequencedResults) {
+  setIsApplying(true);
+  try {
+    const stats = await applySequencedResultsToDB(sequencedResults, {
+      label: 'Upload Auto-Sequence'
+    });
+    setShowUploadAutoSequence(false);
+    setIsApplying(false);
+    toast.success(
+      `Auto-sequence applied: ${stats.totalOrders} orders across ${stats.linesUsed} lines.${stats.combinedCount > 0 ? ` ${stats.combinedCount} combined groups.` : ''}`
+    );
+  } catch (error) {
+    console.error('Upload apply error:', error);
+    setIsApplying(false);
+    toast.error(`Failed to apply: ${error.message}`);
+  }
+}
+
+// Plant-level apply
+async function handlePlantApply(sequencedResults) {
+  setIsApplying(true);
+  try {
+    const stats = await applySequencedResultsToDB(sequencedResults, {
+      label: 'Plant-Level Auto-Sequence'
+    });
+    setShowPlantAutoSequencePreview(false);
+    setIsApplying(false);
+    toast.success(
+      `Plant-level auto-sequence applied: ${stats.totalOrders} orders across ${stats.linesUsed} lines.${stats.combinedCount > 0 ? ` ${stats.combinedCount} combined groups.` : ''}`
+    );
+  } catch (error) {
+    console.error('Plant apply error:', error);
+    setIsApplying(false);
+    toast.error(`Failed to apply: ${error.message}`);
+  }
+}
+
+// Per-line apply
+async function handleLineApply({ targetLine, sequencedOrders }) {
+  setIsApplying(true);
+  try {
+    const sequencedResults = { [targetLine]: sequencedOrders };
+    const stats = await applySequencedResultsToDB(sequencedResults, {
+      label: `Line Auto-Sequence (${targetLine})`
+    });
+    setShowLineAutoSequencePreview(false);
+    setIsApplying(false);
+    toast.success(
+      `Auto-sequence applied to ${targetLine}: ${stats.totalOrders} orders.${stats.combinedCount > 0 ? ` ${stats.combinedCount} combined.` : ''}`
+    );
+  } catch (error) {
+    console.error('Line apply error:', error);
+    setIsApplying(false);
+    toast.error(`Failed to apply: ${error.message}`);
+  }
+}
+```
+
+---
+
+## VERIFICATION
+
+### Combined orders render correctly after apply
+1. ✅ Lead order: volume_override set, original_order_ids set, parent_id null
+2. ✅ Children: parent_id = lead's REAL DB ID, priority_seq null
+3. ✅ Table detects lead via !parent_id && original_order_ids?.length > 0
+4. ✅ Children hidden from main table (filtered by parent_id)
+5. ✅ Blue highlight shown on combined rows
+6. ✅ Expandable to show sub-orders
+
+### Pending order handling
+7. ✅ __pending_ IDs resolved to real DB IDs after creation
+8. ✅ pendingIdMap tracks __pending_ → real ID
+9. ✅ Children get real lead ID (not __pending_ ID) as parent_id
+10. ✅ original_order_ids contains real IDs (not __pending_)
+
+### ID type safety
+11. ✅ All ID comparisons use String() coercion
+12. ✅ No type mismatch between number IDs and string IDs
+13. ✅ Diagnostic logging shows ID types
+
+### Children processed sequentially (not batched)
+14. ✅ Each child updated one at a time with await
+15. ✅ Ensures parent_id is set before any race conditions
+16. ✅ Logged for debugging
+
+### Shared function
+17. ✅ Same function used by upload, plant-level, and per-line apply
+18. ✅ Consistent behavior across all three flows
+```

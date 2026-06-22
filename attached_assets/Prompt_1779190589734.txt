@@ -1,0 +1,160 @@
+Please refine the Powermix source/generated order synchronization logic to enforce a shared avail date between the Line 5 source order and its linked generated order.
+
+We previously aligned the source and generated orders so key planned-order behavior stays synchronized. Please extend that logic to the avail date as well.
+
+---
+
+## REQUIRED RULE
+
+For every linked Powermix source/generated order pair:
+- the **source order avail date** and the **generated order avail date** must always be the same
+
+This should apply to:
+- manual date handling
+- planned order behavior
+- auto-sequence date suggestion logic
+
+The source and generated orders should not drift into different avail dates.
+
+---
+
+## BUSINESS PURPOSE
+
+The generated order and the source order are still one connected Powermix production flow.
+
+So if one linked order is intended to be produced first, the other should follow the same timing target.
+
+The app should preserve this relationship by synchronizing their avail dates.
+
+---
+
+## AUTO-SEQUENCE REQUIREMENT
+
+Please extend this rule into auto-sequence as well.
+
+During auto-sequence:
+- if the AI suggests or recalculates dates for linked Powermix orders
+- the source order and generated order must still end up with the same avail date
+
+Even if the AI is evaluating multiple sequence options, the final suggested avail date for the linked pair must remain synchronized.
+
+---
+
+## GUARDRAIL / DATE SELECTION LOGIC
+
+Do not simply force the Line 5 source order date without considering destination-line feasibility.
+
+Instead, use this logic:
+
+### Preferred rule
+The final shared avail date should be anchored by the **AI-feasible date of the generated order** in the destination line (e.g. Line 2 or Line 6).
+
+Then apply that same date to the linked Line 5 source order.
+
+### Important
+When determining that feasible generated-order date, the AI must still consider:
+- the lineup of orders in the destination line
+- and the lineup of orders in Line 5
+
+So the AI should have context from both sides before finalizing the shared date.
+
+---
+
+## EXPECTED BEHAVIOR
+
+If the generated order is AI-positioned on a given avail date, then:
+- the linked source order should use that same avail date
+
+Example:
+- generated order in Line 2 is best scheduled for May 20
+- source order in Line 5 should also use May 20
+
+This keeps the linked Powermix flow synchronized.
+
+---
+
+## WHAT TO AVOID
+
+Do not allow:
+- source order avail date = May 18
+- generated order avail date = May 20
+
+for the same linked Powermix pair.
+
+That breaks the timing relationship of the split production flow.
+
+Also do not blindly force a date from one side without checking both lineups.
+
+---
+
+## AI CONTEXT REQUIREMENT
+
+When the AI evaluates dates for linked Powermix orders, it should consider:
+- current Line 5 lineup
+- current destination line lineup
+- sequence impact on both lines
+- whether the synchronized date causes avoidable downstream delay
+
+But after evaluating that context, the final result should still be:
+- one shared avail date for the source/generated pair
+
+---
+
+## SCOPE
+
+Apply this specifically to:
+- Line 5 Powermix source orders
+- their linked generated orders in destination lines
+
+Do not apply this synchronization rule to unrelated normal orders.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log:
+
+```javascript
+console.debug('[Powermix Shared Avail Date Evaluation]', {
+  sourceOrderId,
+  generatedOrderId,
+  sourceLine: 5,
+  generatedLine,
+  sourceCurrentAvailDate,
+  generatedCurrentAvailDate,
+  evaluatedSharedAvailDate,
+});
+```
+
+```javascript
+console.debug('[Powermix AutoSequence Shared Date Decision]', {
+  sourceOrderId,
+  generatedOrderId,
+  destinationLineFeasibleDate,
+  line5ContextConsidered: true,
+  destinationLineContextConsidered: true,
+  finalSharedAvailDate,
+});
+```
+
+```javascript
+console.debug('[Powermix Avail Date Sync Applied]', {
+  sourceOrderId,
+  generatedOrderId,
+  sourceAvailDateAfterSync,
+  generatedAvailDateAfterSync,
+  synced: sourceAvailDateAfterSync === generatedAvailDateAfterSync,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Source and generated Powermix orders always share the same avail date
+2. ✅ Manual / planned behavior keeps avail dates synchronized
+3. ✅ Auto-sequence does not assign different avail dates to linked Powermix pairs
+4. ✅ AI evaluates both Line 5 and destination-line lineup before finalizing the shared date
+5. ✅ Final shared date is anchored by the generated order’s feasible destination-line date
+6. ✅ Source Line 5 order adopts the same final avail date
+7. ✅ No unrelated normal orders are affected

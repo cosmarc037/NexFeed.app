@@ -1,0 +1,392 @@
+```
+Enable per-feedmill auto-sequence and update all auto-sequence labels:
+
+---
+
+## 1. UPDATE AUTO-SEQUENCE BUTTON LABELS
+
+### All Feedmills Tab
+```jsx
+<button
+  className="btn-auto-sequence-all"
+  onClick={handlePlantLevelAutoSequence}
+>
+  ✨ Auto-Sequence (All)
+</button>
+```
+
+### Per Feedmill Tab (e.g., Feedmill 1 "All" sub-tab)
+```jsx
+// Determine feedmill short name from current tab
+function getFeedmillShortName(feedmill) {
+  if (feedmill === 'Feedmill 1' || feedmill === 'FM1') return 'FM1';
+  if (feedmill === 'Feedmill 2' || feedmill === 'FM2') return 'FM2';
+  if (feedmill === 'Feedmill 3' || feedmill === 'FM3' || feedmill === 'PMX') return 'FM3';
+  return feedmill;
+}
+
+<button
+  className="btn-auto-sequence-feedmill"
+  onClick={() => handleFeedmillAutoSequence(currentFeedmill)}
+  disabled={false}  // ← ENABLE IT
+>
+  ✨ Auto-Sequence ({getFeedmillShortName(currentFeedmill)})
+</button>
+```
+
+### Per Line Tab
+```jsx
+function getLineShortLabel(line) {
+  const lineNumber = line.match(/\d+/)?.[0];
+  return lineNumber ? `L${lineNumber}` : line;
+}
+
+<button
+  className="btn-auto-sequence-line"
+  onClick={() => handleLineAutoSequence(currentLine)}
+>
+  ✨ Auto-Sequence ({getLineShortLabel(currentLine)})
+</button>
+```
+
+---
+
+## 2. FEEDMILL-TO-LINES MAPPING
+
+```javascript
+const FEEDMILL_LINES = {
+  'Feedmill 1': ['Line 1', 'Line 2'],
+  'Feedmill 2': ['Line 3', 'Line 4'],
+  'Feedmill 3': ['Line 5', 'Line 6', 'Line 7'],
+  // Normalize variations
+  'FM1': ['Line 1', 'Line 2'],
+  'FM2': ['Line 3', 'Line 4'],
+  'FM3': ['Line 5', 'Line 6', 'Line 7'],
+  'PMX': ['Line 5', 'Line 6', 'Line 7'],
+};
+
+function getFeedmillLines(feedmill) {
+  return FEEDMILL_LINES[feedmill] || [];
+}
+```
+
+---
+
+## 3. HANDLE FEEDMILL AUTO-SEQUENCE — SAME AS PER-LINE BUT ACROSS FEEDMILL LINES
+
+```javascript
+async function handleFeedmillAutoSequence(feedmill) {
+  const feedmillLines = getFeedmillLines(feedmill);
+  
+  if (feedmillLines.length === 0) {
+    toast.error(`No lines found for ${feedmill}`);
+    return;
+  }
+  
+  const feedmillShortName = getFeedmillShortName(feedmill);
+  
+  // Show processing overlay
+  setProcessingPhase('scanning');
+  setProcessingStats({ processed: 0, total: 0, combined: 0, moved: 0 });
+  setShowProcessingOverlay(true);
+  setProcessingLabel(`${feedmillShortName} Auto-Sequence`);
+  
+  await new Promise(r => setTimeout(r, 100));
+  
+  try {
+    // Get active orders ONLY from this feedmill's lines
+    const allActiveOrders = enrichedOrders.filter(
+      o => o.status !== 'Done' && o.status !== 'Cancel PO' &&
+           o.status !== 'In Production' && o.status !== 'On-going'
+    );
+    
+    const feedmillOrders = allActiveOrders.filter(o =>
+      feedmillLines.some(line => normalizeLine(o.feedmill_line) === normalizeLine(line))
+    );
+    
+    // Also get orders from OTHER lines that might be candidates to move INTO this feedmill
+    const otherLineOrders = allActiveOrders.filter(o =>
+      !feedmillLines.some(line => normalizeLine(o.feedmill_line) === normalizeLine(line))
+    );
+    
+    setProcessingStats(prev => ({ ...prev, total: feedmillOrders.length }));
+    
+    // Build snapshot — only for this feedmill's lines
+    const snapshot = {};
+    const normalizedFeedmillLines = feedmillLines.map(l => normalizeLine(l));
+    
+    normalizedFeedmillLines.forEach(line => {
+      snapshot[line] = allActiveOrders
+        .filter(o => normalizeLine(o.feedmill_line) === line)
+        .filter(o => !o.parent_id)
+        .sort((a, b) => (a.priority_seq || 0) - (b.priority_seq || 0))
+        .map(o => ({ ...JSON.parse(JSON.stringify(o)) }));
+    });
+    
+    // Run auto-sequence — same algorithm but scoped to feedmill lines
+    setProcessingPhase('combining');
+    await new Promise(r => setTimeout(r, 200));
+    
+    const onProgress = (stats) => {
+      setProcessingStats(prev => ({ ...prev, ...stats }));
+    };
+    
+    const onPhaseChange = (phase) => {
+      setProcessingPhase(phase);
+    };
+    
+    // Use the same algorithm but pass only feedmill lines
+    const { lineOrdersMap, combinedOrders, placementLog } = await runAutoSequenceWithProgress(
+      [...feedmillOrders, ...otherLineOrders],  // All orders for scanning matches
+      masterData, n10dData,
+      normalizedFeedmillLines,  // Only place on feedmill's lines
+      changeoverRules,
+      onProgress, onPhaseChange,
+      {
+        // Scope: only move/place orders onto these lines
+        targetLines: normalizedFeedmillLines,
+        // But scan ALL lines for combinable matches
+        scanAllLines: true,
+        sourceOrders: feedmillOrders,
+      }
+    );
+    
+    // Build results
+    setProcessingPhase('sequencing');
+    await new Promise(r => setTimeout(r, 200));
+    
+    const results = {};
+    normalizedFeedmillLines.forEach(line => {
+      const lineOrders = lineOrdersMap[line] || [];
+      if (lineOrders.length === 0) {
+        results[line] = [];
+        return;
+      }
+      
+      const originalLineOrders = snapshot[line] || [];
+      const withMovement = lineOrders.map((order, newIndex) => {
+        const newPrio = newIndex + 1;
+        const originalIndex = originalLineOrders.findIndex(o => o.id === order.id);
+        let movement = 'same';
+        let movementDelta = 0;
+        
+        if (originalIndex >= 0) {
+          const originalPrio = originalIndex + 1;
+          movementDelta = originalPrio - newPrio;
+          if (movementDelta > 0) movement = 'up';
+          else if (movementDelta < 0) movement = 'down';
+        } else {
+          movement = 'new_to_line';
+        }
+        
+        return {
+          ...order,
+          prio: newPrio,
+          _originalPrio: originalIndex >= 0 ? originalIndex + 1 : -1,
+          _movement: movement,
+          _movementDelta: Math.abs(movementDelta),
+        };
+      });
+      
+      results[line] = withMovement;
+    });
+    
+    setProcessingPhase('done');
+    await new Promise(r => setTimeout(r, 500));
+    
+    // Store and show preview
+    setFeedmillSequenceSnapshot(snapshot);
+    setFeedmillSequenceResults(results);
+    setFeedmillPlacementLog(placementLog);
+    setFeedmillCombinedOrders(combinedOrders);
+    setCurrentFeedmillForPreview(feedmill);
+    
+    const stats = calculatePlantSummary(snapshot, results, combinedOrders, placementLog, normalizedFeedmillLines);
+    setFeedmillSummaryStats(stats);
+    
+    setShowProcessingOverlay(false);
+    setShowFeedmillAutoSequencePreview(true);
+    
+  } catch (error) {
+    console.error('Feedmill auto-sequence error:', error);
+    setShowProcessingOverlay(false);
+    toast.error(`Auto-sequence failed: ${error.message}`);
+  }
+}
+```
+
+---
+
+## 4. FEEDMILL AUTO-SEQUENCE PREVIEW — REUSE PLANT PREVIEW
+
+```jsx
+{showFeedmillAutoSequencePreview && currentFeedmillForPreview && (
+  <PlantAutoSequencePreview
+    title={`${getFeedmillShortName(currentFeedmillForPreview)} Auto-Sequence`}
+    subtitle={`Cross-line combine & optimize — ${currentFeedmillForPreview} (${getFeedmillLines(currentFeedmillForPreview).map(l => getLineShortLabel(l)).join(' & ')})`}
+    originalSnapshot={feedmillSequenceSnapshot}
+    sequencedResults={feedmillSequenceResults}
+    summaryStats={feedmillSummaryStats}
+    placementLog={feedmillPlacementLog}
+    combinedOrders={feedmillCombinedOrders}
+    allLines={getFeedmillLines(currentFeedmillForPreview).map(l => normalizeLine(l))}
+    masterData={masterData}
+    n10dData={n10dData}
+    changeoverRules={changeoverRules}
+    onApplySequence={async (results) => {
+      await handlePlantApply(results);
+      setShowFeedmillAutoSequencePreview(false);
+    }}
+    onCancel={() => setShowFeedmillAutoSequencePreview(false)}
+  />
+)}
+```
+
+---
+
+## 5. UPDATE PlantAutoSequencePreview — ACCEPT CUSTOM TITLE AND LINES
+
+```jsx
+function PlantAutoSequencePreview({
+  title = '✨ Plant-Level Auto-Sequence',
+  subtitle = 'Cross-line combine & optimize — all feedmills, all lines',
+  originalSnapshot,
+  sequencedResults,
+  summaryStats,
+  placementLog,
+  combinedOrders,
+  allLines,  // Can be all 7 lines or just feedmill's lines
+  masterData,
+  n10dData,
+  changeoverRules,
+  onApplySequence,
+  onCancel
+}) {
+  // ... existing component logic, but use the passed allLines instead of ALL_LINES_ORDERED ...
+  
+  return (
+    <div className="auto-sequence-overlay">
+      <div className="auto-sequence-modal">
+        <div className="auto-sequence-header">
+          <div>
+            <h2>{title}</h2>
+            <span className="auto-sequence-subtitle">{subtitle}</span>
+          </div>
+          <button className="auto-sequence-close" onClick={onCancel}>✕</button>
+        </div>
+        
+        {/* Tabs — only show lines from allLines prop */}
+        <div className="plant-preview-tabs">
+          <button
+            className={`plant-preview-tab ${activeTab === 'summary' ? 'active' : ''}`}
+            onClick={() => setActiveTab('summary')}
+          >
+            📊 Summary
+          </button>
+          {allLines
+            .filter(line => 
+              (originalSnapshot?.[line]?.length || 0) > 0 ||
+              (sequencedResults?.[line]?.length || 0) > 0
+            )
+            .map(line => (
+              <button
+                key={line}
+                className={`plant-preview-tab ${activeTab === line ? 'active' : ''}`}
+                onClick={() => setActiveTab(line)}
+              >
+                {getLineShortLabel(line)}
+                {/* change badge */}
+              </button>
+            ))
+          }
+        </div>
+        
+        {/* ... rest of preview unchanged ... */}
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+## 6. ADD STATE FOR FEEDMILL PREVIEW
+
+```javascript
+const [showFeedmillAutoSequencePreview, setShowFeedmillAutoSequencePreview] = useState(false);
+const [feedmillSequenceSnapshot, setFeedmillSequenceSnapshot] = useState(null);
+const [feedmillSequenceResults, setFeedmillSequenceResults] = useState(null);
+const [feedmillSummaryStats, setFeedmillSummaryStats] = useState(null);
+const [feedmillPlacementLog, setFeedmillPlacementLog] = useState([]);
+const [feedmillCombinedOrders, setFeedmillCombinedOrders] = useState([]);
+const [currentFeedmillForPreview, setCurrentFeedmillForPreview] = useState(null);
+const [processingLabel, setProcessingLabel] = useState('');
+```
+
+---
+
+## 7. UPDATE PROCESSING OVERLAY — USE DYNAMIC LABEL
+
+```jsx
+function AutoSequenceProcessingOverlay({ currentPhase, processedCount, totalCount, combinedCount, movedCount, label }) {
+  return (
+    <div className="as-processing-overlay">
+      <div className="as-processing-card">
+        <div className="as-processing-header">
+          <h2 className="as-processing-title">✨ {label || 'Auto-Sequence'}</h2>
+          <p className="as-processing-subtitle">Analyzing and optimizing orders</p>
+        </div>
+        {/* ... rest unchanged ... */}
+      </div>
+    </div>
+  );
+}
+
+// Usage:
+{showProcessingOverlay && (
+  <AutoSequenceProcessingOverlay
+    currentPhase={processingPhase}
+    processedCount={processingStats.processed}
+    totalCount={processingStats.total}
+    combinedCount={processingStats.combined}
+    movedCount={processingStats.moved}
+    label={processingLabel}
+  />
+)}
+```
+
+---
+
+## VERIFICATION
+
+### Labels updated
+1. ✅ All Feedmills tab: "Auto-Sequence (All)"
+2. ✅ Feedmill 1 All tab: "Auto-Sequence (FM1)"
+3. ✅ Feedmill 2 All tab: "Auto-Sequence (FM2)"
+4. ✅ Feedmill 3 / PMX All tab: "Auto-Sequence (FM3)"
+5. ✅ Line 1 tab: "Auto-Sequence (L1)"
+6. ✅ Line 7 tab: "Auto-Sequence (L7)"
+
+### Feedmill auto-sequence enabled
+7. ✅ Button enabled (not greyed out)
+8. ✅ Scopes to feedmill's lines only (FM1 = L1+L2, FM2 = L3+L4, FM3 = L5+L6+L7)
+9. ✅ Scans ALL lines for combinable matches (cross-feedmill)
+10. ✅ But only places/moves orders onto the feedmill's own lines
+
+### Feedmill preview
+11. ✅ Shows only feedmill's lines as tabs (not all 7)
+12. ✅ Title: "FM1 Auto-Sequence"
+13. ✅ Subtitle: "Cross-line combine & optimize — Feedmill 1 (L1 & L2)"
+14. ✅ Same before/after table, same combine controls, same insights
+
+### Same apply function
+15. ✅ Uses handlePlantApply — same DB mutations
+16. ✅ Creates new leads, sets parent_id on children
+17. ✅ Status: Planned / Combined with other PO
+18. ✅ Cascade per line
+
+### Processing overlay
+19. ✅ Dynamic label: "FM1 Auto-Sequence" or "Plant-Level Auto-Sequence"
+20. ✅ Same phases displayed
+21. ✅ Live stats shown
+```

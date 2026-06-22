@@ -1,0 +1,472 @@
+```
+Add "All Feedmills" tab to the Orders navigation:
+
+---
+
+## 1. ADD "ALL FEEDMILLS" TAB — FIRST IN THE LIST
+
+```jsx
+// In the Orders navigation / left sidebar
+const FEEDMILL_TABS = [
+  { id: 'all_feedmills', label: 'All Feedmills' },
+  { id: 'feedmill_1', label: 'Feedmill 1' },
+  { id: 'feedmill_2', label: 'Feedmill 2' },
+  { id: 'feedmill_3', label: 'Feedmill 3' },
+  { id: 'powermix', label: 'Powermix' }
+];
+
+// Feedmill to lines mapping
+const FEEDMILL_LINES = {
+  'feedmill_1': ['Line 1', 'Line 2'],
+  'feedmill_2': ['Line 3', 'Line 4'],
+  'feedmill_3': ['Line 6', 'Line 7'],
+  'powermix': ['Line 5']
+};
+
+// All lines in display order
+const ALL_LINES_ORDERED = [
+  { feedmill: 'Feedmill 1', line: 'Line 1' },
+  { feedmill: 'Feedmill 1', line: 'Line 2' },
+  { feedmill: 'Feedmill 2', line: 'Line 3' },
+  { feedmill: 'Feedmill 2', line: 'Line 4' },
+  { feedmill: 'Feedmill 3', line: 'Line 6' },
+  { feedmill: 'Feedmill 3', line: 'Line 7' },
+  { feedmill: 'Powermix', line: 'Line 5' }
+];
+```
+
+---
+
+## 2. ALL FEEDMILLS VIEW — DISPLAYS ALL LINE TABLES
+
+```jsx
+function AllFeedmillsView({ 
+  allOrders, 
+  masterData, 
+  n10dData, 
+  changeoverRules,
+  onOrderUpdate,
+  onAutoSequenceAll
+}) {
+  return (
+    <div className="all-feedmills-view">
+      {/* Header with Auto-Sequence All button */}
+      <div className="all-feedmills-header">
+        <h2 className="all-feedmills-title">All Feedmills</h2>
+        <button 
+          className="btn-auto-sequence-all"
+          onClick={onAutoSequenceAll}
+        >
+          ✨ Auto-Sequence (All)
+        </button>
+      </div>
+      
+      {/* All line tables */}
+      <div className="all-feedmills-tables">
+        {ALL_LINES_ORDERED.map(({ feedmill, line }) => {
+          const lineOrders = allOrders
+            .filter(o => o.line === line && o.status !== 'Done' && o.status !== 'Cancel PO')
+            .sort((a, b) => a.prio - b.prio);
+          
+          return (
+            <div key={`${feedmill}-${line}`} className="all-feedmills-line-section">
+              {/* Line header */}
+              <div className="all-feedmills-line-header">
+                <span className="all-feedmills-line-label">
+                  {feedmill} — {line}
+                </span>
+                <span className="all-feedmills-line-count">
+                  {lineOrders.length} order{lineOrders.length !== 1 ? 's' : ''}
+                </span>
+              </div>
+              
+              {/* Reuse the SAME order table component used in individual feedmill/line views */}
+              <OrderTable
+                orders={lineOrders}
+                line={line}
+                feedmill={feedmill}
+                masterData={masterData}
+                n10dData={n10dData}
+                changeoverRules={changeoverRules}
+                onOrderUpdate={onOrderUpdate}
+                showAutoSequenceButton={false}
+              />
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+## 3. INTEGRATE INTO ORDERS PAGE
+
+```jsx
+function OrdersPage() {
+  const [activeFeedmill, setActiveFeedmill] = useState('all_feedmills');
+  const [activeLine, setActiveLine] = useState('All');
+  
+  return (
+    <div className="orders-page">
+      {/* Left navigation — feedmill tabs */}
+      <div className="orders-nav">
+        {FEEDMILL_TABS.map(tab => (
+          <button
+            key={tab.id}
+            className={`orders-nav-tab ${activeFeedmill === tab.id ? 'active' : ''}`}
+            onClick={() => {
+              setActiveFeedmill(tab.id);
+              setActiveLine('All');
+            }}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+      
+      {/* Content area */}
+      <div className="orders-content">
+        {activeFeedmill === 'all_feedmills' ? (
+          /* All Feedmills view — no line tabs, just all tables */
+          <AllFeedmillsView
+            allOrders={allOrders}
+            masterData={masterData}
+            n10dData={n10dData}
+            changeoverRules={changeoverRules}
+            onOrderUpdate={handleOrderUpdate}
+            onAutoSequenceAll={handlePlantLevelAutoSequence}
+          />
+        ) : (
+          /* Individual feedmill view — with line tabs */
+          <FeedmillView
+            feedmill={activeFeedmill}
+            activeLine={activeLine}
+            onLineChange={setActiveLine}
+            allOrders={allOrders}
+            masterData={masterData}
+            n10dData={n10dData}
+            changeoverRules={changeoverRules}
+            onOrderUpdate={handleOrderUpdate}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+## 4. DISABLE AUTO-SEQUENCE IN [ALL] TABS PER FEEDMILL
+
+```jsx
+function FeedmillView({ feedmill, activeLine, onLineChange, allOrders, ... }) {
+  const lines = FEEDMILL_LINES[feedmill] || [];
+  const tabs = ['All', ...lines];
+  
+  return (
+    <div className="feedmill-view">
+      {/* Line tabs */}
+      <div className="feedmill-line-tabs">
+        {tabs.map(tab => (
+          <button
+            key={tab}
+            className={`feedmill-line-tab ${activeLine === tab ? 'active' : ''}`}
+            onClick={() => onLineChange(tab)}
+          >
+            {tab}
+          </button>
+        ))}
+      </div>
+      
+      {/* Content */}
+      {activeLine === 'All' ? (
+        /* All lines in this feedmill — auto-sequence DISABLED */
+        <div className="feedmill-all-lines">
+          {lines.map(line => {
+            const lineOrders = allOrders
+              .filter(o => o.line === line && o.status !== 'Done' && o.status !== 'Cancel PO')
+              .sort((a, b) => a.prio - b.prio);
+            
+            return (
+              <div key={line} className="feedmill-line-section">
+                <div className="feedmill-line-section-header">
+                  <span>{line}</span>
+                  <span className="feedmill-line-section-count">
+                    {lineOrders.length} orders
+                  </span>
+                </div>
+                <OrderTable
+                  orders={lineOrders}
+                  line={line}
+                  feedmill={feedmill}
+                  showAutoSequenceButton={false}
+                />
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        /* Individual line — auto-sequence ENABLED */
+        <div className="feedmill-single-line">
+          <OrderTable
+            orders={allOrders.filter(o => o.line === activeLine && o.status !== 'Done' && o.status !== 'Cancel PO').sort((a, b) => a.prio - b.prio)}
+            line={activeLine}
+            feedmill={feedmill}
+            showAutoSequenceButton={true}
+            onAutoSequence={() => handleLineAutoSequence(activeLine)}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+```
+
+---
+
+## 5. ORDER TABLE — ACCEPT showAutoSequenceButton PROP
+
+```jsx
+function OrderTable({ orders, line, feedmill, showAutoSequenceButton = true, onAutoSequence, ... }) {
+  return (
+    <div className="order-table-container">
+      {/* Table header with optional auto-sequence button */}
+      <div className="order-table-header">
+        {showAutoSequenceButton && (
+          <button 
+            className="btn-auto-sequence"
+            onClick={onAutoSequence}
+          >
+            ✨ Auto-Sequence
+          </button>
+        )}
+      </div>
+      
+      {/* The actual order table — SAME for all views */}
+      <table className="order-table">
+        <thead>
+          <tr>
+            <th></th>
+            <th>Prio</th>
+            <th>FPR</th>
+            <th>Planned Order</th>
+            <th>Material Code (FG)</th>
+            <th>Item Description</th>
+            <th>Form</th>
+            <th>Volume (MT)</th>
+            <th>Batch Size</th>
+            <th>Batches</th>
+            <th>Production Time</th>
+            <th>Start Date</th>
+            <th>Start Time</th>
+            <th>Avail Date</th>
+            <th>Estimated Completion Date</th>
+          </tr>
+        </thead>
+        <tbody>
+          {orders.map((order, index) => (
+            <OrderRow key={order.id} order={order} index={index} />
+          ))}
+          {orders.length === 0 && (
+            <tr>
+              <td colSpan="15" className="order-table-empty">
+                No orders on this line.
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+```
+
+---
+
+## 6. STYLING
+
+```css
+/* All Feedmills view */
+.all-feedmills-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow-y: auto;
+}
+
+.all-feedmills-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 24px;
+  border-bottom: 1px solid #e5e7eb;
+  position: sticky;
+  top: 0;
+  background: #ffffff;
+  z-index: 5;
+}
+
+.all-feedmills-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: #1a1a1a;
+  margin: 0;
+}
+
+/* Auto-sequence All button */
+.btn-auto-sequence-all {
+  padding: 8px 16px;
+  background: #ea580c;
+  color: #ffffff;
+  border: none;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn-auto-sequence-all:hover {
+  background: #c2410c;
+}
+
+/* Line sections */
+.all-feedmills-tables {
+  padding: 16px 24px;
+}
+
+.all-feedmills-line-section {
+  margin-bottom: 32px;
+}
+
+.all-feedmills-line-section:last-child {
+  margin-bottom: 16px;
+}
+
+/* Line header */
+.all-feedmills-line-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 16px;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px 8px 0 0;
+  border-bottom: none;
+}
+
+.all-feedmills-line-label {
+  font-size: 14px;
+  font-weight: 700;
+  color: #1a1a1a;
+}
+
+.all-feedmills-line-count {
+  font-size: 12px;
+  color: #6b7280;
+  font-weight: 500;
+}
+
+/* Feedmill [All] tab line sections */
+.feedmill-all-lines {
+  padding: 16px 24px;
+}
+
+.feedmill-line-section {
+  margin-bottom: 32px;
+}
+
+.feedmill-line-section:last-child {
+  margin-bottom: 16px;
+}
+
+.feedmill-line-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 16px;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px 8px 0 0;
+  border-bottom: none;
+  font-size: 14px;
+  font-weight: 700;
+  color: #1a1a1a;
+}
+
+.feedmill-line-section-count {
+  font-size: 12px;
+  color: #6b7280;
+  font-weight: 500;
+}
+
+/* Empty table message */
+.order-table-empty {
+  text-align: center;
+  padding: 24px;
+  color: #9ca3af;
+  font-size: 12px;
+  font-style: italic;
+}
+
+/* Nav tab for All Feedmills */
+.orders-nav-tab {
+  padding: 10px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #6b7280;
+  background: none;
+  border: none;
+  cursor: pointer;
+  border-left: 3px solid transparent;
+  width: 100%;
+  text-align: left;
+}
+
+.orders-nav-tab:hover {
+  background: #f9fafb;
+  color: #374151;
+}
+
+.orders-nav-tab.active {
+  color: #ea580c;
+  border-left-color: #ea580c;
+  background: #fff7ed;
+}
+```
+
+---
+
+## VERIFICATION
+
+### All Feedmills tab
+1. ✅ First tab in navigation: [All Feedmills] [Feedmill 1] [Feedmill 2] [Feedmill 3] [Powermix]
+2. ✅ Shows all line tables in order: FM1-L1, FM1-L2, FM2-L3, FM2-L4, FM3-L6, FM3-L7, PMX-L5
+3. ✅ Each table has header "Feedmill X — Line Y" with order count
+4. ✅ No line tabs — just all tables displayed vertically
+5. ✅ Tables are 100% identical to individual line views
+
+### Auto-Sequence (All) button
+6. ✅ Appears at top of All Feedmills view
+7. ✅ Triggers plant-level auto-sequence for ALL feedmills, ALL lines
+8. ✅ Opens the Plant-Level Auto-Sequence preview
+
+### Auto-sequence disabled in [All] per feedmill
+9. ✅ Feedmill 1 > [All] tab → auto-sequence button hidden
+10. ✅ Feedmill 1 > [Line 1] tab → auto-sequence button visible
+11. ✅ Feedmill 1 > [Line 2] tab → auto-sequence button visible
+12. ✅ Same for all feedmills
+
+### Content is identical
+13. ✅ Same columns in All Feedmills as in individual line views
+14. ✅ Same order table component reused
+15. ✅ Same drag handles, editing, interactions
+16. ✅ Same styling, font sizes, padding
+17. ✅ Empty lines show "No orders on this line"
+```

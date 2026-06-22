@@ -1,0 +1,157 @@
+Please bring back the original detailed demand table in the **Demand Profile** page, but do **not** remove the current heatmap / monthly seasonality table.
+
+I want both tables to be included in the Demand tab.
+
+---
+
+## REQUIRED LAYOUT
+
+Inside the **Demand Profile** page, please display both:
+
+### 1. Original Detailed Demand Table
+This should appear first.
+
+Keep the original row-based table that shows detailed values such as:
+- FG Code
+- Item Description
+- Time Period
+- Historical Demand (MT)
+- Current Inventory (MT)
+- Planned + In Progress (MT)
+- Coverage %
+- Insight
+
+This table is useful for exact values and supply comparison.
+
+---
+
+### 2. Heatmap / Monthly Seasonality Table
+This should appear below the first table.
+
+Keep the current heatmap-style monthly profile table that shows:
+- one row per SKU
+- Jan to Dec columns
+- monthly percentage share of annual demand
+- Total Annual Demand (MT)
+- Insight
+- conditional formatting / heatmap coloring
+
+This table is useful for reading seasonality and peak/low-demand patterns.
+
+---
+
+## IMPORTANT
+
+Do not remove the existing heatmap table.
+Do not replace it with the original table.
+I want both views shown on the same Demand Profile page.
+
+The order should be:
+
+1. Original detailed table
+2. Heatmap / monthly profile table
+
+---
+
+## DISPLAY LOGIC
+
+### Original table
+- keep visible as the primary detailed table
+
+### Heatmap table
+- show below the original table
+- this monthly heatmap view is especially relevant when the selected time grain is **Monthly**
+
+If needed, it is acceptable to show the heatmap table only when:
+- Time Grain = Monthly
+
+That is preferred if the heatmap structure is specifically month-based.
+
+---
+
+## SECTION LABELS (recommended)
+
+Please add clear section headers such as:
+
+### Detailed Demand View
+for the first/original table
+
+### Monthly Demand Profile
+for the heatmap table
+
+This will make it clearer that both tables serve different purposes.
+
+---
+
+## KEEP EXISTING FILTERS
+
+The existing filters and controls should continue to apply consistently, including:
+- Search SKU
+- Time Grain
+- Year
+- Month
+
+Please ensure both tables respond correctly to the selected filters where applicable.
+
+---
+
+## KEEP EXISTING LOGIC
+
+Do not break or remove:
+- current historical demand calculations
+- current inventory logic
+- planned + in progress logic
+- coverage % logic
+- insight logic
+- heatmap formatting logic
+
+This change is mainly to restore the detailed table while keeping the heatmap table below it.
+
+---
+
+## UX GOAL
+
+The page should support both:
+- detailed numeric analysis
+- quick visual seasonality analysis
+
+The detailed table helps users inspect exact values.
+The heatmap table helps users quickly understand demand patterns.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log:
+
+```javascript
+console.debug('[Demand Profile Detailed Table Render]', {
+  timeGrain,
+  rowCount,
+  filters,
+});
+```
+
+```javascript
+console.debug('[Demand Profile Heatmap Table Render]', {
+  timeGrain,
+  skuCount,
+  filters,
+  visible: timeGrain === 'Monthly',
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ The original detailed demand table is restored on the Demand Profile page
+2. ✅ The current heatmap / monthly profile table remains in the page
+3. ✅ The detailed table appears first
+4. ✅ The heatmap table appears below it
+5. ✅ Filters still work correctly for the detailed table
+6. ✅ Filters still work correctly for the heatmap table
+7. ✅ Heatmap formatting remains intact
+8. ✅ No existing demand calculations are broken
+9. ✅ No route or console errors are introduced
+10. ✅ If heatmap is shown only for Monthly view, it appears correctly only in that mode

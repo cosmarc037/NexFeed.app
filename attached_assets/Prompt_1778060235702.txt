@@ -1,0 +1,233 @@
+```
+Add a Cancel button to the auto-sequence running modal so users can stop the process while it is still running.
+
+---
+
+## OBJECTIVE
+
+When Plant-Level Auto-Sequence is running, users currently have no way to stop it.
+
+Add a **Cancel** button to the running progress modal so the user can interrupt the process if needed.
+
+This is useful when:
+- the user triggered auto-sequence by mistake
+- the run is taking too long
+- the user wants to stop and adjust inputs before retrying
+
+---
+
+## 1. ADD A CANCEL BUTTON TO THE RUNNING MODAL
+
+In the Plant-Level Auto-Sequence progress modal, add a visible button labeled:
+
+### `Cancel`
+
+Recommended placement:
+- bottom-right of the modal
+
+Alternative:
+- bottom-center if that better matches the current layout
+
+The button should only be visible while auto-sequence is actively running.
+
+---
+
+## 2. WHEN CANCEL IS CLICKED, STOP THE AUTO-SEQUENCE PROCESS
+
+Clicking Cancel should:
+1. mark the current auto-sequence run as cancelled
+2. stop the remaining steps from executing
+3. close the running modal
+4. prevent final results from being applied
+5. leave the schedule unchanged unless explicitly designed otherwise
+
+Important:
+- partial intermediate calculations should not overwrite the schedule if the run is cancelled before completion
+
+---
+
+## 3. IMPLEMENT CANCELLATION USING A SHARED RUN FLAG OR TOKEN
+
+Because auto-sequence runs through multiple steps, implement a cancellation mechanism that can be checked between steps.
+
+### Suggested pattern:
+```javascript
+let autoSequenceCancelled = false;
+```
+
+When the run starts:
+```javascript
+autoSequenceCancelled = false;
+```
+
+When the user clicks Cancel:
+```javascript
+autoSequenceCancelled = true;
+```
+
+Then, before and/or after each major step, check:
+```javascript
+if (autoSequenceCancelled) {
+  throw new Error('AUTO_SEQUENCE_CANCELLED');
+}
+```
+
+Or use a safer structured cancellation token if already supported.
+
+---
+
+## 4. CHECK FOR CANCELLATION BETWEEN MAJOR STEPS
+
+Add cancellation checks between steps like:
+- scanning orders across all lines
+- finding and combining matching orders
+- calculating queue times per line
+- placing orders on optimal lines
+- applying Future Dispatches target dates
+- sequencing orders per line
+- calculating changeovers
+- generating strategy options per line
+
+### Example:
+```javascript
+async function runAutoSequence() {
+  checkCancelled();
+
+  await scanOrders();
+  checkCancelled();
+
+  await combineOrders();
+  checkCancelled();
+
+  await calculateQueueTimes();
+  checkCancelled();
+
+  await placeOrders();
+  checkCancelled();
+
+  await applyFutureDispatches();
+  checkCancelled();
+
+  await sequencePerLine();
+  checkCancelled();
+
+  await calculateChangeovers();
+  checkCancelled();
+
+  await generateStrategies();
+  checkCancelled();
+
+  await finalizeResults();
+}
+```
+
+### Helper:
+```javascript
+function checkCancelled() {
+  if (autoSequenceCancelled) {
+    throw new Error('AUTO_SEQUENCE_CANCELLED');
+  }
+}
+```
+
+---
+
+## 5. HANDLE CANCELLATION CLEANLY
+
+When cancellation happens:
+- do not treat it like a crash/error
+- do not show a scary failure message
+- close the modal gracefully
+- optionally show a toast/info message
+
+### Suggested message:
+- `Auto-sequence cancelled.`
+or
+- `Auto-sequence was cancelled before completion.`
+
+If the app already has toast notifications, use one.
+
+---
+
+## 6. DO NOT APPLY PARTIAL RESULTS AFTER CANCELLATION
+
+This is very important.
+
+If the user cancels during the run:
+- do not finalize and apply partial auto-sequence results
+- do not partially update lines and leave the UI in a half-sequenced state
+- preserve the current schedule as it was before the run started
+
+If needed, store working results in temporary state and only commit them after the full run completes successfully.
+
+### Recommended approach:
+- use a temporary working copy during auto-sequence
+- only commit final result if the run completes and was not cancelled
+
+---
+
+## 7. DISABLE CANCEL AFTER COMPLETION
+
+Once auto-sequence has completed:
+- hide or disable the Cancel button
+- show normal completion flow instead
+
+Cancel should only be available while status is actively running.
+
+---
+
+## 8. OPTIONAL: ADD CANCELLING STATE
+
+Optional but recommended:
+After the user clicks Cancel, briefly change the UI to:
+- disable the button
+- show `Cancelling...`
+
+This prevents repeated clicking and reassures the user that the request was received.
+
+### Example:
+- Button text changes from `Cancel` to `Cancelling...`
+- button becomes disabled
+
+---
+
+## 9. HANDLE AI STEP CANCELLATION AS BEST AS POSSIBLE
+
+If the process is currently waiting for an AI response and true request abortion is not available, then:
+- mark the run as cancelled
+- ignore/discard the result when it returns
+- do not apply it to the schedule
+- close the modal or show cancelling state until safe cleanup is done
+
+If request abort is supported, use it.
+
+---
+
+## 10. UI EXAMPLE
+
+Add footer actions like:
+- [Cancel]
+
+If there is already a footer area, place the button there.
+
+Keep styling consistent with the rest of the modal.
+
+---
+
+## 11. VERIFICATION
+
+### UX
+1. ✅ Running auto-sequence modal now shows a Cancel button
+2. ✅ User can stop auto-sequence while it is running
+3. ✅ Cancel button is only available while processing is active
+
+### Behavior
+4. ✅ Clicking Cancel stops further processing
+5. ✅ Modal closes cleanly after cancellation
+6. ✅ Partial auto-sequence results are not applied
+7. ✅ Existing schedule remains unchanged if run is cancelled before completion
+
+### Technical
+8. ✅ Cancellation is checked between major steps
+9. ✅ AI results are ignored if they return after cancellation
+10. ✅ Cancellation is handled as a normal user action, not as an error

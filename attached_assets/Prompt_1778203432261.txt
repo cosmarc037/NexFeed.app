@@ -1,0 +1,220 @@
+Please revisit the recommendation logic for AI sequencing strategies because this case suggests that a strategy with real measurable changeover savings may still deserve to be Recommended even if its faithfulness score is relatively low.
+
+---
+
+## OBJECTIVE
+
+In this case, the AI strategy:
+
+### `Swine Diameter Segmentation`
+shows:
+- Changeover time = **4.33 hr**
+- Time-saved = **-0.84 hr**
+- Faithfulness = **55.5%**
+
+The comparison strategy shows:
+- Changeover time = **5.17 hr**
+- Time-saved = **0.00 hr**
+- Faithfulness = **59.0%**
+
+So even though faithfulness is lower, the selected AI strategy actually produces a real measurable reduction in changeover.
+
+This raises the question:
+- should a strategy that truly improves the metric still be eligible to be Recommended even if faithfulness is modest?
+
+I believe the answer should be yes, provided the sequence is valid and the claimed optimization is actually reflected in the metrics.
+
+---
+
+## ISSUE TO REVISIT
+
+The current recommendation logic may be underweighting actual measurable improvement and overweighting faithfulness.
+
+That can produce a situation where:
+- a strategy that genuinely reduces changeover
+- and outperforms the alternative
+
+might be penalized too heavily because the final visible clustering does not perfectly match the AI’s intended narrative.
+
+This can lead to the wrong strategy being favored.
+
+---
+
+## SUGGESTED DIRECTION
+
+Please update the recommendation logic so that for changeover-focused AI strategies:
+
+### Actual measured outcome should carry the highest importance
+If a strategy:
+- materially reduces changeover
+- produces actual time saved
+- preserves valid sequencing / date safety
+
+then it should remain strongly eligible for the `Recommended` badge, even if faithfulness is only moderate.
+
+Faithfulness should still matter, but it should not automatically outweigh real performance gains.
+
+---
+
+## 1. TREAT ACTUAL CHANGEOVER IMPROVEMENT AS A PRIMARY RECOMMENDATION FACTOR
+
+If a strategy’s main objective is changeover reduction, then the strongest recommendation signal should be:
+
+- lower actual changeover than the alternatives
+- real negative time-saved value (actual savings)
+- no invalid date/constraint violations
+
+In this case:
+- `4.33 hr` is clearly better than `5.17 hr`
+- `-0.84 hr` is a real improvement
+
+That should make this strategy highly competitive for `Recommended`.
+
+---
+
+## 2. DO NOT LET LOW FAITHFULNESS AUTOMATICALLY DISQUALIFY A GENUINELY BETTER RESULT
+
+Faithfulness should still be considered, but a modest or low faithfulness score should not automatically block recommendation when:
+- the measurable result is better
+- the sequence is still valid
+- the optimization objective was actually achieved in the metrics
+
+Instead, low faithfulness should mean:
+- the description or visible pattern may need refinement
+not necessarily:
+- the strategy is worse in practical terms
+
+---
+
+## 3. SEPARATE "QUALITY OF RESULT" FROM "QUALITY OF EXPLANATION ALIGNMENT"
+
+Please treat these as two separate dimensions:
+
+### Quality of result
+- actual changeover reduction
+- actual time saved
+- valid date-safe sequence
+- maybe profitability / MTS impact as secondary factors
+
+### Explanation alignment / faithfulness
+- how closely the final table visually reflects the AI’s intended narrative
+
+A sequence can have:
+- high practical value
+- but only moderate narrative faithfulness
+
+That should still allow it to be Recommended if the actual outcome is best.
+
+---
+
+## 4. IF FAITHFULNESS IS LOW, ADJUST THE DESCRIPTION RATHER THAN DISCARDING THE STRATEGY
+
+If the AI strategy genuinely reduced changeover but the final visible clustering only partially matches the original wording, then:
+- revise the wording
+- soften over-specific claims
+- keep the recommendation if the metrics justify it
+
+For example, if the strategy title/description is too strong, update it so it better matches the actual sequence.
+
+This is better than rejecting a useful strategy just because the explanation is imperfect.
+
+---
+
+## 5. USE FAITHFULNESS AS A MODERATOR, NOT A DOMINANT OVERRIDE
+
+Recommended scoring should likely work like this:
+- actual changeover / time-saved = primary driver
+- validity / date safety = hard gate
+- faithfulness = modifier / confidence signal
+- MTS adjusted / profitability = secondary tiebreakers
+
+That means faithfulness can lower confidence somewhat, but it should not completely override a clearly better actual result.
+
+---
+
+## 6. REVISIT THE MINIMUM FAITHFULNESS THRESHOLD FOR RECOMMENDATION
+
+If the current logic blocks recommendation below 60%, that may be too rigid.
+
+In this example:
+- faithfulness = 55.5%
+- but actual performance is clearly better
+
+Please revisit whether:
+- the threshold should be softened
+- or faithfulness should be weighted, not hard-gated
+for strategies that materially outperform the alternatives
+
+---
+
+## 7. VERIFY THIS SPECIFIC CASE
+
+Please compare these two AI strategies directly:
+
+### Strategy A
+- Changeover time = 5.17 hr
+- Time-saved = 0.00 hr
+- Faithfulness = 59.0%
+
+### Strategy B
+- Changeover time = 4.33 hr
+- Time-saved = -0.84 hr
+- Faithfulness = 55.5%
+
+Please confirm whether Strategy B should be considered the better practical result despite lower faithfulness.
+
+My view is:
+- yes, Strategy B is the more meaningful optimization
+- therefore it should remain eligible for Recommended, provided the sequence is valid
+
+---
+
+## 8. KEEP VALIDITY AS A HARD REQUIREMENT
+
+This does not mean recommend anything with low faithfulness.
+
+Only do this if the strategy still:
+- respects dates
+- respects hard sequencing constraints
+- does not violate deadlines
+- produces a real measurable gain
+
+If those are satisfied, then measurable improvement should matter more than perfect narrative alignment.
+
+---
+
+## 9. ADD DEBUG LOGGING FOR RECOMMENDATION TRADEOFFS
+
+Temporarily log:
+
+```javascript
+console.debug('[Recommendation Tradeoff Review]', {
+  lineId,
+  strategies: strategies.map(s => ({
+    id: s.id,
+    title: s.title,
+    changeover: s.changeover,
+    timeSaved: s.timeSaved,
+    faithfulness: s.faithfulness,
+    valid: s.valid,
+    recommended: s.recommended,
+  })),
+  recommendationReasoning: {
+    prioritizesMeasuredImprovement: true,
+    faithfulnessUsedAsModerator: true,
+  }
+});
+```
+
+This helps verify that recommendation is not suppressing clearly better results.
+
+---
+
+## VERIFICATION
+
+1. ✅ Recommendation logic now treats actual changeover reduction as a primary factor for changeover-focused strategies
+2. ✅ Strategies with real time-saved improvement remain eligible for Recommended even if faithfulness is only moderate
+3. ✅ Faithfulness is treated as a modifier/confidence signal, not an automatic disqualifier in all cases
+4. ✅ Strategy descriptions are softened or corrected if faithfulness is low but the result is still practically better
+5. ✅ Validity and date safety remain hard requirements
+6. ✅ In this case, the strategy with 4.33 hr changeover and -0.84 hr time-saved is correctly recognized as the stronger practical result

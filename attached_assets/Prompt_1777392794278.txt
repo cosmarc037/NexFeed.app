@@ -1,0 +1,518 @@
+```
+Implement AI Profit-Optimized sequence using Profit Rate as the profitability objective.
+
+---
+
+## OBJECTIVE
+
+Build the AI Profit-Optimized strategy so it behaves like AI Balanced as the base, but adds profitability optimization using **profit rate**.
+
+The strategy must:
+- keep the same safe and practical scheduling behavior as AI Balanced
+- still respect actual dated / MTO orders
+- still protect critical, urgent, and monitor orders from delay
+- still use practical AI-suggested dates for eligible flexible orders
+- still consider line load and reduce changeovers where reasonable
+- but among safe eligible options, prioritize the orders with better **profit rate**
+
+This should make AI Profit-Optimized distinct from AI Balanced while remaining operationally safe.
+
+---
+
+## 1. USE AI BALANCED AS THE BASE FLOW
+
+AI Profit-Optimized should follow the same structure as AI Balanced:
+- AI-assisted reordering
+- practical date suggestion logic
+- safe-window enforcement
+- chronological display ordering
+- changeover-aware refinement
+- final sort by effective avail date
+
+Do NOT build a completely separate rigid flow.
+Use AI Balanced behavior as the base, then add profit-rate scoring on top.
+
+---
+
+## 2. DEFINE PROFIT RATE
+
+Profit rate must be calculated using:
+
+**Profit Rate = Margin ÷ (Production Hours + Changeover Hours)**
+
+Where:
+- **Margin** comes from master data
+- **Production Hours** comes from volume ÷ run rate
+- **Changeover Hours** comes from the live Changeover Rules configuration / shared changeover calculator
+
+Do not use hardcoded profitability values.
+Do not use raw margin alone as the optimization objective.
+
+---
+
+## 3. GET MARGIN FROM MASTER DATA
+
+Each order must be enriched using the master data `Margin` field.
+
+```javascript
+function enrichOrdersWithMargin(ordersByLine, masterData) {
+  const result = {};
+
+  Object.entries(ordersByLine).forEach(([line, orders]) => {
+    result[line] = orders.map(order => {
+      const materialCode = String(order.material_code_fg || '').trim();
+
+      const mdEntry = masterData.find(md =>
+        String(md.material_code_fg || md.material_code || '').trim() === materialCode
+      );
+
+      const margin = mdEntry ? parseFloat(mdEntry.Margin ?? mdEntry.margin ?? 0) || 0 : 0;
+
+      return {
+        ...order,
+        _margin: margin,
+      };
+    });
+  });
+
+  return result;
+}
+```
+
+Use the actual field names used in your master data structure.
+
+---
+
+## 4. CALCULATE PRODUCTION HOURS
+
+Use the same line runtime logic as the rest of the app.
+
+```javascript
+function calculateProductionHours(order, line) {
+  const volume = parseFloat(order.volume_override || order.volume || order.total_volume_mt || 0) || 0;
+  const runRate = getLineRunRate(normalizeLine(line));
+
+  if (!runRate || runRate <= 0) return 0;
+
+  return volume / runRate;
+}
+```
+
+---
+
+## 5. CALCULATE CHANGEOVER HOURS USING LIVE RULES
+
+Use the same shared function already aligned with the Changeover Rules tab.
+
+```javascript
+function calculateProfitRate(order, prevOrder, changeoverRules, line) {
+  const margin = parseFloat(order._margin || 0) || 0;
+  const productionHours = calculateProductionHours(order, line);
+
+  const changeoverHours = prevOrder
+    ? calculateChangeoverBetween(prevOrder, order, changeoverRules, line)
+    : 0;
+
+  const totalHours = productionHours + changeoverHours;
+
+  if (totalHours <= 0) return 0;
+
+  return margin / totalHours;
+}
+```
+
+Do not use hardcoded changeover assumptions here.
+
+---
+
+## 6. ADD PROFIT-RATE SCORING INTO THE AI PROFIT DATE/PLACEMENT HEURISTIC
+
+The AI Profit-Optimized strategy should score candidates using:
+1. hard constraints first
+2. safe scheduling
+3. profit rate
+4. line load
+5. changeover efficiency
+
+That means profitability should be a **major optimization factor**, but it must never override hard constraints.
+
+---
+
+## 7. CREATE A PROFIT-OPTIMIZED CANDIDATE DATE SCORER
+
+This should be similar to Balanced, but include profit rate as a major scoring input.
+
+```javascript
+function scoreProfitCandidateDate({
+  order,
+  candidateDate,
+  line,
+  orders,
+  changeoverRules,
+}) {
+  let score = 0;
+
+  const loadMap = buildDailyLoadMap(orders, line);
+  const load = loadMap.get(candidateDate) || { orderCount: 0, totalHours: 0 };
+
+  // 1. Profit rate weighting
+  const prevOrder = findNearestPreviousOrderOnOrBeforeDate(order, candidateDate, orders);
+  const profitRate = calculateProfitRate(order, prevOrder, changeoverRules, line);
+  score += profitRate * 20;
+
+  // 2. Prefer lighter-loaded days
+  score += Math.max(0, 12 - load.totalHours) * 3;
+  score += Math.max(0, 4 - load.orderCount) * 1.5;
+
+  // 3. Reward compatibility / lower changeover
+  score += estimateCompatibilityGain(order, candidateDate, orders, changeoverRules, line) * 8;
+
+  // 4. Prefer earlier safe dates for higher-value orders
+  const today = startOfDay(new Date());
+  const candidate = startOfDay(new Date(candidateDate));
+  const daysFromToday = Math.round((candidate - today) / (1000 * 60 * 60 * 24));
+  score += Math.max(0, 20 - daysFromToday) * 0.75;
+
+  // 5. Penalize overloaded days
+  if (load.totalHours > 16) score -= 20;
+  if (load.totalHours > 20) score -= 30;
+
+  return score;
+}
+```
+
+Adjust weights if needed after testing, but make sure profit rate is one of the strongest non-hard-constraint signals.
+
+---
+
+## 8. CHOOSE THE BEST DATE FOR AI PROFIT-OPTIMIZED
+
+```javascript
+function chooseBestProfitDate({
+  order,
+  line,
+  orders,
+  safeWindow,
+  changeoverRules,
+}) {
+  const candidateDates = enumerateDates(safeWindow.start, safeWindow.end);
+
+  let bestDate = safeWindow.start;
+  let bestScore = -Infinity;
+
+  candidateDates.forEach(candidateDate => {
+    const score = scoreProfitCandidateDate({
+      order,
+      candidateDate,
+      line,
+      orders,
+      changeoverRules,
+    });
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestDate = candidateDate;
+    }
+  });
+
+  return bestDate;
+}
+```
+
+---
+
+## 9. APPLY PROFIT-RATE LOGIC ONLY TO ELIGIBLE ORDERS
+
+Protected orders must still follow hard rules:
+- MTO / actual dated orders = fixed date
+- Critical = prioritized, not delayed
+- Urgent / Monitor = may move earlier, but not later than target
+- Flexible / sufficient = can be optimized more freely within safe window
+
+So profit rate should mostly influence:
+- flexible / sufficient orders
+- urgent / monitor only if moving earlier safely
+- never MTO or fixed actual dated orders
+
+```javascript
+function isProtectedOrder(order) {
+  if (isMTOOrder(order)) return true;
+
+  const status = String(order._n10dStatus || order.inferred_target_label || '').toLowerCase();
+
+  if (status === 'critical') return true;
+  if (status === 'urgent') return true;
+  if (status === 'monitor') return true;
+  if (status.includes('prio replenish')) return true;
+
+  return false;
+}
+```
+
+---
+
+## 10. BUILD AI PROFIT DATE HEURISTIC
+
+```javascript
+function applyProfitDateHeuristic(ordersByLine, changeoverRules, n10dData) {
+  const result = {};
+
+  Object.entries(ordersByLine).forEach(([line, orders]) => {
+    const adjusted = orders.map(order => {
+      if (isMTOOrder(order)) {
+        return {
+          ...order,
+          _aiSuggestedDate: normalizeDate(order.target_avail_date),
+          _aiDateReason: 'MTO order — fixed date retained',
+        };
+      }
+
+      const status = String(order._n10dStatus || order.inferred_target_label || '').toLowerCase();
+
+      if (status === 'critical') {
+        return {
+          ...order,
+          _aiSuggestedDate: normalizeDate(order.target_avail_date),
+          _aiDateReason: 'Critical order — prioritized and fixed',
+        };
+      }
+
+      const safeWindow = getProfitSafeWindow(order, n10dData);
+      const suggestedDate = chooseBestProfitDate({
+        order,
+        line,
+        orders,
+        safeWindow,
+        changeoverRules,
+      });
+
+      return {
+        ...order,
+        _originalAvailDate: normalizeDate(order.target_avail_date),
+        target_avail_date: suggestedDate,
+        _aiSuggestedDate: suggestedDate,
+        _dateAdjustedByAI: normalizeDate(order.target_avail_date) !== suggestedDate,
+        _aiDateReason: `Profit-optimized heuristic selected ${suggestedDate} based on profit rate, safe window, line load, and compatibility`,
+      };
+    });
+
+    // Final display should still be chronologically correct
+    const sorted = sortOrdersChronologicallyWithBalancedTieBreak(adjusted).map((o, i) => ({
+      ...o,
+      prio: i + 1,
+    }));
+
+    result[line] = sorted;
+  });
+
+  return result;
+}
+```
+
+---
+
+## 11. SAFE WINDOW RULES FOR AI PROFIT-OPTIMIZED
+
+Use the same safe-window logic as AI Balanced unless there is a better existing shared helper.
+
+```javascript
+function getProfitSafeWindow(order, n10dData) {
+  const today = startOfDay(new Date());
+  const earliest = addDays(today, 2);
+
+  if (isMTOOrder(order)) {
+    const fixed = normalizeDate(order.target_avail_date) || formatISODate(today);
+    return { start: fixed, end: fixed };
+  }
+
+  const status = String(order._n10dStatus || order.inferred_target_label || '').toLowerCase();
+
+  if (status === 'critical') {
+    const fixed = normalizeDate(order.target_avail_date) || formatISODate(today);
+    return { start: fixed, end: fixed };
+  }
+
+  if (status === 'urgent' || status === 'monitor' || status.includes('prio replenish')) {
+    const latest = normalizeDate(order.target_avail_date) || formatISODate(addDays(today, 10));
+    return {
+      start: formatISODate(earliest),
+      end: latest,
+    };
+  }
+
+  // sufficient / flexible
+  const n10dThreshold = resolveEffectiveN10DDate(order, n10dData);
+  const thresholdDate = n10dThreshold ? startOfDay(new Date(n10dThreshold)) : addDays(today, 10);
+  const latest = addDays(thresholdDate, 14);
+
+  return {
+    start: formatISODate(earliest),
+    end: formatISODate(latest),
+  };
+}
+```
+
+---
+
+## 12. FINAL AI PROFIT-OPTIMIZED FLOW
+
+Use the same overall structure as AI Balanced, but swap in the profit-based heuristic.
+
+```javascript
+async function generateAIProfitOptimizedSequence(enrichedByLine, n10dData, masterData, changeoverRules) {
+  const enrichedWithMargin = enrichOrdersWithMargin(enrichedByLine, masterData);
+
+  const prompt = buildAIProfitPrompt(enrichedWithMargin, changeoverRules);
+
+  let aiResult = { strategy: {}, reasoning: '', dateAdjustments: [] };
+
+  try {
+    const response = await callAzureOpenAI(prompt);
+    aiResult = parseAIResponse(response);
+  } catch (error) {
+    console.error('AI Profit generation failed:', error);
+    // fallback to balanced-like behavior with margin enrichment
+  }
+
+  // 1. Apply AI's proposed ordering as a soft input
+  const aiReordered = applyAIReordering(enrichedWithMargin, aiResult);
+
+  // 2. Apply profit-rate heuristic
+  const withDates = applyProfitDateHeuristic(aiReordered, changeoverRules, n10dData);
+
+  // 3. Final display remains chronological
+  const finalResult = {};
+  Object.entries(withDates).forEach(([line, orders]) => {
+    finalResult[line] = sortOrdersChronologicallyWithBalancedTieBreak(orders).map((o, i) => ({
+      ...o,
+      prio: i + 1,
+    }));
+  });
+
+  return {
+    id: 'ai_profit',
+    name: 'AI Profit-Optimized',
+    theme: 'AI-Powered (Profit-Optimized)',
+    description: 'AI prioritizes safer high-profit-rate opportunities while preserving hard date constraints and practical scheduling',
+    icon: '💰',
+    color: 'green',
+    orders: finalResult,
+    metrics: calculateStrategyMetrics(finalResult),
+    aiReasoning: aiResult.reasoning || '',
+    dateAdjustments: collectDateAdjustments(finalResult),
+    isAIRecommended: false,
+  };
+}
+```
+
+---
+
+## 13. UPDATE THE AI PROFIT PROMPT
+
+The prompt should explicitly tell AI to optimize using profit rate, not just raw margin.
+
+```javascript
+function buildAIProfitPrompt(enrichedByLine, changeoverRules) {
+  const allOrders = Object.values(enrichedByLine).flat();
+
+  const orderDetails = allOrders.map(o => ({
+    id: o.id,
+    description: o.item_description,
+    material_code: o.material_code_fg,
+    category: o.category,
+    color: o.color,
+    diameter: o.diameter,
+    form: o.form,
+    current_avail_date: o.target_avail_date,
+    margin: o._margin || 0,
+    is_mto: isMTOOrder(o),
+    n10d_status: o._n10dStatus || o.inferred_target_label || '',
+    production_hours: o.production_time || 0,
+  }));
+
+  const liveRules = buildDynamicChangeoverPromptSection(changeoverRules);
+
+  return `You are an AI production scheduler optimizing for profit rate while preserving safe scheduling.
+
+## CURRENT ORDERS
+${JSON.stringify(orderDetails, null, 2)}
+
+${liveRules}
+
+## PROFIT OBJECTIVE
+Use profit rate:
+Profit Rate = Margin ÷ (Production Hours + Changeover Hours)
+
+Prioritize higher profit-rate opportunities when safe.
+
+## HARD CONSTRAINTS
+1. MTO / actual dated orders must not be delayed
+2. Critical orders must remain prioritized
+3. Urgent / Monitor may move earlier, but not later than their target date
+4. Sufficient orders can be optimized within safe windows
+5. Chronological logic must remain understandable
+
+## OPTIMIZATION GOAL
+Among all safe sequencing choices:
+- favor higher profit-rate orders earlier
+- still reduce unnecessary changeovers where possible
+- still use practical dates based on load and safe windows
+
+Return a sequencing suggestion with reasoning and suggested dates.`;
+}
+```
+
+---
+
+## 14. AI PROFIT SHOULD BE VISIBLY DIFFERENT FROM AI BALANCED WHEN PROFIT OPPORTUNITY EXISTS
+
+Expected behavior:
+- if margins are similar, AI Profit may look close to AI Balanced
+- if some flexible products have much better profit rate, they should move earlier when safe
+- low profit-rate flexible orders can be deferred within safe window if that improves profitability
+- protected orders still stay protected
+
+---
+
+## 15. KEEP FINAL DISPLAY CHRONOLOGICAL
+
+Just like AI Balanced:
+- final rows must be sorted by effective avail date ascending
+- same date tie-breaker can use protected rank, then compatibility
+- profit optimization should influence selected dates and order choices, but not cause visually illogical date order
+
+---
+
+## VERIFICATION
+
+### Profit source and formula
+1. ✅ Margin is read from master data, not hardcoded
+2. ✅ Profit rate is calculated as Margin ÷ (Production Hours + Changeover Hours)
+3. ✅ Changeover hours come from live Changeover Rules configuration
+4. ✅ Profit logic does not use raw margin alone as the main objective
+
+### Safe scheduling preserved
+5. ✅ MTO / actual dated orders remain protected
+6. ✅ Critical orders remain protected
+7. ✅ Urgent / Monitor can move earlier but not later than target date
+8. ✅ Flexible / sufficient orders can be optimized within safe windows
+9. ✅ No hard constraint is broken for profit
+
+### Profit-optimized behavior
+10. ✅ Higher profit-rate flexible orders are favored earlier when safe
+11. ✅ Lower profit-rate flexible orders can move later if safe
+12. ✅ Profit opportunity affects date suggestions and order preference
+13. ✅ AI Profit-Optimized is visibly different from AI Balanced when profitable choices exist
+
+### Chronological correctness
+14. ✅ Final preview remains sorted by effective avail date ascending
+15. ✅ No later date appears above an earlier date
+16. ✅ Same-date tie-break can still use protected rank and compatibility
+17. ✅ Profit optimization does not break visual chronological logic
+
+### Integration
+18. ✅ AI Profit-Optimized reuses AI Balanced structure as the base
+19. ✅ Profit-rate scoring is added on top of balanced logic
+20. ✅ Date adjustments and reasoning appear in preview as expected
+21. ✅ Works with master data and Changeover Rules live configuration
+```

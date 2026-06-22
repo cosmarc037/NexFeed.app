@@ -1,0 +1,123 @@
+Please add a status dependency rule between Line 5 source orders and their linked generated split orders.
+
+According to the business rule from the client, a Line 5 order should not be allowed to proceed into production-related statuses unless its linked generated order is already in progress or completed.
+
+---
+
+## REQUIRED RULE
+
+For a source order in **Line 5 / Powermix** that has a linked generated split order:
+
+Users must **not** be allowed to set the Line 5 source order status to:
+- `On-going`
+- `Done`
+
+unless the linked generated order status is already:
+- `On-going`
+- or `Done`
+
+### In other words
+If the linked generated order is still in a non-started state such as:
+- `Normal`
+- `Plotted`
+- blank
+- or any equivalent not-yet-started status
+
+then the Line 5 source order must not be allowed to move to:
+- `On-going`
+- `Done`
+
+---
+
+## VALIDATION BEHAVIOR
+
+When the user attempts to change the status of a Line 5 source order to:
+- `On-going`
+- or `Done`
+
+the app should:
+
+1. identify whether the source order has a linked generated order
+2. check the current status of that generated order
+3. if the generated order status is not `On-going` or `Done`, block the change
+4. show a clear validation message to the user
+
+---
+
+## SUGGESTED VALIDATION MESSAGE
+
+Use a message similar to:
+
+**Cannot update this Line 5 order to On-going or Done because its linked generated order has not started yet. Please update the generated order first.**
+
+You may improve the wording slightly, but keep the meaning clear.
+
+---
+
+## IMPORTANT SCOPE
+
+This rule applies specifically to:
+- source orders in Line 5 / Powermix
+- that have linked generated split orders
+
+Do not apply this rule to unrelated orders that do not participate in the Powermix split feature.
+
+---
+
+## UI EXPECTATION
+
+If possible:
+- disable invalid status options in the status selector for the Line 5 source order
+- or block on selection/save with validation
+
+Preferred behavior:
+- if the generated order is not On-going or Done, then `On-going` and `Done` should not be selectable for the source Line 5 order
+
+If disabling is not clean in the current UI, then blocking with a clear validation message is acceptable.
+
+---
+
+## LINKED ORDER CHECK
+
+Use the actual Powermix linked-order relationship to identify the generated order.
+Do not rely on weak text matching.
+
+Use the existing source/generated linkage such as:
+- source_order_id
+- generated_order_id
+- linked_order_id
+- generated_from_powermix = true
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log:
+
+```javascript
+console.debug('[Powermix Source Status Gate Check]', {
+  sourceOrderId,
+  sourceLine: 'line_5',
+  attemptedStatus,
+  linkedGeneratedOrderId,
+  linkedGeneratedOrderStatus,
+  allowed,
+});
+
+javascript
+Run Code
+Copy code
+console.debug('[Powermix Source Status Blocked]', {
+  sourceOrderId,
+  attemptedStatus,
+  linkedGeneratedOrderId,
+  linkedGeneratedOrderStatus,
+  reason: 'generated_order_not_started',
+});
+
+VERIFICATION
+✅ Line 5 source order cannot be changed to On-going if linked generated order is not On-going or Done
+✅ Line 5 source order cannot be changed to Done if linked generated order is not On-going or Done
+✅ Status rule applies only to Powermix source orders with linked generated orders
+✅ App shows a clear validation message when blocked
+✅ Linked order lookup uses actual source/generated linkage

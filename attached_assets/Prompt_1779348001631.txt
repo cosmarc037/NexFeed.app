@@ -1,0 +1,279 @@
+Please update the **Monitoring > SKU Monitoring** page to add an AI-calculated **Smart Demand (MT)** column in the **Detailed Demand View** table.
+
+We currently display historical demand values for SKUs, and we have up to **5 years of historical demand data** available. Please add a new forecasted-demand column that uses **all available historical years** to generate a single predicted demand value per row.
+
+---
+
+## REQUIRED CHANGE
+
+Add a new table column:
+
+- **Smart Demand (MT)**
+
+Place it in the **Detailed Demand View** table near the existing historical-demand-related columns, ideally after:
+
+- **Historical Demand (MT)**
+
+or after:
+
+- **Daily Demand (MT)**
+
+Choose whichever placement best fits the current table layout without breaking readability.
+
+---
+
+## FUNCTIONAL REQUIREMENT
+
+For each SKU row in the **Detailed Demand View** table:
+
+- compute a **single forecasted demand value**
+- use **all historical demand years available** for that SKU
+- output **numeric value only**
+- display it in **MT**
+- format it consistently with existing demand columns
+- no explanation
+- no tooltip
+- no AI reasoning text
+- no confidence score
+- no popup/modal required
+
+This column should simply show the AI-estimated demand value.
+
+---
+
+## FORECASTING REQUIREMENT
+
+The **Smart Demand (MT)** value should be derived by analyzing the historical demand pattern for the same SKU across all available years.
+
+The logic should use historical demand records relevant to the SKU and selected period, and generate one practical forecast value.
+
+At minimum, the forecast should consider:
+
+- all available historical years for the SKU
+- recurring month pattern when month-based records exist
+- overall demand trend over time
+- average demand behavior
+- whether demand is increasing, decreasing, or stable
+
+---
+
+## PRACTICAL IMPLEMENTATION RULE
+
+Do not overcomplicate this with a heavy external AI integration unless one already exists in the app.
+
+If there is no existing forecasting service, implement a lightweight deterministic forecasting method that behaves like a smart AI estimate.
+
+Use this priority:
+
+### Preferred forecast logic
+If historical demand exists for the **same SKU and same month across multiple years**:
+- use those values as the primary forecast basis
+
+Then:
+- calculate a weighted forecast favoring more recent years
+- apply a simple trend adjustment if a clear upward or downward pattern exists
+
+### Fallback logic
+If same-month multi-year history is incomplete:
+- use all available historical demand for the SKU
+- compute a weighted average with recency bias
+- if too little data exists, fall back to:
+  - current historical demand value for the row, or
+  - average available demand values for that SKU
+
+### Guardrail
+Never return:
+- null
+- NaN
+- undefined
+- negative values
+
+If insufficient data exists, return a safe numeric fallback.
+
+---
+
+## SUGGESTED FORECAST APPROACH
+
+Implement a helper like:
+
+```ts
+calculateSmartDemand({
+  sku,
+  selectedMonth,
+  selectedYear,
+  historicalRecords
+}): number
+```
+
+Suggested logic:
+
+1. Filter historical records for the same SKU
+2. Prefer records matching the same month from previous years
+3. Sort records by year ascending
+4. Apply recency-based weights, for example:
+   - oldest year = lower weight
+   - most recent year = highest weight
+5. Compute weighted average
+6. If enough data points exist, apply a small trend adjustment based on year-over-year movement
+7. Clamp result to minimum 0
+8. Format for display using the same numeric formatting as other MT columns
+
+Example weighting idea:
+
+- Year -5: 10%
+- Year -4: 15%
+- Year -3: 20%
+- Year -2: 25%
+- Year -1: 30%
+
+If fewer years exist, normalize weights across available records.
+
+Trend adjustment should be modest and should not create extreme forecast spikes.
+
+---
+
+## UI REQUIREMENT
+
+In the **Detailed Demand View** table:
+
+- add column header: **Smart Demand (MT)**
+- render it as a numeric column
+- align formatting with existing demand columns
+- preserve sorting behavior if table supports sortable columns
+- if table supports export/download, include this new field if appropriate
+
+Make sure the added column does not break:
+- horizontal scrolling
+- sticky header behavior
+- responsive layout
+- current styling consistency
+
+---
+
+## DATA REQUIREMENT
+
+Use the same row/SKU context already present in the Monitoring page.
+
+The Smart Demand value should be computed per row using:
+- FG code / SKU identifier
+- selected month
+- selected year
+- all historical demand data available for that SKU
+
+If the currently loaded data only contains one visible historical-demand value, check whether there is already:
+- uploaded historical demand dataset
+- backend historical-demand source
+- API response containing prior-year values
+- cached records used elsewhere in analytics
+
+If necessary, extend the data retrieval so the frontend has access to all needed historical demand records to compute Smart Demand correctly.
+
+---
+
+## BACKEND / FRONTEND EXPECTATION
+
+If calculation is best handled in the backend:
+- add Smart Demand to the API response for the monitoring table rows
+
+If calculation is easy to do in the frontend:
+- compute it client-side from available historical records
+
+Prefer the option that is more consistent with the current app architecture and avoids duplicated logic.
+
+If multiple screens may later reuse this forecast, place the logic in a reusable shared utility/service.
+
+---
+
+## PERFORMANCE REQUIREMENT
+
+The page should remain responsive.
+
+Avoid recomputing Smart Demand inefficiently on every render.
+
+Use:
+- memoization
+- precomputed mapping by SKU
+- backend aggregation
+- or efficient caching
+
+especially if the table contains many SKUs.
+
+---
+
+## SAFE FALLBACK BEHAVIOR
+
+If a SKU has limited historical data:
+
+- 3+ years available → weighted average + trend
+- 2 years available → weighted average with slight recency bias
+- 1 year available → use that value
+- 0 usable years available → return 0 or current row’s historical demand, whichever is more appropriate for current business logic
+
+Pick the safer fallback that avoids blank cells.
+
+---
+
+## WHAT TO AVOID
+
+Do not:
+- add explanatory text in the cell
+- show "AI reason" or "basis"
+- add tooltips unless already part of existing reusable table behavior
+- return inconsistent units
+- make Smart Demand identical to Historical Demand in all cases unless fallback requires it
+- depend on a slow external AI call per row during page render
+
+This feature should feel smart, but remain stable and fast.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily add logs so we can verify the forecast inputs and outputs.
+
+```javascript
+console.debug('[Smart Demand Input]', {
+  sku,
+  selectedMonth,
+  selectedYear,
+  historicalRecordCount,
+  matchingMonthRecordCount,
+});
+```
+
+```javascript
+console.debug('[Smart Demand Calculation]', {
+  sku,
+  historicalValuesUsed,
+  weightsUsed,
+  trendAdjustmentApplied,
+  smartDemand,
+});
+```
+
+```javascript
+console.debug('[Smart Demand Rendered]', {
+  sku,
+  historicalDemand,
+  smartDemand,
+});
+```
+
+Remove or minimize noisy logging once verified.
+
+---
+
+## VERIFICATION
+
+Please verify the following:
+
+1. ✅ A new **Smart Demand (MT)** column appears in the **Detailed Demand View** table  
+2. ✅ Each SKU row shows a numeric forecasted demand value  
+3. ✅ Forecast uses **all available historical years** for that SKU  
+4. ✅ Same-month historical pattern is prioritized when available  
+5. ✅ More recent years influence the forecast more strongly  
+6. ✅ Forecast remains stable and does not return null/NaN/negative values  
+7. ✅ UI formatting matches other MT demand columns  
+8. ✅ Table layout remains usable and readable  
+9. ✅ Performance remains acceptable for larger SKU lists  
+10. ✅ No explanation text or reasoning is shown — only the forecast value

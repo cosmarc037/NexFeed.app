@@ -1,0 +1,91 @@
+```
+Fix the grammar/pluralization for the order count labels in the Before/After headers so the app correctly shows “order” for 1 and “orders” for any other count.
+
+---
+
+## OBJECTIVE
+
+The header currently shows incorrect grammar such as:
+- `After — 1 orders`
+
+This should instead be:
+- `After — 1 order`
+
+We need proper singular/plural handling for all count-based labels in these summary headers.
+
+---
+
+## REQUIRED RULE
+
+Use:
+- `1 order`
+for exactly one
+
+Use:
+- `0 orders`
+- `2 orders`
+- `3 orders`
+- etc.
+for all other values
+
+---
+
+## 1. ADD A SHARED PLURALIZATION HELPER
+
+Create a reusable helper for the word "order".
+
+### Suggested helper:
+```javascript
+function formatOrderCount(count) {
+  const n = Number(count || 0);
+  return `${n} ${n === 1 ? 'order' : 'orders'}`;
+}
+```
+
+---
+
+## 2. USE THIS HELPER IN BEFORE/AFTER HEADER LABELS
+
+Anywhere the app currently builds labels like:
+- `Before — X orders`
+- `After — X orders`
+
+replace the hardcoded string with the helper.
+
+### Example:
+```javascript
+const beforeLabel = `Before — ${formatOrderCount(beforeCount)}`;
+const afterLabel = `After — ${formatOrderCount(afterCount)}`;
+```
+
+---
+
+## 3. APPLY THIS TO RELATED COUNT LABELS IF NEEDED
+
+If there are other places in the same feature where "order/orders" is shown with counts, apply the same helper there too.
+
+Examples:
+- `1 order`
+- `2 orders`
+- `0 orders`
+
+This ensures consistency across the UI.
+
+---
+
+## 4. KEEP OTHER PARTS OF THE HEADER UNCHANGED
+
+For example:
+- `After — 1 order · 1 newly combined`
+
+This should remain correct while only fixing the order-count grammar.
+
+---
+
+## 5. VERIFICATION
+
+1. ✅ `1 order` is shown for exactly one
+2. ✅ `2 orders` is shown for two or more
+3. ✅ `0 orders` is shown for zero
+4. ✅ Before/After header grammar is now correct
+5. ✅ Existing combined/moved/repositioned labels remain unchanged

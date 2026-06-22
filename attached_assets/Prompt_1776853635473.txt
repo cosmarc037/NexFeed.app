@@ -1,0 +1,273 @@
+I can see the issue from the snip — "safety stocks" (no date) is at the top, then May 22, then May 11, then May 12, then May 14. The dates are completely out of order.
+
+The problem is that the category priority is wrong — "safety stocks" is being categorized as "critical" or "urgent" instead of "sufficient", and the dated orders aren't sorting chronologically.
+
+```
+Fix the profitability sorting — ensure dates are properly resolved and sorted:
+
+---
+
+## 1. FIX resolveOrderDate — HANDLE NON-DATE STRINGS PROPERLY
+
+```javascript
+function resolveOrderDate(order, n10dData, materialCode) {
+  // Source 1: Actual avail date on the order
+  const availDate = order.target_avail_date;
+  
+  // CRITICAL: Check that availDate is a REAL date, not a status string
+  if (availDate && isValidISODate(availDate)) {
+    return {
+      date: normalizeToISO(availDate),
+      source: 'avail_date',
+      category: 'dated',
+    };
+  }
+  
+  // Check if availDate is a status string like "prio replenish", "safety stocks"
+  const isStatusString = availDate && !isValidISODate(availDate);
+  
+  // Source 2: N10D lookup
+  if (n10dData && n10dData.length > 0 && materialCode) {
+    const n10dEntry = n10dData.find(n =>
+      String(n.material_code || n.material_code_fg || '').trim() === materialCode
+    );
+    
+    if (n10dEntry) {
+      const inferredDate = n10dEntry.inferred_target_date || n10dEntry.target_date;
+      const n10dStatus = String(n10dEntry.status || n10dEntry.stock_status || '').trim().toLowerCase();
+      
+      if (inferredDate && isValidISODate(inferredDate)) {
+        const isCritical = n10dStatus === 'critical';
+        const isUrgent = n10dStatus === 'urgent';
+        
+        return {
+          date: normalizeToISO(inferredDate),
+          source: 'n10d',
+          category: isCritical ? 'critical' : isUrgent ? 'urgent' : 'n10d_dated',
+        };
+      }
+      
+      // N10D entry but no date
+      if (n10dStatus === 'critical') {
+        return { date: null, source: 'n10d_status', category: 'critical' };
+      }
+      if (n10dStatus === 'urgent') {
+        return { date: null, source: 'n10d_status', category: 'urgent' };
+      }
+      if (['sufficient', 'safe', 'ok'].includes(n10dStatus)) {
+        return { date: null, source: 'n10d_status', category: 'sufficient' };
+      }
+    }
+  }
+  
+  // Source 3: Check the status string for hints
+  if (isStatusString) {
+    const lowerAvail = String(availDate).toLowerCase().trim();
+    if (lowerAvail.includes('safety') || lowerAvail.includes('sufficient') || lowerAvail.includes('safe')) {
+      return { date: null, source: 'status_string', category: 'sufficient' };
+    }
+    if (lowerAvail.includes('prio') || lowerAvail.includes('replenish')) {
+      return { date: null, source: 'status_string', category: 'urgent' };
+    }
+    if (lowerAvail.includes('critical')) {
+      return { date: null, source: 'status_string', category: 'critical' };
+    }
+  }
+  
+  // Source 4: Fallback — existing dates on the order object
+  const fallbackDate = order._targetDate || order._effectiveDate;
+  if (fallbackDate) {
+    const dateStr = fallbackDate instanceof Date
+      ? fallbackDate.toISOString().split('T')[0]
+      : String(fallbackDate);
+    
+    if (isValidISODate(dateStr)) {
+      return {
+        date: normalizeToISO(dateStr),
+        source: 'fallback',
+        category: 'n10d_dated',
+      };
+    }
+  }
+  
+  // Also check order._category from preSortOrders
+  if (order._category === 'C') return { date: null, source: 'category', category: 'critical' };
+  if (order._category === 'B') return { date: null, source: 'category', category: 'urgent' };
+  if (order._category === 'D') return { date: null, source: 'category', category: 'sufficient' };
+  
+  return { date: null, source: 'none', category: 'no_data' };
+}
+
+function isValidISODate(str) {
+  if (!str) return false;
+  const s = String(str).trim();
+  // Reject status strings
+  if (/[a-zA-Z]/.test(s) && !/^\d{4}-\d{2}-\d{2}/.test(s)) return false;
+  // Must start with YYYY-MM-DD
+  if (!/^\d{4}-\d{2}-\d{2}/.test(s)) return false;
+  const d = new Date(s);
+  return !isNaN(d.getTime());
+}
+
+function normalizeToISO(dateStr) {
+  if (!dateStr) return null;
+  const s = String(dateStr).trim();
+  // Already ISO
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.substring(0, 10);
+  // Try to parse
+  const d = new Date(s);
+  if (!isNaN(d.getTime())) return d.toISOString().split('T')[0];
+  return null;
+}
+```
+
+---
+
+## 2. FIX sortWithMargin — ENSURE PROPER DATE COMPARISON
+
+```javascript
+function sortWithMargin(orders, masterData, n10dData) {
+  
+  const enriched = orders.map(order => {
+    const materialCode = String(order.material_code_fg || '').trim();
+    
+    const mdEntry = masterData.find(md =>
+      String(md.material_code_fg || '').trim() === materialCode
+    );
+    const margin = mdEntry ? (parseFloat(mdEntry.margin) || 0) : 0;
+    const hasMarginData = mdEntry && mdEntry.margin != null && mdEntry.margin !== '';
+    
+    const resolvedDate = resolveOrderDate(order, n10dData, materialCode);
+    
+    return {
+      ...order,
+      _margin: margin,
+      _hasMarginData: hasMarginData,
+      _resolvedDate: resolvedDate.date,
+      _dateSource: resolvedDate.source,
+      _dateCategory: resolvedDate.category,
+    };
+  });
+  
+  enriched.sort((a, b) => {
+    // Step 1: Category priority
+    const catA = getCategoryPriority(a._dateCategory);
+    const catB = getCategoryPriority(b._dateCategory);
+    
+    if (catA !== catB) return catA - catB;
+    
+    // Step 2: Within same category — by date
+    const dateA = a._resolvedDate ? new Date(a._resolvedDate) : null;
+    const dateB = b._resolvedDate ? new Date(b._resolvedDate) : null;
+    
+    const hasDateA = dateA && !isNaN(dateA.getTime());
+    const hasDateB = dateB && !isNaN(dateB.getTime());
+    
+    // Both have dates
+    if (hasDateA && hasDateB) {
+      // Compare dates as timestamps (not just day)
+      const dayA = new Date(dateA.getFullYear(), dateA.getMonth(), dateA.getDate()).getTime();
+      const dayB = new Date(dateB.getFullYear(), dateB.getMonth(), dateB.getDate()).getTime();
+      
+      // Different days — earlier first
+      if (dayA !== dayB) {
+        return dayA - dayB;
+      }
+      
+      // SAME DAY — higher margin first
+      return (b._margin || 0) - (a._margin || 0);
+    }
+    
+    // One has date, one doesn't — dated first
+    if (hasDateA && !hasDateB) return -1;
+    if (!hasDateA && hasDateB) return 1;
+    
+    // Neither has date — higher margin first
+    return (b._margin || 0) - (a._margin || 0);
+  });
+  
+  // Reassign prio
+  enriched.forEach((order, index) => {
+    order.prio = index + 1;
+    order.priority_seq = index + 1;
+  });
+  
+  // Debug: log final order
+  console.log('=== Profitability Sort Result ===');
+  enriched.forEach(o => {
+    console.log(
+      `  Prio ${o.prio}: ${(o.item_description || '').substring(0, 35).padEnd(35)} | ` +
+      `Date: ${(o._resolvedDate || 'NONE').padEnd(12)} | ` +
+      `Source: ${(o._dateSource || '').padEnd(14)} | ` +
+      `Cat: ${(o._dateCategory || '').padEnd(12)} | ` +
+      `Margin: ${(o._margin || 0).toFixed(1)}%`
+    );
+  });
+  
+  return enriched;
+}
+
+function getCategoryPriority(category) {
+  switch (category) {
+    case 'critical': return 0;   // Critical — top
+    case 'urgent': return 1;     // Urgent — second
+    case 'dated': return 2;      // Has actual avail date
+    case 'n10d_dated': return 3; // Has N10D inferred date
+    case 'sufficient': return 4; // Safety stocks / sufficient
+    case 'no_data': return 5;    // No date, no N10D
+    default: return 5;
+  }
+}
+```
+
+---
+
+## 3. EXPECTED RESULT FROM THE SNIP
+
+Before fix (wrong):
+  1. safety stocks (no date) — WRONG, should be at bottom
+  2. 22 May 2026
+  3. 11 May 2026 — WRONG, should come before May 22
+  4. 12 May 2026
+  5. 14 May 2026
+
+After fix (correct):
+  1. 11 May 2026 ● (N10D date, sorted first)
+  2. 12 May 2026 ● (N10D date)
+  3. 14 May 2026 ● (N10D date)
+  4. 22 May 2026   (actual avail date)
+  5. safety stocks  (no date — at bottom of its category)
+
+If multiple orders on same day (e.g., two orders on May 14):
+  - 14 May 2026 — 16.4% margin (first)
+  - 14 May 2026 — 16.0% margin (second)
+
+---
+
+## VERIFICATION
+
+### Date resolution
+1. ✅ "safety stocks" → NOT a valid date → category "sufficient" → sorted near bottom
+2. ✅ "prio replenish" → NOT a valid date → category "urgent"
+3. ✅ "2026-05-11" → valid ISO date → used directly
+4. ✅ "22 May 2026" display format → resolved from ISO in DB
+5. ✅ Null/undefined → falls through to N10D → fallback → "no_data"
+
+### Sort order
+6. ✅ Critical orders at top (no date, urgent status)
+7. ✅ Urgent / prio replenish after critical
+8. ✅ Dated orders sorted chronologically: May 11 → May 12 → May 14 → May 22
+9. ✅ N10D dated orders after actual dated, also chronological
+10. ✅ Safety stocks / sufficient near bottom
+11. ✅ No data at very bottom
+
+### Margin tiebreak
+12. ✅ Same day: higher margin first
+13. ✅ Different days: date order preserved regardless of margin
+14. ✅ No margin data: treated as 0% → sorted after orders with margin on same day
+
+### Day comparison
+15. ✅ Uses day-level comparison (strips time)
+16. ✅ "2026-05-11" and "2026-05-11T08:00" → same day
+17. ✅ No timezone issues from Date object
+```

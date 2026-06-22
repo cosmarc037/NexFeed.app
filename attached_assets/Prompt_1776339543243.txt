@@ -1,0 +1,116 @@
+```
+Fix the volume calculation in applySequencedResultsToDB:
+
+---
+
+## 1. FIX COMBINED VOLUME CALCULATION
+
+```javascript
+// In applySequencedResultsToDB — where combined orders are processed
+
+if (order._isCombined && order._combinedFrom && order._combinedFrom.length > 1) {
+  const leadId = order.id;
+  
+  // FIX: Calculate combined volume by summing sub-orders directly
+  const combinedVolume = order._combinedFrom.reduce((sum, sub) => {
+    return sum + (parseFloat(sub.volume) || parseFloat(sub.total_volume_mt) || 0);
+  }, 0);
+  
+  // Fallback: use the order's own volume if sub-order sum fails
+  const finalVolume = combinedVolume > 0 
+    ? combinedVolume 
+    : (parseFloat(order.volume) || parseFloat(order.total_volume_mt) || null);
+  
+  // Never write 0 — write null instead so getEffectiveVolume falls back
+  const volumeOverride = finalVolume && finalVolume > 0 ? finalVolume : null;
+  
+  const allSubIds = order._combinedFrom.map(sub => sub.id);
+  
+  console.log(`  [Combined] Lead: ${leadId}`);
+  console.log(`    Sub volumes: ${order._combinedFrom.map(s => `${s.id}=${parseFloat(s.volume) || parseFloat(s.total_volume_mt) || 0}`).join(', ')}`);
+  console.log(`    Combined volume: ${combinedVolume}, Final: ${finalVolume}, Override: ${volumeOverride}`);
+  
+  // Update lead
+  await updateOrderMutation.mutateAsync({
+    id: leadId,
+    data: {
+      feedmill_line: line,
+      priority_seq: prioCounter,
+      volume_override: volumeOverride,
+      original_order_ids: allSubIds,
+      parent_id: null,
+    }
+  });
+  
+  // Update children
+  const children = order._combinedFrom.filter(sub => String(sub.id) !== String(leadId));
+  for (const child of children) {
+    await updateOrderMutation.mutateAsync({
+      id: child.id,
+      data: {
+        parent_id: leadId,
+        feedmill_line: line,
+        priority_seq: null,
+      }
+    });
+  }
+  
+  prioCounter++;
+}
+```
+
+---
+
+## 2. ALSO FIX IN THE COMBINE ALGORITHM — ENSURE _combinedFrom HAS VOLUME
+
+When the combine algorithm creates the combined order, make sure each sub-order in `_combinedFrom` has a reliable volume field:
+
+```javascript
+// In plantLevelCombineAndPlace — when building _combinedFrom
+baseOrder._combinedFrom = combineGroup.orders.map(o => ({
+  id: o.id,
+  line: o._originalLine,
+  fpr: o.fpr,
+  // Store BOTH volume fields for safety
+  volume: parseFloat(o.volume) || parseFloat(o.total_volume_mt) || 0,
+  total_volume_mt: o.total_volume_mt,
+  item_description: o.item_description,
+  form: o.form,
+  material_code_fg: o.material_code_fg,
+  planned_order_fg: o.planned_order_fg,
+  planned_order_sfg: o.planned_order_sfg,
+  batch_size: o.batch_size,
+  batches: o.batches,
+  production_time: o.production_time,
+  target_avail_date: o.target_avail_date,
+  category: o.category
+}));
+
+// Also store the combined volume on the base order reliably
+const combinedVolume = combineGroup.totalVolume;
+baseOrder.volume = combinedVolume;
+baseOrder.total_volume_mt = combinedVolume;
+```
+
+---
+
+## VERIFICATION
+
+### Volume correct
+1. ✅ Combined volume = sum of all sub-order volumes (not from leadOrder)
+2. ✅ Each sub-order volume read as parseFloat(sub.volume) || parseFloat(sub.total_volume_mt) || 0
+3. ✅ If sum is 0, fall back to order.volume || order.total_volume_mt
+4. ✅ If still 0, write null (not 0) so getEffectiveVolume uses original rounding
+5. ✅ Example: 60 MT + 60 MT = 120 MT written as volume_override
+
+### Console logging
+6. ✅ Logs each sub-order's volume
+7. ✅ Logs combined sum
+8. ✅ Logs final volume_override value
+9. ✅ Easy to diagnose if volume is wrong again
+
+### _combinedFrom reliable
+10. ✅ Each sub-order stores both volume and total_volume_mt
+11. ✅ baseOrder.volume and baseOrder.total_volume_mt both set to combined total
+12. ✅ No falsy fallback to 0 that gets written to DB
+```

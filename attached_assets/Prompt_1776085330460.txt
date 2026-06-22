@@ -1,0 +1,69 @@
+```
+Sort the order cards in the Smart Combine panel by prio number (ascending):
+
+---
+
+## FIX: SORT ORDERS BY PRIO IN COMBINE GROUP
+
+Wherever the order cards are rendered in the CombineGroup component, sort them by prio number before mapping:
+
+```javascript
+// Sort group.orders by prio before rendering
+const sortedGroupOrders = [...group.orders].sort((a, b) => a.prio - b.prio);
+
+// Use sortedGroupOrders instead of group.orders when rendering cards
+{sortedGroupOrders.map(order => {
+  const isSelected = selectedOrders.some(o => o.id === order.id);
+  
+  return (
+    <CombineOrderCard
+      key={order.id}
+      order={order}
+      isSelected={isSelected}
+      onRemove={handleRemoveOrder}
+      onAdd={handleAddOrder}
+      canRemove={selectedOrders.length > 2}
+    />
+  );
+})}
+```
+
+### ALSO SORT WHEN SETTING SELECTED ORDERS
+
+```javascript
+// Handle strategy change — sort after setting
+function handleStrategyChange(strategy) {
+  setSelectedStrategy(strategy);
+  
+  if (strategy === 'max') {
+    setSelectedOrders([...group.orders].sort((a, b) => a.prio - b.prio));
+  } else if (strategy === 'best_pair') {
+    const bestPair = findBestPair(group.orders);
+    setSelectedOrders([...bestPair].sort((a, b) => a.prio - b.prio));
+  }
+}
+
+// Handle order re-add — sort after adding
+function handleAddOrder(order) {
+  setSelectedOrders(prev => {
+    if (prev.some(o => o.id === order.id)) return prev;
+    return [...prev, order].sort((a, b) => a.prio - b.prio);
+  });
+}
+
+// Initial state — sort on init
+const [selectedOrders, setSelectedOrders] = useState(
+  [...group.orders].sort((a, b) => a.prio - b.prio)
+);
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Order cards display in ascending prio order (1, 3, 6, 7, 8, 13, 14, 15, 16)
+2. ✅ Sorting preserved after strategy change
+3. ✅ Sorting preserved after removing an order
+4. ✅ Sorting preserved after re-adding an order
+5. ✅ Prio badges match the sorted order
+```

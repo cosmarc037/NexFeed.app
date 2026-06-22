@@ -1,0 +1,525 @@
+```
+Implement the following fixes to the Knowledge Base:
+
+---
+
+## FIX 1: EDITED CELLS STAY IN THEIR ORIGINAL ROW POSITION
+
+When editing a cell and saving, the row should stay at its original position in the table. Do not re-sort or re-order rows after editing.
+
+### THE PROBLEM
+
+After editing a cell, the table re-renders and the edited row moves to a different position — likely because the table is being re-sorted by a key like FG Material Code or some other field after state update.
+
+### THE FIX
+
+Ensure the table does NOT re-sort after cell edits. Maintain the original row order.
+
+```javascript
+function handleCellChange(rowId, field, newValue) {
+  setKbData(prev => {
+    // Map over existing array — preserves order
+    return prev.map(row => {
+      if (row.id === rowId) {
+        const oldValue = row[field];
+        if (oldValue !== newValue) {
+          trackChange('modify', row, field, oldValue, newValue);
+        }
+        return { ...row, [field]: newValue };
+      }
+      return row;
+    });
+  });
+}
+```
+
+### DO NOT RE-SORT ON EDIT
+
+Search and remove any sort/re-order calls that happen on state update:
+
+```javascript
+// REMOVE or GUARD these — do NOT re-sort after edits
+// kbData.sort((a, b) => ...)  ← REMOVE if called on render
+// setSortedData(kbData.sort(...))  ← REMOVE
+
+// Only sort when explicitly requested (e.g., clicking column header to sort)
+// Never auto-sort on cell change
+```
+
+### ASSIGN STABLE ROW IDs ON LOAD
+
+When data is loaded (from upload or localStorage), assign stable IDs that don't change:
+
+```javascript
+function assignStableIds(data) {
+  return data.map((row, index) => ({
+    ...row,
+    id: row.id || `kb_row_${index}_${Date.now()}`,
+    _originalIndex: index  // Track original position
+  }));
+}
+```
+
+---
+
+## FIX 2: ADD ROW NUMBER COLUMN
+
+Add a "#" column as the first column showing the row number.
+
+```jsx
+<table className="kb-table">
+  <thead>
+    <tr>
+      {isEditMode && <th className="kb-select-header"><input type="checkbox" ... /></th>}
+      <th className="kb-row-number-header">#</th>
+      <th>FG Material Code</th>
+      <th>FG Item Description</th>
+      {/* ... other columns ... */}
+      {isEditMode && <th className="kb-delete-header"></th>}
+    </tr>
+  </thead>
+  <tbody>
+    {kbData.map((row, index) => (
+      <React.Fragment key={row.id}>
+        {isEditMode && <KBRowInsertLine onInsert={() => handleInsertRow(index - 1)} />}
+        <tr>
+          {isEditMode && (
+            <td className="kb-select-cell">
+              <input type="checkbox" checked={selectedRows.has(row.id)} onChange={() => toggleRowSelection(row.id)} />
+            </td>
+          )}
+          <td className="kb-row-number-cell">{index + 1}</td>
+          <td>...</td>
+          {/* ... other cells ... */}
+          {isEditMode && (
+            <td className="kb-delete-cell">
+              <button className="kb-delete-btn" onClick={() => handleDeleteRow(row.id)}>🗑</button>
+            </td>
+          )}
+        </tr>
+      </React.Fragment>
+    ))}
+  </tbody>
+</table>
+```
+
+### ROW NUMBER STYLING
+
+```css
+.kb-row-number-header {
+  width: 40px;
+  min-width: 40px;
+  text-align: center;
+  font-size: 10px;
+  font-weight: 600;
+  color: #6b7280;
+}
+
+.kb-row-number-cell {
+  width: 40px;
+  min-width: 40px;
+  text-align: center;
+  font-size: 11px;
+  color: #9ca3af;
+  font-weight: 500;
+  user-select: none;
+}
+```
+
+---
+
+## FIX 3: ALLOW DELETING THE ONLY HISTORY ENTRY
+
+Remove the restriction that prevents deleting the only remaining history entry. When the last entry is deleted, the Knowledge Base becomes empty.
+
+### OLD (WRONG)
+
+```javascript
+if (isActive && history.length <= 1) {
+  showNotification('warning', 'Cannot delete the only history entry.');
+  return;
+}
+```
+
+### NEW (CORRECT)
+
+```javascript
+function handleDeleteWithActiveTransfer(entry, index) {
+  const isActive = index === 0;
+  
+  showDeleteConfirmDialog(entry, isActive, async () => {
+    if (isActive) {
+      if (history.length > 1) {
+        // Transfer active to next entry
+        const nextEntry = history[1];
+        if (nextEntry && nextEntry.snapshot) {
+          setKbData(JSON.parse(JSON.stringify(nextEntry.snapshot)));
+          showNotification('info',
+            `Active version deleted. Reverted to version from ${formatDateTimeFull(nextEntry.timestamp)}.`
+          );
+        }
+      } else {
+        // Deleting the ONLY entry — clear the Knowledge Base
+        setKbData([]);
+        showNotification('info',
+          'Knowledge Base history cleared. Upload a new file or add data manually.'
+        );
+      }
+    }
+    
+    removeFromHistory(entry.id);
+  });
+}
+```
+
+### DELETE DIALOG — EXTRA WARNING FOR LAST ENTRY
+
+```jsx
+{isActive && history.length === 1 && (
+  <div style={{
+    background: '#fef2f2',
+    border: '1px solid #fecaca',
+    borderRadius: '6px',
+    padding: '10px 12px',
+    marginBottom: '12px'
+  }}>
+    <p style={{ fontSize: '12px', color: '#dc2626', lineHeight: 1.6, fontWeight: 500 }}>
+      ⚠ This is the only history entry. Deleting it will clear the entire 
+      Knowledge Base. You will need to upload a new file or add data manually.
+    </p>
+  </div>
+)}
+```
+
+---
+
+## FIX 4: REVERT/DELETE CORRECTLY RESTORES UPLOADED FILE
+
+The app uses the snapshot stored in each history entry to restore data. Ensure that when the uploaded file entry's snapshot is loaded, it fully replaces the current data.
+
+### THE PROBLEM
+
+When deleting the active manual edit to revert to the original upload, the app doesn't properly load the upload's snapshot. The first manual edit snapshot is used instead.
+
+### THE FIX
+
+Ensure each history entry stores a COMPLETE snapshot at the time of creation.
+
+#### WHEN UPLOADING A FILE
+
+```javascript
+function handleUploadComplete(filename, parsedData, recordCount) {
+  // Assign stable IDs
+  const dataWithIds = assignStableIds(parsedData);
+  
+  // Set as current KB data
+  setKbData(dataWithIds);
+  
+  // Create history entry with FULL snapshot of the uploaded data
+  const uploadEntry = {
+    id: Date.now(),
+    type: 'file_upload',
+    timestamp: new Date().toISOString(),
+    summary: `Uploaded new file: ${filename} (${recordCount} records)`,
+    details: `File "${filename}" uploaded and applied as new Knowledge Base with ${recordCount} records.`,
+    snapshot: JSON.parse(JSON.stringify(dataWithIds)),  // DEEP COPY of uploaded data
+    filename: filename,
+    user: getCurrentUser(),
+  };
+  
+  addToHistory(uploadEntry);
+}
+```
+
+#### WHEN SAVING MANUAL EDITS
+
+```javascript
+function handleSaveChanges() {
+  const errors = validateKnowledgeBase(kbData);
+  if (errors.length > 0) {
+    setValidationErrors(errors);
+    showNotification('error', `Cannot save. ${errors.length} validation error(s) found.`);
+    return;
+  }
+  
+  const { summary, details } = changeTracker.generateChangeSummary();
+  
+  const editEntry = {
+    id: Date.now(),
+    type: 'manual_edit',
+    timestamp: new Date().toISOString(),
+    summary: summary,
+    details: details,
+    snapshot: JSON.parse(JSON.stringify(kbData)),  // DEEP COPY of CURRENT data (after edits)
+    user: getCurrentUser(),
+  };
+  
+  addToHistory(editEntry);
+  
+  setIsEditMode(false);
+  changeTracker.reset();
+  setValidationErrors([]);
+  
+  showNotification('success', 'Knowledge Base saved successfully.');
+}
+```
+
+#### WHEN DELETING ACTIVE AND FALLING BACK TO NEXT ENTRY
+
+```javascript
+if (isActive) {
+  if (history.length > 1) {
+    const nextEntry = history[1];
+    if (nextEntry && nextEntry.snapshot) {
+      // Load the EXACT snapshot from the next entry
+      const restoredData = JSON.parse(JSON.stringify(nextEntry.snapshot));
+      setKbData(restoredData);
+    }
+  } else {
+    setKbData([]);
+  }
+}
+
+removeFromHistory(entry.id);
+```
+
+#### WHEN REVERTING
+
+```javascript
+function handleRevert(entry) {
+  if (!entry.snapshot) {
+    showNotification('error', 'Cannot revert — no snapshot available.');
+    return;
+  }
+  
+  // Load the EXACT snapshot
+  const restoredData = JSON.parse(JSON.stringify(entry.snapshot));
+  setKbData(restoredData);
+  
+  const revertEntry = {
+    id: Date.now(),
+    type: 'revert',
+    timestamp: new Date().toISOString(),
+    summary: `Reverted to version from ${formatDateTimeFull(entry.timestamp)}`,
+    details: `Knowledge Base reverted to: ${entry.summary}`,
+    snapshot: JSON.parse(JSON.stringify(restoredData)),  // Snapshot of restored data
+    user: getCurrentUser(),
+  };
+  
+  addToHistory(revertEntry);
+  showNotification('success', `Knowledge Base reverted successfully.`);
+}
+```
+
+### VERIFY SNAPSHOTS ARE CORRECT
+
+Add a debug check to ensure snapshots are not empty:
+
+```javascript
+function addToHistory(entry) {
+  // Verify snapshot exists and has data
+  if (!entry.snapshot) {
+    console.warn('History entry has no snapshot:', entry);
+  }
+  if (entry.snapshot && entry.snapshot.length === 0 && entry.type !== 'revert') {
+    console.warn('History entry has empty snapshot:', entry);
+  }
+  
+  setHistory(prev => [entry, ...prev]);
+}
+```
+
+---
+
+## FIX 5: REVERT BUTTON — LOADING STATE (SAME AS DELETE)
+
+The Revert button should show a loading spinner when clicked, same as the Delete button.
+
+### REVERT CONFIRMATION DIALOG — WITH LOADING BUTTON
+
+```jsx
+function RevertConfirmDialog({ entry, onRevert, onClose }) {
+  const [confirmText, setConfirmText] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  
+  async function handleRevert() {
+    if (confirmText !== 'Confirm') return;
+    
+    setIsLoading(true);
+    try {
+      await onRevert(entry);
+      onClose();
+    } catch (error) {
+      console.error('Revert failed:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  }
+  
+  return (
+    <div className="dialog-overlay">
+      <div className="dialog-container" style={{ maxWidth: '440px' }}>
+        <div className="dialog-header">
+          <span>⚠ Revert Knowledge Base</span>
+          <button className="dialog-close" onClick={onClose}>✕</button>
+        </div>
+        
+        <div className="dialog-body">
+          <p style={{ fontSize: '12px', color: '#374151', lineHeight: 1.6 }}>
+            You are about to revert the Knowledge Base to the version from:
+          </p>
+          <p style={{ fontSize: '13px', fontWeight: 600, color: '#1a1a1a', margin: '8px 0' }}>
+            {formatDateTimeFull(entry.timestamp)}
+          </p>
+          <p style={{ fontSize: '11px', color: '#6b7280', marginBottom: '12px' }}>
+            {entry.summary}
+          </p>
+          <p style={{ fontSize: '12px', color: '#374151', lineHeight: 1.6 }}>
+            This will replace the current Knowledge Base with this version.
+            All changes made after this point will be lost.
+          </p>
+          <p style={{ fontSize: '12px', color: '#374151', lineHeight: 1.6, marginTop: '12px' }}>
+            Type <strong>Confirm</strong> to proceed:
+          </p>
+          <input
+            type="text"
+            value={confirmText}
+            onChange={(e) => setConfirmText(e.target.value)}
+            placeholder="Type Confirm"
+            disabled={isLoading}
+            style={{
+              width: '100%',
+              padding: '8px 12px',
+              fontSize: '13px',
+              border: '1px solid #e5e7eb',
+              borderRadius: '6px',
+              marginTop: '8px',
+              outline: 'none',
+              opacity: isLoading ? 0.5 : 1
+            }}
+          />
+        </div>
+        
+        <div className="dialog-footer" style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+          <button
+            onClick={onClose}
+            disabled={isLoading}
+            style={{
+              background: '#ffffff',
+              color: '#374151',
+              border: '1px solid #d1d5db',
+              borderRadius: '6px',
+              padding: '8px 20px',
+              fontSize: '13px',
+              fontWeight: 500,
+              cursor: isLoading ? 'not-allowed' : 'pointer',
+              opacity: isLoading ? 0.5 : 1
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleRevert}
+            disabled={confirmText !== 'Confirm' || isLoading}
+            style={{
+              background: confirmText === 'Confirm' && !isLoading ? '#fd5108' : '#d1d5db',
+              color: '#ffffff',
+              border: 'none',
+              borderRadius: '6px',
+              padding: '8px 20px',
+              fontSize: '13px',
+              fontWeight: 600,
+              cursor: confirmText === 'Confirm' && !isLoading ? 'pointer' : 'not-allowed',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px'
+            }}
+          >
+            {isLoading && <LoadingSpinner />}
+            {isLoading ? 'Reverting...' : 'Revert'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+```
+
+### ALSO ENSURE DELETE DIALOG HAS SAME PATTERN
+
+```jsx
+// In Delete confirmation dialog — same loading pattern
+const [isLoading, setIsLoading] = useState(false);
+
+async function handleDelete() {
+  if (confirmText !== 'Confirm') return;
+  
+  setIsLoading(true);
+  try {
+    await onDelete(entry.id);
+    onClose();
+  } catch (error) {
+    console.error('Delete failed:', error);
+  } finally {
+    setIsLoading(false);
+  }
+}
+
+// Delete button
+<button
+  onClick={handleDelete}
+  disabled={confirmText !== 'Confirm' || isLoading}
+  style={{
+    background: confirmText === 'Confirm' && !isLoading ? '#dc2626' : '#d1d5db',
+    color: '#ffffff',
+    border: 'none',
+    borderRadius: '6px',
+    padding: '8px 20px',
+    fontSize: '13px',
+    fontWeight: 600,
+    cursor: confirmText === 'Confirm' && !isLoading ? 'pointer' : 'not-allowed',
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '6px'
+  }}
+>
+  {isLoading && <LoadingSpinner />}
+  {isLoading ? 'Deleting...' : 'Delete'}
+</button>
+```
+
+---
+
+## VERIFICATION
+
+### Row position
+1. ✅ Edit cell in row 3 → save → row stays at position 3
+2. ✅ Table does not re-sort after edits
+3. ✅ Row numbers stay consistent
+
+### Row number column
+4. ✅ "#" column visible as first column
+5. ✅ Numbers are sequential (1, 2, 3...)
+6. ✅ Numbers update correctly when rows are added/deleted
+7. ✅ Visible in both edit mode and read-only mode
+
+### Delete last entry
+8. ✅ Can delete the only remaining history entry
+9. ✅ KB data clears to empty
+10. ✅ Warning shown: "This is the only history entry..."
+11. ✅ After deletion, user can upload new file or add data manually
+
+### Revert to upload
+12. ✅ Delete active manual edit → KB reverts to uploaded file data
+13. ✅ Revert button on upload entry → KB loads original uploaded data
+14. ✅ All 353 records restored exactly as uploaded
+15. ✅ Manual edit changes are gone after revert
+
+### Loading buttons
+16. ✅ Revert button shows spinner + "Reverting..." when clicked
+17. ✅ Revert button unclickable during loading
+18. ✅ Delete button shows spinner + "Deleting..." when clicked
+19. ✅ Delete button unclickable during loading
+20. ✅ Cancel button disabled during loading
+21. ✅ Input field disabled during loading
+```

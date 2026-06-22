@@ -1,0 +1,231 @@
+Clear. Here's the prompt:
+
+```
+Implement the following critical fix to the NexFeed application:
+
+---
+
+## FIX: SCHEDULING ANCHOR — ENTIRE TIMELINE WORKS BACKWARDS FROM AVAIL DATE
+
+The current scheduling logic is fundamentally broken. It starts the timeline from the upload date (current date) and cascades FORWARD, ignoring the Avail Date entirely. This results in orders completing days or weeks before they need to, leaving the plant with no work to do after the orders finish.
+
+**The correct logic:** The ENTIRE timeline must be anchored to the Avail Date and work BACKWARDS. The Avail Date is the fixed endpoint. Everything else is calculated backwards from it.
+
+---
+
+### STEP-BY-STEP SCHEDULING ALGORITHM
+
+**Step 1 — Identify the anchor:**
+- Find all orders in the line with valid Avail Dates.
+- Sort them by Avail Date, EARLIEST first.
+- If multiple dated orders exist, each one is an anchor point.
+- If only one dated order exists, that is the single anchor.
+- If NO dated orders exist (all orders are prio replenish / safety stocks), fall back to: first order starts at upload date 08:00 AM, cascade forward. STOP — skip remaining steps.
+
+**Step 2 — Position the LAST dated order:**
+- The last dated order (latest Avail Date) must complete ON or BEFORE its Avail Date.
+- Work backwards:
+  - Completion Date/Time = Avail Date, reasonable production hour (e.g., 06:00 PM, or end of production day, or simply the Avail Date itself — the order must NOT complete AFTER the Avail Date)
+  - Start Date/Time = Completion Date/Time - Production Hours
+
+**Step 3 — Position earlier dated orders:**
+- For each dated order (working from latest Avail Date backwards to earliest):
+  - Each dated order must complete ON or BEFORE its own Avail Date.
+  - Work backwards from its Avail Date to determine its Start Date/Time.
+
+**Step 4 — Identify gaps between dated orders:**
+- Calculate the time gaps between consecutive dated orders:
+  - Gap = Next dated order's Start Date/Time - Previous dated order's Completion Date/Time
+- Calculate the time gap BEFORE the first dated order:
+  - Gap = First dated order's Start Date/Time - (whatever time is available before it)
+
+**Step 5 — Fill gaps with non-dated orders (BACKWARDS from each anchor):**
+- Collect all non-dated orders (prio replenish, safety stocks, etc.).
+- Starting from the gap immediately BEFORE the first dated order:
+  - Stack non-dated orders backwards from the first dated order's Start Date/Time.
+  - Last non-dated order's Completion = First dated order's Start Date/Time - Changeover
+  - Second-to-last non-dated order's Completion = Last non-dated order's Start - Changeover
+  - Continue stacking backwards until all non-dated orders that fit are placed, or we reach the upload date.
+- If there are gaps between dated orders, fill those with remaining non-dated orders using the same backwards stacking.
+- Any non-dated orders that still don't fit go after the last dated order.
+
+**Step 6 — Determine the FIRST order's Start Date/Time:**
+- After stacking everything backwards, the FIRST order (Prio 1) in the line gets its Start Date/Time as the result of the backwards calculation.
+- This could be March 21 at 6:00 PM, or March 20 at 2:00 AM, or any date — it is whatever the math produces.
+- The first order does NOT default to the upload date. It defaults to whatever the backwards calculation produces.
+
+**Step 7 — Final forward cascade verification:**
+- After the backwards calculation determines all positions, run a forward cascade from Prio 1 to verify:
+  - Order 1: Start = calculated, Completion = Start + Production Hours
+  - Order 2: Start = Order 1 Completion + Changeover, Completion = Start + Production Hours
+  - ... continue for all orders
+  - Last dated order: Verify Completion is ON or BEFORE Avail Date. ✅
+
+---
+
+### CONCRETE EXAMPLE
+
+**Given:**
+- Upload date: March 10, 2026
+- Line has 7 orders:
+
+| Order | Type | Avail Date | Production Time |
+|---|---|---|---|
+| A | safety stocks | — | 48 min |
+| B | safety stocks | — | 1 hr 51 min |
+| C | safety stocks | — | 1 hr 13 min |
+| D | Dated | March 22, 2026 | 19 min |
+| E | prio replenish | — | 48 min |
+| F | prio replenish | — | 1 hr 22 min |
+| G | prio replenish | — | 1 hr 30 min |
+
+Total non-dated production time: ~7 hrs 32 min
+Dated order production time: 19 min
+Total production time: ~7 hrs 51 min
+Assume changeover: 0 min for simplicity
+
+**Step 1:** One dated order: March 22. This is the anchor.
+
+**Step 2:** Position the dated order:
+- Must complete on or before March 22, 2026.
+- Target completion: March 22, 2026, 08:00 AM (reasonable morning completion).
+- Start: March 22, 07:41 AM (08:00 AM - 19 min).
+
+**Step 3:** N/A (only one dated order).
+
+**Step 4:** Gap before the dated order:
+- From upload date (March 10) to March 22, 07:41 AM = ~11.9 days available.
+- Non-dated orders need ~7 hrs 32 min total.
+
+**Step 5:** Stack non-dated orders backwards from March 22, 07:41 AM:
+```
+Order G (last non-dated): Completion = March 22, 07:41 AM → Start = March 22, 06:11 AM
+Order F: Completion = March 22, 06:11 AM → Start = March 22, 04:49 AM
+Order E: Completion = March 22, 04:49 AM → Start = March 22, 04:01 AM
+Order C: Completion = March 22, 04:01 AM → Start = March 22, 02:48 AM
+Order B: Completion = March 22, 02:48 AM → Start = March 22, 00:57 AM
+Order A: Completion = March 22, 00:57 AM → Start = March 22, 00:09 AM
+```
+
+**Step 6:** First order (Prio 1 = Order A) starts at March 22, 12:09 AM.
+
+**Step 7:** Forward cascade verification:
+```
+Prio 1: Order A (safety stocks)    — Start: Mar 22, 12:09 AM → Complete: Mar 22, 12:57 AM
+Prio 2: Order B (safety stocks)    — Start: Mar 22, 12:57 AM → Complete: Mar 22, 02:48 AM
+Prio 3: Order C (safety stocks)    — Start: Mar 22, 02:48 AM → Complete: Mar 22, 04:01 AM
+Prio 4: Order E (prio replenish)   — Start: Mar 22, 04:01 AM → Complete: Mar 22, 04:49 AM
+Prio 5: Order F (prio replenish)   — Start: Mar 22, 04:49 AM → Complete: Mar 22, 06:11 AM
+Prio 6: Order G (prio replenish)   — Start: Mar 22, 06:11 AM → Complete: Mar 22, 07:41 AM
+Prio 7: Order D (March 22)         — Start: Mar 22, 07:41 AM → Complete: Mar 22, 08:00 AM ✅
+```
+
+Plant runs continuously from 12:09 AM to 8:00 AM on March 22. Dated order completes at 8:00 AM, well within March 22. ✅
+
+---
+
+### MULTIPLE DATED ORDERS EXAMPLE
+
+**Given:**
+- Upload date: March 10
+- Orders:
+
+| Order | Type | Avail Date | Production Time |
+|---|---|---|---|
+| A | Dated | March 19 | 6 hrs |
+| B | Dated | March 22 | 4 hrs |
+| C | prio replenish | — | 5 hrs |
+| D | safety stocks | — | 4 hrs |
+| E | prio replenish | — | 3 hrs |
+| F | safety stocks | — | 8 hrs |
+| G | prio replenish | — | 10 hrs |
+
+Total non-dated: 30 hrs
+Dated: 10 hrs
+Total: 40 hrs
+
+**Step 1-2:** Two anchors: March 19 (Order A), March 22 (Order B).
+
+**Step 2:** Position dated orders:
+- Order A: Complete by March 19. Target: March 19, 06:00 PM. Start: March 19, 12:00 PM.
+- Order B: Complete by March 22. Target: March 22, 06:00 PM. Start: March 22, 02:00 PM.
+
+**Step 4:** Gaps:
+- Gap BEFORE Order A: Everything before March 19, 12:00 PM
+- Gap BETWEEN Order A and B: March 19, 06:00 PM to March 22, 02:00 PM = ~68 hours
+- Gap AFTER Order B: After March 22, 06:00 PM
+
+**Step 5:** Fill gaps with non-dated orders:
+
+Gap before Order A (backwards from March 19, 12:00 PM):
+```
+Order G (10 hrs): Start Mar 19, 02:00 AM → Complete Mar 19, 12:00 PM
+Order F (8 hrs): Start Mar 18, 06:00 PM → Complete Mar 19, 02:00 AM
+Order E (3 hrs): Start Mar 18, 03:00 PM → Complete Mar 18, 06:00 PM
+Order D (4 hrs): Start Mar 18, 11:00 AM → Complete Mar 18, 03:00 PM
+Order C (5 hrs): Start Mar 18, 06:00 AM → Complete Mar 18, 11:00 AM
+```
+Total non-dated: 30 hrs. All fit before Order A. ✅
+
+Gap between Order A and B: 68 hours available, 0 non-dated orders remaining. Idle time.
+
+**Step 6:** First order starts March 18, 06:00 AM.
+
+**Step 7:** Forward cascade:
+```
+Prio 1: Order C (prio replenish)   — Start: Mar 18, 06:00 AM → Complete: Mar 18, 11:00 AM
+Prio 2: Order D (safety stocks)    — Start: Mar 18, 11:00 AM → Complete: Mar 18, 03:00 PM
+Prio 3: Order E (prio replenish)   — Start: Mar 18, 03:00 PM → Complete: Mar 18, 06:00 PM
+Prio 4: Order F (safety stocks)    — Start: Mar 18, 06:00 PM → Complete: Mar 19, 02:00 AM
+Prio 5: Order G (prio replenish)   — Start: Mar 19, 02:00 AM → Complete: Mar 19, 12:00 PM
+Prio 6: Order A (March 19)         — Start: Mar 19, 12:00 PM → Complete: Mar 19, 06:00 PM ✅
+Prio 7: Order B (March 22)         — Start: Mar 22, 02:00 PM → Complete: Mar 22, 06:00 PM ✅
+```
+
+Note: Between Prio 6 (completes Mar 19, 6 PM) and Prio 7 (starts Mar 22, 2 PM), there is ~68 hours of idle time. The AI Auto-Sequence would note: "68 hours of idle time between March 19 and March 22. No additional non-dated orders available to fill this gap. Consider requesting additional orders or scheduling maintenance."
+
+If the user later receives Wednesday orders (new upload) with non-dated orders, those can be dragged into this gap.
+
+---
+
+### EDGE CASES
+
+**Edge case 1 — Non-dated orders exceed available time before first anchor:**
+- If non-dated orders require MORE time than available before the first dated order:
+  - Fill as many non-dated orders as possible before the first dated order.
+  - Place remaining non-dated orders in gaps between dated orders.
+  - If gaps are also full, place remaining after the last dated order.
+
+**Edge case 2 — Dated order Avail Date is today or tomorrow:**
+- Work backwards as normal.
+- If the resulting first order Start Date is in the past or earlier today:
+  - Set the first order Start to NOW (current time) or 08:00 AM today, whichever is later.
+  - Cascade forward.
+  - If the dated order's Completion exceeds its Avail Date, flag as conflict (red highlight).
+
+**Edge case 3 — All orders are non-dated:**
+- No anchor exists.
+- First order starts at upload date, 08:00 AM.
+- Cascade forward continuously.
+
+**Edge case 4 — Avail Date is in the past:**
+- Flag as overdue (red highlight).
+- Treat as highest priority — place at the beginning of the timeline.
+- Start immediately (upload date, 08:00 AM or current time).
+
+**Edge case 5 — Multiple dated orders with the same Avail Date:**
+- Sort by Volume (larger first) or maintain upload order.
+- Both must complete by the same Avail Date.
+- Stack them sequentially, both completing before the Avail Date.
+
+---
+
+### IMPORTANT — WHAT THIS REPLACES
+
+This REPLACES the previous rules:
+- ❌ "First order defaults to upload date, 08:00 AM" — NO. First order's Start Date is calculated by the backwards algorithm.
+- ❌ "Cascade forward from current date" — NO. The cascade is verified forward, but the POSITIONS are determined by working backwards from the Avail Date anchor(s).
+- ❌ "Auto-adjust only when there's a conflict" — NO. The entire timeline is ALWAYS anchored to Avail Dates from the start. There should never be a scenario where a dated order completes 12 days early.
+
+The upload date (current date) is only used as the Start Date when ALL orders are non-dated.
+```

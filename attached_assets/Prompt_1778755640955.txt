@@ -1,0 +1,489 @@
+Please refine the Powermix split feature and linked-order behavior for orders auto-created from Line 5 / Powermix logic.
+
+This update includes improvements to:
+- clickable item description behavior
+- text selection support
+- linked-order visual indicators
+- read-only generated fields
+- source-controlled field synchronization
+- batch lookup from Powermix Split
+- split recalculation consistency
+- preservation of existing source/generated order linkage behavior
+
+Please implement the following:
+
+---
+
+## 1. KEEP ITEM DESCRIPTION CLICKABLE BUT STILL ALLOW TEXT SELECTION
+
+The item description name is already clickable for linked-order navigation, which is good.
+
+However, users should still be able to select/copy the item description text if needed.
+
+### Required behavior
+- keep the item description name clickable for linked-order navigation
+- allow the text itself to still be selectable/copyable
+- selecting text should not always trigger navigation
+- preserve a good UX where the text can be both navigable and selectable
+
+### Goal
+Allow both:
+- click-to-navigate
+- text selection / copying
+
+without making the item description behave like a fully locked button-only element.
+
+---
+
+## 2. ADD A PURPLE CHAIN ICON AT THE END OF THE ITEM DESCRIPTION NAME
+
+For linked Powermix orders, add a purple chain icon at the end of the item description name.
+
+### Example
+- Salto Stag Developer (purple chain icon)
+- Gallimax 2 Plus (purple chain icon)
+- Pork Solution Booster (purple chain icon)
+
+### Required behavior
+- icon appears at the end of the item description name
+- icon color is purple
+- icon is a visual indicator that the order is linked to a corresponding source/generated split order
+- keep the item description name as the main clickable navigation trigger
+
+This is a visual enhancement only and should not replace the item-description click behavior.
+
+---
+
+## 3. DISABLE SOURCE-CONTROLLED FIELDS FOR GENERATED ORDERS
+
+For orders auto-created from Line 5 / Powermix Split, the following fields should be disabled / read-only:
+
+- Planned Order (FG | SFG)
+- Volume (MT)
+
+These fields are source-controlled and should not be manually editable on the generated order.
+
+### Important
+Other fields may remain editable unless separately restricted by existing logic.
+
+So for generated orders:
+- Planned Order (FG | SFG) = disabled / read-only
+- Volume (MT) = disabled / read-only
+- other fields may retain editability
+
+---
+
+## 4. AUTO-UPDATE GENERATED ORDER FIELDS WHEN LINE 5 SOURCE ORDER CHANGES
+
+Generated orders should automatically update their source-controlled fields whenever the user changes the corresponding source Line 5 order.
+
+This should not be limited to Volume only.
+
+### Source-controlled fields to auto-sync
+For orders auto-created from Line 5 / Powermix Split, auto-sync the following from the source Line 5 order:
+
+- Planned Order (FG)
+- Planned Order (SFG)
+- Volume (MT)
+
+### Required behavior
+
+#### A. Planned Order (FG | SFG)
+If the user edits the source Line 5 order’s:
+- Planned Order (FG)
+- Planned Order (SFG)
+
+then the generated order should automatically update and copy those latest values.
+
+#### B. Volume (MT)
+If the user edits the source Line 5 order’s volume:
+1. recalculate the split using the Powermix Split percentage
+2. resolve the correct Powermix Split batch size
+3. normalize/adjust the result if needed
+4. update the generated order volume automatically
+
+### Example
+Source Line 5 order:
+- Volume = 70 MT
+- Percentage = 81%
+- Raw split = 56.7
+- Batch size = 2
+- Adjusted generated volume = 58 MT
+
+If user edits source Line 5 volume:
+- from 70 MT
+- to 60 MT
+
+Then generated order should automatically update:
+- raw split = 48.6
+- batch size = 2
+- adjusted generated volume = 50 MT
+
+If user edits source Planned Orders:
+- Planned Order FG = new value
+- Planned Order SFG = new value
+
+then those new planned order values should automatically appear in the generated order as well.
+
+### Important
+Generated orders must stay synchronized with their source Line 5 order for all source-controlled fields.
+
+---
+
+## 5. BATCH SIZE LOOKUP MUST USE MATERIAL CODE AGAINST POWERMIX SPLIT TAB
+
+Clarification:
+The app should use the relevant **material code** as the lookup key so it can resolve the correct batch size from the **Powermix Split** tab.
+
+The problem is not that material code is being used.
+The problem is that the batch size still appears to be resolved from the wrong source (such as Master Data or another fallback), instead of from the matched Powermix Split rule.
+
+### Required behavior
+For Powermix-applicable orders:
+- use the relevant material code to find the matching Powermix Split rule
+- once matched, use the **Batch Size from Powermix Split**
+- do not override it with Master Data batch size if a valid Powermix Split match exists
+
+### Goal
+Material code should be the lookup key.
+Powermix Split should be the source of truth for batch size in this feature.
+
+### Example
+If the matched Powermix Split rule says:
+- material code maps to batch size = 2
+
+then the generated order should use:
+- Batch Size = 2
+
+even if Master Data for that material shows batch size = 1
+
+This same logic should also apply to the relevant Line 5 Powermix context where batch size must align with the Powermix Split rule.
+
+---
+
+## 6. SPLIT VOLUME MUST USE THE EXACT QUANTITY BASIS ACTUALLY USED BY THE APP
+
+Problem:
+There are still cases where the generated split volume appears to be calculated from the wrong source quantity.
+
+### Required behavior
+The split calculation must use the **exact quantity basis actually chosen by the app for the split**.
+
+That same exact quantity basis must also be used consistently for:
+- the split math
+- the generated result
+- any explanatory note or derived text tied to the split logic
+
+### Important consistency rule
+Do not allow this mismatch:
+- split math uses one quantity
+- explanatory/source note refers to another quantity
+
+If the app used 70 MT for the split, then:
+- the split math must use 70 MT
+
+If the app used 72 MT for the split, then:
+- the split math must use 72 MT
+
+Please audit the current split calculation path because there are still cases where raw quantity appears to be used instead of the exact app-used basis.
+
+---
+
+## 7. USE FPR NOTES FOR SPLIT EXPLANATION, NOT THE VOLUME COLUMN
+
+For generated Powermix orders:
+- keep the Volume (MT) column clean
+- do not place the split explanation under Volume
+- instead, place the narrative explanation in **FPR Notes**
+
+### Required note format
+Use a note such as:
+
+**Created from Line 5 order, producing 81% of [product name] from 70 MT source volume.**
+
+The note must use:
+- actual percentage
+- actual product name
+- exact quantity basis used in the split
+
+If the exact quantity basis used was 72 MT, then the note should say 72 MT.
+If the exact quantity basis used was 70 MT, then the note should say 70 MT.
+
+Do not use mismatched values.
+
+---
+
+## 8. KEEP ITEM DESCRIPTION NAME AS THE NAVIGATION TRIGGER
+
+Stick to the original interaction design:
+- do not add a separate navigation link
+- do not add a “Go to split order” text link
+- do not add a separate button
+
+The **item description name itself** remains the click target for linked-order navigation.
+
+The purple chain icon is only a visual indicator, not a replacement for the main click target.
+
+---
+
+## 9. BIDIRECTIONAL LINKED-ORDER NAVIGATION
+
+This must work in both directions:
+
+### A. From Line 5 source order
+If the Line 5 order has a generated split order, clicking the item description name should navigate to the generated order.
+
+### B. From generated split order
+If the order was auto-created from Line 5, clicking the item description name should navigate back to the source Line 5 order.
+
+Use the actual source/generated linkage already maintained by the Powermix split logic.
+
+Do not rely only on weak text matching.
+
+---
+
+## 10. CONTEXT-AWARE NAVIGATION RULE
+
+Navigation behavior must depend on the current Orders view.
+
+### CASE A — USER IS IN “ALL FEEDMILLS”
+If user is currently in:
+- Orders > All Feedmills
+
+then clicking the linked item description should:
+- remain inside All Feedmills
+- scroll to the linked order there
+- bring the correct feedmill/line section into view if needed
+- highlight the linked row
+
+Do not switch the user out of All Feedmills in this case.
+
+### CASE B — USER IS IN A SPECIFIC FEEDMILL OR POWERMIX TAB
+If the user is currently in:
+- Feedmill 1
+- Feedmill 2
+- Feedmill 3
+- Powermix
+
+then clicking the linked item description should:
+- navigate to the correct feedmill tab where the linked order exists
+- open that feedmill context
+- scroll to the linked row
+- highlight the linked row
+
+Example:
+- user is in Powermix
+- clicks a Line 5 source order
+- linked generated order is in Feedmill 3
+- app opens Feedmill 3
+- scrolls to the linked row
+- highlights it
+
+Similarly, clicking a generated order should navigate back to Powermix / Line 5 if that is where the source order exists.
+
+---
+
+## 11. FIX CLICKABILITY PERSISTENCE ACROSS VIEW/TAB CHANGES
+
+There is a bug where the item description may be clickable in one feedmill view but stop being clickable after switching to another view such as Powermix, until the page is refreshed or the user switches tabs again.
+
+This must be fixed.
+
+### Required behavior
+For any valid linked Powermix/source order:
+- the item description name should remain clickable every time the row is rendered
+- regardless of whether the user arrived from:
+  - All Feedmills
+  - Feedmill 1
+  - Feedmill 2
+  - Feedmill 3
+  - Powermix
+
+The app should not require:
+- page refresh
+- tab toggle workaround
+- leaving and re-entering the page
+
+to restore clickability.
+
+### Also fix the source-side issue in Powermix / Line 5
+In Powermix / Line 5, source orders with linked generated orders must themselves be clickable.
+This must work directly in Powermix / Line 5.
+
+The source Line 5 orders should not remain non-clickable.
+
+---
+
+## 12. SOURCE-SIDE CLICKABILITY RULE FOR LINE 5
+
+A Powermix / Line 5 row should be clickable if:
+- it is a source order in Line 5
+- it has a valid linked generated split order
+- the linked order ID exists
+
+When those conditions are true:
+- item description name must become clickable
+- pointer cursor / clear affordance should appear
+- click navigation should work directly in Powermix
+
+---
+
+## 13. PRESERVE EXISTING POWERMIX DATA / LINKAGE BEHAVIOR
+
+Please preserve the previously required behaviors:
+- Material Code (FG) remains the original FG from the Line 5 source order
+- Material Code (SFG) uses the mapped SFG from Powermix Split
+- generated orders remain visually identifiable
+- generated orders remain linked to the exact source Line 5 order
+- status remains `Plotted`
+- source avail date is inherited properly
+- planned order values inherit from the exact source Line 5 order
+- run-rate fallback to Line 5 still applies when target-line run-rate is missing
+- config tab remains named `Powermix Split`
+- config tab remains positioned between `Changeover Rules` and `Master Data`
+
+---
+
+## 14. DEBUG LOGGING
+
+Temporarily log the following:
+
+### item description interaction
+```javascript
+console.debug('[Powermix Item Description Interaction]', {
+  orderId,
+  isLinkedOrder,
+  textSelectionDetected,
+  clickNavigationTriggered,
+});
+```
+
+### chain icon rendering
+```javascript
+console.debug('[Powermix Chain Icon Render]', {
+  orderId,
+  isLinkedOrder,
+  iconVisible,
+  iconColor,
+});
+```
+
+### generated field locking
+```javascript
+console.debug('[Powermix Generated Field Lock]', {
+  generatedOrderId,
+  plannedOrderLocked,
+  volumeLocked,
+});
+```
+
+### source-controlled sync
+```javascript
+console.debug('[Powermix Source Sync]', {
+  sourceOrderId,
+  sourcePlannedOrderFgBefore,
+  sourcePlannedOrderFgAfter,
+  sourcePlannedOrderSfgBefore,
+  sourcePlannedOrderSfgAfter,
+  sourceVolumeBefore,
+  sourceVolumeAfter,
+  percentage,
+  batchSizeFromPowermixSplit,
+  exactQtyBasisUsedForSplit,
+  rawSplitQty,
+  adjustedGeneratedQty,
+  generatedOrderId,
+});
+```
+
+### batch source resolution
+```javascript
+console.debug('[Powermix Batch Source Resolution]', {
+  sourceOrderId,
+  materialCodeUsedForLookup,
+  matchedRuleId,
+  masterDataBatchSize,
+  powermixSplitBatchSize,
+  appliedBatchSize,
+  batchSourceUsed, // expected: 'powermix_split'
+});
+```
+
+### FPR note generation
+```javascript
+console.debug('[Powermix FPR Note Generation]', {
+  sourceOrderId,
+  generatedOrderId,
+  productName,
+  percentage,
+  exactQtyBasisUsedForSplit,
+  renderedFprNote,
+});
+```
+
+### clickability bind / rebind
+```javascript
+console.debug('[Powermix Clickability Bind Check]', {
+  currentViewMode, // all_feedmills | feedmill_1 | feedmill_2 | feedmill_3 | powermix
+  currentLineTab,
+  orderId,
+  linkedOrderId,
+  shouldBeClickable,
+  clickHandlerAttached,
+});
+```
+
+```javascript
+console.debug('[Powermix View Change Rebind]', {
+  previousViewMode,
+  nextViewMode,
+  rowsRebound,
+  linkedRowsDetected,
+});
+```
+
+### source row clickability
+```javascript
+console.debug('[Powermix Source Row Clickability]', {
+  orderId,
+  line: 'line_5',
+  isSourcePowermixOrder,
+  linkedGeneratedOrderId,
+  shouldBeClickable,
+  clickHandlerAttached,
+  rendererUsed,
+});
+```
+
+### navigation result
+```javascript
+console.debug('[Powermix Navigation Result]', {
+  clickedOrderId,
+  linkedOrderId,
+  currentViewMode,
+  navigationMode, // stay_within_all_feedmills | switch_feedmill_tab
+  targetFound,
+  targetRowScrolledIntoView,
+  targetRowHighlighted,
+});
+```
+
+---
+
+## 15. VERIFICATION
+
+1. ✅ Item description remains clickable for linked-order navigation
+2. ✅ Users can still select/copy the item description text
+3. ✅ A purple chain icon appears at the end of the item name for linked Powermix orders
+4. ✅ Generated orders have Planned Order (FG | SFG) disabled
+5. ✅ Generated orders have Volume (MT) disabled
+6. ✅ Changing Line 5 source Planned Order (FG | SFG) automatically updates the generated order Planned Order (FG | SFG)
+7. ✅ Changing Line 5 source Volume (MT) automatically updates the generated order Volume (MT)
+8. ✅ Recalculation uses Powermix Split percentage and Powermix Split batch size
+9. ✅ Split calculation uses the exact app-used quantity basis
+10. ✅ FPR Notes contains the correct split explanation using the exact quantity basis used
+11. ✅ In All Feedmills, clicking linked orders stays within All Feedmills and scrolls to the target row
+12. ✅ In specific feedmill / Powermix views, clicking linked orders navigates to the correct feedmill and row
+13. ✅ Source Line 5 orders in Powermix are clickable when linked generated orders exist
+14. ✅ Clickability remains active across tab/view changes without page refresh
+15. ✅ Existing FG/SFG mapping, status, avail date inheritance, planned-order copy, run-rate fallback, and source linkage remain correct

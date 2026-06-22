@@ -1,0 +1,201 @@
+Please refine the **auto-sequence preview production time display and calculation** so that the preview shows the actual run rate used, and uses that same run rate as the basis for production-time calculation.
+
+---
+
+## 1. ADD `RATE` UNDER THE PRODUCTION TIME IN THE PREVIEW
+
+Please update the **Production Time** column in the auto-sequence preview so that the supporting details below the time include both:
+
+- `CO: xx`
+- `Rate: xx`
+
+### Important formatting requirement
+Please show them on separate lines under the Production Time value.
+
+### Required display format
+Use this structure:
+
+- `[Production Time value]`
+- `CO: xx`
+- `Rate: xx`
+
+### Example
+- `7.75 hours`
+- `CO: 0.33`
+- `Rate: 19.10`
+
+### Do NOT format it like:
+- `CO: 0.33 | Rate: 19.10`
+
+### Expected result
+The preview should clearly show both the changeover and the run rate used for that row, each on its own line.
+
+---
+
+## 2. USE THE DISPLAYED `RATE` AS THE BASIS FOR PREVIEW PRODUCTION TIME
+
+Please make sure the **Rate** shown under the preview Production Time is the exact same run rate used to calculate the preview production time.
+
+### Required rule
+Preview production time must be based on:
+
+- `Volume / displayed Rate`
+
+### Expected result
+There should be no case where the preview shows one run rate but uses a different hidden/default feedmill rate to calculate production time.
+
+---
+
+## 3. DO NOT FALL BACK TO GENERIC FEEDMILL RUN-RATE VALUES IF A ROW-SPECIFIC RATE EXISTS
+
+There are cases where the app appears to calculate preview production time using generic/default feedmill rates such as:
+- `20 MT/hr` for FM1
+- `10 MT/hr` for FM2 / FM3 / PMX
+
+even when a row-specific rate should be used.
+
+Please prevent that behavior in the preview.
+
+### Expected result
+If the order/row has an actual applicable run rate, the preview should:
+- display that rate
+- and use that same rate for production-time calculation
+
+### Goal
+Avoid production-time mismatches caused by hidden/default feedmill fallback rates.
+
+---
+
+## 4. MAKE THE PREVIEW MORE TRANSPARENT BY SHOWING THE RATE USED
+
+The reason for adding `Rate` under Production Time is to make the preview more transparent and easier to validate.
+
+### Goal
+Users should be able to visually confirm that:
+- the shown production time
+- makes sense for the shown volume
+- using the shown rate
+
+### Expected result
+The preview becomes easier to trust because the basis for the production time is visible.
+
+---
+
+## 5. KEEP THE FINAL SCHEDULE’S PRODUCTION-TIME LOGIC CONSISTENT
+
+If the final schedule already correctly shows:
+- production time
+- CO
+- Rate
+
+please preserve that correct behavior.
+
+### Goal
+Align the preview to the same row-specific logic and transparency already expected in the schedule view.
+
+### Expected result
+Preview and schedule should feel consistent in both:
+- calculation basis
+- supporting displayed values
+
+---
+
+## 6. APPLY THIS ACROSS ALL LINES / FEEDMILLS
+
+Please ensure this improvement applies across:
+
+### FM1
+- `Line 1`
+- `Line 2`
+
+### FM2
+- `Line 3`
+- `Line 4`
+
+### FM3
+- `Line 6`
+- `Line 7`
+
+### PMX
+- `Line 5`
+
+### Expected result
+All auto-sequence previews across all lines/feedmills should show:
+- Production Time
+- `CO: xx`
+- `Rate: xx`
+
+and calculate production time from that displayed row rate.
+
+---
+
+## IMPORTANT
+
+Please update the **auto-sequence preview** so that under **Production Time**, it displays:
+
+- the production time value
+- `CO: xx`
+- `Rate: xx`
+
+with `CO` and `Rate` on separate lines, not in one inline string.
+
+Also ensure that the preview production time is calculated from:
+- `Volume / displayed Rate`
+
+and not from a hidden generic feedmill default if a row-specific rate exists.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log the preview production-time basis and displayed rate.
+
+```javascript
+console.debug('[Auto-Sequence Preview Rate Display]', {
+  line,
+  feedmill,
+  orderId,
+  previewProductionTime,
+  coValue,
+  displayedRate,
+  displayFormat: ['production_time', 'CO', 'Rate'],
+});
+```
+
+```javascript
+console.debug('[Auto-Sequence Preview Production Time Basis]', {
+  line,
+  feedmill,
+  orderId,
+  volume,
+  displayedRate,
+  expectedProductionTime: displayedRate > 0 ? volume / displayedRate : null,
+  previewProductionTime,
+  usesDisplayedRateForCalculation:
+    displayedRate > 0 &&
+    Math.abs(previewProductionTime - (volume / displayedRate)) < 0.01,
+});
+```
+
+```javascript
+console.debug('[Auto-Sequence Preview Feedmill Fallback Check]', {
+  line,
+  feedmill,
+  orderId,
+  rowSpecificRateExists,
+  usedGenericFeedmillFallback,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ The preview shows `CO` under Production Time
+2. ✅ The preview shows `Rate` under Production Time
+3. ✅ `CO` and `Rate` appear on separate lines
+4. ✅ Preview production time is calculated from the displayed rate
+5. ✅ Preview no longer uses a hidden generic feedmill fallback when a row-specific rate exists
+6. ✅ The fix works across `Line 1` to `Line 7`
+7. ✅ The fix works across `FM1`, `FM2`, `FM3`, and `PMX`
+8. ✅ No UI errors or console errors are introduced

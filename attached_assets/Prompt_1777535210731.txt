@@ -1,0 +1,332 @@
+```
+Further improve the AI strategy generation and execution so that every AI-generated sequencing strategy ALWAYS considers the following three dimensions together:
+
+1. Changeovers
+2. MTS advancement opportunities
+3. Profitability / profit score
+
+The AI should still have freedom to invent its own sequencing strategies, but it must always evaluate all three dimensions before generating the strategy and before applying the final sequence to the After table.
+
+---
+
+## OBJECTIVE
+
+For every line, the AI must analyze and consider:
+
+### 1. Changeovers
+Reduce unnecessary changeovers by grouping compatible orders where possible, based on:
+- category
+- color
+- diameter
+- form
+- other material compatibility attributes
+- live Changeover Rules tab
+
+### 2. MTS orders / flexible advancement
+The AI may suggest earlier production dates for eligible MTS / flexible orders if doing so improves the sequence and does not compromise any order.
+
+This includes:
+- using lightly loaded earlier days
+- advancing flexible orders into earlier safe dates
+- filling days where only one order is scheduled if another eligible order can safely fit there
+- compressing the queue where safe
+- never causing protected / fixed / critical / urgent orders to be delayed
+
+### 3. Profitability / profit score
+The AI should also consider profitability while generating strategies.
+
+This includes:
+- using profit score / margin context from master data
+- identifying higher-value flexible opportunities
+- considering profitability as one factor in sequencing
+- not violating hard scheduling rules in pursuit of profitability
+
+The AI-generated strategies should be based on a balanced analysis of all three dimensions, even if one strategy emphasizes one dimension more strongly than another.
+
+---
+
+## 1. REQUIRE ALL AI STRATEGIES TO EVALUATE ALL THREE DIMENSIONS
+
+Add a strict prompt instruction:
+
+```text
+Before generating sequencing strategies, always evaluate the line using these three lenses:
+1. changeover reduction through material compatibility
+2. safe advancement opportunities for flexible/MTS orders
+3. profitability / profit score opportunities
+
+You must consider all three in every strategy.
+A strategy may emphasize one more strongly, but it must not ignore the other two.
+```
+
+This means:
+- no strategy should be created based on only one factor
+- all AI strategies must reflect a multi-factor scheduling analysis
+
+---
+
+## 2. CHANGEOVER REQUIREMENT
+
+For every AI-generated strategy, the AI must explicitly assess:
+- whether compatible orders can be grouped
+- whether diameter/color/category/form continuity can reduce changeover
+- whether the final sequence will reduce total changeover time versus Standard or at least improve compatibility
+
+The AI should use the live Changeover Rules tab context.
+
+### Required prompt instruction:
+```text
+Always analyze changeover reduction opportunities using the actual configured Changeover Rules.
+Look for compatible material groupings that can reduce setup loss, cleaning, diameter transitions, or other changeover impacts.
+```
+
+### Strategy output should include:
+```json
+"changeover_consideration": "This strategy keeps compatible poultry 4.000mm runs closer together to avoid extra diameter changeovers."
+```
+
+---
+
+## 3. MTS / FLEXIBLE ADVANCEMENT REQUIREMENT
+
+For every AI-generated strategy, the AI must explicitly assess:
+- which MTS/flexible orders can safely move earlier
+- whether earlier safe days are underutilized
+- whether a lightly loaded day can absorb another eligible order
+- whether advancing flexible orders improves utilization and sequencing
+
+Important:
+- the AI may suggest earlier production than the order’s original target if it is safe
+- but must never cause delay to protected orders or compromise downstream requirements
+
+### Required prompt instruction:
+```text
+Always analyze whether eligible MTS/flexible orders can be advanced to earlier safe dates.
+If a day is lightly loaded or only has one order, and another eligible order can safely be produced there, the strategy may place it on that date to improve utilization and tighten the sequence.
+Do not delay protected or hard-date orders.
+```
+
+### Strategy output should include:
+```json
+"mts_advancement_consideration": "This strategy advances two flexible swine orders into earlier safe dates to make better use of underloaded days."
+```
+
+---
+
+## 4. PROFITABILITY / PROFIT SCORE REQUIREMENT
+
+For every AI-generated strategy, the AI must explicitly assess:
+- which flexible orders have stronger profit score
+- whether profitability can influence sequencing safely
+- whether advancing or preserving certain orders helps line-level profitability
+
+Important:
+- profitability is a consideration, not a permission to violate hard scheduling constraints
+- AI should use master data profitability context and computed profit score where available
+
+### Required prompt instruction:
+```text
+Always consider profitability / profit score when evaluating sequencing opportunities.
+Use profitability as one of the decision factors, especially when choosing among multiple safe flexible sequencing options.
+Do not violate hard scheduling rules in pursuit of profitability.
+```
+
+### Strategy output should include:
+```json
+"profitability_consideration": "This strategy keeps stronger profit-score flexible runs earlier where safe, while still preserving protected dates."
+```
+
+---
+
+## 5. REQUIRE THE AI TO SUMMARIZE THE TRADEOFF ACROSS THE THREE DIMENSIONS
+
+Each AI strategy should explain its balancing logic.
+
+### Add required output fields:
+```json
+{
+  "changeover_consideration": "...",
+  "mts_advancement_consideration": "...",
+  "profitability_consideration": "...",
+  "tradeoff_summary": "This strategy emphasizes earlier flexible-date advancement while still preserving compatible grouping and considering profit score among safe options."
+}
+```
+
+This ensures the strategy clearly reflects all three dimensions.
+
+---
+
+## 6. UPDATE THE AI STRATEGY PROMPT STRUCTURE
+
+Modify the per-line prompt builder so it explicitly gives the AI:
+- line orders
+- standard sequence baseline
+- changeover rules
+- MTS / N10D / future dispatch context
+- master data profit score context
+- hard rules
+- instruction to evaluate all three dimensions
+
+### Suggested function:
+```javascript
+function buildAILineStrategyPrompt({
+  line,
+  lineOrders,
+  standardSequence,
+  changeoverRules,
+  masterData,
+  n10dData,
+}) {
+  // return prompt string
+}
+```
+
+### Required prompt block:
+```text
+You are analyzing one production line after the app has already:
+1. combined compatible orders
+2. assigned orders to this line
+3. applied N10D / future-dispatch logic
+4. built the Standard Sequence
+
+You must generate exactly 2 AI sequencing strategies for this line.
+
+Before generating strategies, always evaluate:
+1. changeover reduction opportunities
+2. safe advancement opportunities for MTS/flexible orders
+3. profitability / profit score opportunities
+
+Every strategy must consider all three.
+A strategy may emphasize one of them more strongly, but it must still account for the other two.
+```
+
+---
+
+## 7. REQUIRE THE AFTER TABLE TO REFLECT THESE THREE DIMENSIONS TOO
+
+It is not enough for the card text to mention them.
+
+When the selected AI strategy is applied to the After table, the final table should reflect:
+- compatible grouping where the strategy supports changeover reduction
+- earlier safe placement of flexible/MTS orders where the strategy supports advancement
+- safe profit-aware sequencing choices where the strategy supports profitability
+
+In other words:
+- if the AI says it is advancing MTS orders, the After table must show them moved earlier when valid
+- if the AI says it is grouping compatible materials, the After table must visibly reflect that
+- if the AI says profitability was considered, the sequence should reflect that where safe and relevant
+
+---
+
+## 8. USE THESE THREE DIMENSIONS IN STRATEGY EXECUTION
+
+Update the strategy execution layer so it does not apply a generic sequence only.
+
+The execution engine should use:
+- strategy.execution_intent
+- strategy.changeover_consideration
+- strategy.mts_advancement_consideration
+- strategy.profitability_consideration
+
+and ensure the final rows reflect those priorities.
+
+### Suggested execution helpers:
+```javascript
+function applyChangeoverAwareRefinement({...}) {}
+function applyMTSAdvancementRefinement({...}) {}
+function applyProfitAwareRefinement({...}) {}
+```
+
+These should work together, with the selected strategy deciding which factor gets stronger emphasis.
+
+---
+
+## 9. UPDATE FAITHFULNESS SCORING TO INCLUDE ALL THREE DIMENSIONS
+
+Faithfulness scoring should explicitly measure whether the final After table reflects:
+
+1. changeover logic
+2. MTS advancement logic
+3. profitability logic
+
+### Add sub-scores:
+```javascript
+changeoverFaithfulness
+mtsAdvancementFaithfulness
+profitabilityFaithfulness
+```
+
+These can contribute to the overall Faithfulness Score depending on the strategy’s stated emphasis.
+
+Example:
+```javascript
+faithfulnessScore =
+  changeoverFaithfulness * 0.30 +
+  mtsAdvancementFaithfulness * 0.30 +
+  profitabilityFaithfulness * 0.20 +
+  differenceFromStandardScore * 0.10 +
+  constraintExecutionScore * 0.10;
+```
+
+If a strategy heavily emphasizes one dimension, you may weight that dimension more strongly in the faithfulness calculation.
+
+---
+
+## 10. UPDATE "VIEW AI REASONING" CONTENT
+
+The AI reasoning should show how the strategy considered all three dimensions.
+
+Example:
+- Changeovers: grouped compatible poultry 4.000mm runs to reduce diameter-related transitions
+- MTS advancement: advanced 2 flexible orders into earlier safe slots to use underloaded days
+- Profitability: favored stronger profit-score flexible orders where multiple safe placements were possible
+
+This will make the strategy more credible and explainable.
+
+---
+
+## 11. UPDATE ROW-LEVEL SEQUENCE INSIGHT
+
+The row-level Sequence Insight should also reflect actual applied decisions from these three dimensions.
+
+Examples:
+- “Moved earlier into 02 May because the date was lightly loaded and the order was eligible for safe advancement.”
+- “Placed near another Swine · 4.000mm order to reduce diameter changeover.”
+- “Kept ahead of other flexible runs due to stronger profit score among safe options.”
+
+Only say these if the final table actually shows them.
+
+---
+
+## 12. PRESERVE HARD RULES
+
+All of the above must still respect:
+- MTO / actual dated order protection
+- critical / urgent / monitor logic
+- N10D / future dispatch rules
+- safe windows
+- chronology for protected orders
+
+These three dimensions are optimization lenses, not permission to violate hard constraints.
+
+---
+
+## 13. VERIFICATION
+
+### AI generation
+1. ✅ Every AI-generated strategy evaluates changeovers
+2. ✅ Every AI-generated strategy evaluates MTS/flexible advancement opportunities
+3. ✅ Every AI-generated strategy evaluates profitability / profit score
+4. ✅ Strategy output includes explicit consideration of all three dimensions
+5. ✅ Strategy descriptions no longer feel one-dimensional
+
+### Strategy execution
+6. ✅ After table reflects changeover-aware grouping where relevant
+7. ✅ After table reflects earlier safe advancement of MTS/flexible orders where relevant
+8. ✅ After table reflects profit-aware sequencing choices where relevant
+9. ✅ Strategy card text and After table are aligned
+
+### Faithfulness / insights
+10. ✅ Faithfulness scoring includes changeover, MTS advancement, and profitability reflection
+11. ✅ AI reasoning explains all three dimensions
+12. ✅ Row-level insights reflect actual applied changes from these dimensions

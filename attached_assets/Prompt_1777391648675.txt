@@ -1,0 +1,59 @@
+Now that AI Balanced is working properly, implement the AI Profit-Optimized sequence.
+
+## Goal
+AI Profit-Optimized should behave similarly to AI Balanced, but with an added profitability preference based on the Margin field from master data.
+
+This means the sequence should:
+- still respect actual dated / MTO orders
+- still protect critical, urgent, and monitor orders from delay
+- still use practical AI-suggested dates for eligible flexible orders
+- still consider line load and reduce changeovers where reasonable
+- but among safe eligible options, prioritize higher-margin products earlier
+
+## Source of profitability
+Use the Margin value from master data.
+Do not hardcode margins.
+Look up each order’s material in master data and use its Margin field.
+
+## Expected behavior
+AI Profit-Optimized should follow the same general scheduling structure as AI Balanced:
+- safe date placement
+- actual dates respected
+- chronological logic preserved
+- final displayed order sorted correctly by effective avail date
+
+But when choosing between multiple safe/flexible options:
+- prefer higher-margin orders
+- suggest earlier production dates for higher-margin flexible orders when safe
+- allow lower-margin flexible orders to move later if that improves profitability and does not create delay
+
+## Important
+Do not break hard constraints:
+- MTO / actual dated orders must not be delayed
+- Critical orders remain prioritized
+- Urgent / Monitor must not be delayed beyond their target date
+- Safe windows still apply
+
+## Suggested implementation
+1. Reuse the AI Balanced flow as the base
+2. Add profitability scoring using master data Margin
+3. When evaluating candidate dates / candidate order placements:
+   - include margin as a scoring factor
+   - higher margin should increase the score
+4. Keep final ordering visually chronological based on effective avail date
+5. Keep material compatibility and changeover logic as supporting optimization, not the only objective
+
+## Profit preference behavior
+- If two flexible orders are equally safe, prefer the one with higher margin
+- If a higher-margin order can be produced earlier without causing delay, AI should prefer that
+- If profitability conflicts with a hard date rule, hard date rule wins
+- Profitability should enhance the sequence, not break the schedule
+
+## Verification
+1. AI Profit-Optimized uses Margin from master data
+2. Higher-margin flexible orders are favored earlier when safe
+3. MTO / actual dated orders are still protected
+4. Critical / urgent / monitor orders are not delayed
+5. Practical AI-suggested dates still work
+6. Final preview order remains chronologically correct
+7. AI Profit-Optimized is visibly different from AI Balanced when margin opportunities exist

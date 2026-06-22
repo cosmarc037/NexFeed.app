@@ -1,0 +1,161 @@
+```
+Adjust the strategy card badges so they sit on the top-right edge of the card border, not inside the content area.
+
+## Goal
+The badge group should behave like the previous design:
+- attached to the card’s top-right edge / border line
+- slightly floating above the card boundary
+- not inside the content area
+- not covering the title or description text
+
+At the same time:
+- keep badges on one row
+- keep dynamic layout depending on which badges are present
+
+### Desired behavior
+If both badges exist:
+[Low distinction] [Recommended]
+
+If only one exists:
+[Low distinction]
+or
+[Recommended]
+
+All should remain aligned to the top-right edge of the card, not inside the body.
+
+---
+
+## 1. Keep one shared badge container
+Use one badge wrapper per strategy card.
+
+Example:
+```jsx
+<div className="strategy-card-badges">
+  {strategy.isLowDistinction && (
+    <span className="strategy-badge strategy-badge-low-distinction">
+      ⓘ Low distinction
+    </span>
+  )}
+
+  {strategy.isAIRecommended && (
+    <span className="strategy-badge strategy-badge-recommended">
+      ⭐ Recommended
+    </span>
+  )}
+</div>
+```
+
+---
+
+## 2. Position the badge container on the card edge, not inside
+The badge wrapper should be absolutely positioned relative to the card and offset upward so it sits on the border edge.
+
+Example CSS:
+```css
+.strategy-card {
+  position: relative;
+  overflow: visible; /* important so badges can float outside edge */
+}
+
+.strategy-card-badges {
+  position: absolute;
+  top: 0;
+  right: 14px;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  z-index: 3;
+  flex-wrap: nowrap;
+}
+```
+
+This makes the badge row:
+- attached to top-right
+- sitting half above / half on the border line
+- not covering inner content
+
+If needed, fine-tune:
+- `right: 12px` to `16px`
+- `transform: translateY(-45%)` or `-50%`
+
+---
+
+## 3. Keep badge order consistent
+When both exist, show:
+[Low distinction] [Recommended]
+
+So render Low distinction first, then Recommended.
+
+---
+
+## 4. Do not push badges into the content area
+Remove any styles that place the badge wrapper inside the header/body area, such as:
+- extra top padding just to accommodate badges
+- inline placement inside title row
+- static layout inside card content
+
+Badges should float on the card edge instead.
+
+---
+
+## 5. Make sure overflow is visible
+If the card container or parent wrapper has:
+```css
+overflow: hidden;
+```
+the badges may get clipped.
+
+Set:
+```css
+.strategy-card,
+.strategy-card-wrapper {
+  overflow: visible;
+}
+```
+
+Only apply this where needed so the edge-floating badges remain visible.
+
+---
+
+## 6. Keep horizontal alignment dynamic
+The badge group should remain right-aligned in all cases:
+- both badges → side-by-side on the edge
+- one badge only → still pinned right
+- none → no wrapper visible
+
+No centered or awkward floating positions.
+
+---
+
+## 7. Preserve badge styling
+Keep existing badge colors/styles if possible.
+Just ensure both badges have matching vertical alignment.
+
+Example:
+```css
+.strategy-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 700;
+  white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+}
+```
+
+---
+
+## 8. Verification
+1. Both badges appear on one row
+2. Badge row sits on the top-right edge of the card
+3. Badges no longer cover card title/description
+4. Single badge stays top-right on the edge
+5. Card content remains fully readable
+6. No clipping occurs from parent overflow

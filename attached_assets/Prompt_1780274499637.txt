@@ -1,0 +1,149 @@
+Please add **filter support for the Pricing columns (`Cost` and `Margin`)** across both the **main** and **demo** order tables, including **Order History** tables.
+
+## 1. ADD FILTERS FOR `COST` AND `MARGIN` UNDER THE `PRICING` HEADER
+
+The `Pricing` grouped header currently contains:
+- `Cost`
+- `Margin`
+
+These columns do not currently have filter support.
+
+Please add filtering capability for both:
+- `Cost`
+- `Margin`
+
+### Expected result
+Users should be able to filter orders based on:
+- cost values
+- margin values
+
+---
+
+## 2. APPLY THIS TO MAIN ORDER TABLES
+
+Please add `Cost` and `Margin` filtering to the main order tables under:
+
+### Orders
+- `All Feedmills`
+- `Feedmill 1`
+- `Feedmill 2`
+- `Feedmill 3`
+- `Powermix`
+
+### Expected result
+All main order tables should support filtering on both Pricing columns.
+
+---
+
+## 3. APPLY THIS TO DEMO ORDER TABLES
+
+Please also add `Cost` and `Margin` filtering to the demo order tables under:
+
+### Fulfillment (Demo)
+- `All Feedmills`
+
+### Expected result
+The demo all-feedmills table should also support filtering on:
+- `Cost`
+- `Margin`
+
+---
+
+## 4. APPLY THIS TO ORDER HISTORY TABLES AS WELL
+
+Please add the same Pricing-column filters to the Order History tabs in both:
+
+### Main
+- `Configurations > Order History`
+
+### Demo
+- `Fulfillment (Demo) > Order History`
+
+### Expected result
+Users should also be able to filter historical done/cancelled orders by:
+- `Cost`
+- `Margin`
+
+---
+
+## 5. KEEP THE FILTER UX CONSISTENT WITH OTHER FILTERABLE COLUMNS
+
+Please make the `Cost` and `Margin` filters behave consistently with the rest of the table filter system already used in the app.
+
+### Goal
+Users should not experience a different filter interaction style just for Pricing.
+
+### Expected result
+The Pricing filters should match the app’s existing filter behavior and UI pattern.
+
+---
+
+## 6. SUPPORT APPROPRIATE NUMERIC/PERCENT FILTERING
+
+Please make sure the filters are suitable for the data type of each field.
+
+### Suggested behavior
+#### Cost
+Support numeric-style filtering such as:
+- equals
+- greater than
+- less than
+- range if available
+
+#### Margin
+Support percentage/numeric-style filtering such as:
+- equals
+- greater than
+- less than
+- range if available
+
+### Expected result
+Users can meaningfully filter pricing fields using appropriate value comparisons.
+
+---
+
+## IMPORTANT
+
+Please add filter support for the `Pricing` columns:
+- `Cost`
+- `Margin`
+
+and apply this consistently to:
+- Main order tables (`All Feedmills`, `Feedmill 1`, `Feedmill 2`, `Feedmill 3`, `Powermix`)
+- Demo order tables (`Fulfillment (Demo) > All Feedmills`)
+- Main Order History
+- Demo Order History
+
+---
+
+## DEBUG LOGGING
+
+```javascript
+console.debug('[Pricing Filter Enabled]', {
+  table,
+  pricingColumns: ['cost', 'margin'],
+  filtersEnabled: true,
+});
+```
+
+```javascript
+console.debug('[Pricing Filter Applied]', {
+  table,
+  column, // 'cost' | 'margin'
+  filterType,
+  filterValue,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ `Cost` has filter support
+2. ✅ `Margin` has filter support
+3. ✅ Filters work in all main order tables
+4. ✅ Filters work in demo All Feedmills
+5. ✅ Filters work in main Order History
+6. ✅ Filters work in demo Order History
+7. ✅ Pricing filters follow the same UI pattern as other column filters
+8. ✅ No UI errors or console errors are introduced

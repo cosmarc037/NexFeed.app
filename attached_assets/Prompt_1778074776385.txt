@@ -1,0 +1,212 @@
+```
+Fix the move insight logic so it does not incorrectly claim that a destination line was chosen because it had the lowest queue time when the real reason was line eligibility from Master Data.
+
+---
+
+## PROBLEM TO FIX
+
+Current example:
+"Salto - Chick Booster Crumble 1x25 kg (2.0 MT) was moved from L2 to L4. Queue times evaluated: L4: 10.0 MT ÷ 10 MT/hr = 1.00 hrs. L4 had the lowest queue time of 1.00 hrs compared to L2 at 0.10 hrs. After placement, L4 increased from 10.0 MT to 12.0 MT."
+
+This is clearly contradictory because:
+- L2 queue time = 0.10 hrs
+- L4 queue time = 1.00 hrs
+- therefore L4 does NOT have the lowest queue time
+
+The real reason for the move is:
+- the product is only eligible on L4 based on Master Data run-rate mapping
+
+So the insight should explain that the move was driven by eligibility, not by lower queue time.
+
+---
+
+## OBJECTIVE
+
+When an order is moved to a line because that line is the only eligible/valid production line from Master Data:
+- the insight must state that clearly
+- the insight must not claim the destination had the lowest queue time if it did not
+- queue time should be presented only as context, not as the primary reason
+
+---
+
+## 1. DETERMINE THE PRIMARY REASON FOR LINE PLACEMENT BEFORE BUILDING THE TEXT
+
+Before generating the move insight, determine whether the move was driven by:
+- line eligibility from Master Data
+- lower queue time
+- lower changeover burden
+- balancing logic
+- other sequencing constraints
+
+If the destination line is the only eligible line, that reason must take priority in the explanation.
+
+### Example helper:
+```javascript
+function getPlacementReasonContext({
+  order,
+  sourceLine,
+  targetLine,
+  eligibleLines,
+}) {
+  const normalizedEligible = (eligibleLines || []).map(normalizeLineKey);
+  const src = normalizeLineKey(sourceLine);
+  const tgt = normalizeLineKey(targetLine);
+
+  const sourceEligible = normalizedEligible.includes(src);
+  const targetEligible = normalizedEligible.includes(tgt);
+  const onlyTargetEligible = targetEligible && normalizedEligible.length === 1;
+
+  return {
+    sourceEligible,
+    targetEligible,
+    onlyTargetEligible,
+  };
+}
+```
+
+---
+
+## 2. IF DESTINATION IS THE ONLY ELIGIBLE LINE, DO NOT USE "LOWEST QUEUE TIME" LANGUAGE
+
+When `onlyTargetEligible === true`:
+- do not say the destination had the lowest queue time
+- do not imply queue time was the deciding factor
+- do not compare queue values in a way that suggests queue-time optimization chose the line
+
+Instead, explain:
+
+- the item was placed there because that is the eligible/valid production line from Master Data
+- queue times are supporting context only
+
+---
+
+## 3. UPDATE THE MOVE TEMPLATE FOR ELIGIBILITY-DRIVEN PLACEMENT
+
+Use a template like:
+
+```text
+{item} ({movedMT} MT) was moved from {sourceLine} to {targetLine} because {targetLine} is the eligible production line for this item based on Master Data run-rate mapping. Before placement, {targetLine} had {targetBeforeMT} MT queued, equivalent to {targetBeforeQueue} hrs at {targetRunRate} MT/hr, and after placement its load increased to {targetAfterMT} MT or {targetAfterQueue} hrs. Although {sourceLine} had a lower queue time, the order was placed on {targetLine} because that line is the valid production line for this product.
+```
+
+This is much more accurate.
+
+---
+
+## 4. ONLY USE "LOWEST QUEUE TIME" IF IT IS ACTUALLY TRUE
+
+If the app wants to say:
+- `X had the lowest queue time`
+
+then it must verify that the destination queue time is actually the lowest among eligible candidate lines.
+
+### Example:
+```javascript
+const destinationHasLowestQueue =
+  candidateLines.every(line => targetQueue <= line.queueTime);
+```
+
+If not true:
+- do not use that phrase
+
+This should be a hard guard.
+
+---
+
+## 5. IF SOURCE LINE IS NOT ELIGIBLE, SAY SO IF HELPFUL
+
+If the order originated on a line that is not actually eligible for production according to Master Data mapping, you may optionally clarify that.
+
+Example:
+```text
+Although the order appeared on L2 initially, L4 is the valid production line for this product based on Master Data.
+```
+
+This can help explain why the move happened even if source queue time was lower.
+
+---
+
+## 6. KEEP QUEUE TIME CONTEXT, BUT FRAME IT CORRECTLY
+
+Queue times can still be shown as context, but not as the main reason when eligibility is the driver.
+
+Good example:
+```text
+Before placement, L4 had 10.0 MT queued (1.00 hrs), increasing to 12.0 MT (1.20 hrs) after the move.
+```
+
+Bad example:
+```text
+L4 had the lowest queue time of 1.00 hrs compared to L2 at 0.10 hrs.
+```
+
+That is mathematically and logically wrong.
+
+---
+
+## 7. ADD A GUARD AGAINST CONTRADICTORY COMPARISON LANGUAGE
+
+Before rendering any phrase like:
+- “lowest queue time”
+- “lower queue”
+- “best queue option”
+
+validate the comparison.
+
+If the destination queue is not actually lower than the compared line:
+- do not generate that sentence
+
+### Suggested rule:
+```javascript
+if (targetQueue > sourceQueue) {
+  // do not claim target has lower queue time
+}
+```
+
+---
+
+## 8. UPDATE ACTIONS TAKEN TEXT PRIORITY
+
+When building move insights, the explanation priority should be:
+
+1. eligibility / valid production line
+2. queue-time impact
+3. changeover or balancing benefit
+
+So if eligibility decides the line, that should be the headline reason.
+
+---
+
+## 9. ADD DEBUG LOGGING FOR MOVE REASONING
+
+Temporarily log:
+
+```javascript
+console.debug('[Move Insight Reasoning]', {
+  orderId: order.id,
+  item: order.item_description,
+  sourceLine,
+  targetLine,
+  sourceQueue,
+  targetQueueBefore,
+  targetQueueAfter,
+  eligibleLines,
+  onlyTargetEligible,
+  sourceEligible,
+  targetEligible,
+});
+```
+
+This will help verify:
+- the destination was chosen because of eligibility
+- not because of lower queue time
+- no contradictory text is generated
+
+---
+
+## 10. VERIFICATION
+
+1. ✅ The insight no longer says L4 had the lowest queue time if L2 is lower
+2. ✅ If destination is the only eligible line from Master Data, the insight explicitly says so
+3. ✅ Queue time is presented as context, not as the wrong primary reason
+4. ✅ Contradictory queue comparisons are no longer generated
+5. ✅ Move insights now reflect the true placement logic

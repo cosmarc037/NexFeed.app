@@ -1,0 +1,121 @@
+Please update the **Fulfillment (Demo)** implementation so that the **Adjusted Inventory** explanation is shown inside the **existing Future Dispatches tooltip**, instead of creating a separate new tooltip.
+
+---
+
+## 1. DO NOT CREATE A SEPARATE TOOLTIP FOR ADJUSTED INVENTORY
+
+In the duplicated **Demo Future Dispatches** tab, the UI already has an existing tooltip for product/inventory details.
+
+Please do **not** add a separate standalone tooltip just for `Adjusted Inventory`.
+
+### Goal
+Avoid tooltip duplication and keep the UI clean and consistent.
+
+### Expected result
+The `Adjusted Inventory` explanation should be incorporated into the existing tooltip experience already used in Future Dispatches.
+
+---
+
+## 2. EXTEND THE EXISTING FUTURE DISPATCHES TOOLTIP TO INCLUDE ADJUSTED INVENTORY
+
+Please update the existing tooltip in **Demo Future Dispatches** so it also displays:
+
+- `Adjusted Inventory`
+- the formula or breakdown used to compute it
+
+### Expected result
+When the user opens the existing tooltip for a product row in Demo Future Dispatches, they should see:
+- the current inventory context
+- and also the adjusted inventory explanation within that same tooltip
+
+---
+
+## 3. SHOW THE ADJUSTED INVENTORY FORMULA IN THE EXISTING TOOLTIP
+
+Please include a clear explanation such as:
+
+- `Adjusted Inventory = Inventory - satisfied order volume + Average Daily`
+
+And, when possible, show the actual values used for that row.
+
+### Example
+If:
+- Inventory = `181.5`
+- satisfied order volume = `0.0`
+- average daily = `18.9`
+
+then the tooltip can show something like:
+
+- `Adjusted Inventory = 181.5 (Inventory) - 0.0 (satisfied order vol) + 18.9 (avg daily) = 200.4`
+
+### Expected result
+Users can see both:
+- the adjusted inventory value
+- and how the system arrived at that number
+
+---
+
+## 4. KEEP THE ADJUSTED INVENTORY EXPLANATION INSIDE THE SAME PRODUCT CONTEXT TOOLTIP
+
+Please present the adjusted inventory details as part of the same row/product information context, not as a separate hover element elsewhere.
+
+### Goal
+Users should be able to understand all inventory-related context in one place.
+
+### Expected result
+The tooltip remains the single source of row-level explanation for:
+- inventory
+- status
+- summary
+- adjusted inventory
+
+---
+
+## 5. APPLY THIS TO THE DUPLICATED DEMO FUTURE DISPATCHES TAB
+
+This change should apply specifically to the **Demo Future Dispatches** implementation under **Fulfillment (Demo)**.
+
+### Important
+This request is tied to the demo workspace fulfillment feature and the added `Adjusted Inventory` field there.
+
+### Expected result
+The demo Future Dispatches tooltip is enhanced to explain adjusted inventory in the same hover card/toolip that already exists.
+
+---
+
+## IMPORTANT
+
+Please implement the `Adjusted Inventory` explanation by **extending the existing Future Dispatches tooltip**, not by creating a second tooltip.
+
+The tooltip should show:
+- the adjusted inventory value
+- the calculation formula
+- and, ideally, the row-specific values used in the calculation
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log the tooltip data being injected for adjusted inventory.
+
+```javascript
+console.debug('[Demo Future Dispatches Tooltip - Adjusted Inventory]', {
+  product,
+  inventory,
+  satisfiedOrderVolume,
+  averageDaily,
+  adjustedInventory,
+  embeddedInExistingTooltip: true,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ No separate tooltip is created for Adjusted Inventory
+2. ✅ The existing Demo Future Dispatches tooltip now includes Adjusted Inventory
+3. ✅ The tooltip explains the Adjusted Inventory formula
+4. ✅ The tooltip can show the row-specific values used in the calculation
+5. ✅ The UI remains clean and avoids duplicate tooltip behavior
+6. ✅ No UI errors or console errors are introduced

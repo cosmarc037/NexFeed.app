@@ -1,0 +1,210 @@
+Please fix the apply-to-schedule logic so that when the preview table shows an app-adjusted divisible volume, that same final adjusted volume is what gets saved into the schedule/order table.
+
+---
+
+## OBJECTIVE
+
+There is a mismatch between the preview sequence table and the applied schedule.
+
+In the preview:
+- an order shows an orange adjusted volume because the original volume is not divisible by batch size
+- example:
+  - original volume = `145 MT`
+  - batch size = `4`
+  - app-adjusted preview volume = `148 MT`
+  - batches = `37`
+
+This is correct, because:
+- `148 / 4 = 37`
+- divisible
+
+However, after applying to schedule, the order table shows:
+- volume = `145 MT`
+- batches = `37`
+
+This is inconsistent and incorrect, because:
+- `145 / 4 = 36.25`
+- not divisible
+- but the row still shows `37` batches
+
+So the apply-to-schedule logic is not persisting the same final adjusted volume shown in the preview.
+
+---
+
+## REQUIRED BEHAVIOR
+
+When a preview row shows an app-adjusted volume in orange, that adjusted volume must be the one applied to schedule.
+
+### In this example:
+Preview shows:
+- `148 MT`
+- `37 batches`
+
+After applying to schedule, the order table must also show:
+- `148 MT`
+- `37 batches`
+
+Do not revert to:
+- the original raw volume (`145 MT`)
+after apply.
+
+---
+
+## 1. USE THE FINAL DISPLAYED / RESOLVED VOLUME AS THE SOURCE OF TRUTH FOR APPLY
+
+The volume used during apply-to-schedule must be the same final resolved volume shown in the preview row.
+
+This includes:
+- app-adjusted divisible volume
+- user override volume
+- combined effective volume
+- any final displayed volume already resolved in preview
+
+Do not use:
+- raw/original volume
+- pre-adjusted volume
+- stale base order volume
+
+If the preview row shows the bold/active volume as the operational volume, that is the value that must be saved.
+
+---
+
+## 2. ENSURE APPLY-TO-SCHEDULE SAVES THE SAME VOLUME THE PREVIEW DISPLAYS
+
+If the preview row shows:
+- `148 MT`
+
+then the scheduled/applied order record must persist:
+- `148 MT`
+
+not:
+- `145 MT`
+
+The preview and applied schedule must use the same final value.
+
+---
+
+## 3. KEEP BATCH COUNT AND VOLUME CONSISTENT AFTER APPLY
+
+After applying:
+- `volume`
+- `batch size`
+- `batches`
+
+must still be internally consistent.
+
+In this case:
+- batch size = `4`
+- batches = `37`
+- volume must therefore be `148 MT`
+
+The system must not allow:
+- `145 MT`
+- `37 batches`
+
+because that is mathematically inconsistent.
+
+---
+
+## 4. APPLY THE SAME FINAL-VOLUME LOGIC USED IN THE PREVIEW
+
+The apply pipeline should reuse the same resolved volume source that the preview renderer uses.
+
+If needed, introduce or reuse a shared helper such as:
+
+```javascript
+function getFinalAppliedVolume(order) {
+  return getFinalDisplayedOrderVolume(order);
+}
+```
+
+Then use that value when writing to schedule.
+
+Do not let preview and apply derive volume from different fields.
+
+---
+
+## 5. IF THE PREVIEW STORES A RESOLVED DISPLAY VOLUME FIELD, PERSIST THAT FIELD
+
+If the preview already enriches each row with something like:
+- `_displayVolumeMT`
+- `_finalVolumeMT`
+- `_effectiveVolumeMT`
+
+then apply-to-schedule should use that exact field when persisting the order.
+
+Example:
+```javascript
+const appliedVolume = order._displayVolumeMT;
+```
+
+This avoids divergence between preview and final saved data.
+
+---
+
+## 6. DO NOT TREAT ORANGE ADJUSTED VOLUME AS PURELY VISUAL
+
+The orange adjusted volume is not just decorative.
+
+It represents the actual operational volume that ensures divisibility by batch size.
+
+So if the preview shows orange `148 MT`, that means:
+- the app already decided that `148 MT` is the valid scheduled production quantity
+
+That adjusted quantity must carry forward into the actual schedule.
+
+---
+
+## 7. REVIEW THIS EXACT CASE
+
+Please verify this exact example:
+
+### Preview row
+- Item: `Elite XP Startex, Mini-pellet 50kg`
+- Preview volume: `148 MT` (orange)
+- Batch size: `4`
+- Batches: `37`
+
+### Applied schedule currently shows
+- Volume: `145 MT`
+- Batch size: `4`
+- Batches: `37`
+
+This is incorrect.
+
+Expected applied result:
+- Volume: `148 MT`
+- Batch size: `4`
+- Batches: `37`
+
+---
+
+## 8. ADD DEBUG LOGGING TO VERIFY APPLY PAYLOAD
+
+Temporarily log:
+
+```javascript
+console.debug('[Apply To Schedule Volume Check]', {
+  orderId: order.id,
+  item: order.item_description,
+  originalVolume: order.original_volume_mt,
+  previewDisplayedVolume: order._displayVolumeMT ?? order.display_volume_mt,
+  appliedVolume: payload.volume_mt,
+  batchSize: payload.batch_size,
+  batches: payload.batches,
+});
+```
+
+This will help confirm:
+- preview and apply are using the same resolved volume
+- adjusted orange volumes are not lost during save
+
+---
+
+## 9. VERIFICATION
+
+1. ✅ App-adjusted orange preview volumes are preserved when applying to schedule
+2. ✅ The applied order table shows the same final volume as the preview
+3. ✅ Volume, batch size, and batches remain mathematically consistent after apply
+4. ✅ Raw/original volume is no longer incorrectly saved when an adjusted volume is already being used in preview
+5. ✅ In the example case, `148 MT` remains `148 MT` after apply, not `145 MT`

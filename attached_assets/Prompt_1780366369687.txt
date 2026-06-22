@@ -1,0 +1,166 @@
+Please add a **loading state to confirmation buttons** in the order-action modals so users get clear feedback that their click is already being processed.
+
+---
+
+## 1. ADD A LOADING STATE TO THE CONFIRM BUTTONS IN THESE MODALS
+
+Please add a visible loading/processing state to the confirmation buttons in the following modals:
+
+- `Cut Order`
+- `Merge Back`
+- `Uncombine Order`
+
+### Goal
+When the user clicks the confirm action, the UI should clearly show that the request is already being processed.
+
+### Expected result
+After clicking confirm, the button should no longer look idle/clickable with no feedback.
+
+---
+
+## 2. APPLY THE LOADING STATE TO THESE CONFIRM BUTTONS
+
+Please apply the loading state to buttons such as:
+
+- `Confirm Cut`
+- `Confirm Merge`
+- `Confirm Uncombine`
+
+### Expected behavior
+After the user clicks the confirm button:
+- show a loading indicator/spinner
+- disable repeated clicking
+- optionally update the button text to a processing state
+
+### Example text
+- `Cutting...`
+- `Merging...`
+- `Uncombining...`
+
+### Expected result
+Users can clearly tell the action is already in progress.
+
+---
+
+## 3. PREVENT DOUBLE-CLICK / DUPLICATE SUBMISSIONS WHILE PROCESSING
+
+Please disable the confirm button while the action is running.
+
+### Goal
+Avoid duplicate clicks or duplicate requests caused by lack of feedback.
+
+### Expected result
+Once the user clicks confirm, the button should not be clickable again until the action completes or fails.
+
+---
+
+## 4. KEEP THE LOADING STATE VISIBLE UNTIL THE ACTION COMPLETES OR FAILS
+
+Please make sure the loading state remains active for the duration of the operation.
+
+### Expected result
+The loading state should:
+- start immediately after confirm click
+- remain visible while processing
+- stop only when the action successfully finishes or an error occurs
+
+---
+
+## 5. IF THE ACTION FAILS, REMOVE THE LOADING STATE AND ALLOW RETRY
+
+If the action does not complete successfully:
+- stop the loading state
+- re-enable the button
+- allow the user to retry
+
+### Expected result
+The modal should not get stuck in a loading state after failure.
+
+---
+
+## 6. PRESERVE THE EXISTING MODAL CONTENT AND LOGIC
+
+This request is only for improving the user feedback on confirm actions.
+
+### Important
+Do not change the existing business logic of:
+- cutting
+- merging back
+- uncombining
+
+### Expected result
+The workflows behave the same, but now provide proper processing feedback.
+
+---
+
+## 7. APPLY THIS CONSISTENTLY TO ALL THREE MODALS
+
+Please make sure the loading behavior is implemented consistently across:
+- Cut Order modal
+- Merge Back modal
+- Uncombine Order modal
+
+### Expected result
+All three modals behave in the same predictable way when confirming actions.
+
+---
+
+## IMPORTANT
+
+Please add a loading state to the confirmation buttons in:
+
+- `Cut Order`
+- `Merge Back`
+- `Uncombine Order`
+
+So that when the user clicks confirm:
+- the button shows a loading/processing state
+- duplicate clicking is prevented
+- users know the action is already being processed
+
+This is needed because currently users can click but have no clear feedback that anything is happening.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log modal confirm processing state.
+
+```javascript
+console.debug('[Order Action Modal Confirm Click]', {
+  modalType, // 'cut' | 'merge_back' | 'uncombine'
+  orderId,
+  loadingStarted: true,
+});
+```
+
+```javascript
+console.debug('[Order Action Modal Loading State]', {
+  modalType,
+  orderId,
+  confirmButtonDisabled: true,
+  loadingVisible: true,
+});
+```
+
+```javascript
+console.debug('[Order Action Modal Processing Complete]', {
+  modalType,
+  orderId,
+  success,
+  loadingEnded: true,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ `Confirm Cut` shows loading state after click
+2. ✅ `Confirm Merge` shows loading state after click
+3. ✅ `Confirm Uncombine` shows loading state after click
+4. ✅ Buttons are disabled while processing
+5. ✅ Duplicate submissions are prevented
+6. ✅ Loading state clears on success
+7. ✅ Loading state clears on failure and allows retry
+8. ✅ No UI errors or console errors are introduced

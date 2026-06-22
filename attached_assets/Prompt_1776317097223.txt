@@ -1,0 +1,397 @@
+```
+Fix the upload auto-sequence Apply to Schedule to use DB mutations:
+
+---
+
+## 1. THE onApplySequence HANDLER MUST USE DB MUTATIONS
+
+The upload preview calls `onApplySequence(sequencedResults)` where `sequencedResults` is an object keyed by line with arrays of orders. The parent handler must do the same thing as the plant-level apply:
+
+```javascript
+async function handleUploadApplySequence(sequencedResults) {
+  setIsApplying(true);
+  
+  try {
+    const mutationPayloads = [];
+    
+    for (const [line, lineOrders] of Object.entries(sequencedResults)) {
+      if (!lineOrders || lineOrders.length === 0) continue;
+      
+      let prioCounter = 1;
+      
+      for (const order of lineOrders) {
+        
+        if (order._isCombined && order._combinedFrom && order._combinedFrom.length > 1) {
+          // === COMBINED ORDER ===
+          const leadId = order.id;
+          const childIds = order._combinedFrom.map(sub => sub.id);
+          const combinedVolume = parseFloat(order.volume) || 0;
+          
+          // Lead order
+          mutationPayloads.push({
+            id: leadId,
+            data: {
+              feedmill_line: line,
+              priority_seq: prioCounter,
+              volume_override: combinedVolume,
+              original_order_ids: childIds,
+              parent_id: null,
+            }
+          });
+          
+          // Child orders
+          const children = order._combinedFrom.filter(sub => sub.id !== leadId);
+          for (const child of children) {
+            mutationPayloads.push({
+              id: child.id,
+              data: {
+                parent_id: leadId,
+                feedmill_line: line,
+                priority_seq: null,
+              }
+            });
+          }
+          
+          prioCounter++;
+          
+        } else {
+          // === REGULAR ORDER ===
+          const updateData = {
+            feedmill_line: line,
+            priority_seq: prioCounter,
+          };
+          
+          // Clear any previous combine state
+          if (order.parent_id) {
+            updateData.parent_id = null;
+          }
+          if (order.volume_override) {
+            updateData.volume_override = null;
+            updateData.original_order_ids = null;
+          }
+          
+          mutationPayloads.push({
+            id: order.id,
+            data: updateData
+          });
+          
+          prioCounter++;
+        }
+      }
+    }
+    
+    console.log(`=== Upload Apply: ${mutationPayloads.length} mutations ===`);
+    mutationPayloads.forEach(mp => {
+      console.log(`  Order ${mp.id}:`, JSON.stringify(mp.data));
+    });
+    
+    // Validate all IDs exist
+    const invalidPayloads = mutationPayloads.filter(mp => !mp.id);
+    if (invalidPayloads.length > 0) {
+      console.error('Found payloads without ID:', invalidPayloads);
+      throw new Error(`${invalidPayloads.length} orders have no ID`);
+    }
+    
+    // Execute mutations in batches
+    const BATCH_SIZE = 10;
+    for (let i = 0; i < mutationPayloads.length; i += BATCH_SIZE) {
+      const batch = mutationPayloads.slice(i, i + BATCH_SIZE);
+      await Promise.all(
+        batch.map(payload =>
+          updateOrderMutation.mutateAsync({ id: payload.id, data: payload.data })
+        )
+      );
+      console.log(`  Batch ${Math.floor(i / BATCH_SIZE) + 1} of ${Math.ceil(mutationPayloads.length / BATCH_SIZE)} complete`);
+    }
+    
+    // Invalidate cache to trigger refetch
+    await queryClient.invalidateQueries({ queryKey: ["orders"] });
+    
+    // Wait for refetch
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
+    // Cascade schedule for each affected line
+    for (const [line, lineOrders] of Object.entries(sequencedResults)) {
+      if (!lineOrders || lineOrders.length === 0) continue;
+      
+      // Build cascade list — only top-level orders (not children of combined)
+      const topLevelOrders = lineOrders.map((order, index) => ({
+        ...order,
+        id: order.id,
+        priority_seq: index + 1,
+        feedmill_line: line,
+      }));
+      
+      console.log(`  Cascading ${line}: ${topLevelOrders.length} orders`);
+      await cascadeSchedule(topLevelOrders, 0);
+    }
+    
+    // Final refetch
+    await queryClient.invalidateQueries({ queryKey: ["orders"] });
+    
+    // Close preview and notify
+    setShowUploadAutoSequence(false);
+    setIsApplying(false);
+    
+    const totalOrders = Object.values(sequencedResults).reduce((sum, lo) => sum + lo.length, 0);
+    const combinedCount = Object.values(sequencedResults).reduce((sum, lo) =>
+      sum + lo.filter(o => o._isCombined).length, 0
+    );
+    const linesUsed = Object.keys(sequencedResults).filter(line =>
+      (sequencedResults[line] || []).length > 0
+    ).length;
+    
+    toast.success(
+      `Auto-sequence applied: ${totalOrders} orders across ${linesUsed} lines.${combinedCount > 0 ? ` ${combinedCount} combined groups.` : ''}`
+    );
+    
+  } catch (error) {
+    console.error('Error applying upload auto-sequence:', error);
+    setIsApplying(false);
+    toast.error(`Failed to apply: ${error.message || 'Please try again.'}`);
+  }
+}
+```
+
+---
+
+## 2. ALSO FIX THE PLANT-LEVEL APPLY — SAME PATTERN
+
+Make sure the plant-level `handlePlantApply` uses the exact same pattern. Create a shared function:
+
+```javascript
+async function applySequencedResultsToDB(sequencedResults, options = {}) {
+  const { onClose, label = 'Auto-sequence' } = options;
+  
+  const mutationPayloads = [];
+  
+  for (const [line, lineOrders] of Object.entries(sequencedResults)) {
+    if (!lineOrders || lineOrders.length === 0) continue;
+    
+    let prioCounter = 1;
+    
+    for (const order of lineOrders) {
+      
+      if (order._isCombined && order._combinedFrom && order._combinedFrom.length > 1) {
+        const leadId = order.id;
+        const childIds = order._combinedFrom.map(sub => sub.id);
+        const combinedVolume = parseFloat(order.volume) || 0;
+        
+        // Lead
+        mutationPayloads.push({
+          id: leadId,
+          data: {
+            feedmill_line: line,
+            priority_seq: prioCounter,
+            volume_override: combinedVolume,
+            original_order_ids: childIds,
+            parent_id: null,
+          }
+        });
+        
+        // Children
+        const children = order._combinedFrom.filter(sub => sub.id !== leadId);
+        for (const child of children) {
+          mutationPayloads.push({
+            id: child.id,
+            data: {
+              parent_id: leadId,
+              feedmill_line: line,
+              priority_seq: null,
+            }
+          });
+        }
+        
+        prioCounter++;
+        
+      } else {
+        const updateData = {
+          feedmill_line: line,
+          priority_seq: prioCounter,
+        };
+        
+        if (order.parent_id) updateData.parent_id = null;
+        if (order.volume_override) {
+          updateData.volume_override = null;
+          updateData.original_order_ids = null;
+        }
+        
+        mutationPayloads.push({ id: order.id, data: updateData });
+        prioCounter++;
+      }
+    }
+  }
+  
+  // Validate
+  const invalid = mutationPayloads.filter(mp => !mp.id);
+  if (invalid.length > 0) {
+    throw new Error(`${invalid.length} orders have no ID — cannot apply.`);
+  }
+  
+  console.log(`=== ${label}: ${mutationPayloads.length} mutations ===`);
+  
+  // Execute in batches
+  const BATCH_SIZE = 10;
+  for (let i = 0; i < mutationPayloads.length; i += BATCH_SIZE) {
+    const batch = mutationPayloads.slice(i, i + BATCH_SIZE);
+    await Promise.all(
+      batch.map(p => updateOrderMutation.mutateAsync({ id: p.id, data: p.data }))
+    );
+  }
+  
+  // Refetch
+  await queryClient.invalidateQueries({ queryKey: ["orders"] });
+  await new Promise(resolve => setTimeout(resolve, 500));
+  
+  // Cascade per line
+  for (const [line, lineOrders] of Object.entries(sequencedResults)) {
+    if (!lineOrders || lineOrders.length === 0) continue;
+    
+    const topLevel = lineOrders.map((o, i) => ({
+      ...o,
+      id: o.id,
+      priority_seq: i + 1,
+      feedmill_line: line,
+    }));
+    
+    await cascadeSchedule(topLevel, 0);
+  }
+  
+  // Final refetch
+  await queryClient.invalidateQueries({ queryKey: ["orders"] });
+  
+  // Stats
+  const totalOrders = Object.values(sequencedResults).reduce((s, lo) => s + lo.length, 0);
+  const combinedCount = Object.values(sequencedResults).reduce((s, lo) =>
+    s + lo.filter(o => o._isCombined).length, 0
+  );
+  const linesUsed = Object.keys(sequencedResults).filter(l =>
+    (sequencedResults[l] || []).length > 0
+  ).length;
+  
+  return { totalOrders, combinedCount, linesUsed };
+}
+```
+
+---
+
+## 3. USE THE SHARED FUNCTION IN ALL THREE APPLY HANDLERS
+
+```javascript
+// Upload apply
+async function handleUploadApplySequence(sequencedResults) {
+  setIsApplying(true);
+  try {
+    const stats = await applySequencedResultsToDB(sequencedResults, {
+      label: 'Upload Auto-Sequence'
+    });
+    setShowUploadAutoSequence(false);
+    setIsApplying(false);
+    toast.success(
+      `Auto-sequence applied: ${stats.totalOrders} orders across ${stats.linesUsed} lines.${stats.combinedCount > 0 ? ` ${stats.combinedCount} combined groups.` : ''}`
+    );
+  } catch (error) {
+    console.error('Upload apply error:', error);
+    setIsApplying(false);
+    toast.error(`Failed to apply: ${error.message}`);
+  }
+}
+
+// Plant-level apply
+async function handlePlantApply(sequencedResults) {
+  setIsApplying(true);
+  try {
+    const stats = await applySequencedResultsToDB(sequencedResults, {
+      label: 'Plant-Level Auto-Sequence'
+    });
+    setShowPlantAutoSequencePreview(false);
+    setIsApplying(false);
+    toast.success(
+      `Plant-level auto-sequence applied: ${stats.totalOrders} orders across ${stats.linesUsed} lines.${stats.combinedCount > 0 ? ` ${stats.combinedCount} combined groups.` : ''}`
+    );
+  } catch (error) {
+    console.error('Plant apply error:', error);
+    setIsApplying(false);
+    toast.error(`Failed to apply: ${error.message}`);
+  }
+}
+
+// Per-line apply
+async function handleLineApply({ targetLine, sequencedOrders, affectedSourceLines }) {
+  setIsApplying(true);
+  try {
+    const sequencedResults = { [targetLine]: sequencedOrders };
+    const stats = await applySequencedResultsToDB(sequencedResults, {
+      label: `Line Auto-Sequence (${targetLine})`
+    });
+    setShowLineAutoSequencePreview(false);
+    setIsApplying(false);
+    toast.success(
+      `Auto-sequence applied to ${targetLine}: ${stats.totalOrders} orders.${stats.combinedCount > 0 ? ` ${stats.combinedCount} combined.` : ''}`
+    );
+  } catch (error) {
+    console.error('Line apply error:', error);
+    setIsApplying(false);
+    toast.error(`Failed to apply: ${error.message}`);
+  }
+}
+```
+
+---
+
+## 4. WIRE UP THE UPLOAD PREVIEW
+
+```jsx
+{showUploadAutoSequence && uploadContext && (
+  <UploadAutoSequencePreview
+    uploadContext={uploadContext}
+    allOrders={enrichedOrders}
+    masterData={masterData}
+    n10dData={n10dData}
+    changeoverRules={changeoverRules}
+    onApplySequence={handleUploadApplySequence}
+    onUploadOnly={() => {
+      setShowUploadAutoSequence(false);
+      toast.success('Orders uploaded without sequencing.');
+    }}
+    onCancel={() => {
+      setShowUploadAutoSequence(false);
+    }}
+  />
+)}
+```
+
+---
+
+## VERIFICATION
+
+### Shared function used by all three
+1. ✅ Upload apply uses applySequencedResultsToDB
+2. ✅ Plant-level apply uses applySequencedResultsToDB
+3. ✅ Per-line apply uses applySequencedResultsToDB
+4. ✅ All three use the exact same mutation pattern
+
+### DB mutations
+5. ✅ Uses updateOrderMutation.mutateAsync (not setAllOrders)
+6. ✅ Regular orders: feedmill_line + priority_seq updated
+7. ✅ Combined leads: volume_override + original_order_ids + feedmill_line + priority_seq
+8. ✅ Combined children: parent_id + feedmill_line + priority_seq: null
+9. ✅ Previous combine state cleared (parent_id, volume_override, original_order_ids)
+
+### Validation
+10. ✅ Checks all payloads have an ID before executing
+11. ✅ Logs all mutations for debugging
+12. ✅ Throws error if any order has no ID
+
+### Execution
+13. ✅ Batched in groups of 10
+14. ✅ React Query invalidated after mutations
+15. ✅ cascadeSchedule called per line
+16. ✅ Final refetch after cascade
+
+### Error handling
+17. ✅ Try/catch wraps entire flow
+18. ✅ isApplying cleared on error
+19. ✅ Error toast with message shown
+20. ✅ Console.error for debugging
+```

@@ -1,0 +1,191 @@
+```
+Implement the following fix:
+
+---
+
+## FIX: AVAIL DATE TOOLTIP — TRIGGER ON ENTIRE CELL, NOT JUST ICON
+
+The stock level tooltip currently only shows when hovering precisely on the small icon. It should show when hovering anywhere on the Avail Date cell.
+
+---
+
+### THE PROBLEM
+
+- User has to precisely center mouse on the tiny icon (⚠ or ✅) to see the tooltip
+- Hovering on the text "prio replenish" or "April 11, 2026" does NOT show the tooltip
+- This is inconvenient and hard to use
+
+### THE FIX
+
+The ENTIRE Avail Date `<td>` cell is the hover trigger. Hovering anywhere inside the cell — on the text, the icon, or empty space — shows the tooltip.
+
+```jsx
+function AvailDateCell({ order, n10dData, dailyColumns, today }) {
+  const [showTooltip, setShowTooltip] = useState(false);
+  const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
+  const timeoutRef = useRef(null);
+  
+  // Get icon data
+  const iconData = getAvailDateIcon(order, n10dData, dailyColumns, today);
+  
+  // Only show tooltip if there's stock data
+  const hasStockData = iconData !== null;
+  
+  function handleCellMouseEnter(e) {
+    if (!hasStockData) return;
+    
+    timeoutRef.current = setTimeout(() => {
+      const pos = clampToViewport(e.clientX + 12, e.clientY + 12, 280, 100);
+      setTooltipPos(pos);
+      setShowTooltip(true);
+    }, 300);
+  }
+  
+  function handleCellMouseMove(e) {
+    if (!hasStockData) return;
+    
+    if (showTooltip) {
+      const pos = clampToViewport(e.clientX + 12, e.clientY + 12, 280, 100);
+      setTooltipPos(pos);
+    }
+  }
+  
+  function handleCellMouseLeave() {
+    clearTimeout(timeoutRef.current);
+    setShowTooltip(false);
+  }
+  
+  return (
+    <td
+      className="avail-date-cell"
+      onMouseEnter={handleCellMouseEnter}
+      onMouseMove={handleCellMouseMove}
+      onMouseLeave={handleCellMouseLeave}
+    >
+      {/* The avail date content */}
+      <div className="avail-date-content">
+        <span className="avail-date-text">
+          {order.avail_date}
+        </span>
+        {iconData && (
+          <span 
+            className="avail-date-icon"
+            style={{ color: iconData.color }}
+          >
+            {iconData.icon}
+          </span>
+        )}
+      </div>
+      
+      {/* Tooltip — rendered via portal */}
+      {showTooltip && hasStockData && (
+        <TooltipPortal>
+          <AvailDateTooltip 
+            order={order} 
+            n10dData={n10dData}
+            dailyColumns={dailyColumns}
+            today={today}
+            position={tooltipPos} 
+          />
+        </TooltipPortal>
+      )}
+    </td>
+  );
+}
+```
+
+### CSS — ENTIRE CELL IS HOVERABLE
+
+```css
+.avail-date-cell {
+  cursor: default;
+  position: relative;
+}
+
+/* When stock data is available, show pointer on entire cell */
+.avail-date-cell.has-stock-data {
+  cursor: pointer;
+}
+
+/* Remove old hover target that was only on the icon */
+/* DELETE if exists: */
+/*
+.avail-date-icon:hover { ... }
+.avail-date-icon { cursor: pointer; padding: 4px; ... }
+*/
+
+/* Icon styling — no special hover target needed anymore */
+.avail-date-icon {
+  margin-left: 4px;
+  font-size: 12px;
+  display: inline;
+  vertical-align: middle;
+}
+
+/* Subtle hover effect on entire cell */
+.avail-date-cell.has-stock-data:hover {
+  background: rgba(0, 0, 0, 0.02);
+  border-radius: 4px;
+}
+```
+
+### ADD has-stock-data CLASS CONDITIONALLY
+
+```jsx
+<td
+  className={`avail-date-cell ${hasStockData ? 'has-stock-data' : ''}`}
+  onMouseEnter={handleCellMouseEnter}
+  onMouseMove={handleCellMouseMove}
+  onMouseLeave={handleCellMouseLeave}
+>
+```
+
+### TOOLTIP POSITION — NEAR CURSOR
+
+```javascript
+function clampToViewport(x, y, tooltipWidth, tooltipHeight) {
+  const viewportWidth = window.innerWidth;
+  const viewportHeight = window.innerHeight;
+  const padding = 8;
+  
+  if (x + tooltipWidth + padding > viewportWidth) {
+    x = x - tooltipWidth - 24;
+  }
+  
+  if (y + tooltipHeight + padding > viewportHeight) {
+    y = y - tooltipHeight - 24;
+  }
+  
+  if (x < padding) x = padding;
+  if (y < padding) y = padding;
+  
+  return { x, y };
+}
+```
+
+---
+
+### VERIFICATION
+
+1. Hover on "prio replenish" text
+   - ✅ Tooltip shows after 300ms
+
+2. Hover on "April 11, 2026" text
+   - ✅ Tooltip shows after 300ms
+
+3. Hover on ✅ or ⚠ icon
+   - ✅ Tooltip shows after 300ms
+
+4. Hover on empty space in avail date cell
+   - ✅ Tooltip shows after 300ms
+
+5. Hover on avail date cell WITHOUT stock data
+   - ✅ No tooltip (no N10D data for this product)
+
+6. Mouse leaves cell
+   - ✅ Tooltip disappears immediately
+
+7. Tooltip position
+   - ✅ Appears near cursor
+   - ✅ Does not go off-screen
+```

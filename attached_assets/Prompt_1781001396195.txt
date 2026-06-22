@@ -1,0 +1,145 @@
+Please update the **order history / audit trail** so it records these two specific events more accurately:
+
+- when a user creates a new order using the **Add Order** feature
+- when a **mash order is diverted** because of a **line shutdown**
+
+This request is specifically about those two workflows.
+
+---
+
+## 1. INCLUDE `ADD ORDER` CREATION EVENTS IN ORDER HISTORY
+
+Please make sure that when a user creates a new order using the **Add Order** feature, that action is recorded in the order history.
+
+### Important
+This is specifically about:
+- manually adding a new order through the **Add Order** feature
+
+This is **not** a general request for every possible type of order creation/import.
+
+### Goal
+Make manually created orders traceable from the moment they are added through the Add Order flow.
+
+### Expected result
+When a user adds a new order, the history shows a clear event such as:
+- `Order Created`
+- or `Added via Add Order`
+
+---
+
+## 2. INCLUDE `MASH ORDER DIVERTED` EVENTS CAUSED BY LINE SHUTDOWN
+
+Please make sure that when a mash order is diverted because a line is in **shutdown**, that action is recorded in the order history.
+
+### Important
+This is specifically about the mash diversion behavior used when:
+- a line is shut down
+- and a mash order is diverted accordingly
+
+### Goal
+Make mash diversion due to shutdown traceable in the order history.
+
+### Expected result
+When a mash order is diverted because of a shutdown, the history shows a clear event such as:
+- `Mash Order Diverted`
+- or `Mash Diverted Due to Line Shutdown`
+
+---
+
+## 3. MAKE THE HISTORY ENTRY CLEAR ABOUT THE SOURCE OF THE ACTION
+
+Please make the history entries clearly reflect what caused the event.
+
+### For Add Order
+The entry should clearly indicate that the order was created through:
+- the **Add Order** feature
+
+### For Mash Diversion
+The entry should clearly indicate that the diversion happened because of:
+- a **line shutdown**
+
+### Goal
+Avoid vague history entries that do not explain what actually happened.
+
+### Expected result
+Users can immediately understand both:
+- what action occurred
+- and what triggered it
+
+---
+
+## 4. INCLUDE RELEVANT CONTEXT IN THE HISTORY ENTRY IF AVAILABLE
+
+If available, please include useful context such as:
+
+### For Add Order
+- timestamp
+- created by user / system
+- line
+- order ID / material
+
+### For Mash Diversion
+- timestamp
+- original line
+- diverted line
+- shutdown line
+- reason / trigger
+
+### Goal
+Make the history more useful for audit, tracing, and operational review.
+
+### Expected result
+The order history gives enough context to understand the event without needing to inspect the full workflow manually.
+
+---
+
+## IMPORTANT
+
+Please update the order history so that it explicitly records:
+
+- orders created through the **Add Order** feature
+- mash orders diverted because of a **line shutdown**
+
+This is needed so these two important workflows are properly reflected in the order history / audit trail.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log these history events when written.
+
+```javascript
+console.debug('[Order History Add Order Created]', {
+  orderId,
+  createdVia: 'Add Order',
+  timestamp,
+});
+```
+
+```javascript
+console.debug('[Order History Mash Diverted Due To Shutdown]', {
+  orderId,
+  shutdownLine,
+  originalLine,
+  divertedLine,
+  timestamp,
+});
+```
+
+```javascript
+console.debug('[Order History Event Recorded]', {
+  orderId,
+  eventType,
+  timestamp,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Orders created via the Add Order feature are recorded in history
+2. ✅ Mash orders diverted due to line shutdown are recorded in history
+3. ✅ History entries clearly describe the action and its trigger
+4. ✅ Relevant context is included when available
+5. ✅ No UI errors or console errors are introduced

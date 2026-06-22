@@ -1,0 +1,281 @@
+The order has changed from the previous snip. Let me verify with the new sequence:
+
+**Order 1: 3 MT, Rate 19.31, CO 0.17**
+- Start: 08:00 AM
+- Production: 3 / 19.31 = 0.155 hrs = 9.3 min
+- Completion should be: 08:00 + 9.3 min = **08:09 AM**
+- App shows: **08:00 AM** ❌ (not adding production time at all)
+
+**Order 2: 24 MT, Rate 19.40, CO 0.83**
+- Start: 08:09 AM + 0.17 hrs (Order 1's CO = 10.2 min) = **08:19 AM**
+- Production: 24 / 19.40 = 1.237 hrs = 74.2 min
+- Completion should be: 08:19 + 74.2 min = **09:34 AM**
+- App shows: **08:10 AM** ❌
+
+**Order 3: 80 MT, Rate 19.10, CO 0.83**
+- Start: 09:34 AM + 0.83 hrs (Order 2's CO = 49.8 min) = **10:24 AM**
+- Production: 80 / 19.10 = 4.188 hrs = 251.3 min
+- Completion should be: 10:24 + 251.3 min = **02:35 PM**
+- App shows: **09:00 AM** ❌
+
+**Order 4: 39 MT, Rate 19.51, CO 0.17**
+- Start: 02:35 PM + 0.83 hrs (Order 3's CO = 49.8 min) = **03:25 PM**
+- Production: 39 / 19.51 = 1.999 hrs = 119.9 min
+- Completion should be: 03:25 + 119.9 min = **05:25 PM**
+- App shows: **09:49 AM** ❌
+
+The app is clearly broken — it looks like it's adding only the changeover and ignoring production time, or it's resetting the start time for every order.
+
+```
+Fix the completion date calculation. It is currently calculating incorrectly — appears to be ignoring production time or resetting start times.
+
+---
+
+## THE EXACT FORMULA
+
+For each line, process orders in priority order (top to bottom):
+
+```
+FIRST ORDER:
+  startTime = user-set start date + start time (e.g., April 08, 2026 08:00 AM)
+  productionHours = volume / runRate
+  completionTime = startTime + productionHours (in hours, converted to milliseconds)
+
+EVERY SUBSEQUENT ORDER:
+  startTime = previousOrder.completionTime + previousOrder.changeover (in hours, converted to milliseconds)
+  productionHours = volume / runRate
+  completionTime = startTime + productionHours (in hours, converted to milliseconds)
+```
+
+**Key:**
+- `productionHours` = `volume / runRate` (e.g., 24 / 19.40 = 1.237 hours)
+- `changeover` = the PREVIOUS order's total changeover (`_changeoverTotal` or `changeover` field)
+- All time math must be done in milliseconds to avoid floating point errors
+
+---
+
+## THE EXACT FUNCTION
+
+```javascript
+function recalculateCompletionDates(allOrders) {
+  // Group orders by line
+  const ordersByLine = {};
+  allOrders.forEach(order => {
+    if (!ordersByLine[order.line]) {
+      ordersByLine[order.line] = [];
+    }
+    ordersByLine[order.line].push(order);
+  });
+  
+  Object.keys(ordersByLine).forEach(line => {
+    const lineOrders = ordersByLine[line].sort((a, b) => a.prio - b.prio);
+    
+    let previousCompletionMs = null;
+    let previousChangeoverHrs = 0;
+    
+    lineOrders.forEach((order, index) => {
+      // Skip Done and Cancelled
+      if (order.status === 'Done' || order.status === 'Cancel PO') {
+        if (order._calculatedCompletionTime) {
+          previousCompletionMs = order._calculatedCompletionTime.getTime();
+          previousChangeoverHrs = order._changeoverTotal ?? parseFloat(order.changeover) ?? 0;
+        }
+        return;
+      }
+      
+      // Get production hours
+      const volume = parseFloat(order.volume) || 0;
+      const runRate = parseFloat(order.run_rate) || 0;
+      const productionHours = runRate > 0 ? volume / runRate : 0;
+      
+      // Convert hours to milliseconds
+      const HOUR_MS = 60 * 60 * 1000;
+      const productionMs = productionHours * HOUR_MS;
+      
+      let startMs;
+      
+      if (index === 0 || previousCompletionMs === null) {
+        // FIRST order — use user-set start date/time
+        const startDateTime = getOrderStartDateTime(order);
+        if (!startDateTime) {
+          // No start time set — skip this order and all subsequent
+          previousCompletionMs = null;
+          previousChangeoverHrs = 0;
+          return;
+        }
+        startMs = startDateTime.getTime();
+      } else {
+        // SUBSEQUENT orders — start = previous completion + previous changeover
+        const changeoverMs = previousChangeoverHrs * HOUR_MS;
+        startMs = previousCompletionMs + changeoverMs;
+      }
+      
+      // Calculate completion
+      const completionMs = startMs + productionMs;
+      
+      // Store as Date objects
+      const startDate = new Date(startMs);
+      const completionDate = new Date(completionMs);
+      
+      order._calculatedStartTime = startDate;
+      order._calculatedCompletionTime = completionDate;
+      
+      // Format for display
+      order._displayStartDate = formatDateForDisplay(startDate);
+      order._displayStartTime = formatTimeForDisplay(startDate);
+      order._displayCompletionDate = formatDateForDisplay(completionDate);
+      order._displayCompletionTime = formatTimeForDisplay(completionDate);
+      order.completion_date = `${order._displayCompletionDate} ${order._displayCompletionTime}`;
+      
+      // Track for next order
+      previousCompletionMs = completionMs;
+      previousChangeoverHrs = order._changeoverTotal ?? parseFloat(order.changeover) ?? 0;
+    });
+  });
+}
+
+function getOrderStartDateTime(order) {
+  // Try to parse the user-set start date and time
+  if (order.start_date && order.start_time) {
+    return parseDateAndTime(order.start_date, order.start_time);
+  }
+  if (order.start_date) {
+    return parseDateAndTime(order.start_date, '08:00 AM');
+  }
+  return null;
+}
+
+function parseDateAndTime(dateStr, timeStr) {
+  try {
+    // Combine date and time strings into a Date object
+    const combined = `${dateStr} ${timeStr}`;
+    const date = new Date(combined);
+    if (!isNaN(date.getTime())) return date;
+    
+    // Try alternative parsing
+    // Handle formats like "April 08, 2026" + "08:00 AM"
+    const dateClean = dateStr.replace(',', '');
+    const alt = new Date(`${dateClean} ${timeStr}`);
+    if (!isNaN(alt.getTime())) return alt;
+    
+    return null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function formatDateForDisplay(date) {
+  if (!date) return '';
+  return date.toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'long',
+    day: '2-digit'
+  });
+}
+
+function formatTimeForDisplay(date) {
+  if (!date) return '';
+  return date.toLocaleTimeString('en-US', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true
+  });
+}
+```
+
+---
+
+## STEP-BY-STEP TRACE WITH CURRENT DATA
+
+To verify the code works, here is the exact trace:
+
+```
+HOUR_MS = 3,600,000 ms
+
+Order 1: 3 MT, Rate 19.31, CO 0.17
+  startMs = April 08, 2026 08:00:00 AM = let's say T₀
+  productionHours = 3 / 19.31 = 0.15535 hrs
+  productionMs = 0.15535 * 3,600,000 = 559,275 ms = 9 min 19 sec
+  completionMs = T₀ + 559,275
+  completionTime = 08:09 AM
+  previousCompletionMs = completionMs
+  previousChangeoverHrs = 0.17
+
+Order 2: 24 MT, Rate 19.40, CO 0.83
+  changeoverMs = 0.17 * 3,600,000 = 612,000 ms = 10 min 12 sec
+  startMs = previousCompletionMs + 612,000 = 08:09 AM + 10:12 = 08:19 AM
+  productionHours = 24 / 19.40 = 1.23711 hrs
+  productionMs = 1.23711 * 3,600,000 = 4,453,608 ms = 1 hr 14 min 14 sec
+  completionMs = 08:19 AM + 1:14:14 = 09:34 AM
+  previousCompletionMs = completionMs
+  previousChangeoverHrs = 0.83
+
+Order 3: 80 MT, Rate 19.10, CO 0.83
+  changeoverMs = 0.83 * 3,600,000 = 2,988,000 ms = 49 min 48 sec
+  startMs = 09:34 AM + 49:48 = 10:23 AM
+  productionHours = 80 / 19.10 = 4.18848 hrs
+  productionMs = 4.18848 * 3,600,000 = 15,078,534 ms = 4 hr 11 min 19 sec
+  completionMs = 10:23 AM + 4:11:19 = 02:35 PM
+  previousCompletionMs = completionMs
+  previousChangeoverHrs = 0.83
+
+Order 4: 39 MT, Rate 19.51, CO 0.17
+  changeoverMs = 0.83 * 3,600,000 = 2,988,000 ms = 49 min 48 sec
+  startMs = 02:35 PM + 49:48 = 03:25 PM
+  productionHours = 39 / 19.51 = 1.99898 hrs
+  productionMs = 1.99898 * 3,600,000 = 7,196,318 ms = 1 hr 59 min 56 sec
+  completionMs = 03:25 PM + 1:59:56 = 05:25 PM
+```
+
+### EXPECTED RESULTS
+
+| Order | Volume | Start | Completion |
+|---|---|---|---|
+| 1 | 3 MT | 08:00 AM | 08:09 AM |
+| 2 | 24 MT | 08:19 AM | 09:34 AM |
+| 3 | 80 MT | 10:23 AM | 02:35 PM |
+| 4 | 39 MT | 03:25 PM | 05:25 PM |
+
+---
+
+## IMPORTANT DEBUGGING CHECKS
+
+Add console logs to verify the calculation is working:
+
+```javascript
+// Add temporarily for debugging
+console.log(`Order ${order.prio}: ${order.item_description}`);
+console.log(`  Volume: ${volume}, Rate: ${runRate}, ProdHrs: ${productionHours.toFixed(4)}`);
+console.log(`  ProdMs: ${productionMs}`);
+console.log(`  PrevCompletionMs: ${previousCompletionMs}`);
+console.log(`  PrevCO: ${previousChangeoverHrs}, CO_Ms: ${previousChangeoverHrs * HOUR_MS}`);
+console.log(`  StartMs: ${startMs}, Start: ${new Date(startMs).toLocaleTimeString()}`);
+console.log(`  CompletionMs: ${completionMs}, Completion: ${new Date(completionMs).toLocaleTimeString()}`);
+```
+
+Ensure:
+1. `productionMs` is NOT zero
+2. `startMs` is NOT being reset to the same value for every order
+3. `previousCompletionMs` is updating after each order
+4. `completionMs = startMs + productionMs` (NOT startMs + changeoverMs or any other combination)
+
+---
+
+## VERIFICATION
+
+| Order | Volume | Rate | CO | Expected Start | Expected Completion |
+|---|---|---|---|---|---|
+| 1 (3 MT) | 3 | 19.31 | 0.17 | 08:00 AM | 08:09 AM |
+| 2 (24 MT) | 24 | 19.40 | 0.83 | 08:19 AM | 09:34 AM |
+| 3 (80 MT) | 80 | 19.10 | 0.83 | 10:23 AM | 02:35 PM |
+| 4 (39 MT) | 39 | 19.51 | 0.17 | 03:25 PM | 05:25 PM |
+
+1. ✅ Order 1 completion = start + production time only (no CO gap before first order)
+2. ✅ Order 2 start = Order 1 completion + Order 1 CO (0.17 hrs)
+3. ✅ Order 3 start = Order 2 completion + Order 2 CO (0.83 hrs)
+4. ✅ Order 4 start = Order 3 completion + Order 3 CO (0.83 hrs)
+5. ✅ Production time = volume / rate (changeover NOT included)
+6. ✅ All times cascade correctly
+7. ✅ No start time resets
+8. ✅ productionMs is never zero for non-zero volumes
+```

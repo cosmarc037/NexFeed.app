@@ -1,0 +1,189 @@
+Yes — that makes sense.
+
+If the AI strategy generation step is already producing the reasoning context needed for sequencing, then showing a separate progress step for:
+
+- **Generating per-row sequence insights (AI-powered)**
+
+can feel redundant and make the process look longer or more complex than it needs to.
+
+So yes, we can simplify the progress flow by **merging the per-row insight generation into the strategy options generation step** and only showing the strategy-options step in the modal.
+
+---
+
+# Recommended behavior
+
+## Keep only:
+**Generating strategy options per line (AI-powered)**
+
+## Remove:
+**Generating per-row sequence insights (AI-powered)**
+
+Even if the app still internally generates row insights during or after that stage, the modal should treat it as part of the same broader AI strategy generation phase.
+
+So:
+- UI becomes cleaner
+- fewer progress steps
+- less confusion
+- users understand it as one AI generation phase
+
+---
+
+# Important note
+This is mostly a **progress-modal / UX simplification**, not necessarily a backend removal.
+
+Meaning:
+- row insights can still be generated internally
+- but they should be considered part of the strategy generation pipeline
+- not shown as a separate visible step
+
+---
+
+# Detailed prompt
+
+```text
+Simplify the Plant-Level Auto-Sequence progress modal by merging the per-row sequence insight generation into the strategy generation step, and remove the separate visible step for per-row insights.
+
+---
+
+## OBJECTIVE
+
+The progress modal currently shows both:
+- `Generating strategy options per line (AI-powered)`
+- `Generating per-row sequence insights (AI-powered)`
+
+This feels redundant, because per-row sequence insights are effectively part of the strategy generation/output process.
+
+We want to simplify the progress flow so the user only sees the broader AI step:
+
+### Keep:
+- `Generating strategy options per line (AI-powered)`
+
+### Remove as a separate visible step:
+- `Generating per-row sequence insights (AI-powered)`
+
+Even if row-level insights are still generated internally, they should be treated as part of the strategy generation phase and not shown as a separate progress item.
+
+---
+
+## 1. REMOVE THE SEPARATE VISIBLE PROGRESS STEP FOR PER-ROW INSIGHTS
+
+In the progress modal UI:
+- remove the separate checklist/progress row:
+  - `Generating per-row sequence insights (AI-powered)`
+
+The modal should no longer display this as its own user-facing stage.
+
+---
+
+## 2. MERGE PER-ROW INSIGHT GENERATION INTO THE STRATEGY GENERATION PHASE
+
+If row-level insights are still being generated under the hood, keep that logic if needed, but treat it as part of:
+
+- `Generating strategy options per line (AI-powered)`
+
+In other words:
+- strategy generation and row insight generation should be grouped into one visible phase from the user’s perspective
+
+---
+
+## 3. DO NOT ADD AN EXTRA WAIT/STAGE JUST FOR THE MODAL
+
+If the app currently waits for:
+- strategy generation
+then
+- per-row insight generation
+
+and displays them separately,
+change the progress modal so it only shows the single AI phase.
+
+The modal should not add a second visible step for row insights.
+
+If necessary, row insight generation can still happen during the same background phase before completion.
+
+---
+
+## 4. KEEP THE INTERNAL LOGIC IF NEEDED, BUT HIDE THE REDUNDANT UI STEP
+
+This change is primarily about UX.
+
+It is okay if internally the app still has:
+- strategy generation
+- row insight generation
+
+But the user-facing progress indicator should only show:
+- one combined AI generation step
+
+So:
+- fewer steps
+- less perceived complexity
+- cleaner flow
+
+---
+
+## 5. UPDATE THE STEP LIST / COMPLETION LOGIC
+
+Make sure the visible checklist now flows like:
+
+1. Scanning orders across all lines
+2. Finding and combining matching orders
+3. Calculating queue times per line
+4. Placing orders on optimal lines
+5. Applying Future Dispatches target dates
+6. Sequencing orders per line
+7. Calculating changeovers
+8. Generating strategy options per line (AI-powered)
+9. Complete
+
+Do not show:
+- per-row sequence insights as a separate row
+
+---
+
+## 6. ENSURE COMPLETION STILL WAITS UNTIL INSIGHTS ARE READY IF NEEDED
+
+If row-level insights are required to be present before the preview is considered fully ready, that is fine.
+
+But the user should still only see:
+- `Generating strategy options per line (AI-powered)`
+
+and then
+- `Complete`
+
+So internally:
+- the final AI phase may include strategy cards + row insights
+- but externally it should appear as one unified step
+
+---
+
+## 7. UPDATE ANY STATUS TEXT / LOADING LABELS IF NEEDED
+
+If there are any helper labels, status messages, or internal UI text that separately mention:
+- generating row insights
+
+update them so they align with the simplified visible flow.
+
+Preferred visible wording:
+- `Generating strategy options per line (AI-powered)`
+
+---
+
+## 8. KEEP THE FINAL UX CLEANER AND SHORTER
+
+The goal is to reduce redundancy and make the modal easier to understand.
+
+Users should feel:
+- the app is doing one final AI generation step
+- not two overlapping AI explanation steps
+
+---
+
+## 9. VERIFICATION
+
+1. ✅ The progress modal no longer shows `Generating per-row sequence insights (AI-powered)` as a separate step
+2. ✅ The modal still shows `Generating strategy options per line (AI-powered)`
+3. ✅ If row insights are still generated internally, they are treated as part of the strategy-generation phase
+4. ✅ The preview still finishes with all required data ready
+5. ✅ The progress flow is visually simpler and less redundant
+```
+
+If you want, I can also give you a **shorter patch prompt** focused only on the checklist change in the modal.

@@ -1,0 +1,815 @@
+```
+Add combine/uncombine toggle and per-order uncombine:
+
+---
+
+## 1. UPDATE STATE MANAGEMENT — SAVE PRE-COMBINE SNAPSHOT
+
+In the UploadAutoSequencePreview (and also LineAutoSequencePreview for per-line):
+
+```jsx
+function UploadAutoSequencePreview({
+  uploadContext,
+  allOrders,
+  masterData,
+  n10dData,
+  changeoverRules,
+  onApplySequence,
+  onUploadOnly,
+  onCancel
+}) {
+  const [isProcessing, setIsProcessing] = useState(true);
+  const [sequencedResults, setSequencedResults] = useState(null);
+  const [originalSnapshot, setOriginalSnapshot] = useState(null);
+  const [summaryStats, setSummaryStats] = useState(null);
+  const [placementLog, setPlacementLog] = useState([]);
+  const [isApplying, setIsApplying] = useState(false);
+  const [activeTab, setActiveTab] = useState('summary');
+  
+  // Combine state
+  const [isCombined, setIsCombined] = useState(false);
+  const [isCombining, setIsCombining] = useState(false);
+  const [preCombineSnapshot, setPreCombineSnapshot] = useState(null);
+  const [preCombinePlacementLog, setPreCombinePlacementLog] = useState([]);
+  const [preCombineStats, setPreCombineStats] = useState(null);
+  
+  // AI state
+  const [aiExplanations, setAiExplanations] = useState(null);
+  const [isLoadingAI, setIsLoadingAI] = useState(false);
+  const [useFallback, setUseFallback] = useState(false);
+  
+  const allLines = ALL_LINES_ORDERED.map(l => normalizeLine(`${l.feedmill} - ${l.line}`));
+  
+  useEffect(() => {
+    runSequenceOnly();
+  }, []);
+  
+  async function runSequenceOnly() {
+    setIsProcessing(true);
+    
+    // ... existing sequence-only logic ...
+    // After setting sequencedResults, placementLog, summaryStats:
+    
+    setIsProcessing(false);
+    
+    if (log.length > 0) {
+      generateAIExplanations(log);
+    }
+  }
+  
+  async function handleCombineOrders() {
+    if (isCombining) return;
+    setIsCombining(true);
+    
+    // Save pre-combine state for undo
+    setPreCombineSnapshot(JSON.parse(JSON.stringify(sequencedResults)));
+    setPreCombinePlacementLog([...placementLog]);
+    setPreCombineStats({ ...summaryStats });
+    
+    // Get all sequenced orders flat
+    const allSequencedOrders = [];
+    Object.entries(sequencedResults).forEach(([line, orders]) => {
+      orders.forEach(o => {
+        allSequencedOrders.push({ ...o, line, feedmill_line: line });
+      });
+    });
+    
+    // Run combine
+    const { lineOrdersMap, combinedOrders, placementLog: combinePlacementLog } = plantLevelCombineOnly(
+      allSequencedOrders, masterData, n10dData, allLines
+    );
+    
+    // Re-sequence each line after combine
+    const results = {};
+    allLines.forEach(line => {
+      const lineOrders = lineOrdersMap[line] || [];
+      if (lineOrders.length === 0) {
+        results[line] = [];
+        return;
+      }
+      
+      const sequenced = runAutoSequence(lineOrders, changeoverRules, masterData, n10dData);
+      const withChangeovers = calculatePreviewChangeovers(sequenced, changeoverRules);
+      
+      const originalLineOrders = originalSnapshot[line] || [];
+      const withMovement = withChangeovers.map((order, newIndex) => {
+        const newPrio = newIndex + 1;
+        const originalIndex = originalLineOrders.findIndex(o => o.id === order.id);
+        let movement = 'same';
+        let movementDelta = 0;
+        
+        if (originalIndex >= 0) {
+          const originalPrio = originalIndex + 1;
+          movementDelta = originalPrio - newPrio;
+          if (movementDelta > 0) movement = 'up';
+          else if (movementDelta < 0) movement = 'down';
+        } else {
+          movement = 'new_to_line';
+        }
+        
+        return {
+          ...order,
+          prio: newPrio,
+          _originalPrio: originalIndex >= 0 ? originalIndex + 1 : -1,
+          _movement: movement,
+          _movementDelta: Math.abs(movementDelta)
+        };
+      });
+      
+      results[line] = withMovement;
+    });
+    
+    setSequencedResults(results);
+    
+    const mergedLog = [...placementLog, ...combinePlacementLog];
+    setPlacementLog(mergedLog);
+    
+    const stats = calculatePlantSummary(originalSnapshot, results, combinedOrders, mergedLog, allLines);
+    setSummaryStats(stats);
+    
+    setIsCombined(true);
+    setIsCombining(false);
+    
+    // Regenerate AI
+    setAiExplanations(null);
+    setUseFallback(false);
+    if (mergedLog.length > 0) {
+      generateAIExplanations(mergedLog);
+    }
+  }
+  
+  function handleUncombineAll() {
+    if (!preCombineSnapshot) return;
+    
+    // Revert to pre-combine state
+    setSequencedResults(JSON.parse(JSON.stringify(preCombineSnapshot)));
+    setPlacementLog([...preCombinePlacementLog]);
+    setSummaryStats({ ...preCombineStats });
+    
+    setIsCombined(false);
+    
+    // Clear pre-combine snapshot
+    setPreCombineSnapshot(null);
+    setPreCombinePlacementLog([]);
+    setPreCombineStats(null);
+    
+    // Regenerate AI for the original log
+    setAiExplanations(null);
+    setUseFallback(false);
+    if (preCombinePlacementLog.length > 0) {
+      generateAIExplanations(preCombinePlacementLog);
+    }
+  }
+  
+  function handleUncombineSingle(line, combinedOrder) {
+    if (!combinedOrder._isCombined || !combinedOrder._combinedFrom) return;
+    
+    // Get current line orders
+    const currentLineOrders = [...(sequencedResults[line] || [])];
+    
+    // Find the index of the combined order
+    const combinedIndex = currentLineOrders.findIndex(o => o.id === combinedOrder.id);
+    if (combinedIndex === -1) return;
+    
+    // Remove the combined order
+    currentLineOrders.splice(combinedIndex, 1);
+    
+    // Insert original individual orders at the same position
+    const individualOrders = combinedOrder._combinedFrom.map(sub => {
+      // Find the full order data
+      const fullOrder = allOrders.find(o => o.id === sub.id) || sub;
+      return {
+        ...fullOrder,
+        id: sub.id,
+        line: line,
+        feedmill_line: line,
+        volume: sub.volume,
+        item_description: sub.item_description,
+        material_code_fg: sub.material_code_fg,
+        form: sub.form,
+        fpr: sub.fpr,
+        planned_order_fg: sub.planned_order_fg,
+        planned_order_sfg: sub.planned_order_sfg,
+        batch_size: sub.batch_size,
+        batches: sub.batches,
+        production_time: sub.production_time,
+        target_avail_date: sub.target_avail_date,
+        category: sub.category,
+        _isCombined: false,
+        _combinedFrom: null,
+        _combinedFromLines: null,
+        _movedFromLine: sub.line !== line ? sub.line : null,
+        _movement: sub.line !== line ? 'new_to_line' : 'same'
+      };
+    });
+    
+    // Insert at the same position
+    currentLineOrders.splice(combinedIndex, 0, ...individualOrders);
+    
+    // Re-sequence
+    const sequenced = runAutoSequence(currentLineOrders, changeoverRules, masterData, n10dData);
+    const withChangeovers = calculatePreviewChangeovers(sequenced, changeoverRules);
+    
+    const originalLineOrders = originalSnapshot[line] || [];
+    const withMovement = withChangeovers.map((order, index) => {
+      const newPrio = index + 1;
+      const originalIndex = originalLineOrders.findIndex(o => o.id === order.id);
+      let movement = 'same';
+      let movementDelta = 0;
+      
+      if (originalIndex >= 0) {
+        const originalPrio = originalIndex + 1;
+        movementDelta = originalPrio - newPrio;
+        if (movementDelta > 0) movement = 'up';
+        else if (movementDelta < 0) movement = 'down';
+      } else {
+        movement = 'new_to_line';
+      }
+      
+      return {
+        ...order,
+        prio: newPrio,
+        _originalPrio: originalIndex >= 0 ? originalIndex + 1 : -1,
+        _movement: movement,
+        _movementDelta: Math.abs(movementDelta)
+      };
+    });
+    
+    // Update results for this line
+    const updatedResults = { ...sequencedResults };
+    updatedResults[line] = withMovement;
+    setSequencedResults(updatedResults);
+    
+    // Remove the combine action from placement log
+    const updatedLog = placementLog.filter(entry => {
+      if (entry.type !== 'combined') return true;
+      // Remove if this was the combine action for this order
+      if (entry.product === combinedOrder.item_description && 
+          entry.toLine === line &&
+          entry.totalVolume === parseFloat(combinedOrder.volume)) {
+        return false;
+      }
+      return true;
+    });
+    setPlacementLog(updatedLog);
+    
+    // Recalculate stats
+    const allCombined = [];
+    Object.values(updatedResults).forEach(orders => {
+      orders.filter(o => o._isCombined).forEach(o => allCombined.push(o));
+    });
+    const stats = calculatePlantSummary(originalSnapshot, updatedResults, allCombined, updatedLog, allLines);
+    setSummaryStats(stats);
+    
+    // Check if any combined orders remain
+    const anyCombinedLeft = Object.values(updatedResults).some(orders =>
+      orders.some(o => o._isCombined)
+    );
+    if (!anyCombinedLeft) {
+      setIsCombined(false);
+    }
+    
+    // Regenerate AI
+    setAiExplanations(null);
+    setUseFallback(false);
+    if (updatedLog.length > 0) {
+      generateAIExplanations(updatedLog);
+    }
+  }
+  
+  // ... existing AI generation functions ...
+  
+  const activeLines = allLines.filter(line =>
+    (originalSnapshot?.[line]?.length || 0) > 0 ||
+    (sequencedResults?.[line]?.length || 0) > 0
+  );
+  
+  return (
+    <div className="auto-sequence-overlay" onClick={e => e.stopPropagation()}>
+      <div className="auto-sequence-modal" onClick={e => e.stopPropagation()}>
+        {/* Header */}
+        <div className="auto-sequence-header">
+          <div>
+            <h2>✨ Auto-Sequence — Post Upload</h2>
+            <span className="auto-sequence-subtitle">
+              {uploadContext.allLinesWereBlank 
+                ? 'All lines were blank — orders auto-assigned to optimal lines'
+                : 'Orders uploaded — review proposed sequence'
+              }
+            </span>
+          </div>
+          <button className="auto-sequence-close" onClick={onCancel} disabled={isApplying}>✕</button>
+        </div>
+        
+        {/* N10D Warning */}
+        {!uploadContext.hasN10D && (
+          <div className="upload-as-warning-banner">
+            <span className="upload-as-warning-icon">⚠️</span>
+            <div className="upload-as-warning-content">
+              <span className="upload-as-warning-title">Future Dispatches not uploaded</span>
+              <span className="upload-as-warning-text">
+                It's recommended to upload Future Dispatches first before uploading orders, 
+                so the app can properly assess demand and stock status for optimal sequencing.
+              </span>
+            </div>
+            <button className="upload-as-warning-dismiss" onClick={(e) => e.target.closest('.upload-as-warning-banner').style.display = 'none'}>✕</button>
+          </div>
+        )}
+        
+        {/* Processing */}
+        {isProcessing && (
+          <div className="upload-as-processing">
+            <div className="auto-sequence-applying-spinner"></div>
+            <span>Analyzing and sequencing orders...</span>
+          </div>
+        )}
+        
+        {!isProcessing && sequencedResults && summaryStats && (
+          <>
+            {/* Stats */}
+            <div className="auto-sequence-stats">
+              <StatBadge label="Orders" value={summaryStats.totalOrdersBefore} />
+              <StatBadge label="Lines Used" value={activeLines.length} />
+              {summaryStats.ordersMovedBetweenLines > 0 && (
+                <StatBadge label="Cross-Line Moves" value={summaryStats.ordersMovedBetweenLines} color="orange" />
+              )}
+              {isCombined && summaryStats.ordersCombined > 0 && (
+                <StatBadge label="Combined Groups" value={summaryStats.ordersCombined} color="green" />
+              )}
+            </div>
+            
+            {/* Tabs */}
+            <div className="plant-preview-tabs">
+              <button
+                className={`plant-preview-tab ${activeTab === 'summary' ? 'active' : ''}`}
+                onClick={() => setActiveTab('summary')}
+              >
+                📊 All Lines Summary
+              </button>
+              {activeLines.map(line => (
+                <button
+                  key={line}
+                  className={`plant-preview-tab ${activeTab === line ? 'active' : ''}`}
+                  onClick={() => setActiveTab(line)}
+                >
+                  {line}
+                </button>
+              ))}
+            </div>
+            
+            {/* Content — pass uncombine handler */}
+            <div className="plant-preview-content">
+              {activeTab === 'summary' && (
+                <PlantSummaryTab
+                  summaryStats={summaryStats}
+                  placementLog={placementLog}
+                  aiExplanations={aiExplanations}
+                  isLoadingAI={isLoadingAI}
+                  useFallback={useFallback}
+                  onRefreshInsights={() => generateAIExplanations(placementLog)}
+                />
+              )}
+              {activeTab !== 'summary' && (
+                <PlantLineTab
+                  line={activeTab}
+                  originalOrders={originalSnapshot[activeTab] || []}
+                  sequencedOrders={sequencedResults[activeTab] || []}
+                  placementLog={placementLog}
+                  aiExplanations={aiExplanations}
+                  isLoadingAI={isLoadingAI}
+                  useFallback={useFallback}
+                  onUncombineSingle={(combinedOrder) => handleUncombineSingle(activeTab, combinedOrder)}
+                />
+              )}
+            </div>
+            
+            {/* Applying overlay */}
+            {isApplying && (
+              <div className="auto-sequence-applying-overlay">
+                <div className="auto-sequence-applying-content">
+                  <div className="auto-sequence-applying-spinner"></div>
+                  <span className="auto-sequence-applying-text">Applying to schedule...</span>
+                  <span className="auto-sequence-applying-sub">Please wait. Do not close this window.</span>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+        
+        {/* Footer */}
+        <div className="auto-sequence-footer">
+          <div className="auto-sequence-footer-left">
+            {!isCombined && !isProcessing && (
+              <button
+                className={`btn-combine-orders ${isCombining ? 'btn-combine-loading' : ''}`}
+                onClick={handleCombineOrders}
+                disabled={isCombining || isApplying}
+              >
+                {isCombining ? (
+                  <>
+                    <span className="btn-apply-spinner"></span>
+                    Combining...
+                  </>
+                ) : (
+                  '🔗 Combine Orders'
+                )}
+              </button>
+            )}
+            {isCombined && (
+              <button
+                className="btn-uncombine-orders"
+                onClick={handleUncombineAll}
+                disabled={isApplying}
+              >
+                ↩ Uncombine Orders
+              </button>
+            )}
+          </div>
+          <div className="auto-sequence-footer-right">
+            <button className="btn-upload-only" onClick={onUploadOnly} disabled={isApplying || isCombining}>
+              Upload Only
+            </button>
+            <button
+              className={`btn-apply ${isApplying ? 'btn-apply-loading' : ''}`}
+              onClick={() => {
+                if (isApplying) return;
+                setIsApplying(true);
+                onApplySequence(sequencedResults);
+              }}
+              disabled={isApplying || isProcessing || isCombining}
+            >
+              {isApplying ? (
+                <>
+                  <span className="btn-apply-spinner"></span>
+                  Applying...
+                </>
+              ) : (
+                'Apply to Schedule'
+              )}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+## 2. UPDATE PlantAfterRow — ADD UNCOMBINE X BUTTON
+
+```jsx
+function PlantAfterRow({ order, onUncombineSingle }) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  
+  return (
+    <>
+      <tr className={`auto-sequence-row-after ${order._isCombined ? 'as-row-combined' : ''}`}>
+        <td className="as-col-drag">
+          <span className="as-drag-handle">⠿</span>
+        </td>
+        <td className="as-col-prio">
+          <span className="as-prio-badge as-prio-badge-after">{order.prio}</span>
+        </td>
+        <td className="as-col-fpr">{order.fpr}</td>
+        <td className="as-col-planned">
+          <div>{order.planned_order_fg}</div>
+          <div className="as-sub-text">{order.planned_order_sfg}</div>
+        </td>
+        <td className="as-col-material">{order.material_code_fg}</td>
+        <td className="as-col-desc">
+          <div className="as-desc-with-movement">
+            {/* Line badge */}
+            {order._movedFromLine && order._movedFromLine !== order.line && (
+              <span className="as-line-badge" title={`This order came from ${order._movedFromLine}`}>
+                {getLineShortName(order._movedFromLine)}
+              </span>
+            )}
+            
+            {/* Combined icon */}
+            {order._isCombined && (
+              <button
+                className="as-combined-toggle"
+                onClick={() => setIsExpanded(!isExpanded)}
+                title={`${order._combinedFrom?.length || 0} orders combined`}
+              >
+                🔗
+              </button>
+            )}
+            
+            {/* Movement indicator */}
+            {order._movement !== 'new_to_line' && (order._movement === 'up' || order._movement === 'down') && (
+              <MovementIndicator movement={order._movement} delta={order._movementDelta} />
+            )}
+            
+            <div className="as-desc-content">
+              <div className="as-desc-main-row">
+                <span className="as-desc-main">{order.item_description}</span>
+                
+                {/* Right arrow and uncombine X — only for combined orders */}
+                {order._isCombined && onUncombineSingle && (
+                  <span className="as-uncombine-inline">
+                    <span className="as-desc-arrow">▶</span>
+                    <button
+                      className="as-uncombine-btn"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onUncombineSingle(order);
+                      }}
+                      title="Uncombine this order"
+                    >
+                      ✕
+                    </button>
+                  </span>
+                )}
+                
+                {/* Regular right arrow for non-combined orders (existing expand behavior) */}
+                {!order._isCombined && order._hasDetails && (
+                  <span className="as-desc-arrow">▶</span>
+                )}
+              </div>
+              <div className="as-sub-text">{order.category}</div>
+              {order._isCombined && order._combinedFrom && (
+                <div className="as-combined-label">
+                  {order._combinedFrom.length} orders combined
+                  {order._combinedFromLines && 
+                   order._combinedFromLines.some(l => l !== order.line) && (
+                    <span> · from {order._combinedFromLines
+                      .filter(l => l !== order.line)
+                      .map(l => getLineShortName(l))
+                      .join(', ')
+                    }</span>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </td>
+        <td className="as-col-form">{order.form}</td>
+        <td className="as-col-volume"><strong>{order.volume}</strong> MT</td>
+        <td className="as-col-batch">{order.batch_size}</td>
+        <td className="as-col-batches">{order.batches}</td>
+        <td className="as-col-prod">
+          <div><strong>{formatProductionTime(order.production_time)}</strong></div>
+          <div className="as-sub-text">CO: {formatProductionTime(order._changeoverTotal || order.changeover || 0)}</div>
+        </td>
+        <td className="as-col-start-date">
+          {order.start_date ? formatDate(order.start_date) : <span className="as-placeholder">Set start date</span>}
+        </td>
+        <td className="as-col-start-time">
+          {order.start_time || <span className="as-placeholder">Set time</span>}
+        </td>
+        <td className="as-col-avail">{formatAvailDate(order.target_avail_date)}</td>
+        <td className="as-col-completion">
+          {order.completion_date || <span className="as-placeholder">Set completion</span>}
+        </td>
+      </tr>
+      
+      {/* Expanded sub-orders */}
+      {isExpanded && order._isCombined && order._combinedFrom && (
+        order._combinedFrom.map((subOrder, subIndex) => {
+          const cameFromDifferentLine = subOrder.line !== order.line;
+          return (
+            <tr key={`sub-${order.id}-${subIndex}`} className="as-row-combined-sub">
+              <td className="as-col-drag"></td>
+              <td className="as-col-prio"></td>
+              <td className="as-col-fpr"><span className="as-sub-fpr">{subOrder.fpr}</span></td>
+              <td className="as-col-planned">
+                <div className="as-sub-text">{subOrder.planned_order_fg || '—'}</div>
+                <div className="as-sub-text">{subOrder.planned_order_sfg || '—'}</div>
+              </td>
+              <td className="as-col-material"><span className="as-sub-text">{subOrder.material_code_fg || '—'}</span></td>
+              <td className="as-col-desc">
+                <div className="as-sub-desc">
+                  {cameFromDifferentLine && (
+                    <span className="as-line-badge as-line-badge-small" title={`Originally from ${subOrder.line}`}>
+                      {getLineShortName(subOrder.line)}
+                    </span>
+                  )}
+                  <div><div className="as-sub-text-dark">{subOrder.item_description || order.item_description}</div></div>
+                </div>
+              </td>
+              <td className="as-col-form"><span className="as-sub-text">{subOrder.form || order.form}</span></td>
+              <td className="as-col-volume"><span className="as-sub-text">{subOrder.volume} MT</span></td>
+              <td className="as-col-batch"><span className="as-sub-text">{subOrder.batch_size || '—'}</span></td>
+              <td className="as-col-batches"><span className="as-sub-text">{subOrder.batches || '—'}</span></td>
+              <td className="as-col-prod"><span className="as-sub-text">{subOrder.production_time ? formatProductionTime(subOrder.production_time) : '—'}</span></td>
+              <td className="as-col-start-date"><span className="as-sub-text">—</span></td>
+              <td className="as-col-start-time"><span className="as-sub-text">—</span></td>
+              <td className="as-col-avail"><span className="as-sub-text">{formatAvailDate(subOrder.target_avail_date) || '—'}</span></td>
+              <td className="as-col-completion"><span className="as-sub-text">—</span></td>
+            </tr>
+          );
+        })
+      )}
+    </>
+  );
+}
+```
+
+---
+
+## 3. UPDATE PlantLineTab — PASS UNCOMBINE HANDLER TO TABLE
+
+```jsx
+function PlantLineTab({ 
+  line, 
+  originalOrders, 
+  sequencedOrders, 
+  placementLog,
+  aiExplanations,
+  isLoadingAI,
+  useFallback,
+  onUncombineSingle
+}) {
+  // ... existing stats calculations ...
+  
+  const lineActions = getActionsForLine(placementLog, line);
+  
+  return (
+    <div className="plant-line-tab">
+      {/* Stats */}
+      {/* ... existing ... */}
+      
+      {/* Before and After tables */}
+      <div className="auto-sequence-comparison">
+        <div className="auto-sequence-comparison-container">
+          <div className="auto-sequence-comparison-scroll">
+            {/* Before table — unchanged */}
+            {/* ... */}
+            
+            <div className="auto-sequence-divider"></div>
+            
+            {/* After table — pass onUncombineSingle */}
+            <div className="auto-sequence-table-panel">
+              <div className="auto-sequence-table-label auto-sequence-label-after">
+                <span className="auto-sequence-label-icon">✨</span>
+                After — {sequencedOrders.length} orders
+                {/* ... existing subtitle ... */}
+              </div>
+              <div className="auto-sequence-table-wrapper">
+                <table className="auto-sequence-table auto-sequence-table-after">
+                  <thead>
+                    <tr>
+                      <th className="as-col-drag"></th>
+                      <th className="as-col-prio">Prio</th>
+                      <th className="as-col-fpr">FPR</th>
+                      <th className="as-col-planned">Planned Order</th>
+                      <th className="as-col-material">Material Code (FG)</th>
+                      <th className="as-col-desc">Item Description</th>
+                      <th className="as-col-form">Form</th>
+                      <th className="as-col-volume">Volume (MT)</th>
+                      <th className="as-col-batch">Batch Size</th>
+                      <th className="as-col-batches">Batches</th>
+                      <th className="as-col-prod">Production Time</th>
+                      <th className="as-col-start-date">Start Date</th>
+                      <th className="as-col-start-time">Start Time</th>
+                      <th className="as-col-avail">Avail Date</th>
+                      <th className="as-col-completion">Estimated Completion Date</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sequencedOrders.map(order => (
+                      <PlantAfterRow 
+                        key={order.id} 
+                        order={order} 
+                        onUncombineSingle={onUncombineSingle}
+                      />
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      {/* Actions taken */}
+      {lineActions.length > 0 && (
+        <div className="line-actions-plain">
+          {/* ... existing actions display ... */}
+        </div>
+      )}
+    </div>
+  );
+}
+```
+
+---
+
+## 4. STYLING
+
+```css
+/* Uncombine inline — arrow + X next to description */
+.as-uncombine-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 4px;
+  flex-shrink: 0;
+}
+
+.as-desc-arrow {
+  font-size: 8px;
+  color: #9ca3af;
+}
+
+.as-uncombine-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: none;
+  background: none;
+  color: #9ca3af;
+  font-size: 10px;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+  transition: all 0.15s;
+}
+
+.as-uncombine-btn:hover {
+  background: #fef2f2;
+  color: #dc2626;
+}
+
+/* Description main row — flex for name + arrow + X */
+.as-desc-main-row {
+  display: flex;
+  align-items: center;
+}
+
+.as-desc-main {
+  flex: 1;
+}
+
+.as-desc-content {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* Uncombine All button */
+.btn-uncombine-orders {
+  padding: 8px 16px;
+  background: #ffffff;
+  color: #dc2626;
+  border: 1px solid #dc2626;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn-uncombine-orders:hover:not(:disabled) {
+  background: #fef2f2;
+}
+
+.btn-uncombine-orders:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+```
+
+---
+
+## VERIFICATION
+
+### Combine toggle
+1. ✅ Initially shows "🔗 Combine Orders" button
+2. ✅ After clicking, orders combined, button changes to "↩ Uncombine Orders"
+3. ✅ Clicking "Uncombine Orders" reverts to pre-combine state (sequence only)
+4. ✅ Button changes back to "🔗 Combine Orders"
+5. ✅ Can toggle combine/uncombine multiple times
+6. ✅ Pre-combine snapshot saved before combining
+
+### Uncombine All
+7. ✅ Reverts sequencedResults to pre-combine snapshot
+8. ✅ Reverts placementLog to pre-combine log
+9. ✅ Reverts summaryStats to pre-combine stats
+10. ✅ Combined orders split back into individual rows
+11. ✅ AI explanations regenerated
+
+### Uncombine specific order
+12. ✅ X button appears after right arrow on combined orders only
+13. ✅ Format: "Item Description ▶ ✕"
+14. ✅ Regular orders do NOT show the X button
+15. ✅ Clicking X splits the combined order into individual sub-orders
+16. ✅ Line re-sequences after uncombine
+17. ✅ Movement indicators recalculated
+18. ✅ Combine action removed from placement log
+19. ✅ Stats updated
+
+### Visual
+20. ✅ X button is subtle (grey) by default
+21. ✅ X button turns red on hover
+22. ✅ "Uncombine Orders" button has red border/text
+23. ✅ Smooth transitions
+```

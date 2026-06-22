@@ -1,0 +1,227 @@
+Please further refine the shutdown feature of the application to support planned vs unplanned shutdown handling, downtime timeframe, and more accurate order impact analysis using target/avail dates.
+
+This enhancement should improve both the shutdown input form and the downstream impact analysis logic.
+
+The client feedback is:
+
+"To update planned vs unplanned with timeframe.
+Unplanned - 6am to 8am... extend to hrs..better if scheduled downtime...
+Consider the target date"
+
+Please implement the following improvements.
+
+---
+
+## 1. ADD SHUTDOWN TYPE: PLANNED VS UNPLANNED
+
+Currently the shutdown modal only asks for “Reason for Shutdown”.
+
+Please add a higher-level required field:
+
+## Shutdown Type
+Options:
+- Planned
+- Unplanned
+
+### Purpose
+This allows the app to distinguish between:
+- scheduled downtime / maintenance
+- unexpected interruption / breakdown
+
+This should become part of the shutdown record and should also influence how the shutdown is described in the UI and analysis.
+
+---
+
+## 2. KEEP REASON FOR SHUTDOWN AS A SECONDARY FIELD
+
+Retain the existing “Reason for Shutdown” field, but treat it as the detailed reason under the selected shutdown type.
+
+### Example
+- Shutdown Type = Planned
+- Reason = Scheduled maintenance
+
+or
+- Shutdown Type = Unplanned
+- Reason = Equipment breakdown
+
+The existing reason list may stay, but should now sit under the new type field.
+
+If useful, the available reasons may later be filtered by type, but that is optional for now.
+
+---
+
+## 3. ADD SHUTDOWN TIMEFRAME
+
+The shutdown feature should capture the actual downtime window.
+
+### Required fields
+Add:
+- Start Date
+- Start Time
+- End Date
+- End Time
+
+Preferred implementation:
+- full start datetime
+- full end datetime
+
+If necessary, duration may also be shown as a derived field.
+
+### Goal
+The impact analysis must know exactly when the line is unavailable.
+
+This aligns with the client’s example:
+- unplanned shutdown from 6:00 AM to 8:00 AM
+- extend to hours
+- better if treated as scheduled downtime window
+
+### Validation
+- end datetime must be later than start datetime
+- timeframe is required before confirming shutdown
+
+---
+
+## 4. IMPROVE IMPACT ANALYSIS TO CONSIDER TARGET / AVAIL DATE
+
+Currently, the shutdown impact analysis appears to rely mainly on future dispatch and stock-bucket logic (e.g. stock sufficient, critical, etc.), but it does not properly consider the affected orders’ target/avail dates.
+
+Please fix this.
+
+### Required behavior
+When analyzing the effect of a line shutdown, the app must consider:
+- shutdown timeframe
+- current orders assigned to that line
+- their production hours
+- their current sequence position
+- their estimated completion timing
+- and most importantly their target / avail dates
+
+### Key question the app should answer
+If this shutdown removes available production time from the line, which orders are now at risk of:
+- completing later than their target / avail date
+- being delayed into a critical window
+- requiring diversion to another line
+
+This should become part of the impact analysis.
+
+---
+
+## 5. RECOMPUTE AFFECTED ORDER RISK BASED ON TIME LOSS
+
+For each affected order, the app should estimate the effect of the shutdown timeframe on:
+- order start time
+- order completion time
+- and whether the new completion still falls before the order’s avail/target date
+
+### Examples of result interpretation
+- order still safe despite downtime
+- order delayed but still before target date
+- order likely to miss avail date
+- order becomes critical if not diverted
+- order can be diverted to another line with manageable impact
+
+This should make the impact analysis more realistic than only using stock-bucket labels.
+
+---
+
+## 6. IMPROVE THE “AFFECTED ORDERS” SECTION
+
+In the shutdown modal, the affected orders section should become more informative.
+
+For each affected order, include or reflect:
+- order name
+- volume
+- production time
+- current urgency/stock bucket if relevant
+- target/avail date
+- whether shutdown pushes it past target date
+- whether it can be diverted
+- whether risk is low / medium / high
+
+The description should no longer rely only on inventory status.
+
+It should also reflect target-date risk.
+
+---
+
+## 7. IMPROVE IMPACT ANALYSIS TEXT
+
+The generated shutdown analysis text should mention:
+- shutdown type (planned vs unplanned)
+- shutdown timeframe
+- target-date impact
+- whether affected orders remain on time or become delayed
+- diversion feasibility where applicable
+
+### Example style
+“Planned shutdown of Line 1 from 6:00 AM to 8:00 AM is expected to delay 2 active orders. One order remains before its avail date, while one order is projected to miss its target date unless diverted to Line 2.”
+
+This is more useful than generic inventory-only commentary.
+
+---
+
+## 8. OPTIONAL LABEL IMPROVEMENT
+
+If useful, rename or supplement the shutdown reason section with wording like:
+- Shutdown Type
+- Reason
+- Downtime Window
+
+This may make the modal easier to understand.
+
+---
+
+## 9. DEBUG LOGGING
+
+Temporarily log:
+
+### shutdown input
+```javascript
+console.debug('[Shutdown Input]', {
+  lineId,
+  shutdownType, // planned | unplanned
+  shutdownReason,
+  startDateTime,
+  endDateTime,
+  durationHours,
+});
+```
+
+### affected order impact
+```javascript
+console.debug('[Shutdown Order Impact Analysis]', {
+  orderId,
+  orderName,
+  productionHours,
+  currentEstimatedCompletion,
+  adjustedEstimatedCompletion,
+  availDate,
+  missesAvailDateAfterShutdown,
+  canBeDiverted,
+});
+```
+
+### impact summary
+```javascript
+console.debug('[Shutdown Impact Summary]', {
+  lineId,
+  activeOrdersAffected,
+  ordersAtRisk,
+  ordersStillSafe,
+  diversionCandidates,
+});
+```
+
+---
+
+## 10. VERIFICATION
+
+1. ✅ Shutdown modal includes Shutdown Type = Planned / Unplanned
+2. ✅ Shutdown modal includes downtime timeframe fields (start/end date & time)
+3. ✅ Shutdown cannot be confirmed without a valid timeframe
+4. ✅ Impact analysis considers shutdown timeframe, not just generic line shutdown
+5. ✅ Affected-order analysis considers each order’s target / avail date
+6. ✅ App identifies which orders become late because of the shutdown
+7. ✅ Impact analysis text mentions timing-based risk, not just stock bucket labels
+8. ✅ Affected orders section more clearly shows target-date risk and diversion feasibility
+9. ✅ Existing shutdown workflow remains intact while becoming more time-aware

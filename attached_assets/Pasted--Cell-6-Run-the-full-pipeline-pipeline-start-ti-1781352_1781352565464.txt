@@ -1,0 +1,75 @@
+# ── Cell 6: Run the full pipeline ─────────────────────────────────────────────
+pipeline_start = time.perf_counter()
+
+# ── Stage 1: Intent Router ────────────────────────────────────────────────────
+banner('STAGE 1 — INTENT ROUTER', '🧭')
+info(f'Query: "{QUERY}"')
+t0 = time.perf_counter()
+intent = await intent_router.route(QUERY)
+elapsed = time.perf_counter() - t0
+ok(f'Intent classified: "{intent}"  ({elapsed:.2f}s)')
+
+# ── Stage 2: Context Planner ──────────────────────────────────────────────────
+banner('STAGE 2 — CONTEXT PLANNER', '📐')
+info(f'Intent in: "{intent}"')
+retrieval_plan = context_planner.plan(intent, QUERY)
+ok(f'Required sources: {retrieval_plan.required_sources}')
+
+# ── Stage 3: Database Retrieval ───────────────────────────────────────────────
+# Note: get_session() is an async generator (FastAPI dependency), so we use
+# AsyncSessionLocal directly for notebook use.
+banner('STAGE 3 — DATABASE RETRIEVAL', '🗄️')
+t0 = time.perf_counter()
+async with AsyncSessionFactory() as session:
+    raw_context = await context_builder.build(retrieval_plan, ATHLETE_ID, session)
+elapsed = time.perf_counter() - t0
+
+ok(f'Fetched in {elapsed:.2f}s')
+for key, val in raw_context.items():
+    if isinstance(val, list):   arrow(f'{key}: {len(val)} item(s)')
+    elif isinstance(val, dict): arrow(f'{key}: {len(val)} key(s)')
+    else:                       arrow(f'{key}: {val}')
+
+raw_tokens = estimate_tokens(raw_context)
+info(f'Raw context size: ~{raw_tokens:,} tokens (estimate)')
+show_json('Raw context', raw_context)
+
+# ── Stage 4: Context Optimizer ────────────────────────────────────────────────
+banner('STAGE 4 — CONTEXT OPTIMIZER', '✂️')
+optimized_context = context_optimizer.optimize(raw_context, intent)
+opt_tokens = estimate_tokens(optimized_context)
+
+for key in raw_context:
+    raw_val = raw_context[key]
+    opt_val = optimized_context.get(key)
+    if isinstance(raw_val, list) and isinstance(opt_val, list):
+        tag = f'{len(raw_val)} → {len(opt_val)} (trimmed)' if len(raw_val) != len(opt_val) else f'{len(opt_val)} (unchanged)'
+        arrow(f'{key}: {tag}')
+    elif isinstance(raw_val, dict) and isinstance(opt_val, dict):
+        r = sum(len(v) for v in raw_val.values())
+        o = sum(len(v) for v in opt_val.values())
+        tag = f'{r} → {o} rows (trimmed)' if r != o else f'{o} rows (unchanged)'
+        arrow(f'{key} splits: {tag}')
+
+ok(f'Optimized: ~{opt_tokens:,} tokens  (was ~{raw_tokens:,}, saved ~{raw_tokens - opt_tokens:,})')
+show_json('Optimized context (sent to LLM)', optimized_context)
+
+# ── Stage 5: Analysis Engine ──────────────────────────────────────────────────
+banner('STAGE 5 — ANALYSIS ENGINE', '🤖')
+info('Calling model_manager.generate(service=analysis)...')
+t0 = time.perf_counter()
+result = await analysis_engine.analyze(QUERY, optimized_context)
+elapsed = time.perf_counter() - t0
+ok(f'Analysis complete ({elapsed:.2f}s)')
+
+# ── Final result ──────────────────────────────────────────────────────────────
+total = time.perf_counter() - pipeline_start
+banner('RESULT', '🏁')
+ok(f'Total pipeline time: {total:.2f}s')
+print()
+print('  ANALYSIS:')
+print('  ' + result.analysis.replace('\n', '\n  '))
+print()
+print('  SUGGESTED QUESTIONS:')
+for i, q in enumerate(result.suggested_questions, 1):
+    print(f'    {i}. {q}')

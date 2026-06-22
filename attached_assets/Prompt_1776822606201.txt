@@ -1,0 +1,87 @@
+```
+Fix: Filter child orders from the before snapshot:
+
+---
+
+## 1. FIX SNAPSHOT BUILDING — EXCLUDE CHILDREN
+
+```javascript
+// When building the original snapshot at the start of auto-sequence:
+const snapshot = {};
+allLines.forEach(line => {
+  snapshot[line] = activeOrders
+    .filter(o => normalizeLine(o.feedmill_line) === line)
+    .filter(o => !o.parent_id)  // ← ADD THIS: exclude child orders
+    .sort((a, b) => (a.priority_seq || 0) - (b.priority_seq || 0))
+    .map(o => ({ ...JSON.parse(JSON.stringify(o)) }));
+});
+setOriginalSnapshot(snapshot);
+```
+
+---
+
+## 2. ALSO FIX IN PlantLineTab — BEFORE TABLE RENDERING
+
+In case the snapshot was already built without the filter, add the filter at render time as well:
+
+```jsx
+// In PlantLineTab — before table tbody:
+<tbody>
+  {originalOrders
+    .filter(o => !o.parent_id)  // ← Only top-level orders
+    .map(order => (
+      <PlantBeforeRow
+        key={order.id}
+        order={order}
+        allOrders={originalOrders}
+      />
+    ))
+  }
+</tbody>
+```
+
+And fix the before table header count:
+
+```jsx
+// Before header — count only top-level
+const topLevelBefore = originalOrders.filter(o => !o.parent_id);
+
+<div className="auto-sequence-table-label auto-sequence-label-before">
+  <span className="auto-sequence-label-icon">📋</span>
+  Before — {topLevelBefore.length} orders
+</div>
+```
+
+---
+
+## 3. FIX THE TOP-LEVEL STATS — ALSO EXCLUDE CHILDREN
+
+```javascript
+function calculatePlantSummary(originalSnapshot, sequencedResults, combinedOrders, placementLog, allLines) {
+  let totalBefore = 0;
+  let totalAfter = 0;
+  
+  allLines.forEach(line => {
+    const before = (originalSnapshot[line] || []).filter(o => !o.parent_id);
+    const after = sequencedResults[line] || [];
+    
+    totalBefore += before.length;
+    totalAfter += after.length;
+    
+    // ... rest of calculation ...
+  });
+  
+  // ...
+}
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Snapshot built with .filter(o => !o.parent_id)
+2. ✅ Before table renders only top-level orders
+3. ✅ Before header count matches After count when no changes
+4. ✅ "Before — 13 orders" matches "After — 13 orders · no changes"
+5. ✅ Stats badges: Before 13, After 13 (not 28 vs 13)
+```

@@ -1,0 +1,171 @@
+Please implement clickable linked-order navigation for Powermix split orders using the **item description name itself** as the click target.
+
+IMPORTANT:
+Stick to the original interaction design:
+- do not add a separate link icon
+- do not add a separate “Go to split order” text link
+- do not add a button
+
+Only the **item description name** should be clickable for linked Powermix orders.
+
+This should work bidirectionally between:
+- the source order in Line 5
+- the generated split order in Line 2 or Line 6
+
+---
+
+## 1. CLICK TARGET
+
+Make the **item description name itself** clickable for linked Powermix rows.
+
+This applies to:
+- the source Line 5 order that created a split order
+- the generated split order created from Line 5
+
+Do not add:
+- icons
+- extra links
+- separate navigation buttons
+
+The clickable behavior should be directly attached to the item description name.
+
+---
+
+## 2. BIDIRECTIONAL NAVIGATION
+
+### A. From Line 5 source order
+If the Line 5 order has a generated split order, clicking the item description should navigate to that generated order.
+
+### B. From generated split order
+If the order was auto-created from Line 5, clicking the item description should navigate back to the source Line 5 order.
+
+This should use the actual source/generated order linkage already maintained by the Powermix feature.
+
+Do not rely on weak text matching only.
+
+---
+
+## 3. CONTEXT-AWARE NAVIGATION RULE
+
+Navigation behavior must depend on the currently selected Orders view.
+
+### CASE A — USER IS IN “ALL FEEDMILLS”
+If the user is currently in:
+- `Orders > All Feedmills`
+
+then clicking the linked order name should:
+- remain inside the **All Feedmills** view
+- scroll to the linked order inside that same All Feedmills page
+- bring the correct feedmill/line section into view if needed
+- highlight the linked order row
+
+Important:
+Do **not** switch the user out of All Feedmills in this case.
+
+The app should move within All Feedmills only.
+
+---
+
+### CASE B — USER IS IN A SPECIFIC FEEDMILL OR POWERMIX TAB
+If the user is currently inside:
+- Feedmill 1
+- Feedmill 2
+- Feedmill 3
+- Powermix
+
+then clicking the linked order name should:
+- navigate to the correct feedmill tab where the linked order exists
+- open that feedmill context
+- scroll to the linked row
+- highlight the linked row
+
+Example:
+- user is in Powermix
+- clicks the item description of a Line 5 source order
+- the linked generated order is in Feedmill 3
+- app should open Feedmill 3
+- scroll to the linked row
+- highlight it
+
+Similarly, if the user is in Feedmill 2 or 3 and clicks a generated split order, the app should navigate back to Powermix / Line 5 if that is where the source order exists.
+
+---
+
+## 4. VISUAL FEEDBACK AFTER NAVIGATION
+
+After navigation:
+- scroll the target row into view
+- visually highlight the row
+- keep the highlight briefly so the user can easily locate it
+
+This is important because there may be many orders and multiple lines visible.
+
+---
+
+## 5. LINKAGE SOURCE
+
+Use the actual linked order relationship already maintained by the Powermix split logic, such as:
+- source_order_id
+- generated_order_id
+- linked_order_id
+- generation_rule_id
+- generated_from_powermix = true
+
+Do not depend only on product name text matching.
+
+---
+
+## 6. FALLBACK HANDLING
+
+If the linked order cannot be found:
+- do not break the page
+- do not navigate to the wrong row
+- optionally show a simple message like:
+  - `Linked split order not found`
+  - or `Source order not found`
+
+But keep the UI stable.
+
+---
+
+## 7. DEBUG LOGGING
+
+Temporarily log:
+
+```javascript
+console.debug('[Powermix Item Description Click Navigation]', {
+  clickedOrderId,
+  clickedOrderLine,
+  clickedOrderFeedmillView,
+  linkedOrderId,
+  linkedOrderLine,
+  linkedOrderFeedmill,
+  currentViewMode, // all_feedmills | feedmill_1 | feedmill_2 | feedmill_3 | powermix
+  navigationMode, // stay_within_all_feedmills | switch_feedmill_tab
+});
+```
+
+```javascript
+console.debug('[Powermix Navigation Result]', {
+  targetFound,
+  targetRowScrolledIntoView,
+  targetRowHighlighted,
+  stayedInAllFeedmills,
+  switchedFeedmillTab,
+});
+```
+
+---
+
+## 8. VERIFICATION
+
+1. ✅ The item description name itself is clickable for linked Powermix orders
+2. ✅ No extra icon, text link, or button is added
+3. ✅ Clicking a Line 5 source order navigates to the generated split order
+4. ✅ Clicking a generated split order navigates back to the Line 5 source order
+5. ✅ In All Feedmills view, navigation stays within All Feedmills
+6. ✅ In All Feedmills view, the app scrolls to the linked row instead of switching tabs
+7. ✅ In specific feedmill / Powermix views, the app switches to the correct feedmill when needed
+8. ✅ The linked row is scrolled into view and highlighted
+9. ✅ Navigation uses actual source/generated linkage, not weak text-only matching
+10. ✅ Missing linked rows are handled gracefully

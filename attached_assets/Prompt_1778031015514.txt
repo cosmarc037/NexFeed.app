@@ -1,0 +1,283 @@
+```
+Add Cost and Margin from Master Data into the order table, grouped under a new "Pricing" header section.
+
+---
+
+## OBJECTIVE
+
+We recently added new columns in Master Data:
+- Cost
+- Margin
+
+Now we want these values to also appear in the order table.
+
+For each order:
+- use the order’s material code as the identifier
+- look up the corresponding record in Master Data
+- retrieve the matching Cost and Margin
+- display them in the order table row
+
+---
+
+## 1. LOOK UP COST AND MARGIN USING MATERIAL CODE
+
+For every order row:
+- read the order’s material code
+- match it against Master Data
+- pull:
+  - Cost
+  - Margin
+
+Use the material code as the lookup key.
+
+### Matching rules
+Normalize the material code before matching:
+- convert to string
+- trim whitespace
+- compare consistently
+
+### Suggested helper:
+```javascript
+function normalizeMaterialCode(value) {
+  if (value == null) return '';
+  return String(value).trim();
+}
+
+function getPricingFromMasterData(order, masterData) {
+  const orderCode = normalizeMaterialCode(order.material_code_fg || order.material_code);
+
+  if (!orderCode) {
+    return {
+      cost: null,
+      margin: null,
+      pricingFound: false,
+    };
+  }
+
+  const match = (masterData || []).find(md => {
+    const codesToCheck = [
+      md.material_code_fg,
+      md.material_code,
+      md.MaterialCode,
+      md['Material Code'],
+      md['Material Code (FG)'],
+    ].map(normalizeMaterialCode);
+
+    return codesToCheck.includes(orderCode);
+  });
+
+  if (!match) {
+    return {
+      cost: null,
+      margin: null,
+      pricingFound: false,
+    };
+  }
+
+  const cost = match.Cost ?? match.cost ?? match['Cost'] ?? null;
+  const margin = match.Margin ?? match.margin ?? match['Margin'] ?? null;
+
+  return {
+    cost,
+    margin,
+    pricingFound: true,
+  };
+}
+```
+
+---
+
+## 2. ENRICH ORDER ROWS WITH COST AND MARGIN
+
+Before rendering the order table, enrich each order with pricing values from master data.
+
+### Example:
+```javascript
+function enrichOrdersWithPricing(orders, masterData) {
+  return (orders || []).map(order => {
+    const pricing = getPricingFromMasterData(order, masterData);
+
+    return {
+      ...order,
+      _cost: pricing.cost,
+      _margin: pricing.margin,
+      _pricingFound: pricing.pricingFound,
+    };
+  });
+}
+```
+
+Apply this consistently anywhere the order table is built:
+- main order table
+- auto-sequence preview if applicable
+- line-level order tables
+- after-table / before-table if desired
+
+---
+
+## 3. ADD A NEW GROUPED TABLE HEADER: "PRICING"
+
+In the order table layout, insert a new grouped header section:
+
+- Order Details
+- **Pricing**
+- Production Parameters
+
+So Pricing should appear between:
+- order details section
+- production parameters section
+
+### Pricing group columns:
+- Cost
+- Margin
+
+---
+
+## 4. TABLE HEADER STRUCTURE
+
+Update the multi-row table header so that:
+
+### Header groups
+- Order Details
+- Pricing
+- Production Parameters
+
+### Pricing sub-columns
+- Cost
+- Margin
+
+Example conceptual layout:
+```text
+| Order Details | Pricing | Production Parameters |
+| ...           | Cost | Margin | ...              |
+```
+
+Make sure column span / group span values are updated correctly.
+
+---
+
+## 5. DISPLAY RULES FOR COST AND MARGIN
+
+For each row:
+- if pricing was found, display Cost and Margin
+- if no matching master data record exists, display `—`
+
+### Suggested rendering:
+```jsx
+<td>{order._cost != null ? formatCurrency(order._cost) : '—'}</td>
+<td>{order._margin != null ? formatMargin(order._margin) : '—'}</td>
+```
+
+### Suggested formatting
+- Cost:
+  - numeric display
+  - optionally currency style if already supported
+- Margin:
+  - preserve current format
+  - if it is percentage-based, show as percent or plain numeric as consistent with the rest of the app
+
+Examples:
+- Cost: `1,250.00`
+- Margin: `18.7%`
+or
+- Margin: `18.7`
+
+Use whichever format matches your current master data display standard.
+
+---
+
+## 6. DO NOT BREAK EXISTING PROFIT-SCORE / MASTER DATA LOGIC
+
+If `_margin` is already being used for AI sequencing / profit-score logic, be careful not to conflict with it.
+
+Recommended approach:
+- either reuse `_margin` if already correctly populated from Master Data
+- or use display-specific fields like:
+  - `_displayCost`
+  - `_displayMargin`
+
+If `_margin` is already the validated master-data margin field used by AI, it is fine to display it directly.
+
+For cost:
+- likely add a new field such as:
+```javascript
+_cost
+```
+
+---
+
+## 7. HANDLE MISSING / UNPARSEABLE VALUES SAFELY
+
+If Cost or Margin is missing:
+- show `—`
+- do not show `undefined`
+- do not break layout
+
+If values are present but not parseable:
+- show raw string if appropriate
+- otherwise show `—`
+
+Example helper:
+```javascript
+function formatPricingValue(value) {
+  if (value == null || value === '') return '—';
+  return value;
+}
+```
+
+---
+
+## 8. KEEP LOOKUP PER MATERIAL CODE ONLY
+
+Important:
+- do not match by description
+- do not match by partial text
+- do not infer pricing from another row
+
+Use only the material code match from Master Data.
+
+If no material-code match is found:
+- show `—`
+
+---
+
+## 9. OPTIONAL: ADD DEBUG LOGGING FOR PRICING LOOKUP
+
+Temporarily log matching results to verify the join is working:
+
+```javascript
+console.debug('[Pricing Lookup]', {
+  orderId: order.id,
+  materialCode: order.material_code_fg || order.material_code,
+  cost: pricing.cost,
+  margin: pricing.margin,
+  pricingFound: pricing.pricingFound,
+});
+```
+
+This helps verify:
+- codes are matching correctly
+- values are being retrieved
+- table display issues are not due to lookup failure
+
+---
+
+## 10. VERIFICATION
+
+### Data lookup
+1. ✅ Each order looks up Cost and Margin from Master Data using material code
+2. ✅ Material code matching is normalized to avoid string mismatch issues
+3. ✅ Missing master-data matches safely show `—`
+
+### UI layout
+4. ✅ A new grouped header "Pricing" is added between Order Details and Production Parameters
+5. ✅ Pricing contains two columns:
+   - Cost
+   - Margin
+6. ✅ Table header spans align correctly
+
+### Display
+7. ✅ Each order row shows the correct Cost for its material code
+8. ✅ Each order row shows the correct Margin for its material code
+9. ✅ Existing table layout and logic remain stable
+10. ✅ Existing AI margin logic is not broken by the new display columns

@@ -1,0 +1,212 @@
+```
+Fix: Simply re-sort same-day orders by margin, nothing else:
+
+---
+
+## 1. REPLACE THE ENTIRE sortWithMargin FUNCTION
+
+```javascript
+function sortWithMargin(orders, masterData) {
+  // Step 1: Enrich each order with its margin from master data
+  const enriched = orders.map(order => {
+    const materialCode = String(order.material_code_fg || '').trim();
+    const mdEntry = masterData.find(md =>
+      String(md.material_code_fg || '').trim() === materialCode
+    );
+    const margin = mdEntry ? (parseFloat(mdEntry.margin) || 0) : 0;
+    const hasMarginData = mdEntry && mdEntry.margin != null && mdEntry.margin !== '';
+    
+    return {
+      ...order,
+      _margin: margin,
+      _hasMarginData: hasMarginData,
+    };
+  });
+  
+  // Step 2: Group orders by their display date
+  // Orders are ALREADY sorted correctly (by avail date, N10D, urgency, etc.)
+  // We just need to find groups with the SAME date and re-sort within those groups
+  
+  const groups = [];
+  let currentGroup = [];
+  let currentDateKey = null;
+  
+  for (const order of enriched) {
+    const dateKey = getOrderDateKey(order);
+    
+    if (dateKey !== currentDateKey) {
+      if (currentGroup.length > 0) {
+        groups.push(currentGroup);
+      }
+      currentGroup = [order];
+      currentDateKey = dateKey;
+    } else {
+      currentGroup.push(order);
+    }
+  }
+  if (currentGroup.length > 0) {
+    groups.push(currentGroup);
+  }
+  
+  // Step 3: Within each group, sort by margin descending
+  const result = [];
+  for (const group of groups) {
+    if (group.length > 1) {
+      group.sort((a, b) => (b._margin || 0) - (a._margin || 0));
+    }
+    result.push(...group);
+  }
+  
+  // Step 4: Reassign prio
+  result.forEach((order, index) => {
+    order.prio = index + 1;
+    order.priority_seq = index + 1;
+  });
+  
+  return result;
+}
+
+function getOrderDateKey(order) {
+  // Get the date that this order is sorted by
+  // This could be target_avail_date, _targetDate, or a status string
+  
+  const availDate = order.target_avail_date;
+  
+  // If it's a real date, extract YYYY-MM-DD
+  if (availDate && /^\d{4}-\d{2}-\d{2}/.test(String(availDate).trim())) {
+    return String(availDate).trim().substring(0, 10);
+  }
+  
+  // If it has an inferred target date
+  if (order._targetDate && /^\d{4}-\d{2}-\d{2}/.test(String(order._targetDate).trim())) {
+    return String(order._targetDate).trim().substring(0, 10);
+  }
+  
+  // If it has _sortDate
+  if (order._sortDate && order._sortDate instanceof Date && !isNaN(order._sortDate.getTime())) {
+    return order._sortDate.toISOString().substring(0, 10);
+  }
+  
+  // Not a date — use the display string as the key
+  // This groups "safety stocks" together, "prio replenish" together, etc.
+  return String(availDate || order._availDateDisplay || 'no_date').trim().toLowerCase();
+}
+```
+
+---
+
+## 2. UPDATE handleToggleProfitability — SIMPLER
+
+```javascript
+async function handleToggleProfitability() {
+  if (isProfitabilityApplied) {
+    // Revert to original sort
+    setSequencedResults(preMarginResults);
+    setIsProfitabilityApplied(false);
+    allLines.forEach(line => invalidateLineCache(line));
+    return;
+  }
+  
+  // Save current for reverting
+  setPreMarginResults(JSON.parse(JSON.stringify(sequencedResults)));
+  
+  const marginResults = {};
+  
+  allLines.forEach(line => {
+    const lineOrders = sequencedResults[line] || [];
+    if (lineOrders.length === 0) {
+      marginResults[line] = [];
+      return;
+    }
+    
+    // Deep copy
+    const ordersCopy = lineOrders.map(o => ({ ...JSON.parse(JSON.stringify(o)) }));
+    
+    // Just re-sort same-day orders by margin — that's it
+    const sorted = sortWithMargin(ordersCopy, masterData);
+    
+    // Recalculate changeovers since order changed
+    calculatePreviewChangeovers(sorted, changeoverRules);
+    
+    // Recalculate movement
+    const originalLineOrders = originalSnapshot[line] || [];
+    sorted.forEach((order, index) => {
+      order.prio = index + 1;
+      const originalIndex = originalLineOrders.findIndex(o => o.id === order.id);
+      if (originalIndex >= 0) {
+        const originalPrio = originalIndex + 1;
+        const delta = originalPrio - order.prio;
+        order._originalPrio = originalPrio;
+        order._movement = delta > 0 ? 'up' : delta < 0 ? 'down' : 'same';
+        order._movementDelta = Math.abs(delta);
+      } else {
+        order._movement = order._movedFromLine ? 'new_to_line' : 'same';
+      }
+    });
+    
+    marginResults[line] = sorted;
+  });
+  
+  setSequencedResults(marginResults);
+  setIsProfitabilityApplied(true);
+  allLines.forEach(line => invalidateLineCache(line));
+}
+```
+
+---
+
+## EXAMPLE TRACE
+
+Input (already sorted by date):
+  1. Order A: April 15 — 16.8%
+  2. Order B: April 17 — 15.2%
+  3. Order C: April 20 — 20.0%
+  4. Order D: April 21 — 15.0%
+  5. Order E: April 21 — 16.6%
+  6. Order F: April 21 — 13.7%
+
+Step 1: Group by date key
+  Group 1: [Order A] → "2026-04-15"
+  Group 2: [Order B] → "2026-04-17"
+  Group 3: [Order C] → "2026-04-20"
+  Group 4: [Order D, Order E, Order F] → "2026-04-21"
+
+Step 2: Sort within groups by margin desc
+  Group 1: [Order A] → unchanged (only 1)
+  Group 2: [Order B] → unchanged (only 1)
+  Group 3: [Order C] → unchanged (only 1)
+  Group 4: [Order E (16.6%), Order D (15.0%), Order F (13.7%)]
+
+Result:
+  1. Order A: April 15 — 16.8%  ← unchanged
+  2. Order B: April 17 — 15.2%  ← unchanged
+  3. Order C: April 20 — 20.0%  ← unchanged
+  4. Order E: April 21 — 16.6%  ← moved up (was 5th)
+  5. Order D: April 21 — 15.0%  ← moved down (was 4th)
+  6. Order F: April 21 — 13.7%  ← unchanged
+
+---
+
+## VERIFICATION
+
+### Dates preserved
+1. ✅ April 15 stays before April 17
+2. ✅ April 17 stays before April 20
+3. ✅ April 20 stays before April 21
+4. ✅ Date order NEVER changes
+
+### Margin applied within same day
+5. ✅ April 21 group: 16.6% → 15.0% → 13.7%
+6. ✅ Higher margin comes first
+7. ✅ Only affects orders with the SAME date
+
+### Non-dated orders
+8. ✅ "safety stocks" grouped together → sorted by margin within group
+9. ✅ "prio replenish" grouped together → sorted by margin within group
+10. ✅ Position relative to dated orders unchanged
+
+### Simple and correct
+11. ✅ No category reassignment
+12. ✅ No date re-resolution
+13. ✅ Just: group by date → sort within group by margin → done
+```

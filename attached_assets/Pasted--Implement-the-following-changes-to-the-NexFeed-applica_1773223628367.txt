@@ -1,0 +1,191 @@
+```
+Implement the following changes to the NexFeed application:
+
+---
+
+## CANCEL/UN-CANCEL — FPR NOTES BEHAVIOR
+
+### CANCEL — AUTO-GENERATED NOTE
+
+When an order is cancelled, an auto-generated cancellation note is APPENDED to the FPR Notes.
+
+**Format:**
+```
+Cancelled: [Reason] — [Month DD, YYYY HH:MM AM/PM]
+```
+
+Or with additional notes:
+```
+Cancelled: [Reason] — [Month DD, YYYY HH:MM AM/PM]. [Additional Notes]
+```
+
+**Examples:**
+```
+Cancelled: Material unavailable — March 10, 2026 02:30 PM
+```
+```
+Cancelled: Other — March 10, 2026 02:30 PM. Supplier delayed shipment by 2 weeks.
+```
+
+**Styling:**
+- The auto-generated cancellation note text is displayed in RED font (#e53935) in the FPR Notes field.
+- If the order had existing notes before cancellation, the existing notes remain in their original color (dark text).
+- Only the auto-generated cancellation text is red.
+
+**Example in FPR Notes field (visual):**
+
+```
+Check HA with warehouse team          ← original note, dark text (#1a1a1a)
+Cancelled: Material unavailable — March 10, 2026 02:30 PM    ← red text (#e53935)
+```
+
+**Implementation for red text:**
+- The auto-generated cancel note must be stored in a way that it can be identified separately from user-written notes.
+- Option A (recommended): Store the cancel note as a separate field (e.g., `cancel_note`) and render it alongside the regular `prod_remarks` / FPR Notes field, but in red. When displayed, the FPR Notes cell shows:
+  - [existing prod_remarks in dark text]
+  - [cancel_note in red text]
+- Option B: Store the cancel note within prod_remarks but wrapped in a marker/tag (e.g., `[CANCEL]Cancelled: Material unavailable — March 10, 2026 02:30 PM[/CANCEL]`). When rendering the FPR Notes cell, detect this tag and render that portion in red.
+- Either approach is acceptable — the key requirement is that the cancel note is visually red AND can be cleanly removed on un-cancel without affecting original notes.
+
+---
+
+### UN-CANCEL — AUTO-GENERATED NOTE IS REMOVED
+
+When an order is un-cancelled (restored from "Cancel PO" to any other status):
+
+1. **The auto-generated cancellation note is REMOVED from FPR Notes.**
+   - ONLY the auto-generated cancel text is removed.
+   - Any original notes that existed BEFORE the cancellation are PRESERVED — they remain untouched.
+
+2. **The original notes are fully intact after un-cancel.**
+
+**Example flow:**
+
+**Step 1 — Order has original note:**
+```
+FPR Notes: "Check HA with warehouse team"
+```
+
+**Step 2 — Order is cancelled (reason: Material unavailable):**
+```
+FPR Notes: "Check HA with warehouse team"                        ← dark text, preserved
+           "Cancelled: Material unavailable — March 10, 2026 02:30 PM"   ← red text, auto-generated
+```
+
+**Step 3 — Order is un-cancelled (restored to "Plotted"):**
+```
+FPR Notes: "Check HA with warehouse team"    ← dark text, preserved — original note intact
+```
+
+The red cancellation text is completely removed. Only the original note remains.
+
+**Example flow — order with NO original notes:**
+
+**Step 1 — No notes:**
+```
+FPR Notes: (empty)
+```
+
+**Step 2 — Order is cancelled:**
+```
+FPR Notes: "Cancelled: Material unavailable — March 10, 2026 02:30 PM"   ← red text
+```
+
+**Step 3 — Order is un-cancelled:**
+```
+FPR Notes: (empty)    ← cancel note removed, nothing left
+```
+
+**Example flow — order cancelled and un-cancelled multiple times:**
+
+**Step 1 — Original note:**
+```
+FPR Notes: "Rush order per management"
+```
+
+**Step 2 — Cancelled first time:**
+```
+FPR Notes: "Rush order per management"
+           "Cancelled: Client request — March 10, 2026 02:30 PM"   ← red
+```
+
+**Step 3 — Un-cancelled:**
+```
+FPR Notes: "Rush order per management"    ← cancel note removed
+```
+
+**Step 4 — Cancelled again:**
+```
+FPR Notes: "Rush order per management"
+           "Cancelled: Scheduling conflict — March 11, 2026 09:00 AM"   ← red, NEW cancel note
+```
+
+**Step 5 — Un-cancelled again:**
+```
+FPR Notes: "Rush order per management"    ← cancel note removed again
+```
+
+Each cancel/un-cancel cycle adds and removes the cancel note cleanly. The original note is never touched.
+
+---
+
+### IMPLEMENTATION APPROACH
+
+**Recommended: Separate cancel_note field**
+
+Add a new field to the order data model:
+
+```
+cancel_note: string | null
+```
+
+**On cancel:**
+- Set `cancel_note` to the auto-generated text: "Cancelled: [Reason] — [Date Time]"
+- If additional notes provided: "Cancelled: [Reason] — [Date Time]. [Additional Notes]"
+- Do NOT modify `prod_remarks` (the existing FPR Notes field).
+
+**On un-cancel:**
+- Set `cancel_note` to null.
+- Do NOT modify `prod_remarks`.
+
+**When rendering the FPR Notes cell:**
+- Display `prod_remarks` in normal dark text (#1a1a1a).
+- If `cancel_note` is not null, display it below `prod_remarks` in red text (#e53935).
+- If `prod_remarks` is empty and `cancel_note` exists, only the red text shows.
+- If both are empty, the cell is empty.
+
+**Visual rendering in the FPR Notes cell:**
+
+```
+┌──────────────────────────────────────────┐
+│ Check HA with warehouse team             │  ← dark text (prod_remarks)
+│ Cancelled: Material unavailable —        │  ← red text (cancel_note)
+│ March 10, 2026 02:30 PM                 │  ← red text (continued)
+└──────────────────────────────────────────┘
+```
+
+**When editing FPR Notes:**
+- The user edits ONLY `prod_remarks` (the regular notes).
+- The `cancel_note` is NOT editable by the user — it is system-generated and system-removed.
+- In the edit view, only `prod_remarks` appears in the text input.
+- The red `cancel_note` is displayed below the input as read-only text (if the order is currently cancelled).
+
+---
+
+### FPR NOTES IN ORDER HISTORY (CANCELLED ORDERS TAB)
+
+When a cancelled order is moved to Order History > Cancelled Orders tab:
+- The FPR Notes column shows BOTH `prod_remarks` and `cancel_note`.
+- `prod_remarks` in dark text.
+- `cancel_note` in red text (#e53935).
+- Since these are archived/historical records, the cancel note is permanent in the history view — it is NOT removed even if it was un-cancelled and re-cancelled before being archived.
+
+---
+
+### FPR NOTES IN EXPORT
+
+When exporting orders (if export functionality exists):
+- FPR Notes should include both `prod_remarks` and `cancel_note` as a single combined text.
+- The cancel note is appended after the regular notes with a line break.
+- Red formatting is not applicable in exports (plain text) — the cancel note is simply included as text.
+```

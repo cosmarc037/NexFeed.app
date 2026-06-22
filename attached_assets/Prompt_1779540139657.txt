@@ -1,0 +1,224 @@
+Please update the **downstream Start Date / Start Time scheduling behavior** with the following validation and auto-resolution rules.
+
+---
+
+## 1. APPLY THIS ONLY TO 2ND ORDERS ONWARD
+
+Please apply this behavior only to:
+- the **2nd order onward**
+- or any order that has a **previous order** above it in sequence
+
+Do not change the already-implemented logic for the **first order**.
+
+### Expected result
+The first-order default/fallback behavior remains unchanged.
+
+This update only applies to downstream orders whose schedule can be resolved using the **previous order’s completion datetime**.
+
+---
+
+## 2. USERS MUST NOT BE ABLE TO SELECT THE SAME DATE AS THE PREVIOUS ORDER’S COMPLETION DATE
+
+For any downstream order, when the user manually edits the **Start Date**:
+
+- the user must **not** be allowed to select the **same calendar date** as the previous order’s completion date
+- the user must also **not** be allowed to select any **past date**
+
+### Example
+If the previous order’s completion date is:
+- `May 23, 2026`
+
+then the user must not be allowed to manually select:
+- `May 23, 2026`
+
+If today is:
+- `May 23, 2026`
+
+then the user must also not be allowed to select:
+- `May 19, 2026`
+- `May 20, 2026`
+- `May 21, 2026`
+- `May 22, 2026`
+
+### Reason
+If the user wants the order to be produced on the **same date** as the previous order’s completion date, they should not do that through manual Start Date selection.
+
+Instead, they should only edit the **Start Time**, and the app should automatically determine whether the same date is valid.
+
+### Expected result
+Manual **Start Date** input for downstream orders should only allow:
+- a date later than the previous order’s completion date
+- and not any date in the past
+
+---
+
+## 3. IF USER SETS START DATE ONLY, DEFAULT START TIME TO 8:00 AM
+
+If a user manually sets a **Start Date** but leaves **Start Time** blank:
+
+- keep the selected Start Date
+- automatically set **Start Time = 8:00 AM**
+
+### Important
+This applies only after the Start Date passes validation.
+
+### Expected result
+For a valid downstream Start Date entry:
+- `Start Date = selected date`
+- `Start Time = 8:00 AM`
+
+---
+
+## 4. IF USER SETS START TIME ONLY, AUTO-DETERMINE WHETHER TO USE THE SAME DATE OR THE NEXT DATE
+
+If a user manually sets a **Start Time** but leaves **Start Date** blank:
+
+- look at the **previous order’s completion datetime**
+- compare the entered Start Time against the **previous completion time**
+
+### Resolution rule
+
+#### If entered Start Time is later than or equal to the previous completion time
+Use the **same date** as the previous order’s completion date.
+
+#### If entered Start Time is earlier than the previous completion time
+Use the **following date** after the previous order’s completion date.
+
+### Reason
+This allows the user to schedule a downstream order on the same production day **without manually selecting the same date**, which is intentionally disallowed in the date picker/input.
+
+---
+
+## 5. TIME-ONLY EXAMPLES
+
+### Example A — Same-date scheduling is valid through Start Time
+Previous order completion:
+- `May 23, 2026, 12:00 PM`
+
+User enters:
+- `Start Time = 3:00 PM`
+- `Start Date = blank`
+
+Since `3:00 PM` is later than `12:00 PM`, the app should resolve to:
+- `Start Date = May 23, 2026`
+- `Start Time = 3:00 PM`
+
+### Example B — Earlier time should move to the following date
+Previous order completion:
+- `May 23, 2026, 12:00 PM`
+
+User enters:
+- `Start Time = 10:00 AM`
+- `Start Date = blank`
+
+Since `10:00 AM` is earlier than `12:00 PM`, the app should resolve to:
+- `Start Date = May 24, 2026`
+- `Start Time = 10:00 AM`
+
+### Expected result
+Users can still achieve same-day scheduling, but only through the **Start Time** field when it aligns with the previous completion time.
+
+---
+
+## 6. USE THE PREVIOUS ORDER’S COMPLETION DATETIME AS THE REFERENCE
+
+Please use the **previous order’s completion datetime** as the reference point for downstream Start Date / Start Time resolution.
+
+This ensures the behavior remains aligned with the app’s existing sequencing and cascade logic.
+
+### Expected result
+The app continues to respect the current order sequence and does not allow downstream orders to be scheduled in a way that conflicts with the previous order’s completion timing.
+
+---
+
+## 7. DO NOT BREAK THE EXISTING CASCADING COMPLETION LOGIC
+
+Please preserve the current logic where:
+- completion dates cascade from earlier orders
+- production hours drive schedule continuation
+- first-order defaults already work
+
+This request is only to improve:
+- Start Date validation
+- Start Time-only auto-resolution for downstream orders
+
+Do not break:
+- estimated completion calculations
+- production-hours-based cascade
+- existing first-order scheduling behavior
+
+---
+
+## IMPORTANT
+
+Please preserve this rule distinction:
+
+- **Manual Start Date**
+  - cannot use the same date as the previous order’s completion date
+  - cannot use past dates
+  - if valid and Start Time is blank, default to `8:00 AM`
+
+- **Manual Start Time only**
+  - may still resolve to the same date as the previous order’s completion date
+  - should automatically use:
+    - the same date if the entered time is later than or equal to previous completion time
+    - the next date if the entered time is earlier than previous completion time
+
+This distinction is important and should not be merged into one generic rule.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log downstream Start Date validation and Start Time-only resolution.
+
+```javascript
+console.debug('[Downstream Start Date Validation]', {
+  orderId,
+  selectedStartDate,
+  previousCompletionDate,
+  todayDate,
+  isPastDate,
+  isSameAsPreviousCompletionDate,
+  allowed:
+    !isPastDate && !isSameAsPreviousCompletionDate,
+});
+```
+
+```javascript
+console.debug('[Downstream Start Date Only Resolution]', {
+  orderId,
+  selectedStartDate,
+  resolvedStartTime: '08:00 AM',
+});
+```
+
+```javascript
+console.debug('[Downstream Start Time Only Resolution]', {
+  orderId,
+  previousCompletionDatetime,
+  enteredStartTime,
+  previousCompletionTime,
+  resolvedStartDate,
+  resolutionRule:
+    enteredStartTime >= previousCompletionTime
+      ? 'same_date'
+      : 'next_date',
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ The new behavior applies only to **2nd orders onward** or orders with a previous order
+2. ✅ The existing first-order scheduling logic remains unchanged
+3. ✅ A user cannot manually select the **same date** as the previous order’s completion date
+4. ✅ A user cannot manually select a **past date**
+5. ✅ If a valid Start Date is selected and Start Time is blank, the app defaults Start Time to **8:00 AM**
+6. ✅ If a user enters only Start Time and it is later than or equal to the previous completion time, the app uses the **same date**
+7. ✅ If a user enters only Start Time and it is earlier than the previous completion time, the app uses the **following date**
+8. ✅ Same-date downstream production is still possible through **Start Time-only** entry
+9. ✅ Manual Start Date input does not allow same-date downstream scheduling
+10. ✅ Existing completion-date cascading and production-hours sequencing continue to work correctly
+11. ✅ No UI errors or console errors are introduced

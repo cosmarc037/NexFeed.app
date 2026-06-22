@@ -1,0 +1,172 @@
+Please update the **source-order → generated-order navigation behavior** so that if the target generated order is inside a **collapsed combined order group**, the app automatically expands that group before redirecting to the generated order.
+
+---
+
+## 1. AUTO-EXPAND COLLAPSED COMBINED ORDERS WHEN NAVIGATING TO A GENERATED ORDER
+
+The application currently allows users to click a **source order** to navigate to its linked **generated order**.
+
+However, if the target generated order is inside a **collapsed combined order**, the navigation does not properly reveal the generated order unless the user manually expands the combined group first.
+
+Please fix this behavior.
+
+### Expected result
+If a user clicks a source order and the linked generated order is hidden inside a collapsed combined group:
+- the app should automatically expand the combined group
+- then reveal and navigate to the generated order
+
+Users should not need to manually expand the combined order before the redirect works properly.
+
+---
+
+## 2. CHECK WHETHER THE TARGET GENERATED ORDER IS INSIDE A COLLAPSED COMBINED GROUP
+
+Before navigating to the generated order, please check whether the target row is currently:
+
+- visible directly
+- or hidden inside a collapsed combined group
+
+### Expected result
+The app should detect whether the target generated order is nested under a collapsed combined-order container before trying to scroll or focus it.
+
+---
+
+## 3. IF THE TARGET IS COLLAPSED, EXPAND THE COMBINED GROUP AUTOMATICALLY
+
+If the linked generated order is inside a collapsed combined order, please automatically expand that combined group first.
+
+### Important
+This expansion should happen automatically as part of the redirect/navigation flow.
+
+### Expected result
+The generated order becomes visible before the app attempts to scroll to or highlight it.
+
+---
+
+## 4. AFTER EXPANSION, SCROLL TO AND REVEAL THE GENERATED ORDER
+
+Once the combined group is expanded, the app should continue the redirect behavior normally by:
+
+- scrolling to the generated order
+- bringing it into view
+- and, if supported, visually focusing or highlighting it
+
+### Goal
+The user should immediately land on the actual generated order row they intended to view.
+
+### Expected result
+Clicking the source order should reliably reveal the target generated order even when it is nested inside a combined group.
+
+---
+
+## 5. HANDLE LINE / SECTION OPENING IF NEEDED
+
+If the generated order exists under a different line section or container that is not currently visible, please also ensure the app opens or activates the relevant line/section before expanding the combined group and scrolling to the row.
+
+### Expected result
+The full navigation flow should work end-to-end:
+- locate the correct line
+- reveal the correct combined group if collapsed
+- scroll to the specific generated order row
+
+---
+
+## 6. DO NOT REQUIRE MANUAL USER EXPANSION
+
+Please remove the need for this manual workaround:
+
+- expand combined group first
+- then click again / search manually for the generated order
+
+### Expected result
+The redirect should work in a single click, even when the generated order is inside a collapsed combined group.
+
+---
+
+## 7. PRESERVE CURRENT LINKING / GENERATED-ORDER RELATIONSHIP LOGIC
+
+Please keep the existing logic that determines:
+- which generated order belongs to which source order
+- how the link/redirect is triggered
+- which line/row is the correct destination
+
+This request is specifically to improve the **navigation visibility behavior** when the generated order is hidden by a collapsed combined group.
+
+### Expected result
+Only the reveal/navigation behavior is enhanced.
+
+---
+
+## 8. OPTIONAL: ADD A TEMPORARY HIGHLIGHT TO THE REVEALED GENERATED ORDER
+
+If supported, it would be helpful to temporarily highlight the generated order row after the auto-expand + scroll action.
+
+### Goal
+Make it obvious to the user which row was opened as the destination.
+
+### Example behavior
+- expand combined group
+- scroll to generated order
+- apply temporary highlight or flash effect for 1–2 seconds
+
+This is optional but recommended for UX clarity.
+
+---
+
+## IMPORTANT
+
+Please implement this behavior:
+
+- when a user clicks a source order to navigate to its generated order,
+- and that generated order is inside a collapsed combined group,
+- the app must automatically expand the combined group first,
+- then scroll to and reveal the generated order
+
+The user should not need to manually expand the combined order for the redirect to work.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log the navigation and auto-expansion behavior.
+
+```javascript
+console.debug('[Generated Order Redirect]', {
+  sourceOrderId,
+  targetGeneratedOrderId,
+  targetLine,
+  targetFound,
+});
+```
+
+```javascript
+console.debug('[Generated Order Redirect - Combined Group Expansion]', {
+  targetGeneratedOrderId,
+  combinedGroupId,
+  wasCollapsed,
+  autoExpanded: wasCollapsed,
+});
+```
+
+```javascript
+console.debug('[Generated Order Redirect - Reveal]', {
+  targetGeneratedOrderId,
+  targetVisibleAfterExpand,
+  scrolledIntoView: true,
+  highlighted: true,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Clicking a source order still redirects to its linked generated order
+2. ✅ If the target generated order is inside a collapsed combined group, the app detects that correctly
+3. ✅ The app automatically expands the combined group before navigating to the generated order
+4. ✅ The app scrolls to the generated order after expansion
+5. ✅ The generated order becomes visible without requiring manual expansion
+6. ✅ If needed, the correct target line/section is opened before the reveal
+7. ✅ Existing source-to-generated linking logic remains intact
+8. ✅ Optional highlight/focus behavior works if implemented
+9. ✅ No UI errors or console errors are introduced

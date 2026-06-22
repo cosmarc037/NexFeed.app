@@ -1,0 +1,372 @@
+```
+Clean up the Actions Taken display — minimal bold, badges at bottom, clean explanation:
+
+---
+
+## 1. UPDATE AI PROMPT — NO BOLD IN EXPLANATION
+
+```javascript
+function buildActionsPrompt(placementLog) {
+  return `
+You are a production scheduling advisor. Explain each action taken during a plant-level auto-sequence.
+
+LINE RUN RATES:
+- Line 1: 20 MT/hr
+- Line 2: 20 MT/hr
+- Line 3: 10 MT/hr
+- Line 4: 10 MT/hr
+- Line 5: 10 MT/hr
+- Line 6: 10 MT/hr
+- Line 7: 10 MT/hr
+
+Queue Time Formula: Total MT on line ÷ Line run rate = Queue time in hours
+Lower queue time = better (earlier to complete)
+
+For EACH action below, write a 2-4 sentence explanation.
+
+CONTENT TO INCLUDE:
+1. What happened (combined in place / moved and combined / moved)
+2. Show the queue time calculation for the chosen line AND at least 1-2 other lines for comparison
+3. Show the MT change on the destination line (before → after)
+4. For moved orders: mention what the source line's queue time was
+5. For combined: mention changeovers saved and time saved
+
+FORMATTING RULES:
+- Do NOT use ** or any bold markers.
+- Do NOT use markdown.
+- Write plain text only.
+- Keep it concise — 2-4 sentences max.
+- Show actual numbers (MT, queue times, run rates).
+- Use short line names (L1, L2, etc.).
+
+ACTIONS:
+
+${placementLog.map((entry, index) => {
+  const lineDetails = entry.lineScores
+    .map(ls => `${getLineShortName(ls.line)}: ${ls.totalMTBefore.toFixed(1)} MT ÷ ${ls.runRate} MT/hr = ${ls.queueTimeBefore.toFixed(2)} hrs (after: ${ls.totalMTAfter.toFixed(1)} MT)`)
+    .join('\n    ');
+  
+  if (entry.type === 'combined') {
+    const allSameLine = entry.fromLines.every(l => l === entry.toLine);
+    return `
+ACTION ${index + 1}: COMBINED
+Product: ${entry.product}
+Orders: ${entry.ordersCount}, Total: ${entry.totalVolume} MT
+Movement: ${allSameLine ? 'Combined in place on ' + getLineShortName(entry.toLine) : 'From ' + entry.fromLines.map(l => getLineShortName(l)).join(', ') + ' → ' + getLineShortName(entry.toLine)}
+Eligible Lines:
+    ${lineDetails}
+Destination MT: ${entry.bestLineReason.totalMTBefore.toFixed(1)} → ${entry.bestLineReason.totalMTAfter.toFixed(1)} MT
+Changeovers Saved: ${entry.changeoversSaved} (${entry.timeSaved.toFixed(2)} hrs)
+`;
+  }
+  
+  if (entry.type === 'moved') {
+    return `
+ACTION ${index + 1}: MOVED
+Product: ${entry.product}, Volume: ${entry.volume} MT
+From: ${getLineShortName(entry.fromLine)} → ${getLineShortName(entry.toLine)}
+Eligible Lines:
+    ${lineDetails}
+Source: ${getLineShortName(entry.fromLine)} queue was ${entry.fromLineReason.queueTime.toFixed(2)} hrs
+Destination MT: ${entry.lineScores.find(ls => ls.line === entry.toLine)?.totalMTBefore.toFixed(1)} → ${entry.lineScores.find(ls => ls.line === entry.toLine)?.totalMTAfter.toFixed(1)} MT
+`;
+  }
+  
+  return '';
+}).join('\n')}
+
+RESPONSE FORMAT:
+ACTION [number]:
+[2-4 sentences, plain text, no bold, no markdown]
+
+RULES:
+- Use EXACT numbers from data.
+- Show ALL eligible lines with queue time calculations.
+- Do NOT use ** or any formatting.
+- Keep concise.
+  `;
+}
+```
+
+---
+
+## 2. UPDATE FALLBACK — NO BOLD
+
+```javascript
+function generateFallbackExplanation(entry) {
+  if (entry.type === 'combined') {
+    const allSameLine = entry.fromLines.every(l => l === entry.toLine);
+    
+    const allLineDetails = entry.lineScores
+      .map(ls => `${getLineShortName(ls.line)}: ${ls.totalMTBefore.toFixed(1)} MT ÷ ${ls.runRate} MT/hr = ${ls.queueTimeBefore.toFixed(2)} hrs`)
+      .join(', ');
+    
+    if (allSameLine) {
+      return `${entry.ordersCount} orders of ${entry.product} already on ${getLineShortName(entry.toLine)} were combined into a single ${entry.totalVolume} MT run. Queue times evaluated: ${allLineDetails}. ${getLineShortName(entry.toLine)} was confirmed as optimal with the lowest queue time of ${entry.bestLineReason.queueTime.toFixed(2)} hrs. After combining, ${getLineShortName(entry.toLine)} increased from ${entry.bestLineReason.totalMTBefore.toFixed(1)} MT to ${entry.bestLineReason.totalMTAfter.toFixed(1)} MT (${entry.bestLineReason.queueTimeAfter.toFixed(2)} hrs). This saved ${entry.changeoversSaved} changeover${entry.changeoversSaved > 1 ? 's' : ''} and ${formatTimeShift(entry.timeSaved)}.`;
+    } else {
+      const otherLines = [...new Set(entry.fromLines.filter(l => l !== entry.toLine))];
+      return `${entry.ordersCount} orders of ${entry.product} were combined into ${entry.totalVolume} MT on ${getLineShortName(entry.toLine)}, pulling from ${otherLines.map(l => getLineShortName(l)).join(', ')}. Queue times evaluated: ${allLineDetails}. ${getLineShortName(entry.toLine)} had the lowest queue time of ${entry.bestLineReason.queueTime.toFixed(2)} hrs. After combining, ${getLineShortName(entry.toLine)} increased from ${entry.bestLineReason.totalMTBefore.toFixed(1)} MT to ${entry.bestLineReason.totalMTAfter.toFixed(1)} MT (${entry.bestLineReason.queueTimeAfter.toFixed(2)} hrs). This saved ${entry.changeoversSaved} changeover${entry.changeoversSaved > 1 ? 's' : ''} and ${formatTimeShift(entry.timeSaved)}.`;
+    }
+  }
+  
+  if (entry.type === 'moved') {
+    const fromScore = entry.lineScores.find(ls => ls.line === entry.fromLine);
+    const toScore = entry.lineScores.find(ls => ls.line === entry.toLine);
+    
+    const allLineDetails = entry.lineScores
+      .map(ls => `${getLineShortName(ls.line)}: ${ls.totalMTBefore.toFixed(1)} MT ÷ ${ls.runRate} MT/hr = ${ls.queueTimeBefore.toFixed(2)} hrs`)
+      .join(', ');
+    
+    return `${entry.product} (${entry.volume} MT) was moved from ${getLineShortName(entry.fromLine)} to ${getLineShortName(entry.toLine)}. Queue times evaluated: ${allLineDetails}. ${getLineShortName(entry.toLine)} had the lowest queue time of ${toScore?.queueTimeBefore.toFixed(2)} hrs compared to ${getLineShortName(entry.fromLine)} at ${fromScore?.queueTimeBefore.toFixed(2)} hrs. After placement, ${getLineShortName(entry.toLine)} increased from ${toScore?.totalMTBefore.toFixed(1)} MT to ${toScore?.totalMTAfter.toFixed(1)} MT.`;
+  }
+  
+  return 'Action details unavailable.';
+}
+```
+
+---
+
+## 3. UPDATED DISPLAY — BADGES AT BOTTOM, INLINE WITH SUB-ORDERS
+
+```jsx
+function PlantActionsTaken({ placementLog, aiExplanations, isLoadingAI, useFallback, onRefreshInsights }) {
+  if (placementLog.length === 0) {
+    return (
+      <div className="plant-actions-section">
+        <div className="plant-actions-header">
+          <h3 className="plant-summary-title">📋 Actions Taken</h3>
+        </div>
+        <div className="plant-actions-empty">No actions taken — all orders remain on their original lines.</div>
+      </div>
+    );
+  }
+  
+  return (
+    <div className="plant-actions-section">
+      <div className="plant-actions-header">
+        <h3 className="plant-summary-title">📋 Actions Taken</h3>
+        <button className="plant-actions-refresh" onClick={onRefreshInsights}>
+          ↻ Refresh
+        </button>
+      </div>
+      
+      {isLoadingAI && (
+        <div className="plant-actions-loading">Analyzing actions...</div>
+      )}
+      
+      {!isLoadingAI && placementLog.map((entry, index) => {
+        const explanation = (!useFallback && aiExplanations && aiExplanations[index])
+          ? aiExplanations[index]
+          : generateFallbackExplanation(entry);
+        
+        const isAI = !useFallback && aiExplanations && aiExplanations[index];
+        
+        // Calculate MT change for destination
+        const toScore = entry.lineScores.find(ls => ls.line === entry.toLine);
+        
+        return (
+          <div key={index} className="plant-action-card">
+            {/* Header */}
+            <div className="plant-action-header">
+              {entry.type === 'combined' ? (
+                <>
+                  <span className="plant-action-icon">🔗</span>
+                  <span className="plant-action-title">
+                    Combined <strong>{entry.ordersCount}</strong> orders of <strong>{entry.product}</strong> ({entry.totalVolume} MT)
+                    {entry.fromLines.every(l => l === entry.toLine) 
+                      ? ` in place on ${entry.toLine}`
+                      : ` from ${[...new Set(entry.fromLines)].map(l => getLineShortName(l)).join(', ')} → ${entry.toLine}`
+                    }
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span className="plant-action-icon">↗</span>
+                  <span className="plant-action-title">
+                    Moved <strong>{entry.product}</strong> ({entry.volume} MT) {getLineShortName(entry.fromLine)} → {entry.toLine}
+                  </span>
+                </>
+              )}
+              {isAI && <span className="plant-action-ai-tag">AI</span>}
+            </div>
+            
+            {/* Explanation — plain text, no bold */}
+            <div className="plant-action-explanation">
+              {explanation}
+            </div>
+            
+            {/* Bottom badges — MT change + sub-orders all in one row */}
+            <div className="plant-action-badges">
+              {/* MT change badge for destination */}
+              {toScore && (
+                <span className="plant-action-mt-badge plant-action-mt-increase">
+                  {getLineShortName(entry.toLine)} {toScore.totalMTBefore.toFixed(1)} MT → {toScore.totalMTAfter.toFixed(1)} MT
+                  <span className="plant-action-mt-diff">
+                    (+{(toScore.totalMTAfter - toScore.totalMTBefore).toFixed(1)} MT)
+                  </span>
+                </span>
+              )}
+              
+              {/* Sub-order chips for combined */}
+              {entry.type === 'combined' && entry.individualVolumes && (
+                entry.individualVolumes.map((iv, subIdx) => (
+                  <span key={subIdx} className="plant-action-sub-chip">
+                    {getLineShortName(iv.fromLine)} · {iv.volume} MT
+                  </span>
+                ))
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+```
+
+---
+
+## 4. CLEAN STYLING
+
+```css
+/* Action card */
+.plant-action-card {
+  background: #f9fafb;
+  border: 1px solid #f3f4f6;
+  border-radius: 8px;
+  padding: 14px 16px;
+  margin-bottom: 10px;
+}
+
+/* Header */
+.plant-action-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.plant-action-icon {
+  flex-shrink: 0;
+  font-size: 14px;
+  margin-top: 2px;
+}
+
+.plant-action-title {
+  font-size: 13px;
+  color: #374151;
+  line-height: 1.5;
+  flex: 1;
+}
+
+.plant-action-title strong {
+  color: #1a1a1a;
+  font-weight: 600;
+}
+
+.plant-action-ai-tag {
+  flex-shrink: 0;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: #ede9fe;
+  color: #7c3aed;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Explanation — plain text, no bold */
+.plant-action-explanation {
+  font-size: 12px;
+  color: #6b7280;
+  line-height: 1.7;
+  padding: 10px 14px;
+  background: #ffffff;
+  border-radius: 6px;
+  border: 1px solid #f3f4f6;
+  margin-bottom: 8px;
+}
+
+/* Bottom badges — all in one row */
+.plant-action-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+/* MT change badge */
+.plant-action-mt-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.plant-action-mt-increase {
+  background: #f0fdf4;
+  color: #16a34a;
+  border: 1px solid #bbf7d0;
+}
+
+.plant-action-mt-decrease {
+  background: #fef2f2;
+  color: #dc2626;
+  border: 1px solid #fecaca;
+}
+
+.plant-action-mt-diff {
+  font-size: 9px;
+  opacity: 0.8;
+}
+
+/* Sub-order chips */
+.plant-action-sub-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: 1px solid #bfdbfe;
+}
+
+/* Remove old MT change badge styles */
+/* DELETE: .plant-action-mt-changes, .mt-change-badge, .mt-change-*, etc. */
+```
+
+---
+
+## VERIFICATION
+
+### No bold in explanation text
+1. ✅ AI prompt says "Do NOT use ** or any bold markers"
+2. ✅ Fallback generates plain text without **
+3. ✅ Explanation renders as plain grey text
+4. ✅ No ActionExplanation bold parser needed — removed
+
+### Header has minimal bold
+5. ✅ Only product name and order count are bold in header
+6. ✅ Line names NOT bold in header
+7. ✅ MT amount NOT bold in header
+
+### Badges at bottom in one row
+8. ✅ MT change badge: "L7 150.0 MT → 270.0 MT (+120.0 MT)"
+9. ✅ Sub-order chips: "L6 · 60.0 MT", "L6 · 60.0 MT"
+10. ✅ All badges in one horizontal row
+11. ✅ MT badge is green for increase
+12. ✅ Sub-order chips are blue
+
+### Clean layout
+13. ✅ Header (icon + title + AI tag)
+14. ✅ Explanation (plain text in white card)
+15. ✅ Badges row (MT change + sub-orders)
+16. ✅ No redundant information between sections
+17. ✅ Concise 2-4 sentence explanations
+```

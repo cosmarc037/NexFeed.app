@@ -1,0 +1,186 @@
+Please update the **SAP order upload flow** so that orders with valid **Feedmill Line** values are placed into the schedule **first**, and only **after that** should the app calculate queue time and auto-assign the orders that have blank/missing line values.
+
+This is needed because queue-time-based fallback placement for missing-line orders should be based on the **actual placed schedule**, not on an empty or incomplete table.
+
+---
+
+## 1. PLACE ORDERS WITH VALID LINE VALUES FIRST
+
+When a user uploads the SAP order file, please first process and place all orders that already have a valid **Feedmill Line** value.
+
+### Required behavior
+During upload:
+- identify all orders with valid line values
+- place those orders into their corresponding lines first
+- let those orders populate the schedule/table before evaluating missing-line orders
+
+### Goal
+Ensure the initial schedule state reflects the real uploaded orders before any queue-time fallback logic is applied.
+
+### Expected result
+Orders with valid lines appear in the schedule first.
+
+---
+
+## 2. DETECT BLANK-LINE ORDERS ONLY AFTER THE INITIAL PLACEMENT IS DONE
+
+After the valid-line orders are placed, then detect the orders that have:
+- blank Feedmill Line values
+- missing line assignments
+
+### Goal
+Separate the upload flow into:
+1. direct placement of valid-line orders
+2. fallback placement of missing-line orders
+
+### Expected result
+Missing-line orders are evaluated only after the schedule already contains the directly placed orders.
+
+---
+
+## 3. CALCULATE QUEUE TIME ONLY AFTER THE INITIAL SCHEDULE EXISTS
+
+Please make sure the queue-time calculation for missing-line fallback happens only after the app has already placed the valid-line orders.
+
+### Important
+Do **not** calculate queue time for missing-line orders against:
+- an empty table
+- an uninitialized schedule
+- or a partially placed schedule before the valid-line orders are inserted
+
+### Goal
+Make the queue-time comparison reflect the actual current workload of each line after initial placement.
+
+### Expected result
+Missing-line orders are assigned using a more realistic queue-time basis.
+
+---
+
+## 4. USE THE EXISTING MISSING-LINE FALLBACK LOGIC ONLY AFTER VALID-LINE PLACEMENT
+
+After valid-line orders are placed, then apply the missing-line fallback flow:
+
+### Fallback order
+1. **If the order is Line 5 / MX-only** → assign directly to Line 5
+2. **If the order has one applicable non-Line-5 historical line** → assign directly to that line
+3. **If the order has multiple applicable non-Line-5 historical lines** → compare queue time only across those applicable lines
+4. **If the order has no historical line applicability** → compare queue time across FM1–FM3 only
+
+### Goal
+Use the same placement logic as before, but apply it at the correct time in the upload flow.
+
+### Expected result
+Missing-line assignment happens after the schedule has meaningful queue-time data.
+
+---
+
+## 5. MAKE THE QUEUE-TIME BASIS COME FROM THE ACTUAL PLACED ORDERS
+
+Please ensure that queue time is calculated from the lines **after** the valid-line orders have already been inserted into the schedule.
+
+### Goal
+Use the true post-upload workload as the basis for deciding where blank-line orders should go.
+
+### Expected result
+Queue-time-driven assignment becomes more realistic and consistent with actual scheduling state.
+
+---
+
+## 6. HANDLE FIRST-TIME UPLOADS CORRECTLY
+
+For first-time uploads, the table may initially be empty.
+
+That is fine — but even in that case, the correct flow should still be:
+
+1. place orders that already have valid line values
+2. then calculate queue time
+3. then place the orders with missing line values
+
+### Goal
+Avoid calculating missing-line queue-time placement before the directly assigned uploaded orders exist.
+
+### Expected result
+Even first-time uploads use a correct staged placement process.
+
+---
+
+## 7. KEEP THIS FLOW CONSISTENT WITH HOW THE APP REASONS ABOUT CURRENT SCHEDULE STATE
+
+Please make this upload behavior consistent with the general scheduling principle that:
+- placement logic should use the actual current schedule state
+- not a hypothetical empty state
+
+### Goal
+Ensure the app’s missing-line placement decisions are grounded in the real current queue/load situation.
+
+### Expected result
+Blank-line orders are assigned based on the actual schedule after direct placements, not before.
+
+---
+
+## IMPORTANT
+
+Please update the SAP upload flow so that:
+
+- orders with valid **Feedmill Line** values are placed first
+- only after those orders are placed should the app detect and process orders with blank/missing line values
+- queue-time calculations for missing-line assignment should happen only after the initial placed schedule exists
+- then apply the existing missing-line fallback logic:
+  - Line 5 / MX-only → direct assign
+  - one applicable non-Line-5 line → direct assign
+  - multiple applicable non-Line-5 lines → lowest queue time among those lines
+  - no historical applicability → lowest queue time across FM1–FM3
+
+This is needed because queue-time-based placement for missing-line orders should be based on the **actual placed workload**, not on an empty or incomplete schedule.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log the staged SAP upload flow.
+
+```javascript
+console.debug('[SAP Upload Stage 1 Valid-Line Placement]', {
+  uploadedOrderCount,
+  validLineOrderCount,
+  missingLineOrderCount,
+  validLineOrdersPlacedFirst: true,
+});
+```
+
+```javascript
+console.debug('[SAP Upload Stage 2 Missing-Line Detection]', {
+  missingLineOrdersDetected: missingLineOrders?.map(o => ({
+    orderId: o.id,
+    materialCode: o.materialCode,
+  })),
+});
+```
+
+```javascript
+console.debug('[SAP Upload Queue Time Basis After Initial Placement]', {
+  queueTimeCalculatedAfterValidLinePlacement: true,
+  currentLineLoadsUsedForFallback: true,
+});
+```
+
+```javascript
+console.debug('[SAP Upload Missing-Line Final Assignment]', {
+  orderId,
+  materialCode,
+  selectedLine,
+  fallbackPath,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Orders with valid Feedmill Line values are placed first
+2. ✅ Missing-line orders are processed only after valid-line placement
+3. ✅ Queue time is calculated only after the initial schedule exists
+4. ✅ Missing-line fallback assignment uses actual placed workload
+5. ✅ First-time uploads follow the same staged flow correctly
+6. ✅ Existing missing-line fallback logic remains intact
+7. ✅ No UI errors or console errors are introduced

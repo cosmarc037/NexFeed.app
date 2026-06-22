@@ -1,0 +1,1158 @@
+```
+Implement the following changes to the NexFeed application:
+
+---
+
+## 1. PER-LINE SHUTDOWN BUTTON — OVERVIEW PAGE
+
+Add a shutdown/resume icon button next to each line header inside the feedmill cards.
+
+### LAYOUT
+
+```
+┌─────────────────────────────────────────────────┐
+│ Feedmill 1                                    ▼ │
+│                                                 │
+│ ┌─────────────────────────────────────────────┐ │
+│ │ 100%                                        │ │
+│ └─────────────────────────────────────────────┘ │
+│ 779 MT total · 40 MT/hr                        │
+│                                                 │
+│ Line 1                               ⏻ Shutdown│
+│ ┌─────────────────────────────────────────────┐ │
+│ │ 100%                                        │ │
+│ └─────────────────────────────────────────────┘ │
+│ 371 MT · 20 MT/hr                               │
+│                                                 │
+│ Line 2                               ⏻ Shutdown│
+│ ┌─────────────────────────────────────────────┐ │
+│ │ 100%                                        │ │
+│ └─────────────────────────────────────────────┘ │
+│ 408 MT · 20 MT/hr                               │
+│                                                 │
+│ Category Breakdown                              │
+│ ...                                             │
+│                                                 │
+│                    ⏻ Shutdown (feedmill-level)   │
+└─────────────────────────────────────────────────┘
+```
+
+When a line is shut down, it changes to:
+
+```
+│ Line 1  🔴 SHUTDOWN                    ▶ Resume │
+```
+
+### COMPONENT
+
+```jsx
+function LineHeader({ line, feedmill, isShutdown, onShutdown, onResume }) {
+  return (
+    <div className="line-header-row">
+      <div className="line-header-left">
+        <span className="line-header-name">{line}</span>
+        {isShutdown && (
+          <span className="line-shutdown-badge">
+            🔴 SHUTDOWN
+          </span>
+        )}
+      </div>
+      <div className="line-header-right">
+        {isShutdown ? (
+          <button
+            className="line-resume-btn"
+            onClick={() => onResume(line)}
+            title="Resume this line"
+          >
+            <span className="resume-icon">▶</span>
+            <span>Resume</span>
+          </button>
+        ) : (
+          <button
+            className="line-shutdown-btn"
+            onClick={() => onShutdown(line, feedmill)}
+            title="Shutdown this line"
+          >
+            <span className="shutdown-icon">⏻</span>
+            <span>Shutdown</span>
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+```
+
+### STYLING
+
+```css
+.line-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 16px;
+  margin-bottom: 4px;
+}
+
+.line-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.line-header-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1a1a1a;
+}
+
+.line-shutdown-badge {
+  font-size: 10px;
+  font-weight: 600;
+  color: #dc2626;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: #fef2f2;
+}
+
+.line-shutdown-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: none;
+  color: #6b7280;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: color 0.15s, background 0.15s;
+}
+
+.line-shutdown-btn:hover {
+  color: #dc2626;
+  background: #fef2f2;
+}
+
+.shutdown-icon {
+  font-size: 14px;
+}
+
+.line-resume-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  color: #16a34a;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 4px 10px;
+  border-radius: 4px;
+  transition: background 0.15s;
+}
+
+.line-resume-btn:hover {
+  background: #dcfce7;
+}
+
+.resume-icon {
+  font-size: 12px;
+}
+```
+
+---
+
+## 2. SHUTDOWN DIALOG — WITH AI ANALYSIS, REASON, AND NOTES
+
+This dialog appears for BOTH per-line and per-feedmill shutdown. When triggered, it shows AI impact analysis, diversion suggestions (for same-feedmill lines), and fields for reason and notes.
+
+### DIALOG COMPONENT
+
+```jsx
+function ShutdownDialog({ target, targetType, feedmill, onConfirm, onCancel }) {
+  // target: 'Line 1' or 'Feedmill 1'
+  // targetType: 'line' or 'feedmill'
+  
+  const [reason, setReason] = useState('');
+  const [notes, setNotes] = useState('');
+  const [analysis, setAnalysis] = useState(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(true);
+  const [diversionPlan, setDiversionPlan] = useState([]);
+  
+  // Auto-generate AI analysis on open
+  useEffect(() => {
+    generateShutdownAnalysis();
+  }, []);
+  
+  async function generateShutdownAnalysis() {
+    setIsAnalyzing(true);
+    
+    try {
+      const context = buildShutdownContext(target, targetType, feedmill);
+      const prompt = buildShutdownPrompt(context);
+      const response = await callAI(prompt);
+      const parsed = parseShutdownResponse(response);
+      
+      setAnalysis(parsed.analysis);
+      setDiversionPlan(parsed.diversions);
+    } catch (error) {
+      console.error('Shutdown analysis failed:', error);
+      setAnalysis('Unable to generate analysis. You can still proceed with the shutdown.');
+      setDiversionPlan([]);
+    } finally {
+      setIsAnalyzing(false);
+    }
+  }
+  
+  function handleConfirm() {
+    onConfirm({
+      target,
+      targetType,
+      reason,
+      notes,
+      diversionPlan,
+      timestamp: new Date().toISOString()
+    });
+  }
+  
+  // Get affected lines
+  const affectedLines = targetType === 'feedmill' 
+    ? FEEDMILL_LINE_MAP[feedmill]
+    : [target];
+  
+  // Get affected orders
+  const affectedOrders = getAllOrders().filter(o => 
+    affectedLines.includes(o.line) &&
+    o.status !== 'Done' &&
+    o.status !== 'Cancel PO'
+  );
+  
+  // Get available diversion lines (same feedmill, not shutdown)
+  const sameFeedmillLines = FEEDMILL_LINE_MAP[feedmill].filter(
+    l => !affectedLines.includes(l) && !isLineShutdown(l)
+  );
+  
+  return (
+    <div className="dialog-overlay">
+      <div className="shutdown-dialog">
+        {/* Header */}
+        <div className="shutdown-dialog-header">
+          <div className="shutdown-dialog-title">
+            <span className="shutdown-dialog-icon">⏻</span>
+            <span>Shutdown {target}</span>
+          </div>
+          <button className="dialog-close" onClick={onCancel}>✕</button>
+        </div>
+        
+        {/* Summary */}
+        <div className="shutdown-dialog-summary">
+          <div className="shutdown-summary-stat">
+            <span className="shutdown-summary-label">Affected Lines</span>
+            <span className="shutdown-summary-value">{affectedLines.join(', ')}</span>
+          </div>
+          <div className="shutdown-summary-stat">
+            <span className="shutdown-summary-label">Active Orders</span>
+            <span className="shutdown-summary-value">{affectedOrders.length}</span>
+          </div>
+          <div className="shutdown-summary-stat">
+            <span className="shutdown-summary-label">Total Volume</span>
+            <span className="shutdown-summary-value">
+              {affectedOrders.reduce((sum, o) => sum + (parseFloat(o.volume) || 0), 0).toFixed(0)} MT
+            </span>
+          </div>
+          {sameFeedmillLines.length > 0 && (
+            <div className="shutdown-summary-stat">
+              <span className="shutdown-summary-label">Available Lines</span>
+              <span className="shutdown-summary-value shutdown-summary-available">
+                {sameFeedmillLines.join(', ')}
+              </span>
+            </div>
+          )}
+        </div>
+        
+        {/* AI Analysis */}
+        <div className="shutdown-dialog-analysis">
+          <div className="shutdown-analysis-header">
+            <span>✨ Impact Analysis</span>
+            {isAnalyzing && (
+              <span className="shutdown-analysis-loading">
+                <span className="refresh-spinning">🔄</span> Analyzing...
+              </span>
+            )}
+          </div>
+          
+          <div className="shutdown-analysis-body">
+            {isAnalyzing && !analysis && (
+              <div className="shutdown-analysis-loading-text">
+                Analyzing impact on orders and identifying diversion opportunities...
+              </div>
+            )}
+            
+            {analysis && (
+              <div className="shutdown-analysis-text">
+                {analysis}
+              </div>
+            )}
+          </div>
+        </div>
+        
+        {/* Diversion Plan — only if same-feedmill lines available */}
+        {diversionPlan.length > 0 && (
+          <div className="shutdown-dialog-diversions">
+            <div className="shutdown-diversions-header">
+              <span>📋 Suggested Diversion Plan</span>
+            </div>
+            <div className="shutdown-diversions-body">
+              {diversionPlan.map((diversion, index) => (
+                <div key={index} className="shutdown-diversion-item">
+                  <div className="shutdown-diversion-order">
+                    <span className="shutdown-diversion-name">{diversion.orderName}</span>
+                    <span className="shutdown-diversion-detail">
+                      {diversion.volume} MT · {diversion.form} · Prio {diversion.currentPrio}
+                    </span>
+                  </div>
+                  <div className="shutdown-diversion-arrow">→</div>
+                  <div className="shutdown-diversion-target">
+                    <span className="shutdown-diversion-line">{diversion.targetLine}</span>
+                    <span className="shutdown-diversion-rate">
+                      Rate: {diversion.targetRate} MT/hr · Prio {diversion.targetPrio}
+                    </span>
+                  </div>
+                </div>
+              ))}
+              
+              <button 
+                className="shutdown-apply-all-btn"
+                onClick={() => handleApplyAllDiversions(diversionPlan)}
+              >
+                Apply All Diversions
+              </button>
+            </div>
+          </div>
+        )}
+        
+        {/* No diversions available */}
+        {!isAnalyzing && diversionPlan.length === 0 && sameFeedmillLines.length === 0 && (
+          <div className="shutdown-dialog-no-diversions">
+            <span>ℹ</span>
+            No other lines available in {feedmill} for diversion. 
+            Orders will remain on the shutdown line until resumed.
+          </div>
+        )}
+        
+        {/* Reason and Notes */}
+        <div className="shutdown-dialog-form">
+          <div className="shutdown-form-field">
+            <label>Reason for Shutdown <span className="required">*</span></label>
+            <select 
+              value={reason} 
+              onChange={(e) => setReason(e.target.value)}
+            >
+              <option value="">Select reason...</option>
+              <option value="Maintenance">Maintenance</option>
+              <option value="Equipment Failure">Equipment Failure</option>
+              <option value="Power Outage">Power Outage</option>
+              <option value="Material Shortage">Material Shortage</option>
+              <option value="Quality Issue">Quality Issue</option>
+              <option value="Planned Downtime">Planned Downtime</option>
+              <option value="Other">Other</option>
+            </select>
+          </div>
+          
+          <div className="shutdown-form-field">
+            <label>Notes (optional)</label>
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="Add any additional details about this shutdown..."
+              rows={3}
+            />
+          </div>
+        </div>
+        
+        {/* Footer */}
+        <div className="shutdown-dialog-footer">
+          <button className="shutdown-cancel-btn" onClick={onCancel}>
+            Cancel
+          </button>
+          <button 
+            className="shutdown-confirm-btn"
+            onClick={handleConfirm}
+            disabled={!reason || isAnalyzing}
+          >
+            Confirm Shutdown
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+## 3. AI PROMPT FOR SHUTDOWN ANALYSIS
+
+```javascript
+function buildShutdownContext(target, targetType, feedmill) {
+  const affectedLines = targetType === 'feedmill'
+    ? FEEDMILL_LINE_MAP[feedmill]
+    : [target];
+  
+  const allOrders = getAllOrders();
+  
+  const affectedOrders = allOrders.filter(o =>
+    affectedLines.includes(o.line) &&
+    o.status !== 'Done' &&
+    o.status !== 'Cancel PO'
+  );
+  
+  const sameFeedmillLines = FEEDMILL_LINE_MAP[feedmill].filter(
+    l => !affectedLines.includes(l) && !isLineShutdown(l)
+  );
+  
+  const availableLineOrders = {};
+  sameFeedmillLines.forEach(line => {
+    availableLineOrders[line] = allOrders.filter(o =>
+      o.line === line &&
+      o.status !== 'Done' &&
+      o.status !== 'Cancel PO'
+    );
+  });
+  
+  const masterData = getMasterData();
+  const n10dData = getN10DProducts();
+  
+  return {
+    target,
+    targetType,
+    feedmill,
+    affectedLines,
+    affectedOrders: affectedOrders.map(o => {
+      const product = n10dData?.find(p => String(p.material_code_fg) === String(o.material_code_fg));
+      const n10dStatus = product ? getProductStatus(product.due_for_loading, product.inventory, getDailyColumns(), product, new Date()) : null;
+      
+      // Check which available lines can run this product
+      const possibleLines = sameFeedmillLines.filter(line => {
+        const md = masterData.find(m => String(m.fgMaterialCode) === String(o.material_code_fg));
+        if (!md) return false;
+        const lineRateMap = {
+          'Line 1': md.l1Rate, 'Line 2': md.l2Rate, 'Line 3': md.l3Rate,
+          'Line 4': md.l4Rate, 'Line 5': md.l5Rate, 'Line 6': md.l6Rate, 'Line 7': md.l7Rate
+        };
+        return parseFloat(lineRateMap[line]) > 0;
+      });
+      
+      return {
+        prio: o.prio,
+        name: o.item_description,
+        fpr: o.fpr,
+        volume: o.volume,
+        form: o.form,
+        status: o.status,
+        line: o.line,
+        availDate: o.avail_date,
+        n10dStatus,
+        materialCode: o.material_code_fg,
+        possibleLines,
+        category: o.category,
+        color: o.color
+      };
+    }),
+    sameFeedmillLines,
+    availableLineOrders: Object.fromEntries(
+      Object.entries(availableLineOrders).map(([line, orders]) => [
+        line,
+        { count: orders.length, totalVolume: orders.reduce((s, o) => s + (parseFloat(o.volume) || 0), 0) }
+      ])
+    )
+  };
+}
+
+function buildShutdownPrompt(context) {
+  return `
+You are a production planning advisor. A planner is shutting down ${context.targetType === 'feedmill' ? 'all lines in' : ''} ${context.target} (${context.feedmill}).
+
+AFFECTED LINES: ${context.affectedLines.join(', ')}
+AFFECTED ORDERS (${context.affectedOrders.length}):
+${context.affectedOrders.map(o => `
+  Prio ${o.prio}: ${o.name} | ${o.volume} MT | ${o.form} | ${o.status}
+  Line: ${o.line} | Avail: ${o.availDate || 'N/A'} | N10D: ${o.n10dStatus || 'N/A'}
+  Can run on: ${o.possibleLines.length > 0 ? o.possibleLines.join(', ') : 'No alternatives in same feedmill'}
+`).join('\n')}
+
+AVAILABLE LINES IN SAME FEEDMILL (${context.feedmill}):
+${context.sameFeedmillLines.length > 0
+  ? context.sameFeedmillLines.map(l => `${l}: ${context.availableLineOrders[l].count} orders, ${context.availableLineOrders[l].totalVolume} MT`).join('\n')
+  : 'None — all lines in this feedmill are affected or shutdown'}
+
+RULES:
+- Analyze which orders are most critical (Critical/Urgent N10D status, nearest avail dates)
+- For orders that CAN be diverted to available lines in the same feedmill, suggest specific diversions
+- Prioritize diverting Critical and Urgent orders first
+- Consider the available line's current load — don't overload it
+- For orders that CANNOT be diverted (no run rate on other lines), note they must wait
+- Be specific — use product names, volumes, and line names
+
+PROVIDE TWO SECTIONS:
+
+SECTION 1 — ANALYSIS:
+2-4 sentences summarizing the impact and overall recommendation.
+
+SECTION 2 — DIVERSIONS:
+List each order that should be diverted, in this exact format (one per line):
+DIVERT|[orderName]|[volume]|[form]|[currentPrio]|[currentLine]|[targetLine]|[targetPrio]|[reason]
+
+Only include DIVERT lines for orders that have available alternative lines.
+If no diversions are possible, do not include SECTION 2.
+  `;
+}
+```
+
+---
+
+## 4. PARSE AI RESPONSE
+
+```javascript
+function parseShutdownResponse(response) {
+  const lines = response.split('\n');
+  
+  let analysis = '';
+  const diversions = [];
+  
+  lines.forEach(line => {
+    const trimmed = line.trim();
+    
+    if (trimmed.startsWith('DIVERT|')) {
+      const parts = trimmed.split('|');
+      if (parts.length >= 9) {
+        diversions.push({
+          orderName: parts[1],
+          volume: parts[2],
+          form: parts[3],
+          currentPrio: parts[4],
+          currentLine: parts[5],
+          targetLine: parts[6],
+          targetPrio: parts[7],
+          reason: parts[8],
+          targetRate: getRunRateForProduct(parts[1], parts[6])
+        });
+      }
+    } else if (trimmed && !trimmed.startsWith('SECTION')) {
+      analysis += (analysis ? ' ' : '') + trimmed;
+    }
+  });
+  
+  return { analysis, diversions };
+}
+```
+
+---
+
+## 5. APPLY SHUTDOWN STATE
+
+```javascript
+function handleShutdownConfirm(shutdownData) {
+  const { target, targetType, reason, notes, timestamp } = shutdownData;
+  
+  if (targetType === 'line') {
+    setLineShutdowns(prev => ({
+      ...prev,
+      [target]: { 
+        isShutdown: true, 
+        reason, 
+        notes, 
+        since: timestamp,
+        feedmill: getFeedmillForLine(target)
+      }
+    }));
+  } else {
+    // Feedmill shutdown — shutdown all lines in feedmill
+    const lines = FEEDMILL_LINE_MAP[target];
+    setLineShutdowns(prev => {
+      const updated = { ...prev };
+      lines.forEach(line => {
+        updated[line] = {
+          isShutdown: true,
+          reason,
+          notes,
+          since: timestamp,
+          feedmill: target,
+          isFeedmillShutdown: true
+        };
+      });
+      return updated;
+    });
+    
+    setFeedmillShutdowns(prev => ({
+      ...prev,
+      [target]: { isShutdown: true, reason, notes, since: timestamp }
+    }));
+  }
+  
+  // Mark divertible orders on shutdown lines
+  markDivertibleOrders(target, targetType);
+  
+  // Recalculate
+  recalculateAllChangeovers(allOrders, changeoverRules);
+  recalculateCompletionDates(allOrders);
+  
+  showNotification('warning', `${target} has been shut down. ${reason}.`);
+}
+
+function handleResume(target, targetType) {
+  if (targetType === 'line') {
+    setLineShutdowns(prev => {
+      const updated = { ...prev };
+      delete updated[target];
+      return updated;
+    });
+    
+    // Clear divert markers on this line's orders
+    clearDivertMarkers(target);
+  } else {
+    const lines = FEEDMILL_LINE_MAP[target];
+    setLineShutdowns(prev => {
+      const updated = { ...prev };
+      lines.forEach(line => delete updated[line]);
+      return updated;
+    });
+    
+    setFeedmillShutdowns(prev => {
+      const updated = { ...prev };
+      delete updated[target];
+      return updated;
+    });
+    
+    lines.forEach(line => clearDivertMarkers(line));
+  }
+  
+  recalculateAllChangeovers(allOrders, changeoverRules);
+  recalculateCompletionDates(allOrders);
+  
+  showNotification('success', `${target} has been resumed.`);
+}
+```
+
+---
+
+## 6. ORDER TABLE — RED BORDER FOR SHUTDOWN LINES
+
+### WHEN A LINE IS SHUTDOWN
+
+```jsx
+function OrderTable({ line, orders }) {
+  const shutdown = lineShutdowns[line];
+  const isShutdown = shutdown?.isShutdown;
+  
+  return (
+    <div className={`order-table-container ${isShutdown ? 'order-table-shutdown' : ''}`}>
+      {isShutdown && (
+        <div className="order-table-shutdown-banner">
+          🔴 {line} — SHUTDOWN since {formatDate(shutdown.since)}
+          {shutdown.reason && ` · ${shutdown.reason}`}
+        </div>
+      )}
+      <table className="order-table">
+        {/* ... */}
+      </table>
+    </div>
+  );
+}
+```
+
+### STYLING
+
+```css
+.order-table-shutdown {
+  border: 2px solid #dc2626;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.order-table-shutdown-banner {
+  background: #fef2f2;
+  color: #dc2626;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 8px 16px;
+  border-bottom: 1px solid #fecaca;
+}
+```
+
+### WHEN A FEEDMILL IS SHUTDOWN — BOTH LINE TABLES GET RED BORDER
+
+When Feedmill 1 is shut down, both Line 1 and Line 2 tables show the red border. This is handled automatically because each line's shutdown state is set individually when a feedmill is shut down.
+
+---
+
+## 7. DIVERTIBLE ORDERS — YELLOW HIGHLIGHT + RIGHT-CLICK
+
+When a line is shutdown, orders that can be diverted (have run rates on other lines in the same feedmill) are highlighted in yellow with a "Line shutdown — right-click to divert" message.
+
+```jsx
+function OrderRow({ order, isLineShutdown }) {
+  const isDivertible = order._isDivertible && isLineShutdown;
+  
+  return (
+    <tr className={`order-row ${isDivertible ? 'order-row-divertible' : ''}`}
+        onContextMenu={(e) => {
+          if (isDivertible) {
+            e.preventDefault();
+            showDivertContextMenu(e, order);
+          }
+        }}
+    >
+      {/* ... cells ... */}
+      <td className="item-description-cell">
+        <div className="item-desc-name">{order.item_description}</div>
+        <div className="item-desc-meta">
+          <span className="item-desc-category">{order.category}</span>
+          {order.color && (
+            <>
+              <span className="item-desc-separator">|</span>
+              <span className="item-desc-color">{order.color}</span>
+            </>
+          )}
+          {order.diameter && (
+            <>
+              <span className="item-desc-separator">|</span>
+              <span className="item-desc-diameter">{order.diameter}mm</span>
+            </>
+          )}
+        </div>
+        {isDivertible && (
+          <div className="item-desc-divert-hint">
+            ⚠ Line shutdown — right-click to divert
+          </div>
+        )}
+      </td>
+    </tr>
+  );
+}
+```
+
+```css
+.order-row-divertible {
+  background: #fefce8 !important;
+}
+
+.item-desc-divert-hint {
+  font-size: 10px;
+  color: #ca8a04;
+  font-weight: 500;
+  margin-top: 2px;
+}
+```
+
+---
+
+## 8. PRODUCTION INSIGHTS — SHUTDOWN AI ANALYSIS
+
+When a line is shutdown, the AI Summary in Production Insights should include shutdown analysis and diversion recommendations.
+
+### UPDATE AI SUMMARY CONTEXT
+
+```javascript
+function buildSummaryContext(type, data, scope) {
+  const context = { /* ... existing context building ... */ };
+  
+  // Add shutdown info
+  const shutdownLines = [];
+  Object.entries(lineShutdowns).forEach(([line, info]) => {
+    if (info.isShutdown) {
+      const lineOrders = data.filter(o => o.line === line && o.status !== 'Done' && o.status !== 'Cancel PO');
+      shutdownLines.push({
+        line,
+        reason: info.reason,
+        since: info.since,
+        orderCount: lineOrders.length,
+        volume: lineOrders.reduce((s, o) => s + (parseFloat(o.volume) || 0), 0),
+        divertibleCount: lineOrders.filter(o => o._isDivertible).length
+      });
+    }
+  });
+  
+  context.shutdownLines = shutdownLines;
+  
+  return context;
+}
+```
+
+### UPDATE AI PROMPT
+
+```javascript
+// Add to Production Insights prompt:
+`
+SHUTDOWN STATUS:
+${context.shutdownLines.length > 0
+  ? context.shutdownLines.map(s => `
+  ${s.line} — SHUTDOWN (${s.reason}) since ${s.since}
+  ${s.orderCount} orders affected (${s.volume} MT)
+  ${s.divertibleCount} orders can be diverted to other lines in the same feedmill
+  `).join('\n')
+  : 'No lines currently shutdown.'}
+
+If lines are shutdown, include in your analysis:
+- Which shutdown orders are most critical to divert first
+- Which available lines in the same feedmill are best suited for each order
+- Prioritize Critical and Urgent N10D products for diversion
+`
+```
+
+---
+
+## 9. APPLY ALL DIVERSIONS BUTTON
+
+```javascript
+async function handleApplyAllDiversions(diversionPlan) {
+  for (const diversion of diversionPlan) {
+    const order = findOrderByName(diversion.orderName, diversion.currentLine);
+    if (order) {
+      await divertOrder(order.id, diversion.targetLine, diversion.targetPrio);
+    }
+  }
+  
+  recalculateAllChangeovers(allOrders, changeoverRules);
+  recalculateCompletionDates(allOrders);
+  
+  showNotification('success', `${diversionPlan.length} order(s) diverted successfully.`);
+}
+```
+
+---
+
+## 10. SHUTDOWN DIALOG STYLING
+
+```css
+.shutdown-dialog {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 560px;
+  max-height: 85vh;
+  background: #ffffff;
+  border-radius: 12px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.2);
+  z-index: 10001;
+  overflow-y: auto;
+}
+
+.shutdown-dialog-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.shutdown-dialog-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 16px;
+  font-weight: 700;
+  color: #dc2626;
+}
+
+.shutdown-dialog-icon {
+  font-size: 20px;
+}
+
+.shutdown-dialog-summary {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  padding: 16px 20px;
+  background: #f9fafb;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.shutdown-summary-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.shutdown-summary-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.shutdown-summary-value {
+  font-size: 14px;
+  font-weight: 700;
+  color: #1a1a1a;
+}
+
+.shutdown-summary-available {
+  color: #16a34a;
+}
+
+.shutdown-dialog-analysis {
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.shutdown-analysis-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 20px;
+  background: #fff7ed;
+  border-bottom: 1px solid #fed7aa;
+  font-size: 12px;
+  font-weight: 600;
+  color: #92400e;
+}
+
+.shutdown-analysis-body {
+  padding: 14px 20px;
+  min-height: 60px;
+}
+
+.shutdown-analysis-text {
+  font-size: 12px;
+  color: #374151;
+  line-height: 1.7;
+}
+
+.shutdown-dialog-diversions {
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.shutdown-diversions-header {
+  padding: 12px 20px;
+  background: #eff6ff;
+  border-bottom: 1px solid #bfdbfe;
+  font-size: 12px;
+  font-weight: 600;
+  color: #1e40af;
+}
+
+.shutdown-diversions-body {
+  padding: 12px 20px;
+}
+
+.shutdown-diversion-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.shutdown-diversion-item:last-of-type {
+  border-bottom: none;
+}
+
+.shutdown-diversion-order {
+  flex: 1;
+}
+
+.shutdown-diversion-name {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: #1a1a1a;
+}
+
+.shutdown-diversion-detail {
+  display: block;
+  font-size: 10px;
+  color: #6b7280;
+  margin-top: 1px;
+}
+
+.shutdown-diversion-arrow {
+  font-size: 16px;
+  color: #9ca3af;
+}
+
+.shutdown-diversion-target {
+  text-align: right;
+}
+
+.shutdown-diversion-line {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: #2563eb;
+}
+
+.shutdown-diversion-rate {
+  display: block;
+  font-size: 10px;
+  color: #6b7280;
+  margin-top: 1px;
+}
+
+.shutdown-apply-all-btn {
+  width: 100%;
+  margin-top: 12px;
+  padding: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #ffffff;
+  background: #fd5108;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.shutdown-apply-all-btn:hover {
+  background: #e8490b;
+}
+
+.shutdown-dialog-no-diversions {
+  padding: 14px 20px;
+  font-size: 12px;
+  color: #6b7280;
+  background: #f9fafb;
+  border-bottom: 1px solid #e5e7eb;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.shutdown-dialog-form {
+  padding: 16px 20px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.shutdown-form-field {
+  margin-bottom: 12px;
+}
+
+.shutdown-form-field:last-child {
+  margin-bottom: 0;
+}
+
+.shutdown-form-field label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: #374151;
+  margin-bottom: 6px;
+}
+
+.shutdown-form-field .required {
+  color: #dc2626;
+}
+
+.shutdown-form-field select {
+  width: 100%;
+  padding: 8px 12px;
+  font-size: 13px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  outline: none;
+  background: #ffffff;
+}
+
+.shutdown-form-field select:focus {
+  border-color: #fd5108;
+}
+
+.shutdown-form-field textarea {
+  width: 100%;
+  padding: 8px 12px;
+  font-size: 13px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  outline: none;
+  resize: vertical;
+  font-family: inherit;
+}
+
+.shutdown-form-field textarea:focus {
+  border-color: #fd5108;
+}
+
+.shutdown-dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 14px 20px;
+}
+
+.shutdown-cancel-btn {
+  padding: 8px 20px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #6b7280;
+  background: #ffffff;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.shutdown-confirm-btn {
+  padding: 8px 20px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #ffffff;
+  background: #dc2626;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.shutdown-confirm-btn:hover {
+  background: #b91c1c;
+}
+
+.shutdown-confirm-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+```
+
+---
+
+## VERIFICATION
+
+### Per-line shutdown button
+1. ✅ Shutdown icon visible next to each line header in Overview feedmill cards
+2. ✅ Clicking shows shutdown dialog with AI analysis
+3. ✅ Different icons for shutdown (⏻) and resume (▶)
+4. ✅ Resume toggles the line back to active
+
+### Per-feedmill shutdown
+5. ✅ Existing feedmill shutdown button still works
+6. ✅ Now shows AI analysis in dialog (was missing before)
+7. ✅ Both line tables get red border when feedmill is shutdown
+8. ✅ All lines in feedmill marked as shutdown
+
+### Shutdown dialog
+9. ✅ Shows summary: affected lines, order count, volume, available lines
+10. ✅ AI analysis auto-generates on open
+11. ✅ Diversion plan shows specific orders with target lines
+12. ✅ "Apply All Diversions" button diverts all suggested orders at once
+13. ✅ Reason dropdown required before confirming
+14. ✅ Notes field optional
+15. ✅ No "specify hours" — shutdown is indefinite until resumed
+
+### Order table visual
+16. ✅ Shutdown line tables have red border
+17. ✅ Shutdown banner shows above table with date and reason
+18. ✅ Divertible orders highlighted yellow
+19. ✅ "Line shutdown — right-click to divert" hint on divertible orders
+20. ✅ Right-click opens divert dialog (existing functionality)
+
+### Production Insights
+21. ✅ AI Summary includes shutdown analysis when a line is shutdown
+22. ✅ Recommends which orders to divert first (Critical/Urgent priority)
+23. ✅ When no shutdown, follows original insight behavior
+
+### Recalculations
+24. ✅ Changeovers recalculate on shutdown and resume
+25. ✅ Completion dates recalculate on shutdown and resume
+26. ✅ Orders remain editable on shutdown lines
+```

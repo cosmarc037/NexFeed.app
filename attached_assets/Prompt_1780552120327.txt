@@ -1,0 +1,125 @@
+Please update the **AI vs Final Sequence** table so it better aligns with the app’s current **AI-driven auto-sequence behavior**.
+
+Since deterministic refinement has already been hidden / disabled, please simplify the table accordingly.
+
+---
+
+## 1. IMPROVE THE `REASON` COLUMN SO IT MATCHES THE CURRENT AUTO-SEQUENCE LOGIC
+
+Please update the **Reason** column so it reflects the app’s current sequencing behavior more accurately.
+
+### The Reason column should explain things like:
+- why the AI placed the order on that suggested/effective date
+- why the order was advanced earlier
+- why it stayed on a later date
+- why the visible Final Rank differs from AI Rank due to date-first sorting
+- why the order is grouped with neighboring orders
+- whether the AI is using MTS advancement, urgency, grouping, or line movement logic
+
+### Goal
+Make the Reason column the main useful explanation field for the current AI-driven sequence.
+
+### Expected result
+The Reason text becomes clearer, more relevant, and more aligned to the app’s current behavior.
+
+---
+
+## 2. REMOVE OR HIDE THE `CONSTRAINT NOTE` COLUMN
+
+Please remove or hide the **Constraint Note** column from the **AI vs Final Sequence** table.
+
+### Reason
+Deterministic refinement has already been hidden / disabled, so this column no longer aligns well with the current flow.
+
+### Goal
+Avoid showing outdated or low-value technical notes that were more relevant to the previous deterministic-adjustment behavior.
+
+### Expected result
+The table becomes cleaner and no longer shows a column that is no longer meaningful for the current feature.
+
+---
+
+## 3. REMOVE OR HIDE THE `RISK / CONFIDENCE` COLUMN
+
+Please remove or hide the **Risk / Confidence** column from the **AI vs Final Sequence** table.
+
+### Reason
+This column currently appears inconsistent and is no longer clearly aligned with the current AI-driven sequencing flow.
+
+### Goal
+Reduce noise and keep the table focused on the fields that are still actively meaningful.
+
+### Expected result
+The table becomes simpler and easier to read.
+
+---
+
+## 4. KEEP THE TABLE FOCUSED ON CURRENTLY USEFUL FIELDS
+
+Please keep the **AI vs Final Sequence** table focused on fields that still support the current feature behavior, such as:
+- Final Rank
+- AI Rank
+- Order / Entity ID
+- Product
+- Current Line
+- Proposed Line
+- Moved?
+- Repositioned by Final Sort? / equivalent label
+- Reason
+
+### Goal
+Keep the table aligned with the app’s current AI-first sequence model.
+
+### Expected result
+The table reflects the current product logic instead of older deterministic-adjustment logic.
+
+---
+
+## IMPORTANT
+
+Please update the **AI vs Final Sequence** table so that:
+
+- the **Reason** column is improved and aligned to the current AI-driven auto-sequence behavior
+- the **Constraint Note** column is removed or hidden
+- the **Risk / Confidence** column is removed or hidden
+
+Since deterministic refinement is already hidden / disabled, those extra columns no longer appear necessary and may only add confusion.
+
+The table should now focus mainly on:
+- what the AI suggested
+- what the final visible order is
+- and why the order is placed where it is
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log the table simplification and reason updates.
+
+```javascript
+console.debug('[AI vs Final Sequence Table Simplified]', {
+  constraintNoteHidden: true,
+  riskConfidenceHidden: true,
+  reasonColumnUpdated: true,
+});
+```
+
+```javascript
+console.debug('[AI vs Final Sequence Reason Alignment]', {
+  entityId,
+  aiRank,
+  finalRank,
+  suggestedDate,
+  reasonAlignedToCurrentAiDrivenFlow: true,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Reason column is updated to match current AI-driven sequence behavior
+2. ✅ Constraint Note column is removed or hidden
+3. ✅ Risk / Confidence column is removed or hidden
+4. ✅ Table remains focused on the fields that still matter
+5. ✅ No UI errors or console errors are introduced

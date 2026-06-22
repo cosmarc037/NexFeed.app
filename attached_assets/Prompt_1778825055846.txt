@@ -1,0 +1,110 @@
+Please add another status dependency rule for Powermix-generated orders to prevent them from being reverted to a not-yet-started state once the linked Line 5 source order has already progressed.
+
+This is a reverse status lock to preserve process consistency between the Line 5 source order and the generated split order.
+
+---
+
+## REQUIRED RULE
+
+If the linked **Line 5 source order** is already:
+- `On-going`
+- or `Done`
+
+then the linked **generated order** must not be allowed to be set back to a not-yet-started status such as:
+- `Normal`
+- `Plotted`
+- blank
+- or any equivalent not-yet-started state
+
+### In other words
+Once the source Line 5 order is already being produced or completed, the generated order cannot be reverted to a pre-start state.
+
+This should be blocked.
+
+---
+
+## PURPOSE
+
+This is to prevent inconsistent production states such as:
+- source Line 5 order already `On-going` or `Done`
+- generated order reverted back to `Plotted` / `Normal`
+
+If the source order is already being produced or completed, that means the generated order should remain in a started/completed state as well, or at least should not be moved backward to a pre-start status.
+
+---
+
+## VALIDATION BEHAVIOR
+
+When the user attempts to change the generated order status to a not-yet-started state, the app should:
+
+1. identify the linked Line 5 source order
+2. check the source order’s status
+3. if the source order is already `On-going` or `Done`, block the generated order from reverting to:
+   - `Normal`
+   - `Plotted`
+   - blank
+   - or equivalent not-started statuses
+4. show a clear validation message
+
+---
+
+## SUGGESTED VALIDATION MESSAGE
+
+Use a message similar to:
+
+**Cannot revert this generated order to a not-yet-started status because its linked Line 5 source order is already On-going or Done.**
+
+You may improve the wording slightly, but keep the meaning clear.
+
+---
+
+## IMPORTANT
+
+Keep the previously agreed status rules intact as well:
+
+### Rule A — Source Line 5 order
+Source Line 5 order cannot move to `On-going` / `Done` unless linked generated order is already `On-going` / `Done`
+
+### Rule B — Generated order prior-order sequencing
+Generated order cannot move to `On-going` / `Done` unless its prior order in the same line is already `On-going` / `Done`
+
+### Rule C — New reverse lock
+Generated order cannot be moved back to a not-yet-started state if the linked source Line 5 order is already `On-going` / `Done`
+
+All three rules must coexist correctly.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log:
+
+```javascript
+console.debug('[Powermix Generated Reverse Status Lock Check]', {
+  generatedOrderId,
+  attemptedStatus,
+  linkedSourceOrderId,
+  linkedSourceOrderStatus,
+  blockedBecauseSourceAlreadyStartedOrDone,
+});
+```
+
+```javascript
+console.debug('[Powermix Generated Reverse Status Blocked]', {
+  generatedOrderId,
+  attemptedStatus,
+  linkedSourceOrderId,
+  linkedSourceOrderStatus,
+  reason: 'source_order_already_started_or_done',
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ If the Line 5 source order is `On-going` or `Done`, the generated order cannot be reverted to `Normal` / `Plotted` / not-started status
+2. ✅ The app blocks invalid backward status changes on generated orders
+3. ✅ A clear validation message is shown when blocked
+4. ✅ Existing source-order and prior-order status dependency rules remain intact
+5. ✅ The status relationship between source and generated orders stays consistent

@@ -1,0 +1,508 @@
+```
+Fix AI Profit Sequence Insight so the profit-rate calculation uses the real row values from the app and never shows incorrect or mismatched numbers.
+
+---
+
+## OBJECTIVE
+
+The current AI Profit Sequence Insight is showing incorrect values.
+
+Example of wrong behavior:
+- Insight says: `Profit Rate = 0 ÷ (1.95 + 0) = 0/hr`
+- But the row actually shows:
+  - Production Time = `2.00 hours`
+  - CO = `0.83`
+  - Margin should come from master data, not default to 0 unless truly missing
+
+This means the insight generator is not using the same source-of-truth values as the row.
+
+The fix is to ensure that AI Profit insights use:
+- actual margin from master data enrichment
+- actual production time already computed/displayed on the row
+- actual changeover already computed/displayed on the row
+- actual profit rate computed from those exact numbers
+
+The AI should explain the values, not guess or loosely recalculate them.
+
+---
+
+## 1. DO NOT LET AI ESTIMATE THE FORMULA INPUTS
+
+For AI Profit insights, the model must NOT independently infer:
+- margin
+- production hours
+- changeover hours
+- profit rate
+
+Instead, the app must compute and pass these exact values into the AI prompt context.
+
+The AI should only explain those values using natural language.
+
+---
+
+## 2. BUILD PROFIT INSIGHT CONTEXT FROM FINAL ROW VALUES
+
+Update the row-context builder so that when `strategyId === 'ai_profit'`, it uses the actual final displayed row values.
+
+### Create/adjust helpers:
+
+```javascript
+function getDisplayedProductionHours(order, line) {
+  const direct =
+    parseFloat(order.production_time ?? order._productionTimeHrs);
+
+  if (!Number.isNaN(direct)) return direct;
+
+  const volume = parseFloat(order.volume_override || order.volume || order.total_volume_mt || 0) || 0;
+  const runRate = getLineRunRate(normalizeLine(line));
+
+  return runRate > 0 ? volume / runRate : 0;
+}
+
+function getDisplayedChangeoverHours(order, previousOrder, changeoverRules, line) {
+  const direct =
+    parseFloat(order.changeover ?? order._changeoverHrs);
+
+  if (!Number.isNaN(direct)) return direct;
+
+  if (previousOrder) {
+    return parseFloat(calculateChangeoverBetween(previousOrder, order, changeoverRules, line) || 0) || 0;
+  }
+
+  return 0;
+}
+
+function getDisplayedMargin(order) {
+  const margin = parseFloat(order._margin ?? order.margin ?? 0);
+  return Number.isNaN(margin) ? 0 : margin;
+}
+
+function calculateDisplayedProfitRate({ margin, productionHours, changeoverHours }) {
+  const total = productionHours + changeoverHours;
+  if (total <= 0) return 0;
+  return margin / total;
+}
+```
+
+---
+
+## 3. UPDATE `buildOrderInsightContext(...)` TO USE THESE HELPERS
+
+When building the order context for insight generation, use the displayed/final values directly.
+
+```javascript
+function buildOrderInsightContext({
+  order,
+  previousOrder,
+  nextOrder,
+  strategyId,
+  line,
+  lineOrders,
+  index,
+  changeoverRules,
+}) {
+  const effectiveAvailDate = normalizeDate(order._aiSuggestedDate || order.target_avail_date);
+  const protectedReason = getProtectedReason(order);
+
+  const productionHours = getDisplayedProductionHours(order, line);
+  const changeoverHours = getDisplayedChangeoverHours(order, previousOrder, changeoverRules, line);
+  const margin = getDisplayedMargin(order);
+  const profitRate = calculateDisplayedProfitRate({
+    margin,
+    productionHours,
+    changeoverHours,
+  });
+
+  const ctx = {
+    strategy: strategyId,
+    line,
+    position: index + 1,
+    totalOrders: lineOrders.length,
+
+    order_id: order.id,
+    material_code_fg: order.material_code_fg,
+    item_description: order.item_description,
+
+    category: order.category,
+    color: order.color,
+    diameter: order.diameter,
+    form: order.form,
+    materialSignature: getMaterialSignature(order),
+
+    effectiveAvailDate,
+    originalAvailDate: normalizeDate(order._originalAvailDate || order.target_avail_date),
+    estimatedCompletionDate: order.estimated_completion_date || order._estimatedCompletion || null,
+
+    n10dStatus: order._n10dStatus || order.inferred_target_label || '',
+    protectedReason,
+
+    previousOrder: previousOrder
+      ? {
+          order_id: previousOrder.id,
+          item_description: previousOrder.item_description,
+          materialSignature: getMaterialSignature(previousOrder),
+          effectiveAvailDate: normalizeDate(previousOrder._aiSuggestedDate || previousOrder.target_avail_date),
+        }
+      : null,
+
+    nextOrder: nextOrder
+      ? {
+          order_id: nextOrder.id,
+          item_description: nextOrder.item_description,
+          materialSignature: getMaterialSignature(nextOrder),
+          effectiveAvailDate: normalizeDate(nextOrder._aiSuggestedDate || nextOrder.target_avail_date),
+        }
+      : null,
+
+    previousChangeover: previousOrder
+      ? Number(getDisplayedChangeoverHours(order, previousOrder, changeoverRules, line).toFixed(2))
+      : 0,
+
+    nextChangeover: nextOrder
+      ? Number(
+          (parseFloat(nextOrder.changeover ?? nextOrder._changeoverHrs) ||
+            calculateChangeoverBetween(order, nextOrder, changeoverRules, line) ||
+            0).toFixed(2)
+        )
+      : 0,
+
+    productionHours: Number(productionHours.toFixed(2)),
+    changeoverHours: Number(changeoverHours.toFixed(2)),
+    margin: Number(margin.toFixed(2)),
+    profitRate: Number(profitRate.toFixed(2)),
+
+    aiDateReason: order._aiDateReason || order._aiReasoning || '',
+  };
+
+  return strategyId === 'ai_profit'
+    ? validateProfitInsightContext(ctx)
+    : ctx;
+}
+```
+
+---
+
+## 4. ENSURE MARGIN ENRICHMENT IS NOT LOST BEFORE INSIGHT GENERATION
+
+The AI Profit insight generator must receive orders that already contain the margin from master data.
+
+If margin is getting lost between:
+- master data enrichment
+- AI profit sequence generation
+- strategy insight generation
+
+then re-enrich the orders before generating profit insights.
+
+### Add a defensive step:
+
+```javascript
+function ensureMarginPresent(ordersByLine, masterData) {
+  const result = {};
+
+  Object.entries(ordersByLine).forEach(([line, orders]) => {
+    result[line] = orders.map(order => {
+      if (order._margin != null && !Number.isNaN(parseFloat(order._margin))) {
+        return order;
+      }
+
+      const materialCode = String(order.material_code_fg || '').trim();
+      const mdEntry = masterData.find(md =>
+        String(md.material_code_fg || md.material_code || '').trim() === materialCode
+      );
+
+      const margin = mdEntry ? parseFloat(mdEntry.Margin ?? mdEntry.margin ?? 0) || 0 : 0;
+
+      return {
+        ...order,
+        _margin: margin,
+      };
+    });
+  });
+
+  return result;
+}
+```
+
+### Then before generating AI Profit insights:
+
+```javascript
+strategies.ai_profit.orders = ensureMarginPresent(strategies.ai_profit.orders, masterData);
+
+strategies.ai_profit.orders = await generateStrategyInsights({
+  strategyId: 'ai_profit',
+  ordersByLine: strategies.ai_profit.orders,
+  changeoverRules,
+  masterData,
+  n10dData,
+});
+```
+
+---
+
+## 5. ADD CONTEXT VALIDATION BEFORE SENDING TO AI
+
+This prevents mismatched row values from entering the prompt.
+
+```javascript
+function validateProfitInsightContext(ctx) {
+  const expectedProfitRate =
+    (ctx.productionHours + ctx.changeoverHours) > 0
+      ? ctx.margin / (ctx.productionHours + ctx.changeoverHours)
+      : 0;
+
+  const roundedExpected = Number(expectedProfitRate.toFixed(2));
+
+  if (Math.abs(roundedExpected - ctx.profitRate) > 0.01) {
+    console.warn('[Profit Insight] Profit rate mismatch', {
+      order_id: ctx.order_id,
+      margin: ctx.margin,
+      productionHours: ctx.productionHours,
+      changeoverHours: ctx.changeoverHours,
+      ctxProfitRate: ctx.profitRate,
+      expectedProfitRate: roundedExpected,
+    });
+
+    ctx.profitRate = roundedExpected;
+  }
+
+  return ctx;
+}
+```
+
+This ensures:
+- profit rate is always mathematically consistent with the production and changeover values sent to AI
+
+---
+
+## 6. UPDATE THE AI INSIGHT PROMPT SO THE MODEL USES PROVIDED VALUES EXACTLY
+
+For `ai_profit`, the prompt must clearly instruct the model:
+
+- do not estimate the values
+- do not recalculate using other assumptions
+- use the given numeric fields exactly
+- if margin is 0 because it is missing, say so honestly
+
+### Update the prompt builder:
+
+```javascript
+function buildStrategyInsightsPrompt({ strategyId, lineContexts }) {
+  return `
+You are generating row-level sequencing explanations for a production scheduling system.
+
+The selected strategy is: ${strategyId}
+
+You will receive row contexts that already contain the exact numeric values to use.
+
+IMPORTANT RULES:
+- Do not invent or estimate margin, production hours, changeover hours, or profit rate
+- Use the provided numeric values exactly as given
+- If strategy is ai_profit, explain the formula using the provided values only
+- Do not replace provided values with your own estimates
+- If margin is 0 and the row context indicates no margin was found, explain that profitability data is unavailable or zero
+
+For each row, generate:
+1. "short" → concise one-line explanation for table display
+2. "long" → expanded explanation for the "more" view
+
+For ai_profit:
+- Explain the provided Profit Rate using:
+  Profit Rate = Margin ÷ (Production Hours + Changeover Hours)
+- Use the exact values from the row context
+- If helpful, explain whether the order was prioritized, deferred, or protected
+
+Return valid JSON only:
+{
+  "results": [
+    {
+      "order_id": "123",
+      "short": "Prioritized here due to higher profit rate among safe flexible orders.",
+      "long": "This order was placed earlier because it delivers stronger value per line-hour than other safe flexible options. Profit Rate = 18.00 ÷ (2.00 + 0.83) = 6.36 profit/hr."
+    }
+  ]
+}
+
+### Order contexts:
+${JSON.stringify(lineContexts, null, 2)}
+`;
+}
+```
+
+---
+
+## 7. ADD EXPLICIT "MARGIN MISSING" FLAG TO CONTEXT
+
+So the AI can distinguish:
+- true zero margin
+- missing/no lookup found
+
+### Add helper:
+```javascript
+function getMarginStatus(order) {
+  const raw = order._margin ?? order.margin;
+
+  if (raw == null || raw === '') {
+    return { margin: 0, marginFound: false };
+  }
+
+  const parsed = parseFloat(raw);
+  if (Number.isNaN(parsed)) {
+    return { margin: 0, marginFound: false };
+  }
+
+  return { margin: parsed, marginFound: true };
+}
+```
+
+### Then use it in context:
+```javascript
+const { margin, marginFound } = getMarginStatus(order);
+```
+
+### Add to context:
+```javascript
+margin: Number(margin.toFixed(2)),
+marginFound,
+```
+
+### And update prompt instructions:
+- If `marginFound` is false, do not frame it as a meaningful profitability signal
+- Explain that margin data is unavailable or not found
+
+---
+
+## 8. MAKE PROFIT INSIGHT MATCH WHAT THE USER SEES IN THE ROW
+
+The user should never see:
+- row says `2.00 hours` but insight says `1.95`
+- row says `CO: 0.83` but insight says `0`
+- row belongs to profit strategy but insight says margin 0 when margin actually exists
+
+The insight must match the displayed row numbers exactly.
+
+That means:
+- row values are the source of truth
+- insight values must be derived from the same final row data
+
+---
+
+## 9. ADD A SAFE FALLBACK FOR PROFIT INSIGHT IF MARGIN IS MISSING
+
+If margin is unavailable:
+- do not pretend the profit logic is precise
+- explain honestly
+
+### Example fallback outputs:
+```javascript
+function getFallbackProfitInsight(ctx) {
+  if (!ctx.marginFound) {
+    return {
+      short: 'Scheduled within profit strategy, but margin data is unavailable.',
+      long: 'This order is part of the profit-optimized sequence, but no margin value was found in master data for this item. Its placement still respects safe scheduling, date constraints, and operational flow.',
+    };
+  }
+
+  return {
+    short: 'Scheduled using profit-optimized sequencing.',
+    long: `This order was evaluated using profit-rate logic. Profit Rate = ${ctx.margin.toFixed(2)} ÷ (${ctx.productionHours.toFixed(2)} + ${ctx.changeoverHours.toFixed(2)}) = ${ctx.profitRate.toFixed(2)} profit/hr.`,
+  };
+}
+```
+
+Use this if AI response is missing or unusable.
+
+---
+
+## 10. ENSURE THE AI PROFIT INSIGHT PIPELINE USES FINAL STRATEGY OUTPUT, NOT PRELIMINARY ORDER DATA
+
+The insight generation for `ai_profit` must run after:
+- margin enrichment
+- date assignment
+- final row production-time calculation
+- final row changeover calculation
+- final order sorting
+
+Do not generate the profit insight too early using partial data.
+
+### Correct order:
+1. generate AI Profit strategy
+2. compute final row values
+3. ensure margin present
+4. build insight context from final rows
+5. generate AI insights
+6. render After table
+
+---
+
+## 11. ADD DEBUG LOGGING FOR BAD CONTEXT CASES
+
+Temporarily log when:
+- marginFound is false
+- productionHours is 0 unexpectedly
+- changeoverHours differs from row display
+- profitRate mismatch is detected
+
+Example:
+```javascript
+if (strategyId === 'ai_profit') {
+  console.debug('[Profit Insight Context]', {
+    order_id: ctx.order_id,
+    material_code_fg: ctx.material_code_fg,
+    margin: ctx.margin,
+    marginFound: ctx.marginFound,
+    productionHours: ctx.productionHours,
+    changeoverHours: ctx.changeoverHours,
+    profitRate: ctx.profitRate,
+  });
+}
+```
+
+This will help confirm the pipeline is now using the correct values.
+
+---
+
+## 12. KEEP THE SHORT AND LONG INSIGHT FORMATS
+
+Continue to store:
+```javascript
+order._strategyInsights.ai_profit = {
+  short: '...',
+  long: '...'
+}
+```
+
+But make sure the numbers in `long` match the row exactly.
+
+---
+
+## VERIFICATION
+
+### Source-of-truth consistency
+1. ✅ AI Profit insight uses the actual row production time
+2. ✅ AI Profit insight uses the actual row changeover value
+3. ✅ AI Profit insight uses actual margin from master data enrichment
+4. ✅ Profit rate is calculated only from those same values
+5. ✅ Row numbers and insight numbers now match
+
+### Margin handling
+6. ✅ Margin enrichment is preserved through strategy generation
+7. ✅ Missing margin is explicitly identified with `marginFound = false`
+8. ✅ Missing margin is explained honestly instead of showing misleading profit math
+9. ✅ True zero margin and missing margin are not confused
+
+### Prompt reliability
+10. ✅ AI is instructed to use provided values exactly
+11. ✅ AI no longer estimates or invents profit formula inputs
+12. ✅ Long insight for ai_profit shows the exact formula using provided numbers
+
+### Timing / pipeline
+13. ✅ Insight generation runs after final row values are computed
+14. ✅ Profit insight uses final strategy output, not preliminary data
+15. ✅ No stale or partial values are used in ai_profit insight generation
+
+### Regression prevention
+16. ✅ No more cases like `0 ÷ (1.95 + 0) = 0/hr` when the row shows different values
+17. ✅ Profit insights remain strategy-specific
+18. ✅ Switching strategies still updates the insight correctly
+19. ✅ Existing Balanced and Standard insight behavior remains intact
+```

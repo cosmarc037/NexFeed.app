@@ -1,0 +1,175 @@
+Please fix the **generated re-order production-time calculation** in the **Fulfillment (Demo)** workspace so that once a suggested re-order is approved and applied to the schedule, its production time is calculated using the **re-order volume to produce**, not the original source order volume.
+
+---
+
+## 1. FIX THE PRODUCTION TIME BASIS FOR APPROVED RE-ORDERS
+
+There is currently a mismatch between the production time shown in the **Suggested Re-orders** table and the production time shown after the re-order is approved and inserted into the schedule.
+
+### Current issue
+In the suggestion row:
+- original/source order volume may be `148 MT`
+- `Vol to Produce (MT)` may be `16 MT`
+- suggested `Production Time` is correctly shown as approximately `0.84 hrs`
+
+But after approval and insertion into the table/schedule:
+- the order still shows `Volume = 16 MT`
+- while `Production Time` becomes `7.75 hrs`
+
+This indicates the app is likely still using the **original source order volume** as the basis for production-time calculation after approval.
+
+### Expected result
+Once the re-order is approved and inserted, the production time must still be based on:
+- the generated **Volume to Produce**
+not
+- the original source order volume
+
+---
+
+## 2. USE `VOL TO PRODUCE (MT)` AS THE SINGLE SOURCE OF TRUTH FOR THE APPROVED RE-ORDER’S PRODUCTION TIME
+
+Please ensure that for approved/generated re-orders:
+
+- `Vol to Produce (MT)` is the quantity used to calculate production time
+- the original source order volume is only reference/context and must not drive the final production-time calculation
+
+### Goal
+The generated re-order should behave like its own new order with its own production quantity.
+
+### Expected result
+If:
+- `Vol to Produce = 16 MT`
+- run rate = `19.10 MT/hr`
+
+then production time should remain around:
+- `0.84 hrs`
+
+both:
+- in the suggestion row
+- and after approval in the active schedule/table
+
+---
+
+## 3. DO NOT LET THE SOURCE ORDER VOLUME LEAK INTO THE FINAL RE-ORDER RECORD
+
+Please check the approval/apply-to-schedule flow to ensure that once the re-order is created:
+
+- it does not inherit the source order’s volume as the basis for production time
+- it does not carry any stale source-order production-time calculation
+- it does not recompute using the original/source volume behind the scenes
+
+### Expected result
+The approved/generated re-order should be treated as a standalone new order with:
+- its own generated volume
+- its own production time
+- its own scheduling metrics
+
+---
+
+## 4. KEEP THE DISPLAYED VOLUME AND PRODUCTION TIME CONSISTENT AFTER APPROVAL
+
+Please make sure the final inserted row remains internally consistent.
+
+### Example
+If the inserted re-order row shows:
+- `Volume = 16 MT`
+
+then the row’s production time must match a `16 MT` order, not a `148 MT` order.
+
+### Expected result
+There should be no mismatch such as:
+- `16 MT`
+- but `7.75 hrs`
+
+if `7.75 hrs` corresponds to the source order volume instead.
+
+---
+
+## 5. APPLY THIS TO ALL RELATED CALCULATIONS FOR THE GENERATED RE-ORDER IF NEEDED
+
+Please review whether the same source-volume leak may also affect other downstream calculations for approved re-orders, such as:
+- estimated completion time
+- batches/bags if applicable
+- sequence timing
+- scheduling projections
+
+### Goal
+Ensure the approved re-order consistently behaves as a new order based on the generated re-order volume.
+
+### Expected result
+All relevant scheduling calculations for the approved re-order should be driven by the generated re-order quantity, not the original source quantity.
+
+---
+
+## IMPORTANT
+
+Please fix the approval/apply-to-schedule behavior for **Fulfillment (Demo) generated re-orders** so that:
+
+- the generated re-order’s production time is calculated from **Vol to Produce (MT)**
+- not from the original source order volume
+- the inserted row remains consistent with the suggestion row
+
+### Example
+If:
+- source order volume = `148 MT`
+- re-order volume to produce = `16 MT`
+- run rate = `19.10 MT/hr`
+
+then the generated re-order’s production time after approval should remain approximately:
+- `0.84 hrs`
+
+not:
+- `7.75 hrs`
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log the production-time basis before and after approval.
+
+```javascript
+console.debug('[Demo Re-Order Production Time Suggestion]', {
+  sourceOrderId,
+  sourceOrderVolume,
+  reorderVolumeToProduce,
+  runRate,
+  suggestedProductionTime,
+  calculationBasis: 'reorderVolumeToProduce',
+});
+```
+
+```javascript
+console.debug('[Demo Re-Order Production Time After Approval]', {
+  sourceOrderId,
+  approvedReorderId,
+  insertedVolume,
+  runRate,
+  finalProductionTime,
+  calculationBasis,
+  sourceVolumeLeakDetected: calculationBasis === 'sourceOrderVolume',
+});
+```
+
+```javascript
+console.debug('[Demo Re-Order Consistency Check]', {
+  approvedReorderId,
+  displayedVolume,
+  displayedProductionTime,
+  expectedProductionTimeFromDisplayedVolume,
+  matchesExpected:
+    Math.abs(displayedProductionTime - expectedProductionTimeFromDisplayedVolume) < 0.01,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Suggested re-order production time is based on `Vol to Produce (MT)`
+2. ✅ Approved re-order production time is also based on `Vol to Produce (MT)`
+3. ✅ The original source order volume is not used for final production-time calculation
+4. ✅ Inserted re-order rows show production time consistent with their displayed volume
+5. ✅ Example: `16 MT` at `19.10 MT/hr` shows approximately `0.84 hrs`
+6. ✅ Example mismatch like `16 MT` with `7.75 hrs` no longer occurs
+7. ✅ Related downstream scheduling calculations remain consistent if applicable
+8. ✅ No UI errors or console errors are introduced

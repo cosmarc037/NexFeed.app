@@ -1,0 +1,597 @@
+```
+Update the per-line AI strategy system so the selected AI strategy is faithfully reflected in the "After" preview table, and add a new Faithfulness Score metric inside each strategy card together with Min slack, MTS adjusted, Risk level, and Violations.
+
+---
+
+## OBJECTIVE
+
+The AI-generated strategy card must not only describe an idea — the After table must clearly and measurably reflect that strategy.
+
+Right now, some strategies say things like:
+- Flexible Date Advancement
+- Swine Diameter Grouping
+
+but the actual After table does not strongly reflect those ideas.
+
+We need to:
+
+1. execute AI strategies more faithfully
+2. measure how faithfully the final After table reflects the strategy
+3. surface that score inside the card metrics container
+4. use that score in recommendation / low-distinction logic
+
+---
+
+## PROBLEM TO FIX
+
+Examples of current mismatch:
+- a strategy says “advance flexible orders,” but the After table does not clearly move eligible flexible orders earlier into underused safe dates
+- a strategy says “group swine by diameter,” but the After table does not clearly cluster swine diameter-compatible runs
+- strategy names/descriptions can be stronger than the actual result shown in preview
+
+This makes the card feel disconnected from the actual applied sequence.
+
+---
+
+## GOAL
+
+For each AI-generated strategy:
+- the app should execute the strategy as faithfully as possible
+- the resulting After table should visibly reflect the strategy objective
+- a Faithfulness Score should be computed and shown in the strategy card
+- the recommendation logic should consider this score
+- low-distinction handling should also consider this score
+
+The Faithfulness Score should appear inside the same metric box as:
+- Min slack
+- MTS adjusted
+- Risk level
+- Violations
+
+---
+
+## 1. EXTEND AI STRATEGY OUTPUT WITH EXECUTION INTENT
+
+Require each AI-generated strategy to return structured execution intent.
+
+### Example response shape:
+```json
+{
+  "strategy_name": "Flexible Date Advancement",
+  "subtitle": "AI-generated strategy",
+  "short_description": "Advances flexible orders to fill earlier slack while keeping protected dates safe.",
+  "line_specific_observation": "This line has several flexible orders with safe windows that allow earlier compression.",
+  "why_this_strategy_fits_this_line": "The line has enough early capacity to move selected flexible orders forward without affecting protected dates.",
+  "difference_from_standard": "Unlike Standard, this strategy intentionally pulls selected flexible orders into earlier safe days.",
+  "distinct_focus": "Advance eligible flexible orders and compress the queue",
+  "execution_intent": {
+    "primary_goal": "advance_flexible_orders",
+    "secondary_goal": "preserve_material_compatibility",
+    "date_behavior": "pull_flexible_orders_forward_into_earlier_safe_slots",
+    "grouping_behavior": "prefer_nearby_compatible_materials_when_advancing",
+    "slack_behavior": "fill_underutilized_early_days_when_safe"
+  },
+  "orders": [
+    { "order_id": "A1", "suggested_date": "2026-04-30", "priority_reason": "protected" },
+    { "order_id": "A2", "suggested_date": "2026-05-02", "priority_reason": "advanced into early slack" }
+  ]
+}
+```
+
+Another example:
+```json
+{
+  "strategy_name": "Swine Diameter Grouping",
+  "subtitle": "AI-generated strategy",
+  "short_description": "Clusters swine orders by diameter to reduce diameter-related changeovers.",
+  "line_specific_observation": "The line contains multiple swine orders whose diameters are split across the queue.",
+  "why_this_strategy_fits_this_line": "Reclustering compatible swine runs reduces diameter transitions while staying inside safe date windows.",
+  "difference_from_standard": "Unlike Standard, this strategy intentionally regroups swine diameter runs instead of preserving the default date spread.",
+  "distinct_focus": "Diameter-compatible swine clustering",
+  "execution_intent": {
+    "primary_goal": "group_swine_by_diameter",
+    "secondary_goal": "keep_dates_safe",
+    "date_behavior": "adjust_flexible_swine_orders_within_safe_windows_to_improve_grouping",
+    "grouping_behavior": "cluster_swine_orders_with_same_or_compatible_diameter",
+    "slack_behavior": "do_not_scatter_grouped_swine_runs_unnecessarily"
+  },
+  "orders": [
+    { "order_id": "A3", "suggested_date": "2026-05-05", "priority_reason": "grouped with 4.00mm swine run" }
+  ]
+}
+```
+
+---
+
+## 2. EXECUTE THE AI STRATEGY AS A REAL PLAN
+
+Stop treating the AI strategy only as a label/description.
+
+For the selected AI strategy:
+- use the returned order sequence
+- use the returned suggested dates if valid
+- interpret `execution_intent`
+- apply strategy-specific refinement so the final After table matches the strategy objective as much as safely possible
+
+### Suggested function:
+```javascript
+function executeAIStrategyForLine({
+  strategy,
+  line,
+  lineOrders,
+  standardOrders,
+  n10dData,
+  masterData,
+  changeoverRules,
+}) {
+  // map AI output to final executable row sequence
+}
+```
+
+Execution priority should become:
+1. hard constraints
+2. AI strategy intent
+3. generic optimization heuristics
+4. final display cleanup
+
+Not the other way around.
+
+---
+
+## 3. ADD STRATEGY-SPECIFIC EXECUTION HELPERS
+
+Use the AI strategy’s `execution_intent.primary_goal` to determine which refinement helper to apply.
+
+### Example supported goals:
+- `advance_flexible_orders`
+- `group_swine_by_diameter`
+- `compress_compatible_runs`
+- `create_downstream_slack`
+- `protect_late_window_capacity`
+- `stabilize_mid_queue`
+
+### Suggested helpers:
+```javascript
+function applyFlexibleDateAdvancementIntent({...}) {}
+function applySwineDiameterGroupingIntent({...}) {}
+function applyCompatibleRunCompressionIntent({...}) {}
+function applySlackCreationIntent({...}) {}
+```
+
+These helpers should:
+- preserve hard rules
+- push the final sequence toward what the AI actually described
+- not let generic fallback heuristics dilute the strategy
+
+---
+
+## 4. FLEXIBLE DATE ADVANCEMENT: REQUIRED EXECUTION BEHAVIOR
+
+If `primary_goal === "advance_flexible_orders"`:
+
+The app must:
+- move eligible flexible orders into earlier safe dates where capacity exists
+- use lightly loaded earlier days when practical
+- avoid unnecessary spreading of flexible orders across later days if earlier safe compression is possible
+- still prefer material compatibility where reasonable
+
+### Required checks:
+- if a day only has one order and enough line time remains, try placing another eligible flexible order there
+- if an eligible order can move from a later safe date to an earlier one, allow that when aligned with the strategy
+- do not leave obvious unused earlier slack while calling the strategy "advancement"
+
+### Suggested helper:
+```javascript
+function applyFlexibleDateAdvancementIntent({
+  orders,
+  line,
+  strategy,
+  n10dData,
+  changeoverRules,
+}) {
+  // fills earlier safe days with eligible flexible orders
+  // compresses queue without violating hard rules
+}
+```
+
+---
+
+## 5. SWINE DIAMETER GROUPING: REQUIRED EXECUTION BEHAVIOR
+
+If `primary_goal === "group_swine_by_diameter"`:
+
+The app must:
+- identify swine orders
+- identify their diameter values
+- cluster compatible swine diameter runs closer together where safe
+- allow flexible swine orders to move within safe windows to support grouping
+- visibly reduce fragmentation of swine runs in the After table
+
+### Required checks:
+- swine orders should appear more clustered than in Standard
+- same or compatible diameters should be adjacent or near-adjacent where safe
+- if the strategy claims swine diameter grouping, the final order table must visibly show that pattern
+
+### Suggested helper:
+```javascript
+function applySwineDiameterGroupingIntent({
+  orders,
+  line,
+  strategy,
+  n10dData,
+  changeoverRules,
+}) {
+  // groups swine orders by diameter while preserving protected-date logic
+}
+```
+
+---
+
+## 6. ADD STRATEGY FAITHFULNESS SCORING
+
+Create a faithfulness evaluation layer after the AI strategy is executed and the final After table is built.
+
+### Suggested function:
+```javascript
+function evaluateStrategyFaithfulness({
+  strategy,
+  line,
+  standardOrders,
+  finalOrders,
+  n10dData,
+  changeoverRules,
+}) {
+  // returns score + breakdown
+}
+```
+
+This function should evaluate whether the final After table actually reflects the selected strategy’s stated objective.
+
+---
+
+## 7. DEFINE THE FAITHFULNESS SCORE
+
+Faithfulness Score should be a numeric score from **0 to 100**.
+
+### High-level interpretation:
+- **90–100** = strategy is strongly reflected in the final table
+- **70–89** = strategy is mostly reflected
+- **50–69** = weakly reflected
+- **below 50** = poorly reflected / card and preview are misaligned
+
+---
+
+## 8. FAITHFULNESS SCORING DIMENSIONS
+
+Use weighted components based on the strategy’s declared objective.
+
+### Core scoring dimensions:
+1. **Intent alignment** (40%)
+   - Does the final sequence visibly reflect the primary goal?
+
+2. **Date behavior alignment** (20%)
+   - Do actual suggested/applied dates reflect the date strategy?
+
+3. **Grouping behavior alignment** (20%)
+   - Does the final order arrangement reflect the stated grouping/compression objective?
+
+4. **Difference from Standard** (10%)
+   - Is the final sequence meaningfully different from Standard in the intended way?
+
+5. **Constraint-preserving execution quality** (10%)
+   - Was the strategy applied without violating hard rules?
+
+### Example formula:
+```javascript
+faithfulnessScore =
+  intentAlignment * 0.40 +
+  dateAlignment * 0.20 +
+  groupingAlignment * 0.20 +
+  differenceFromStandardScore * 0.10 +
+  constraintExecutionScore * 0.10;
+```
+
+Round to 1 decimal or integer as needed.
+
+---
+
+## 9. STRATEGY-SPECIFIC FAITHFULNESS RULES
+
+### A. For `advance_flexible_orders`
+Score based on:
+- number/ratio of eligible flexible orders actually moved earlier
+- use of underutilized earlier safe dates
+- degree of queue compression
+- preservation of compatibility while advancing
+
+Suggested subchecks:
+```javascript
+flexibleAdvanceRatio
+earlySlackUtilizationScore
+queueCompressionScore
+compatibilityPreservationScore
+```
+
+Example:
+```javascript
+intentAlignment = average([
+  flexibleAdvanceRatio,
+  earlySlackUtilizationScore,
+  queueCompressionScore
+]);
+```
+
+### B. For `group_swine_by_diameter`
+Score based on:
+- swine clustering improvement vs Standard
+- reduction in swine diameter fragmentation
+- adjacency/near-adjacency of same-diameter swine orders
+- allowed safe date movement used to support grouping
+
+Suggested subchecks:
+```javascript
+swineClusterScore
+diameterAdjacencyScore
+fragmentationReductionScore
+safeDateGroupingScore
+```
+
+### C. For other future strategy types
+Use the strategy’s `execution_intent` to route to the proper evaluator.
+
+---
+
+## 10. EXAMPLE FAITHFULNESS EVALUATOR STRUCTURE
+
+```javascript
+function evaluateStrategyFaithfulness({
+  strategy,
+  line,
+  standardOrders,
+  finalOrders,
+  n10dData,
+  changeoverRules,
+}) {
+  const primaryGoal = strategy?.execution_intent?.primary_goal || '';
+
+  if (primaryGoal === 'advance_flexible_orders') {
+    return evaluateFlexibleDateAdvancementFaithfulness({
+      strategy,
+      line,
+      standardOrders,
+      finalOrders,
+      n10dData,
+      changeoverRules,
+    });
+  }
+
+  if (primaryGoal === 'group_swine_by_diameter') {
+    return evaluateSwineDiameterGroupingFaithfulness({
+      strategy,
+      line,
+      standardOrders,
+      finalOrders,
+      n10dData,
+      changeoverRules,
+    });
+  }
+
+  return evaluateGenericStrategyFaithfulness({
+    strategy,
+    line,
+    standardOrders,
+    finalOrders,
+  });
+}
+```
+
+Return structure:
+```javascript
+{
+  score: 82.4,
+  rating: 'Mostly reflected',
+  breakdown: {
+    intentAlignment: 85,
+    dateAlignment: 78,
+    groupingAlignment: 80,
+    differenceFromStandardScore: 70,
+    constraintExecutionScore: 100,
+  },
+  notes: [
+    '2 of 3 eligible flexible orders were advanced earlier',
+    'Earlier safe dates were utilized better than Standard',
+  ]
+}
+```
+
+---
+
+## 11. STORE FAITHFULNESS SCORE IN STRATEGY METRICS
+
+Add the metric to each strategy object:
+
+```javascript
+strategy.metrics.faithfulnessScore = 82.4;
+strategy.metrics.faithfulnessRating = 'Mostly reflected';
+strategy.metrics.faithfulnessBreakdown = {...};
+```
+
+This should be available for:
+- card display
+- recommendation logic
+- distinction logic
+- debugging / AI reasoning modal
+
+---
+
+## 12. SHOW FAITHFULNESS SCORE INSIDE THE METRICS CONTAINER
+
+Inside each strategy card, place the Faithfulness Score in the same metrics box that currently shows:
+- Min slack
+- MTS adjusted
+- Risk level
+- Violations
+
+### Example layout:
+- Min slack
+- MTS adjusted
+- Risk level
+- Violations
+- Faithfulness
+
+### Example JSX:
+```jsx
+<div className="strategy-metrics-box">
+  <div className="metric-row">
+    <span>Min slack</span>
+    <strong>{formatHours(strategy.metrics.minSlackHours)}</strong>
+  </div>
+  <div className="metric-row">
+    <span>MTS adjusted</span>
+    <strong>{strategy.metrics.mtsAdjusted} / {strategy.metrics.mtsCount}</strong>
+  </div>
+  <div className="metric-row">
+    <span>Risk level</span>
+    <strong>{strategy.metrics.riskLevel}</strong>
+  </div>
+  <div className="metric-row">
+    <span>Violations</span>
+    <strong>{strategy.metrics.violations}</strong>
+  </div>
+  <div className="metric-row">
+    <span>Faithfulness</span>
+    <strong>{strategy.metrics.faithfulnessScore?.toFixed(1) ?? '—'}</strong>
+  </div>
+</div>
+```
+
+If desired, show:
+- `82.4 / 100`
+or
+- `82.4`
+
+Either is fine, but keep it concise.
+
+---
+
+## 13. OPTIONALLY COLOR-CODE FAITHFULNESS
+
+Optional but recommended:
+
+### Suggested rating bands:
+- **90+** → green
+- **75–89.9** → light green
+- **60–74.9** → yellow/orange
+- **below 60** → red
+
+This can be a small chip or colored value, but keep it inside the metrics box.
+
+Example:
+```jsx
+<span className={getFaithfulnessClass(strategy.metrics.faithfulnessScore)}>
+  {strategy.metrics.faithfulnessScore?.toFixed(1)}
+</span>
+```
+
+---
+
+## 14. USE FAITHFULNESS SCORE IN RECOMMENDATION LOGIC
+
+Update the recommended selection logic among AI options so that it considers faithfulness.
+
+A strategy should not be recommended if:
+- its card sounds strong
+- but its preview result does not actually reflect the strategy
+
+### Suggested weighting update:
+- Slack / safety: 30%
+- Risk level: 20%
+- Optimization effect: 15%
+- Profitability metric: 10%
+- Faithfulness score: 25%
+
+Example:
+```javascript
+finalRecommendationScore =
+  slackScore * 0.30 +
+  riskScore * 0.20 +
+  optimizationScore * 0.15 +
+  profitabilityScore * 0.10 +
+  faithfulnessScore * 0.25;
+```
+
+This makes the app reward strategies that are both good and faithfully applied.
+
+---
+
+## 15. USE FAITHFULNESS IN LOW-DISTINCTION / WEAK-APPLICATION LOGIC
+
+If faithfulness is low, the strategy should:
+- lose recommendation priority
+- potentially be marked as weakly applied
+- contribute to low distinction or low quality warnings
+
+Suggested rule:
+- if `faithfulnessScore < 60`, do not recommend
+- if `faithfulnessScore < 50`, mark as weak/poorly reflected
+- if distinction is low and faithfulness is low, strongly discourage recommendation
+
+---
+
+## 16. UPDATE THE "VIEW AI REASONING" CONTENT
+
+Inside the AI reasoning modal/expandable section, include:
+- why the strategy was chosen
+- how it was applied
+- faithfulness summary
+- notes explaining where the preview reflects the strategy
+
+Example:
+- “Faithfulness: 82.4 — 2 flexible orders were moved earlier, and early safe capacity on 02 May was used more effectively than in Standard.”
+
+This makes the metric interpretable to users.
+
+---
+
+## 17. MAKE SEQUENCE INSIGHT MATCH ACTUAL EXECUTION
+
+The row-level Sequence Insight should be based on the actual final table behavior, not just the strategy description.
+
+If a flexible order was advanced:
+- say it was advanced and why
+
+If a swine order was grouped:
+- say it was grouped near compatible diameter orders
+
+Do not claim grouping/advancement if the final table does not show it.
+
+---
+
+## 18. VERIFICATION
+
+### Strategy execution
+1. ✅ The AI strategy is executed as a real plan, not just shown as a label
+2. ✅ Flexible Date Advancement visibly advances eligible flexible orders into earlier safe slots
+3. ✅ Swine Diameter Grouping visibly clusters swine orders by diameter in the After table
+4. ✅ Generic heuristics no longer dilute the strategy intent
+
+### Faithfulness scoring
+5. ✅ Each AI strategy gets a Faithfulness Score from 0 to 100
+6. ✅ Faithfulness Score is computed from actual preview behavior vs strategy intent
+7. ✅ Faithfulness Score includes breakdown and notes
+8. ✅ The metric is stored inside strategy.metrics
+
+### UI
+9. ✅ Faithfulness Score is shown inside the strategy card metrics container
+10. ✅ It appears together with Min slack, MTS adjusted, Risk level, and Violations
+11. ✅ Users can see whether the preview really reflects the strategy
+
+### Recommendation / quality
+12. ✅ Recommendation logic now considers faithfulness
+13. ✅ Low-faithfulness strategies are not recommended
+14. ✅ Distinction / weak-application logic also considers faithfulness
+
+### Explainability
+15. ✅ AI reasoning includes faithfulness summary
+16. ✅ Sequence Insight reflects the actual applied result
+17. ✅ Users can trust that the strategy card and the After table are aligned

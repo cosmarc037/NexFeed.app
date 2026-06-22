@@ -1,0 +1,419 @@
+```
+Update the Scheduling Impact AI prompt and display to:
+1. Group later and deadline orders the same way as earlier orders
+2. Only show sections that have actual data
+
+---
+
+## 1. UPDATE AI PROMPT — GROUP ALL SECTIONS
+
+```javascript
+function buildSchedulingImpactPrompt(context, calculatedImpact) {
+  const hasEarlier = calculatedImpact.earlierOrders.length > 0;
+  const hasLater = calculatedImpact.laterOrders.length > 0;
+  const hasDeadlineMisses = calculatedImpact.deadlineMisses.length > 0;
+  
+  return `
+You are a production scheduling advisor for a feed manufacturing plant.
+Analyze the scheduling impact of combining orders on ${context.line}.
+
+COMBINED ORDER:
+  Product: ${context.combiningOrders[0]?.name}
+  Total Volume: ${context.combinedVolume} MT
+  Production Time: ${context.combinedProductionHours} hrs
+  Insertion Position: Priority ${context.insertionResult.prio}
+
+CALCULATED TIME SHIFTS (use as reference — these are accurate):
+${hasLater
+  ? 'Orders starting later:\n' + calculatedImpact.laterOrders.map(o => `  Prio ${o.prio}: ${o.name} — ${o.shiftFormatted} later (N10D: ${o.n10dStatus || 'N/A'})`).join('\n')
+  : 'Orders starting later: None'}
+
+${hasEarlier
+  ? 'Orders starting earlier:\n' + calculatedImpact.earlierOrders.map(o => `  Prio ${o.prio}: ${o.name} — ${o.shiftFormatted} earlier (N10D: ${o.n10dStatus || 'N/A'})`).join('\n')
+  : 'Orders starting earlier: None'}
+
+${hasDeadlineMisses
+  ? 'Orders at risk of missing avail date:\n' + calculatedImpact.deadlineMisses.map(o => `  Prio ${o.prio}: ${o.name} — new completion ${o.newCompletion} exceeds avail date ${o.availDate} (~${o.delayDays} days late) (N10D: ${o.n10dStatus || 'N/A'})`).join('\n')
+  : 'Orders at risk of missing avail date: None'}
+
+ORDER CONTEXT (N10D status, avail dates):
+${context.lineContext
+  .filter(o => !o.isBeingCombined)
+  .map(o => `  Prio ${o.prio}: ${o.name} | N10D: ${o.n10dStatus} | Avail: ${o.availDate} (${o.isDated ? 'DATED' : 'NON-DATED'})`)
+  .join('\n')}
+
+RESPONSE FORMAT:
+
+ONLY include sections that have actual data. If a section has no orders, DO NOT include that section at all. Skip it entirely — no label, no "No orders..." message.
+
+For sections that DO have data, use the section label on its own line, then the grouped/individual items below.
+
+GROUPING RULES — APPLY TO ALL THREE SECTIONS:
+
+1. If multiple orders have the SAME time shift or same delay amount, GROUP them into one line.
+   - For earlier: ✅ Prio [range] ([count] orders) — all start ~[time] earlier. Notable: [2-3 important ones with N10D status if Critical/Urgent].
+   - For later: ⚠ Prio [range] ([count] orders) — all start ~[time] later. Notable: [2-3 important ones with N10D status].
+   - For deadline: ⛔ Prio [range] ([count] orders) — all exceed avail date by ~[X] days. Notable: [2-3 important ones].
+
+2. If orders have DIFFERENT time shifts, group by similar time shifts.
+   - Example: ⚠ Prio 7–15 (9 orders) — start ~4 hrs 11 min later. Notable: Gallimax 3 Maintenance Red Pellet (Prio 12), Ave Max Duck Growex (Prio 13).
+   - Example: ⚠ Prio 16: Gallimax 3 Maintenance — starts 2 hrs 5 min later.
+
+3. If only 1-3 orders in a section, list individually.
+   - Example: ✅ Prio 17: Elite XP Startex — starts 10 min earlier.
+   - Example: ⚠ Prio 5: Gall 21 Chicken Layer — starts 24 hrs 43 min later. Critical status, avail date March 19.
+
+4. Always mention N10D status for Critical and Urgent orders.
+5. Always mention avail dates for dated orders in the later and deadline sections.
+
+TIME FORMAT:
+- Use human-readable format: "10 min", "4 hrs 11 min", "1 day 2 hrs", etc.
+- Do NOT use decimal hours like "0.17 hrs" or "4.18 hrs". Convert them.
+  - 0.17 hrs = 10 min
+  - 4.18 hrs = 4 hrs 11 min
+  - 24.71 hrs = 1 day 43 min
+  - 15.91 hrs = 15 hrs 55 min
+
+AFTER the sections, write a 3-5 sentence summary:
+- Each sentence on its OWN LINE.
+- Only reference concerns that actually exist in the data.
+- If only earlier orders exist (no delays, no deadline misses), be positive.
+- If delays exist, assess severity and mention Critical/Urgent orders.
+- Give a recommendation.
+
+IMPORTANT:
+- Do NOT include sections with no data.
+- Do NOT write "No orders starting later" or "No orders at risk" — just skip the section.
+- Use the calculated time shifts as reference — do NOT invent different times.
+- Do NOT use markdown formatting.
+- Convert all decimal hours to human-readable format.
+- Start each bullet with the appropriate icon (✅, ⚠, ⛔).
+  `;
+}
+```
+
+---
+
+## 2. UPDATE buildSchedulingImpactData — ADD N10D STATUS TO ENTRIES
+
+```javascript
+function buildSchedulingImpactData(group, lineOrders) {
+  // ... existing code until the shift calculation ...
+  
+  currentLineOrders.forEach(order => {
+    if (combiningIds.includes(order.id)) return;
+    if (beforeStart[order.id] === undefined || afterStart[order.id] === undefined) return;
+    
+    const shiftHrs = beforeStart[order.id] - afterStart[order.id];
+    const prodTime = orderProdTimes[order.id]?.prodHrs || 0;
+    
+    // Get N10D status
+    const n10dProduct = context?.n10dData?.find(
+      p => String(p.material_code_fg) === String(order.material_code_fg)
+    );
+    const n10dStatus = n10dProduct ? getProductStatus(
+      n10dProduct.due_for_loading, n10dProduct.inventory,
+      getDailyColumns(), n10dProduct, new Date()
+    ) : null;
+    
+    // Deadline miss check
+    const targetAvail = order.target_avail_date;
+    const isDated = targetAvail && /^\d{4}-\d{2}-\d{2}/.test(targetAvail) && !isNaN(Date.parse(targetAvail));
+    
+    let deadlineMiss = null;
+    
+    if (isDated) {
+      const availDateObj = new Date(targetAvail);
+      const newStartHrs = afterStart[order.id];
+      const newCompletionMs = leadStartDate.getTime() + ((newStartHrs + prodTime) * 60 * 60 * 1000);
+      const newCompletionDate = new Date(newCompletionMs);
+      
+      if (newCompletionDate > availDateObj) {
+        const delayMs = newCompletionDate.getTime() - availDateObj.getTime();
+        const delayDays = Math.ceil(delayMs / (1000 * 60 * 60 * 24));
+        
+        deadlineMiss = {
+          prio: order.prio,
+          name: order.item_description,
+          availDate: availDateObj.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
+          newCompletion: newCompletionDate.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
+          delayDays: delayDays,
+          n10dStatus: n10dStatus || 'N/A'
+        };
+        
+        deadlineMisses.push(deadlineMiss);
+      }
+    }
+    
+    if (Math.abs(shiftHrs) < 0.01) return;
+    
+    const entry = {
+      prio: order.prio,
+      name: order.item_description,
+      shiftHrs: Math.abs(shiftHrs),
+      shiftFormatted: formatTimeShift(Math.abs(shiftHrs)),
+      n10dStatus: n10dStatus || 'N/A',
+      hasDeadlineMiss: deadlineMiss !== null
+    };
+    
+    if (shiftHrs > 0) {
+      earlierOrders.push(entry);
+    } else {
+      laterOrders.push(entry);
+    }
+  });
+  
+  // ... rest of sorting and return ...
+}
+```
+
+---
+
+## 3. UPDATE DISPLAY — ONLY SHOW SECTIONS WITH DATA
+
+```jsx
+function SchedulingImpactAIDisplay({ response }) {
+  const hasEarlier = response.earlierSection.length > 0;
+  const hasLater = response.laterSection.length > 0;
+  const hasDeadline = response.deadlineSection.length > 0;
+  const hasSummary = response.summary.length > 0;
+  
+  return (
+    <div className="scheduling-impact-ai">
+      {/* Earlier section — only if data exists */}
+      {hasEarlier && (
+        <div className="scheduling-impact-section">
+          <div className="scheduling-impact-label scheduling-impact-faster">
+            Orders starting earlier:
+          </div>
+          {response.earlierSection.map((line, index) => (
+            <SchedulingImpactLine key={`earlier-${index}`} line={line} type="earlier" />
+          ))}
+        </div>
+      )}
+      
+      {/* Later section — only if data exists */}
+      {hasLater && (
+        <div className="scheduling-impact-section">
+          <div className="scheduling-impact-label scheduling-impact-delayed">
+            Orders starting later:
+          </div>
+          {response.laterSection.map((line, index) => (
+            <SchedulingImpactLine key={`later-${index}`} line={line} type="later" />
+          ))}
+        </div>
+      )}
+      
+      {/* Deadline section — only if data exists */}
+      {hasDeadline && (
+        <div className="scheduling-impact-section">
+          <div className="scheduling-impact-label scheduling-impact-deadline">
+            Orders at risk of missing avail date:
+          </div>
+          {response.deadlineSection.map((line, index) => (
+            <SchedulingImpactLine key={`deadline-${index}`} line={line} type="deadline" />
+          ))}
+        </div>
+      )}
+      
+      {/* Summary — only if exists */}
+      {hasSummary && (
+        <div className="scheduling-impact-ai-note">
+          {response.summary.map((sentence, index) => (
+            <p key={index} className="scheduling-impact-ai-sentence">
+              {sentence}
+            </p>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+```
+
+### ALSO UPDATE FALLBACK — ONLY SHOW SECTIONS WITH DATA
+
+```jsx
+function SchedulingImpactFallback({ impact }) {
+  const hasLater = impact.laterOrders.length > 0;
+  const hasEarlier = impact.earlierOrders.length > 0;
+  const hasDeadline = impact.deadlineMisses.length > 0;
+  
+  return (
+    <div className="scheduling-impact-fallback">
+      <div className="scheduling-impact-fallback-note">
+        AI analysis unavailable — showing calculated data.
+      </div>
+      
+      {hasLater && (
+        <div className="scheduling-impact-section">
+          <div className="scheduling-impact-label scheduling-impact-delayed">
+            Orders starting later:
+          </div>
+          {impact.laterOrders.map((order, index) => (
+            <div key={index} className="scheduling-impact-item scheduling-impact-item-delayed">
+              <span className="scheduling-impact-bullet">⚠</span>
+              <span className="scheduling-impact-text">
+                Prio {order.prio}: {order.name} — starts <strong>{order.shiftFormatted} later</strong>
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+      
+      {hasEarlier && (
+        <div className="scheduling-impact-section">
+          <div className="scheduling-impact-label scheduling-impact-faster">
+            Orders starting earlier:
+          </div>
+          {impact.earlierOrders.map((order, index) => (
+            <div key={index} className="scheduling-impact-item scheduling-impact-item-faster">
+              <span className="scheduling-impact-bullet">✅</span>
+              <span className="scheduling-impact-text">
+                Prio {order.prio}: {order.name} — starts <strong>{order.shiftFormatted} earlier</strong>
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+      
+      {hasDeadline && (
+        <div className="scheduling-impact-section">
+          <div className="scheduling-impact-label scheduling-impact-deadline">
+            Orders at risk of missing avail date:
+          </div>
+          {impact.deadlineMisses.map((order, index) => (
+            <div key={index} className="scheduling-impact-item scheduling-impact-item-deadline">
+              <span className="scheduling-impact-bullet">⛔</span>
+              <span className="scheduling-impact-text">
+                Prio {order.prio}: {order.name} — new completion <strong>{order.newCompletion}</strong> exceeds avail date <strong>{order.availDate}</strong> (~{order.delayDays} days late)
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+```
+
+---
+
+## 4. UPDATE RESPONSE PARSER — HANDLE MISSING SECTIONS
+
+```javascript
+function parseSchedulingImpactResponse(response) {
+  let cleaned = response.trim();
+  
+  // Remove markdown
+  cleaned = cleaned.replace(/\*\*/g, '');
+  cleaned = cleaned.replace(/#{1,6}\s*/g, '');
+  cleaned = cleaned.replace(/\*([^*]+)\*/g, '$1');
+  cleaned = cleaned.replace(/_([^_]+)_/g, '$1');
+  
+  const result = {
+    earlierSection: [],
+    laterSection: [],
+    deadlineSection: [],
+    summary: []
+  };
+  
+  // Split into lines
+  const allLines = cleaned.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+  
+  let currentSection = null;
+  const sectionLines = {
+    earlier: [],
+    later: [],
+    deadline: [],
+    summary: []
+  };
+  
+  allLines.forEach(line => {
+    const lower = line.toLowerCase();
+    
+    // Detect section headers
+    if (lower.startsWith('orders starting earlier')) {
+      currentSection = 'earlier';
+      return;
+    }
+    if (lower.startsWith('orders starting later')) {
+      currentSection = 'later';
+      return;
+    }
+    if (lower.startsWith('orders at risk')) {
+      currentSection = 'deadline';
+      return;
+    }
+    
+    // Lines with icons go to their section
+    if (line.startsWith('✅')) {
+      currentSection = currentSection || 'earlier';
+      sectionLines.earlier.push(line);
+      return;
+    }
+    if (line.startsWith('⚠')) {
+      currentSection = currentSection || 'later';
+      sectionLines.later.push(line);
+      return;
+    }
+    if (line.startsWith('⛔')) {
+      currentSection = currentSection || 'deadline';
+      sectionLines.deadline.push(line);
+      return;
+    }
+    
+    // Non-icon lines
+    if (currentSection === 'earlier' || currentSection === 'later' || currentSection === 'deadline') {
+      // Check if this looks like a summary sentence (no icon, not a "no orders" message)
+      if (!lower.includes('no orders') && line.length > 30) {
+        // Might be start of summary
+        currentSection = 'summary';
+        sectionLines.summary.push(line);
+      }
+    } else if (currentSection === 'summary') {
+      sectionLines.summary.push(line);
+    } else {
+      // Unclassified — likely summary
+      sectionLines.summary.push(line);
+    }
+  });
+  
+  result.earlierSection = sectionLines.earlier;
+  result.laterSection = sectionLines.later;
+  result.deadlineSection = sectionLines.deadline;
+  result.summary = sectionLines.summary.slice(0, 5);
+  
+  return result;
+}
+```
+
+---
+
+## VERIFICATION
+
+### Grouping
+1. ✅ Earlier orders grouped: "✅ Prio 17–18 (2 orders) — all start ~10 min earlier"
+2. ✅ Later orders grouped: "⚠ Prio 7–15 (9 orders) — all start ~4 hrs 11 min later. Notable: Gallimax 3 Red Pellet (Prio 12), Ave Max Duck Growex (Prio 13)"
+3. ✅ Deadline orders grouped if same delay amount
+4. ✅ Individual orders listed if 1-3 in section
+5. ✅ Mixed time shifts create multiple groups
+
+### Time format
+6. ✅ 0.17 hrs → "10 min" (not "0.17 hrs")
+7. ✅ 4.18 hrs → "4 hrs 11 min"
+8. ✅ 24.71 hrs → "1 day 43 min"
+
+### Conditional sections
+9. ✅ Section hidden if no data (no "No orders..." message)
+10. ✅ Only earlier data → only earlier section shown
+11. ✅ Only later data → only later section shown
+12. ✅ Earlier + later but no deadline → two sections shown, deadline hidden
+13. ✅ All three have data → all three shown
+14. ✅ No data at all → "No scheduling impact" message
+
+### N10D in context
+15. ✅ N10D status passed to AI for each order
+16. ✅ AI mentions Critical/Urgent in notable orders
+17. ✅ N10D status included in later and deadline entries
+```

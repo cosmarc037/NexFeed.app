@@ -1,0 +1,363 @@
+```
+Update master data to include Pricing and Margin columns:
+
+---
+
+## 1. UPDATE MASTER DATA PARSER — ADD NEW COLUMNS
+
+```javascript
+// In the master data upload parser — add pricing and margin fields:
+
+function parseMasterDataRow(row) {
+  return {
+    // ... existing fields ...
+    material_code_fg: row['FG Material Code'] || row['material_code_fg'] || '',
+    item_description: row['FG Item Description'] || row['item_description'] || '',
+    material_code_sfg: row['SFG1 Material Code'] || row['material_code_sfg'] || '',
+    sfg_item_description: row['SFG Item Description'] || row['sfg_item_description'] || '',
+    category: row['Category'] || row['category'] || '',
+    color: row['Color'] || row['color'] || '',
+    
+    // NEW: Pricing and Margin
+    pricing_php: parsePricing(row['Pricing (Php)'] || row['pricing_php'] || ''),
+    margin: parseMargin(row['Margin'] || row['margin'] || ''),
+    
+    form: row['Form'] || row['form'] || '',
+    diameter: row['Diameter'] || row['diameter'] || '',
+    changeover: parseFloat(row['Changeover'] || row['changeover'] || 0),
+    fg_weight: parseFloat(row['FG Weight'] || row['fg_weight'] || 0),
+    
+    // ... rest of existing fields ...
+    batch_fm1: row['Batch FM1'] || row['batch_fm1'] || '',
+    batch_fm2: row['Batch FM2'] || row['batch_fm2'] || '',
+    batch_fm3: row['Batch FM3'] || row['batch_fm3'] || '',
+    batch_pmx: row['Batch PMX'] || row['batch_pmx'] || '',
+    label_1: row['Label 1'] || row['label_1'] || '',
+    label_2: row['Label 2'] || row['label_2'] || '',
+    thread: row['Thread'] || row['thread'] || '',
+    sacks_code: row['Sacks Code'] || row['sacks_code'] || '',
+    sacks_desc: row['Sacks Desc'] || row['sacks_desc'] || '',
+    tags_code: row['Tags Code'] || row['tags_code'] || '',
+    tags_desc: row['Tags Desc'] || row['tags_desc'] || '',
+    run_rate_l1: parseFloat(row['L1 Rate'] || row['run_rate_l1'] || 0),
+    run_rate_l2: parseFloat(row['L2 Rate'] || row['run_rate_l2'] || 0),
+    run_rate_l3: parseFloat(row['L3 Rate'] || row['run_rate_l3'] || 0),
+    run_rate_l4: parseFloat(row['L4 Rate'] || row['run_rate_l4'] || 0),
+    run_rate_l5: parseFloat(row['L5 Rate'] || row['run_rate_l5'] || 0),
+    run_rate_l6: parseFloat(row['L6 Rate'] || row['run_rate_l6'] || 0),
+    run_rate_l7: parseFloat(row['L7 Rate'] || row['run_rate_l7'] || 0),
+  };
+}
+
+// Helper: Parse pricing — handles "2,664" format
+function parsePricing(value) {
+  if (!value && value !== 0) return null;
+  const cleaned = String(value).replace(/,/g, '').replace(/₱/g, '').replace(/Php/gi, '').trim();
+  const num = parseFloat(cleaned);
+  return isNaN(num) ? null : num;
+}
+
+// Helper: Parse margin — handles "16.7%" format
+function parseMargin(value) {
+  if (!value && value !== 0) return null;
+  const cleaned = String(value).replace(/%/g, '').trim();
+  const num = parseFloat(cleaned);
+  return isNaN(num) ? null : num;
+}
+```
+
+---
+
+## 2. UPDATE MASTER DATA TABLE — ADD COLUMNS
+
+```jsx
+// In MasterDataTable.jsx — add Pricing and Margin columns
+
+// Add to the header groupings (Product Details section):
+const MASTER_DATA_COLUMNS = [
+  // Product Details group
+  { key: 'material_code_fg', label: 'FG Material Code', group: 'Product Details' },
+  { key: 'item_description', label: 'FG Item Description', group: 'Product Details' },
+  { key: 'material_code_sfg', label: 'SFG1 Material Code', group: 'Product Details' },
+  { key: 'sfg_item_description', label: 'SFG Item Description', group: 'Product Details' },
+  { key: 'category', label: 'Category', group: 'Product Details' },
+  { key: 'color', label: 'Color', group: 'Product Details' },
+  
+  // NEW: Pricing group
+  { key: 'pricing_php', label: 'Pricing (₱)', group: 'Pricing' },
+  { key: 'margin', label: 'Margin', group: 'Pricing' },
+  
+  // Production Parameters group
+  { key: 'form', label: 'Form', group: 'Production Parameters' },
+  { key: 'diameter', label: 'Diameter', group: 'Production Parameters' },
+  { key: 'changeover', label: 'Changeover', group: 'Production Parameters' },
+  { key: 'fg_weight', label: 'FG Weight', group: 'Production Parameters' },
+  
+  // Batch Sizes group
+  { key: 'batch_fm1', label: 'Batch FM1', group: 'Batch Sizes' },
+  { key: 'batch_fm2', label: 'Batch FM2', group: 'Batch Sizes' },
+  { key: 'batch_fm3', label: 'Batch FM3', group: 'Batch Sizes' },
+  { key: 'batch_pmx', label: 'Batch PMX', group: 'Batch Sizes' },
+  
+  // Labeling group
+  { key: 'label_1', label: 'Label 1', group: 'Labeling' },
+  { key: 'label_2', label: 'Label 2', group: 'Labeling' },
+  { key: 'thread', label: 'Thread', group: 'Labeling' },
+  
+  // Packaging group
+  { key: 'sacks_code', label: 'Sacks Code', group: 'Packaging' },
+  { key: 'sacks_desc', label: 'Sacks Desc', group: 'Packaging' },
+  { key: 'tags_code', label: 'Tags Code', group: 'Packaging' },
+  { key: 'tags_desc', label: 'Tags Desc', group: 'Packaging' },
+  
+  // Run Rates group
+  { key: 'run_rate_l1', label: 'L1 Rate', group: 'Run Rates' },
+  { key: 'run_rate_l2', label: 'L2 Rate', group: 'Run Rates' },
+  { key: 'run_rate_l3', label: 'L3 Rate', group: 'Run Rates' },
+  { key: 'run_rate_l4', label: 'L4 Rate', group: 'Run Rates' },
+  { key: 'run_rate_l5', label: 'L5 Rate', group: 'Run Rates' },
+  { key: 'run_rate_l6', label: 'L6 Rate', group: 'Run Rates' },
+  { key: 'run_rate_l7', label: 'L7 Rate', group: 'Run Rates' },
+];
+```
+
+---
+
+## 3. RENDER PRICING AND MARGIN CELLS WITH FORMATTING
+
+```jsx
+// In the table body — format pricing and margin cells:
+
+function renderMasterDataCell(row, column) {
+  const value = row[column.key];
+  
+  if (column.key === 'pricing_php') {
+    if (value == null || value === '') return <span className="md-cell-empty">—</span>;
+    return (
+      <span className="md-cell-pricing">
+        ₱{Number(value).toLocaleString('en-PH', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+      </span>
+    );
+  }
+  
+  if (column.key === 'margin') {
+    if (value == null || value === '') return <span className="md-cell-empty">—</span>;
+    const marginValue = Number(value);
+    const marginColor = marginValue >= 20 ? '#16a34a' : 
+                        marginValue >= 15 ? '#ea580c' : 
+                        marginValue >= 10 ? '#dc2626' : '#991b1b';
+    return (
+      <span className="md-cell-margin" style={{ color: marginColor }}>
+        {marginValue.toFixed(1)}%
+      </span>
+    );
+  }
+  
+  // ... existing cell rendering for other columns ...
+  return <span>{value || '—'}</span>;
+}
+```
+
+---
+
+## 4. EDIT MODE — PRICING AND MARGIN INPUTS
+
+```jsx
+// In edit mode — add input fields for pricing and margin:
+
+function renderEditCell(row, column, onChange) {
+  const value = row[column.key];
+  
+  if (column.key === 'pricing_php') {
+    return (
+      <input
+        type="number"
+        className="md-edit-input md-edit-pricing"
+        value={value || ''}
+        onChange={(e) => onChange(column.key, e.target.value ? parseFloat(e.target.value) : null)}
+        placeholder="0.00"
+        step="0.01"
+        min="0"
+      />
+    );
+  }
+  
+  if (column.key === 'margin') {
+    return (
+      <input
+        type="number"
+        className="md-edit-input md-edit-margin"
+        value={value || ''}
+        onChange={(e) => onChange(column.key, e.target.value ? parseFloat(e.target.value) : null)}
+        placeholder="0.0"
+        step="0.1"
+        min="0"
+        max="100"
+      />
+    );
+  }
+  
+  // ... existing edit cells ...
+}
+```
+
+---
+
+## 5. DOWNLOAD TEMPLATE — INCLUDE NEW COLUMNS
+
+```javascript
+// In the download template function — add pricing and margin:
+
+function generateMasterDataTemplate() {
+  const headers = [
+    'FG Material Code',
+    'FG Item Description',
+    'SFG1 Material Code',
+    'SFG Item Description',
+    'Category',
+    'Color',
+    'Pricing (Php)',    // NEW
+    'Margin',           // NEW
+    'Form',
+    'Diameter',
+    'Changeover',
+    'FG Weight',
+    'Batch FM1',
+    'Batch FM2',
+    'Batch FM3',
+    'Batch PMX',
+    'Label 1',
+    'Label 2',
+    'Thread',
+    'Sacks Code',
+    'Sacks Desc',
+    'Tags Code',
+    'Tags Desc',
+    'L1 Rate',
+    'L2 Rate',
+    'L3 Rate',
+    'L4 Rate',
+    'L5 Rate',
+    'L6 Rate',
+    'L7 Rate',
+  ];
+  
+  // ... generate Excel with headers ...
+}
+```
+
+---
+
+## 6. EXPORT — INCLUDE PRICING AND MARGIN
+
+```javascript
+// When exporting master data to Excel:
+
+function exportMasterData(data) {
+  const rows = data.map(row => ({
+    'FG Material Code': row.material_code_fg,
+    'FG Item Description': row.item_description,
+    'SFG1 Material Code': row.material_code_sfg,
+    'SFG Item Description': row.sfg_item_description,
+    'Category': row.category,
+    'Color': row.color,
+    'Pricing (Php)': row.pricing_php,     // NEW
+    'Margin': row.margin ? `${row.margin}%` : '',  // NEW
+    'Form': row.form,
+    'Diameter': row.diameter,
+    'Changeover': row.changeover,
+    'FG Weight': row.fg_weight,
+    // ... rest of fields ...
+  }));
+  
+  // ... generate Excel ...
+}
+```
+
+---
+
+## 7. STYLING
+
+```css
+/* Pricing column */
+.md-cell-pricing {
+  font-weight: 600;
+  color: #374151;
+  font-size: 12px;
+}
+
+/* Margin column — color-coded */
+.md-cell-margin {
+  font-weight: 700;
+  font-size: 12px;
+}
+
+/* Edit inputs */
+.md-edit-pricing,
+.md-edit-margin {
+  width: 80px;
+  text-align: right;
+}
+
+/* Pricing group header */
+.md-group-pricing {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+/* Empty cell */
+.md-cell-empty {
+  color: #d1d5db;
+  font-size: 11px;
+}
+```
+
+---
+
+## 8. DB SCHEMA — ADD COLUMNS
+
+```sql
+-- Add to master_data table (if using direct DB):
+ALTER TABLE master_data ADD COLUMN pricing_php DECIMAL(10,2);
+ALTER TABLE master_data ADD COLUMN margin DECIMAL(5,2);
+```
+
+Or if using the app's entity system:
+
+```javascript
+// In the MasterData entity definition:
+{
+  // ... existing fields ...
+  pricing_php: { type: 'number', label: 'Pricing (₱)' },
+  margin: { type: 'number', label: 'Margin (%)' },
+}
+```
+
+---
+
+## VERIFICATION
+
+### Parsing
+1. ✅ "2,664" parsed as 2664 (commas removed)
+2. ✅ "16.7%" parsed as 16.7 (percent sign removed)
+3. ✅ Null/empty values handled gracefully
+4. ✅ Works with both Excel upload and manual edit
+
+### Display
+5. ✅ Pricing shows as "₱2,664" with peso sign and comma formatting
+6. ✅ Margin shows as "16.7%" with color coding
+7. ✅ Margin colors: ≥20% green, ≥15% orange, ≥10% red, <10% dark red
+8. ✅ Empty values show "—"
+
+### Column placement
+9. ✅ Pricing and Margin placed between Color and Form (Product Details → Pricing → Production Parameters)
+10. ✅ "Pricing" group header in the table
+11. ✅ Included in download template
+12. ✅ Included in export
+
+### Edit mode
+13. ✅ Number inputs for both fields
+14. ✅ Pricing: step 0.01, min 0
+15. ✅ Margin: step 0.1, min 0, max 100
+16. ✅ Changes saved to DB
+```

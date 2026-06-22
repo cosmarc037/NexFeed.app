@@ -1,0 +1,243 @@
+```
+Implement the following change to the NexFeed application:
+
+---
+
+## SAP UPLOAD — SMART MERGE FOR NEW ORDERS
+
+When a new SAP file is uploaded and new orders are added to an existing line, the app must handle dated and non-dated orders differently.
+
+---
+
+### CORE RULE
+
+- **New DATED orders** → Merge INTO the existing schedule at the correct chronological position.
+- **New NON-DATED orders** → Append to the BOTTOM of the existing schedule, untouched.
+
+---
+
+### DETAILED BEHAVIOR
+
+**Step 1: Identify new orders from the upload**
+- Compare the uploaded SAP data with existing orders on the line.
+- New orders = orders in the upload that do NOT already exist in the table (based on FPR or unique identifier).
+- Existing orders = orders already in the table (keep them in their CURRENT positions).
+
+**Step 2: Separate new orders into dated and non-dated**
+- New dated orders: new orders with an actual availability date.
+- New non-dated orders: new orders with text availability (prio replenish, safety stocks, for sched, etc.).
+
+**Step 3: Insert new dated orders into correct chronological position**
+- For each new dated order:
+  1. Find the correct position in the EXISTING schedule based on its availability date.
+  2. Insert it AFTER the last existing order (dated or non-dated) whose date is earlier or equal.
+  3. Insert it BEFORE the next existing dated order whose date is later.
+  4. If multiple new dated orders have the same date, keep them in their upload sequence relative to each other.
+
+**Step 4: Append new non-dated orders to the bottom**
+- ALL new non-dated orders are placed at the BOTTOM of the table, below all existing orders.
+- They maintain their upload sequence relative to each other.
+- They are NOT mixed into the existing schedule.
+- This allows the user to review them and decide where to place them.
+
+**Step 5: Re-number Prio values**
+- After merging and appending, re-sequence all Prio numbers (1, 2, 3, ...).
+
+---
+
+### EXAMPLE
+
+**Existing schedule (before upload):**
+```
+Prio 1: Order A | March 17, 2026          ← existing dated
+Prio 2: Order B | prio replenish          ← existing non-dated
+Prio 3: Order C | March 22, 2026          ← existing dated
+Prio 4: Order D | safety stocks           ← existing non-dated
+Prio 5: Order E | March 28, 2026          ← existing dated
+```
+
+**New SAP upload contains:**
+```
+New Order F | March 20, 2026              ← new, dated
+New Order G | prio replenish              ← new, non-dated
+New Order H | March 25, 2026             ← new, dated
+New Order I | safety stocks               ← new, non-dated
+New Order J | March 17, 2026             ← new, dated (same date as Order A)
+```
+
+**After smart merge:**
+```
+Prio 1:  Order A | March 17, 2026         ← existing, unchanged position
+Prio 2:  Order J | March 17, 2026         ← NEW, inserted after March 17 (same date)
+Prio 3:  Order B | prio replenish         ← existing, unchanged position
+Prio 4:  Order F | March 20, 2026         ← NEW, inserted between March 17 and March 22
+Prio 5:  Order C | March 22, 2026         ← existing, unchanged position
+Prio 6:  Order H | March 25, 2026         ← NEW, inserted between March 22 and March 28
+Prio 7:  Order D | safety stocks          ← existing, unchanged position
+Prio 8:  Order E | March 28, 2026         ← existing, unchanged position
+Prio 9:  Order G | prio replenish         ← NEW non-dated, appended to bottom
+Prio 10: Order I | safety stocks          ← NEW non-dated, appended to bottom
+```
+
+**What happened:**
+- Order J (March 17) → inserted after Order A (also March 17) — same date, placed after existing.
+- Order F (March 20) → inserted between Order B (non-dated, after March 17 block) and Order C (March 22).
+- Order H (March 25) → inserted between Order C (March 22) and Order E (March 28). Placed after Order D (non-dated) since Order D was already between the dated orders.
+- Order G and Order I (both non-dated) → appended to the very bottom.
+- ALL existing orders kept their positions unchanged.
+
+---
+
+### INSERTION POSITION LOGIC FOR NEW DATED ORDERS
+
+```
+function findInsertPosition(newOrder, existingOrders) {
+  const newDate = parseDate(newOrder.availability);
+  
+  // Get all existing DATED orders with their current indices
+  const existingDated = existingOrders
+    .map((o, index) => ({ ...o, index }))
+    .filter(o => isDateValue(o.availability));
+  
+  // Find the last existing dated order with date <= newDate
+  const lastEarlierOrEqual = existingDated
+    .filter(o => parseDate(o.availability) <= newDate)
+    .pop();  // last one by position
+  
+  // Find the first existing dated order with date > newDate
+  const firstLater = existingDated
+    .find(o => parseDate(o.availability) > newDate);
+  
+  if (!lastEarlierOrEqual && !firstLater) {
+    // No existing dated orders — insert at end (before non-dated append zone)
+    return existingOrders.length;
+  }
+  
+  if (!lastEarlierOrEqual) {
+    // New order has the earliest date — insert before the first dated order
+    return firstLater.index;
+  }
+  
+  if (!firstLater) {
+    // New order has the latest date — insert after the last dated order
+    return lastEarlierOrEqual.index + 1;
+  }
+  
+  // Insert after the last earlier/equal dated order
+  // But check if there are non-dated orders between the two dated orders
+  // Place the new order AFTER any non-dated orders that follow the earlier dated order
+  
+  let insertIndex = lastEarlierOrEqual.index + 1;
+  
+  // Walk forward through non-dated orders until we hit the next dated order
+  while (insertIndex < firstLater.index && !isDateValue(existingOrders[insertIndex].availability)) {
+    insertIndex++;
+  }
+  
+  // Insert just before the next dated order (after any non-dated orders in between)
+  return insertIndex;
+}
+```
+
+**Why insert AFTER non-dated orders between two dated orders?**
+- This preserves the user's existing arrangement.
+- The user may have intentionally placed non-dated orders between two dated orders.
+- Inserting the new dated order just before the next dated order keeps the date sequence tight.
+
+---
+
+### EXISTING ORDERS — NEVER MOVED
+
+**Critical rule:** When a new SAP file is uploaded, EXISTING orders in the table are NEVER repositioned.
+
+- Existing orders stay in their current Prio positions.
+- Only NEW orders are inserted or appended.
+- The user's manual arrangement of existing orders is preserved.
+
+**Exception:** If an existing order's data is UPDATED by the SAP upload (e.g., volume change, availability date change), and the availability date changed:
+- The order stays in its position initially.
+- The auto-sort date validation runs (from the previous prompt).
+- If the date change creates a chronological violation, the auto-sort moves it to the correct position and shows the re-sort notification toast.
+
+---
+
+### NOTIFICATION AFTER UPLOAD
+
+After the smart merge is complete, show a summary notification:
+
+```
+┌─────────────────────────────────────────────────────┐
+│ ✅ SAP Upload Complete                               │
+│                                                      │
+│ Line 1:                                              │
+│ • 3 new dated orders merged into schedule            │
+│ • 2 new non-dated orders added to bottom             │
+│ • 0 existing orders updated                          │
+│                                                      │
+│ Non-dated orders are at the bottom of the table.     │
+│ Review and position them as needed.                  │
+│                                                      │
+└─────────────────────────────────────────────────────┘
+```
+
+**Toast styling:**
+- Position: Top-right.
+- Background: Light green (#dcfce7).
+- Border-left: 3px solid #43a047.
+- Text: Dark green (#166534), 13px.
+- Auto-dismiss after 6 seconds (slightly longer since it has more info).
+- Has close (×) button.
+
+---
+
+### NEW NON-DATED ORDERS AT BOTTOM — VISUAL INDICATOR
+
+To help the user notice and review the newly appended non-dated orders at the bottom:
+
+**Option: Subtle "NEW" badge**
+- Each newly appended non-dated order gets a small "NEW" badge next to the FPR.
+- Badge styling:
+  - Background: Light green (#dcfce7)
+  - Text: Green (#166534)
+  - Font size: 10px
+  - Border radius: 4px
+  - Padding: 2px 6px
+- The "NEW" badge disappears after:
+  - The user drags the order to a new position, OR
+  - 24 hours pass, OR
+  - The user clicks/dismisses it.
+
+```
+Prio 9:  [NEW] Order G | prio replenish    ← newly appended
+Prio 10: [NEW] Order I | safety stocks     ← newly appended
+```
+
+This draws attention to the new orders so the user doesn't forget to position them.
+
+---
+
+### EDGE CASES
+
+**Edge case 1 — Upload has only non-dated new orders:**
+- All new orders are appended to the bottom.
+- No merging into the schedule.
+- Notification: "2 new non-dated orders added to bottom."
+
+**Edge case 2 — Upload has only dated new orders:**
+- All new orders are merged into the schedule at correct positions.
+- Nothing appended to the bottom.
+- Notification: "3 new dated orders merged into schedule."
+
+**Edge case 3 — Upload has duplicate FPR but different order:**
+- If the FPR matches an existing order but other details differ (e.g., different volume), treat it as an UPDATE to the existing order, not a new order.
+- If it's truly a new order with the same FPR (different FG/SFG), treat it as a new order.
+
+**Edge case 4 — Empty existing line:**
+- If the line has no existing orders, all uploaded orders follow the initial auto-sort logic:
+  - Dated orders sorted chronologically first.
+  - Non-dated orders after, in upload sequence.
+
+**Edge case 5 — Combined group in existing schedule:**
+- New dated orders must NOT be inserted inside a combined group block.
+- If the correct chronological position falls inside a combined block, insert the new order AFTER the last child of the block.
+```

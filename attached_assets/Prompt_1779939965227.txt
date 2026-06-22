@@ -1,0 +1,258 @@
+Please update the **Powermix source/generated order combination behavior** so that **Powermix source orders mirror the combine/uncombine state of their generated orders** across all Powermix-related flows, including **Line 5** and **Line 7** source orders.
+
+---
+
+## 1. MIRROR GENERATED-ORDER COMBINES BACK TO THE CORRESPONDING POWERMIX SOURCE ORDERS
+
+Please implement a rule for **Powermix-related orders** so that when generated orders are combined, their corresponding source orders are also combined.
+
+### Scope
+This should apply to **all Powermix-related source/generated relationships**, including:
+- `Line 5` source orders
+- `Line 7` source orders
+- and their generated orders on destination lines
+
+### New intended behavior
+If two or more generated orders are combined together, then the matching Powermix source orders should also be combined to mirror that structure.
+
+### Goal
+The source-side Powermix orders and the generated-side orders should remain structurally aligned.
+
+### Expected result
+If generated orders become one combined group, the corresponding Powermix source orders should also become one combined group.
+
+---
+
+## 2. MIRROR GENERATED-ORDER UNCOMBINES BACK TO THE CORRESPONDING POWERMIX SOURCE ORDERS
+
+Please also implement the reverse behavior.
+
+### New intended behavior
+If a user later **uncombines** a generated order group, the corresponding Powermix source-order group should also automatically uncombine.
+
+### Goal
+Do not allow the generated side and the Powermix source side to drift into mismatched states such as:
+- generated side = uncombined
+- source side = still combined
+
+### Expected result
+The combine state of Powermix source orders should always stay synchronized with the combine state of the corresponding generated orders.
+
+---
+
+## 3. APPLY THIS TO ALL POWERMIX-RELATED SOURCE ORDERS, NOT JUST LINE 5
+
+Please ensure this feature applies to all Powermix-derived source/generated flows, including:
+- `Line 5 → generated order` flows
+- `Line 7 → generated order` flows
+
+### Important
+This is not a Line 5-only rule.
+
+### Expected result
+Any Powermix-related source order whose generated order is combined/uncombined should mirror that same structural change on the source side.
+
+---
+
+## 4. KEEP THE SOURCE/GENERATED RELATIONSHIP STRUCTURALLY SYNCHRONIZED
+
+Please treat the Powermix source-order group and generated-order group as linked structures for combine-state purposes.
+
+### Expected synchronization behavior
+- generated combine → source combine
+- generated uncombine → source uncombine
+
+### Goal
+The source and generated sides should reflect the same grouping state so users do not see mismatched structures between Powermix source orders and their generated counterparts.
+
+---
+
+## 5. DO NOT REQUIRE THE SOURCE-SIDE MIRROR COMBINE TO RESPECT THE NORMAL 200 MT CAP
+
+There is an important Powermix-specific nuance.
+
+If generated orders are validly combined and that combination should be mirrored back to the Powermix source orders, the source-side mirrored combine should still proceed even if the source-side total exceeds the normal combine cap.
+
+### Example
+Generated side:
+- Generated Order A = `170 MT`
+- Generated Order B = `30 MT`
+- Combined generated lead = `200 MT`
+
+Source side:
+- Source Order A = `200 MT`
+- Source Order B = `50 MT`
+- Mirrored source combined lead = `250 MT`
+
+### New intended behavior
+The mirrored source-side combine should still happen.
+
+### Important
+This source-side mirror combine is a special Powermix-linked synchronization behavior and should not be blocked just because the source-side total exceeds the usual `200 MT` combine cap.
+
+### Expected result
+The normal combine cap should not prevent source-side mirror combination when it is being created only to reflect a valid generated-order combine.
+
+---
+
+## 6. KEEP THE NORMAL COMBINE CAP FOR STANDARD NON-MIRROR COMBINATION LOGIC
+
+Please keep the standard combine cap behavior for:
+- normal source-to-source combinations
+- normal generated-to-generated combinations
+- all other standard combine logic
+
+### Important
+The cap exception should apply only to:
+- Powermix source-side mirrored combines created as a reflection of valid generated-order grouping
+
+### Expected result
+This should be a narrowly scoped exception, not a general removal of the combine cap.
+
+---
+
+## 7. ONLY MIRROR COMBINE/UNCOMBINE FOR LINKED POWERMIX SOURCE/GENERATED ORDERS
+
+Please make sure the source-side combine/uncombine only happens for source orders that are actually linked to the generated-order group.
+
+### Goal
+Do not combine unrelated Powermix source orders just because generated orders elsewhere were combined.
+
+### Expected result
+The mirror behavior should only apply to the correct linked source/generated set.
+
+---
+
+## 8. PRESERVE THE GENERATED-VS-SOURCE COMBINATION GUARDRAIL
+
+Please keep the hard guardrail that:
+- generated orders must never directly combine with source orders
+
+### Important
+This request is about mirroring combine state between:
+- the generated-order group
+- and its corresponding source-order group
+
+It is **not** asking to allow mixed generated+source combination in one shared combined group.
+
+### Expected result
+The app should still reject:
+- generated + source direct combination
+
+while allowing:
+- generated orders to combine with generated orders
+- corresponding source orders to mirror that combine separately on the source side
+
+---
+
+## 9. APPLY THIS TO USER-TRIGGERED UNCOMBINE ACTIONS AFTER AUTO-SEQUENCE
+
+Please specifically support the case where:
+- auto-sequence creates combined generated orders
+- the user later uses the app’s **Uncombine** action on those generated orders
+
+### Expected behavior
+When the generated order group is uncombined:
+- the corresponding Powermix source-order group should also automatically uncombine
+
+### Expected result
+User actions on generated-order combine state remain synchronized with the source side after auto-sequence and later manual edits.
+
+---
+
+## 10. KEEP HISTORY / AUDIT / UI GROUPING CONSISTENT
+
+If the app tracks combination history, lead/sub-order grouping, or audit behavior, please ensure that the mirrored Powermix source-side combine/uncombine is reflected consistently.
+
+### Goal
+Users should not see confusing state mismatches between:
+- displayed group structure
+- lead/sub-order behavior
+- generated-order grouping
+- source-order grouping
+
+### Expected result
+The UI and data model should stay consistent after mirrored combine/uncombine operations.
+
+---
+
+## IMPORTANT
+
+Please implement this Powermix-wide rule:
+
+### For all Powermix-related source/generated flows:
+- if generated orders combine, corresponding source orders must also combine
+- if generated orders uncombine, corresponding source orders must also uncombine
+
+This applies to:
+- `Line 5` source orders
+- `Line 7` source orders
+- and their linked generated orders
+
+Also:
+- the source-side mirrored combine should not be blocked by the normal `200 MT` combine cap
+- but this cap exception should apply only to mirrored Powermix source-side combines, not to normal standard combinations
+
+Generated and source orders must still never directly combine with each other.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log Powermix source/generated combine-state mirroring.
+
+```javascript
+console.debug('[Powermix Combine Mirror]', {
+  generatedGroupId,
+  sourceGroupId,
+  sourceLine,
+  generatedOrdersCombined: true,
+  mirroredSourceCombineApplied: true,
+});
+```
+
+```javascript
+console.debug('[Powermix Uncombine Mirror]', {
+  generatedGroupId,
+  sourceGroupId,
+  sourceLine,
+  generatedOrdersUncombined: true,
+  mirroredSourceUncombineApplied: true,
+});
+```
+
+```javascript
+console.debug('[Powermix Mirror Combine Cap Exception]', {
+  sourceGroupId,
+  mirroredSourceCombinedVolume,
+  standardCapMT: 200,
+  capExceeded: mirroredSourceCombinedVolume > 200,
+  allowedBecauseMirroredPowermixSourceCombine: true,
+});
+```
+
+```javascript
+console.debug('[Powermix Generated/Source Guardrail]', {
+  orderAType,
+  orderBType,
+  directMixedCombineBlocked:
+    (orderAType === 'generated' && orderBType === 'source') ||
+    (orderAType === 'source' && orderBType === 'generated'),
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ If Powermix-generated orders combine, the corresponding Powermix source orders also combine
+2. ✅ If Powermix-generated orders are uncombined, the corresponding Powermix source orders also uncombine
+3. ✅ This applies to both `Line 5` and `Line 7` Powermix source-order flows
+4. ✅ Source-side mirrored combine/uncombine only applies to correctly linked source/generated groups
+5. ✅ The normal `200 MT` cap does not block a mirrored Powermix source-side combine
+6. ✅ The cap exception is limited only to mirrored Powermix source-side combines
+7. ✅ Normal standard combine-cap rules remain unchanged for other combination types
+8. ✅ Generated orders still never directly combine with source orders
+9. ✅ User-triggered uncombine on generated orders also uncombines the linked Powermix source orders
+10. ✅ UI grouping, lead/sub-order structure, and data state remain consistent
+11. ✅ No UI errors or console errors are introduced

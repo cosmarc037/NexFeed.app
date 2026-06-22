@@ -1,0 +1,240 @@
+Please improve the row-level sequence insight so that when a strategy is focused on changeover reduction, the insight also explains the changeover/clustering reason for that order’s placement, not just generic reasons like AI suggestion, monitor status, or availability.
+
+---
+
+## OBJECTIVE
+
+Right now, row-level sequence insights are often too generic.
+
+They may explain things like:
+- AI suggested this order
+- monitor status
+- date protection
+- availability window
+- MTO / Future Dispatches logic
+
+But when the selected strategy is specifically focused on reducing changeovers, the row-level sequence insight should also explain the changeover-related reason for why that order is placed where it is.
+
+We want the insight to better reflect clustering logic such as:
+- grouped with similar diameter orders
+- placed beside same-color orders
+- moved later to reduce red→non-red penalty
+- clustered to reduce diameter / color / category changeover
+
+---
+
+## REQUIRED BEHAVIOR
+
+When a sequence strategy is changeover-focused, the row-level sequence insight should include changeover-aware reasoning that explains why the order is clustered or positioned there.
+
+This should be similar in spirit to how:
+- margin is reflected when profitability is applied
+
+In other words:
+- if changeover reduction is a meaningful factor in the final order placement, it should appear in the row insight
+
+---
+
+## 1. INCLUDE CHANGEOVER / CLUSTERING REASONS IN ROW-LEVEL INSIGHTS
+
+For changeover-focused strategies, row-level insights should mention relevant reasons such as:
+- grouped with same diameter orders
+- kept near same-color orders
+- placed after a compatible transition to reduce cleaning
+- moved later/earlier to avoid expensive red/non-red transition
+- clustered with same-category or compatible products to reduce changeover
+
+Do not limit the row-level insight to only:
+- AI suggestion
+- monitor / critical / sufficient logic
+- availability / date protection
+
+Those reasons can remain, but add the changeover reason too when applicable.
+
+---
+
+## 2. MAKE THE CHANGEOVER REASON SPECIFIC TO THE ACTUAL ORDER POSITION
+
+The row-level insight should not just say:
+- “for changeover reduction”
+
+It should explain specifically why this order is in this spot relative to nearby orders.
+
+Examples:
+- `Placed after another 3.00mm order to reduce diameter-change penalties.`
+- `Kept near yellow products to avoid a higher color-cleaning transition.`
+- `Moved later so the red pellet transition happens at the end of the run.`
+- `Clustered beside similar category orders to reduce cleaning time.`
+
+The explanation should use the actual neighboring sequence context.
+
+---
+
+## 3. KEEP DATE / MTO / MONITOR LOGIC TOO, BUT COMBINE IT WITH CHANGEOVER IF BOTH MATTER
+
+If an order was positioned due to both:
+- date safety
+- and changeover reduction
+
+then the row insight should mention both.
+
+Example:
+```text
+This order stays within its safe date window and is grouped beside similar 3.00mm products to reduce changeover.
+```
+
+Another example:
+```text
+This order remains protected by its availability date while being placed near yellow 4mm orders to reduce diameter and color transitions.
+```
+
+So:
+- do not replace important date logic
+- enrich it with changeover logic when relevant
+
+---
+
+## 4. USE CHANGEOVER-FOCUSED INSIGHT TEMPLATES WHEN THE ACTIVE STRATEGY IS CHANGEOVER-ORIENTED
+
+If the selected strategy is primarily about:
+- diameter clustering
+- color clustering
+- red-last placement
+- category buffering
+- changeover reduction
+
+then the row insight generator should switch to a changeover-aware explanation style.
+
+It should reflect the actual strategy theme.
+
+---
+
+## 5. INCLUDE CHANGEOVER REASONING IN BOTH SHORT INSIGHT AND EXPANDED “MORE” VIEW
+
+If the UI supports:
+- short row insight
+- expanded “more” explanation
+
+then both should reflect changeover logic when relevant.
+
+For example:
+- short insight = concise clustering reason
+- expanded insight = more detailed explanation of adjacency / transition reduction
+
+This keeps the explanation consistent.
+
+---
+
+## 6. USE THE ACTUAL NEIGHBORING ORDERS TO BUILD THE CHANGEOVER EXPLANATION
+
+The best row insight should consider:
+- previous order
+- next order
+- color
+- diameter
+- category
+- changeover rules triggered or avoided
+
+This allows the explanation to say things like:
+- `Placed between compatible 3.00mm orders`
+- `Moved after the yellow 4mm block`
+- `Kept before the red order to avoid a higher outgoing penalty`
+
+This will make the insight much more believable and informative.
+
+---
+
+## 7. DO NOT GENERATE FAKE CHANGEOVER REASONS IF CHANGEOVER DID NOT ACTUALLY AFFECT THE POSITION
+
+Only include changeover language when it was truly a factor in the sequence.
+
+If an order is placed mostly because of:
+- strict avail date
+- critical dispatch risk
+- hard MTO constraint
+
+then the insight should still say that.
+
+Changeover should be included when it actually influenced the final placement.
+
+---
+
+## 8. ALIGN CHANGEOVER INSIGHT WITH THE SELECTED STRATEGY THE USER IS VIEWING
+
+If the user is viewing a changeover-focused strategy:
+- row insights should mention clustering/changeover where appropriate
+
+If the user is viewing a profitability-focused sequence:
+- row insights should mention margin/profitability where appropriate
+
+If the user is viewing standard date-driven sequence:
+- row insights can remain more date/MTO oriented
+
+The row insight should reflect the active strategy logic.
+
+---
+
+## 9. EXAMPLES OF IMPROVED CHANGEOVER-AWARE INSIGHTS
+
+Examples of the style we want:
+
+### Example 1
+```text
+This order is grouped with nearby 3.00mm products to reduce diameter changeover before the line transitions to other runs.
+```
+
+### Example 2
+```text
+This yellow order is kept beside compatible yellow products to reduce color-cleaning penalties while staying within its safe date window.
+```
+
+### Example 3
+```text
+This red pellet order is moved later in the sequence so the costly red-to-non-red transition is avoided for subsequent orders.
+```
+
+### Example 4
+```text
+This order is placed here to preserve its monitor-safe timing while also reducing category and diameter changeovers with adjacent products.
+```
+
+These are just examples — the actual wording should be based on the real sequence context.
+
+---
+
+## 10. ADD DEBUG LOGGING FOR CHANGEOVER-AWARE INSIGHTS
+
+Temporarily log:
+
+```javascript
+console.debug('[Row Insight Changeover Reasoning]', {
+  lineId,
+  strategyId,
+  orderId: order.id,
+  item: order.item_description,
+  previousOrderId: previousOrder?.id ?? null,
+  nextOrderId: nextOrder?.id ?? null,
+  color: order.color,
+  diameter: order.diameter,
+  category: order.category,
+  changeoverReasonIncluded: true,
+  generatedInsight: order.sequenceInsight,
+});
+```
+
+This helps verify:
+- changeover-aware reasoning is being generated
+- the insight uses real neighboring context
+- the insight aligns with the selected strategy
+
+---
+
+## VERIFICATION
+
+1. ✅ Row-level sequence insights now include changeover/clustering reasons when changeover reduction is a meaningful factor
+2. ✅ Changeover-aware insights explain why the order is placed beside/near specific orders
+3. ✅ Date/MTO/monitor logic is still preserved when relevant
+4. ✅ Changeover reasoning is specific, not generic
+5. ✅ Short insight and expanded “more” insight both reflect changeover logic when applicable
+6. ✅ Changeover language is only used when it truly influenced the final sequence
+7. ✅ The insight now better matches the selected strategy and visible order clustering

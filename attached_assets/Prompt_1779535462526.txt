@@ -1,0 +1,226 @@
+Please update the **History logging for Order Combination** so that combined orders leave a clear audit trail in the order table.
+
+---
+
+## 1. ADD HISTORY LOGGING FOR ORDER COMBINATION EVENTS
+
+The application currently has an **order combination** feature that combines orders after auto-sequencing. However, when orders are combined, there is currently no visible history entry indicating that a combination happened.
+
+Please add history logging for all order-combination events.
+
+### Goal
+When orders are combined, users should be able to see in the **History** column that:
+- the order was combined
+- which other order(s) it was combined with
+- whether it became the surviving combined row or was absorbed into another row
+- the relevant line / priority / volume details at the time of combination
+
+### Expected result
+No order that participates in a combination should have a blank history for that event.
+
+---
+
+## 2. LOG HISTORY ON BOTH THE SURVIVING ORDER AND THE ABSORBED ORDER(S)
+
+Please write history entries for:
+- the **surviving / resulting combined order**
+- each **absorbed / merged source order**
+
+### A. History on the surviving combined order
+The surviving order should log that other orders were combined into it.
+
+Suggested format:
+- `Combined orders: absorbed FPR ###### into this order`
+- `Combined orders: absorbed FPR ######, ###### into this order`
+- `Combined group created: combined with FPR ######`
+
+If useful, include:
+- previous total volume
+- added volume
+- new combined total volume
+- resulting priority
+- line
+
+Example:
+- `Combined orders: absorbed FPR 260521 into this order; volume 4 MT + 6 MT = 10 MT`
+- `Combined group created after auto-sequencing; combined with FPR 260522 on Line 2`
+
+### B. History on absorbed / merged orders
+Each source order that gets absorbed into another order should log that it was merged into a combined order.
+
+Suggested format:
+- `Combined into FPR ######`
+- `Merged into combined order FPR ######`
+- `Combined after auto-sequencing into FPR ###### on Line X`
+
+If useful, include:
+- original volume
+- target/surviving order FPR
+- original priority and resulting group priority
+
+Example:
+- `Combined into FPR 260521 after auto-sequencing; original volume 6 MT`
+- `Merged into combined order FPR 260521 on Line 2`
+
+---
+
+## 3. INCLUDE COMBINATION CONTEXT IN THE HISTORY ENTRY
+
+Where available, please include enough detail in the history entry to make the event understandable without opening backend logs.
+
+Include relevant context such as:
+- target/surviving FPR
+- absorbed FPR(s)
+- line
+- priority before/after if changed
+- volume before/after
+- whether the combination happened as part of **auto-sequencing**
+- whether the row belongs to a **combined group**
+
+### Recommended event wording
+Use consistent labels such as:
+
+- `Combined after auto-sequencing: absorbed FPR ######`
+- `Merged into combined order: FPR ######`
+- `Combined group updated`
+- `Combined group created`
+
+The exact wording can vary, but it should be clear and consistent.
+
+---
+
+## 4. DIFFERENTIATE BETWEEN COMBINATION CREATION AND FUTURE COMBINATION UPDATES
+
+If the app supports cases where:
+- a combined group is first created, and later
+- additional orders are added into the same combined group,
+
+please log those as separate history events.
+
+### Example
+- `Combined group created with FPR 260522`
+- `Combined group updated: absorbed additional order FPR 260523`
+
+### Expected result
+Users should be able to tell whether:
+- this was the initial combination event, or
+- a later update to an already combined order/group
+
+---
+
+## 5. PRESERVE HISTORY FOR ALL SUB-ORDERS / COMBINED GROUP MEMBERS
+
+If combined groups already have special handling elsewhere in the app, make sure the same principle used in shutdown diversion history applies here as well.
+
+### Requirement
+Sub-orders or absorbed rows in a combined group should also receive their own history entries, not just the visible parent/surviving row.
+
+### Goal
+Every affected order record should retain traceability.
+
+This is especially important if:
+- a combined order is later reverted
+- users inspect old source rows
+- downstream actions need auditability
+
+---
+
+## 6. DO NOT BREAK EXISTING HISTORY EVENTS
+
+Please preserve the current history behavior for:
+- Uploaded
+- Cancel PO set from SAP upload
+- Status changed
+- Cut Order
+- Override volume
+- Manually reordered
+- Diverted / Reverted
+- Auto-sequenced
+- Optimized
+
+This request is only to **add missing history coverage for order combination**, not to remove or rewrite existing history events unless needed for consistency.
+
+---
+
+## 7. ADD COMBINATION HISTORY AT THE TIME THE COMBINE ACTION OCCURS
+
+Please ensure the history is written immediately when the combination is performed by the system.
+
+### Important
+The history should be recorded at the actual time the order-combination logic executes, especially when it occurs:
+- after auto-sequencing
+- during AI-driven grouping
+- during any combine-orders workflow
+
+Do not wait for a later save step if that risks missing the event.
+
+---
+
+## 8. HANDLE COMMON COMBINATION SCENARIOS
+
+Please support history logging for these common cases:
+
+### Scenario A — Two orders combined
+- one order survives
+- one order is absorbed
+
+### Scenario B — Multiple orders combined into one
+- one order survives
+- several orders are absorbed
+
+### Scenario C — Combined group expanded later
+- an existing combined order absorbs another qualifying order later
+
+### Scenario D — Combined rows affected by later actions
+If a combined order is later:
+- reordered
+- diverted
+- reverted
+- completed
+- cancelled
+
+the existing history system should continue working normally on that combined row and/or its related sub-orders as applicable.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log order-combination history writes so the event trail can be validated during testing.
+
+```javascript
+console.debug('[Order Combination History]', {
+  action: 'combine_orders',
+  survivingFPR,
+  absorbedFPRs,
+  line,
+  combinedGroupId,
+  previousVolume,
+  absorbedVolume,
+  newTotalVolume,
+  triggeredBy: 'auto_sequencing',
+});
+```
+
+```javascript
+console.debug('[Order Combination History Entry Written]', {
+  orderFPR,
+  entryType,
+  entryMessage,
+  combinedGroupId,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ When two or more orders are combined, a history entry is written for the surviving combined order
+2. ✅ When two or more orders are combined, a history entry is also written for each absorbed order
+3. ✅ The surviving order history clearly indicates which order(s) were combined into it
+4. ✅ The absorbed order history clearly indicates which order it was merged into
+5. ✅ The history entry includes useful context such as FPR, line, and volume where available
+6. ✅ If the combination happens after auto-sequencing, the history reflects that context
+7. ✅ If a combined group is updated later, a new history entry is added rather than silently overwriting old context
+8. ✅ Existing history events for upload, status changes, cut order, override, reorder, diversion, and AI sequencing still work
+9. ✅ No affected combined order appears with a blank history for the combination event
+10. ✅ No UI errors or console errors are introduced

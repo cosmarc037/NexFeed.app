@@ -1,0 +1,163 @@
+```
+Implement the following changes to the NexFeed application:
+
+---
+
+## AI STOCK INSIGHTS — LIGHT ORANGE CARD, NOT COLLAPSIBLE, AUTO-GENERATED
+
+Add an AI-generated insight section on the Next 10 Days page, positioned BETWEEN the upload area and the Stock Level Preview table.
+
+### LAYOUT
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  Upload Area                                             │
+│  [Drag & drop or upload file]                            │
+│  Dummy 10 Days.xlsx · 20 products · 03/19/2026 04:22 PM │
+└─────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────┐
+│  ✨ AI Stock Insights                        ↻ Refresh   │
+│                                                          │
+│  20 products analyzed — 15 need production, 2 are stock  │
+│  sufficient, and 3 have critical stock levels...         │
+│                                                          │
+└──────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────┐
+│  Stock Level Preview (20 products)          ↻ Refresh    │
+│  [Table]                                                 │
+└─────────────────────────────────────────────────────────┘
+```
+
+---
+
+### CONTAINER STYLING
+
+| Property | Value |
+|---|---|
+| Background | Light orange (#fff7ed) |
+| Border | 1px solid #fed7aa |
+| Border radius | 12px |
+| Padding | 20px 24px |
+| Margin top | 16px (below upload area) |
+| Margin bottom | 16px (above stock level preview) |
+| Box shadow | None |
+
+---
+
+### HEADER ROW
+
+```
+✨ AI Stock Insights                                 ↻ Refresh
+```
+
+| Element | Styling |
+|---|---|
+| ✨ icon | Orange sparkle icon, matching the Smart Production Summary icon style |
+| "AI Stock Insights" | 14px, font-weight 700 (bold), dark text (#1a1a1a) |
+| "Refresh" button | Orange text (#fd5108), 12px, with refresh icon (↻). Hover: slightly darker orange. Cursor: pointer. |
+| Layout | Title on the left, Refresh on the far right, same line |
+
+---
+
+### CONTENT — FLOWING NARRATIVE STYLE
+
+AI-generated insight text sits directly below the header. No bullet cards, no separate sections — a flowing narrative paragraph similar to the Smart Production Summary.
+
+| Property | Value |
+|---|---|
+| Font size | 12px |
+| Text color | Dark grey (#4b5563) |
+| Line height | 1.6 |
+| Margin top | 8px (below header) |
+
+**The AI generates a concise, flowing narrative covering:**
+
+1. **Overview** — how many products, how many need production, how many stock sufficient, total balance.
+2. **Urgent items** — products with target dates within 1-2 days, mentioned by name.
+3. **Extended production** — products unlikely to meet target in 10 days.
+4. **Stock sufficient** — products that can be deprioritized.
+5. **SAP match** — how many products match existing SAP orders (if SAP data exists).
+
+**Example output:**
+```
+20 products analyzed — 15 need production, 2 are stock 
+sufficient, and 3 have critical stock levels. Total balance 
+to produce is approximately 620 MT. Gallimax 3 Maintenance 
+is the most urgent with a target date of Mar 19 (tomorrow), 
+needing 28.6 MT to meet the 74.9 MT inventory target. 
+Poultry Sol Broiler Starter has a target of Mar 22 with a 
+gap of 248.6 MT. 8 products including Elite XP Startex and 
+Classic Hog Growex are unlikely to meet targets within 10 
+days — production should start as early as possible. Salto 
+Baby Stag and Gall 21 Chicken Layer have sufficient stock 
+and can be deprioritized. 15 of 20 products match existing 
+SAP orders.
+```
+
+**Product references in the narrative:**
+- Product names: semi-bold (#374151), dotted underline (#d1d5db).
+- On hover: orange (#fd5108), solid underline, cursor pointer.
+- On click: scrolls to that product row in the Stock Level Preview table below, briefly highlights the row (yellow flash, 2 seconds).
+
+---
+
+### NOT COLLAPSIBLE
+
+- The section is ALWAYS visible — it cannot be collapsed.
+- No chevron icon.
+- No collapse toggle.
+- It is a static card, always open.
+
+---
+
+### AUTO-GENERATED
+
+The AI insights generate AUTOMATICALLY — no manual trigger needed.
+
+**Auto-generate triggers:**
+1. When a Next 10 Days file is uploaded → generates immediately after parsing.
+2. When the user navigates to the Next 10 Days page → if a file was previously uploaded, show cached insights.
+3. When the user clicks "Refresh" → re-generates fresh insights.
+
+**Loading state:**
+- Replace insight text with "Analyzing stock levels..." in grey (#9ca3af) italic, with a subtle spinner.
+- Duration: typically 1-3 seconds.
+
+**Caching:**
+- If cached insights exist from a previous generation (less than 5 minutes old), show cached version immediately without re-generating.
+- If data changes (new file uploaded), always re-generate fresh.
+
+**Error state:**
+- If generation fails: "Unable to generate insights. Click Refresh to try again." in grey (#9ca3af) italic.
+
+---
+
+### REFRESH BUTTON BEHAVIOR
+
+- On click: re-generates the AI insights based on current stock data.
+- Brief loading state replaces the insight text.
+- New insights replace old ones with smooth fade transition (~200ms).
+- Button shows subtle rotation animation on the ↻ icon while generating.
+
+---
+
+### EMPTY STATE (NO FILE UPLOADED)
+
+When no Next 10 Days file has been uploaded:
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│  ✨ AI Stock Insights                                        │
+│                                                              │
+│  Upload a Next 10 Days file to generate stock insights.      │
+│                                                              │
+└──────────────────────────────────────────────────────────────┘
+```
+
+- Same light orange background (#fff7ed).
+- Same border (#fed7aa).
+- Grey text (#9ca3af), 12px, italic.
+- Refresh button hidden when no data.
+```

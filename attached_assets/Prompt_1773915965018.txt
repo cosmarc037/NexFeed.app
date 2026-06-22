@@ -1,0 +1,127 @@
+```
+Implement the following changes to the NexFeed application:
+
+---
+
+## 1. FREEZE TABLE HEADERS — MAIN HEADER AND SUB-HEADERS
+
+Both the main header row (PRODUCT DETAILS, NEXT 10 DAYS, TRACKING) and the sub-header row (MATERIAL CODE, CATEGORY, ITEM DESCRIPTION, etc.) must be frozen/sticky at the top of the table when the user scrolls down through the data rows.
+
+**Sticky behavior:**
+- The main header row (grouped headers) stays fixed at the top of the table container.
+- The sub-header row (individual column names) stays fixed directly below the main header row.
+- When the user scrolls down through product rows, both header rows remain visible at all times.
+- Data rows scroll underneath the frozen headers.
+
+**Implementation:**
+
+```css
+/* Main header row (PRODUCT DETAILS, NEXT 10 DAYS, TRACKING) */
+.table-main-header th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: white;
+}
+
+/* Sub-header row (MATERIAL CODE, CATEGORY, etc.) */
+.table-sub-header th {
+  position: sticky;
+  top: [height of main header row]; /* e.g., 36px */
+  z-index: 3;
+  background: white;
+}
+```
+
+**Important details:**
+- The `top` value for the sub-header must equal the height of the main header row, so it sits directly below it when sticky.
+- Both rows must have `background: white` to prevent data rows from showing through when scrolling.
+- Both rows must have `z-index: 3` or higher to stay above data rows AND above the frozen left columns (which have z-index: 2).
+
+**Corner cell (intersection of frozen rows + frozen columns):**
+- The cells in the top-left corner (where frozen columns meet frozen headers) need the highest z-index:
+  - `z-index: 4` — so they stay above both the frozen rows and frozen columns.
+
+**Shadow on sticky headers:**
+- Add a subtle bottom shadow on the sub-header row to indicate the freeze boundary:
+  ```css
+  .table-sub-header th {
+    box-shadow: 0 2px 4px rgba(0,0,0,0.04);
+  }
+  ```
+
+**Table container:**
+- The table must be inside a container with a fixed max-height and `overflow-y: auto` for vertical scrolling to work with sticky headers.
+- Max height: approximately 500-600px, or a reasonable height that shows ~10-12 rows before scrolling.
+- If the table has fewer rows than the max height, no scroll needed — headers are just normal.
+
+```css
+.stock-level-table-container {
+  max-height: 600px;
+  overflow-y: auto;
+  overflow-x: auto;
+}
+```
+
+---
+
+## 2. TABLE FONT SIZES — MATCH KNOWLEDGE BASE EXACTLY
+
+The Next 10 Days table font sizes must be identical to the Knowledge Base table.
+
+**Inspect the Knowledge Base table and match these values:**
+
+| Element | Styling |
+|---|---|
+| Main header text (PRODUCT DETAILS, etc.) | Same size as any grouped header in Knowledge Base. If KB has no grouped header, use 10px uppercase, 600 weight, grey (#6b7280) |
+| Sub-header text (MATERIAL CODE, CATEGORY, etc.) | Same size as Knowledge Base column headers — approximately 10-11px, uppercase, 600 weight, grey (#6b7280) |
+| Data cell text (Material Code values, Category, Item Description) | Same size as Knowledge Base data rows — approximately 12-13px, regular 400 weight, dark text (#374151) |
+| Numeric values (Due for Loading, daily values, Inventory, etc.) | Same size as Knowledge Base numeric values — approximately 12-13px |
+| Bold values (Due for Loading, Inventory) | Same size as above but font-weight 700 |
+| Status text (Needs Production, Stock Sufficient) | Same size as Knowledge Base Form column — approximately 12px |
+| Target Date text | Same size as data cells — approximately 12-13px |
+
+**The key principle:** If a user switches between the Knowledge Base tab and the Next 10 Days tab, the table text should feel the same size — no jarring difference.
+
+**To ensure exact match, use the SAME CSS classes or the SAME font-size variables that the Knowledge Base table uses.** Do not hardcode separate values. If the Knowledge Base uses a shared table component or shared CSS, reuse it.
+
+**If the Knowledge Base uses specific values:**
+```css
+/* Use whatever the Knowledge Base table actually uses */
+.kb-table td, .next10-table td {
+  font-size: [same value];
+  padding: [same value];
+  line-height: [same value];
+  color: [same value];
+}
+
+.kb-table th, .next10-table th {
+  font-size: [same value];
+  padding: [same value];
+  text-transform: [same value];
+  font-weight: [same value];
+  color: [same value];
+}
+```
+
+**Row height and padding should also match:**
+
+| Property | Match Knowledge Base |
+|---|---|
+| Cell padding | Same as KB (inspect and match) |
+| Row height | Same as KB |
+| Row border | Same as KB (1px solid #f3f4f6 or whatever KB uses) |
+| Row hover | Same as KB hover effect |
+
+---
+
+### VERIFICATION
+
+After implementing, visually compare:
+
+1. Open Knowledge Base tab — note the font sizes, row heights, padding.
+2. Open Next 10 Days tab — the table should look identical in terms of text size and density.
+3. If any difference is visible, adjust until they match.
+
+Screenshots of both tables side by side should show the same visual density and font sizes.
+```

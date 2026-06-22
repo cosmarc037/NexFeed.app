@@ -1,0 +1,349 @@
+```
+Fix the AI prompt to ENFORCE grouping and add a validation layer that groups the output if the AI fails to:
+
+---
+
+## 1. STRONGER AI PROMPT — ENFORCE GROUPING
+
+Update the grouping rules section of the prompt to be more explicit:
+
+```javascript
+function buildSchedulingImpactPrompt(context, calculatedImpact) {
+  const hasEarlier = calculatedImpact.earlierOrders.length > 0;
+  const hasLater = calculatedImpact.laterOrders.length > 0;
+  const hasDeadlineMisses = calculatedImpact.deadlineMisses.length > 0;
+  
+  // Pre-group the data to give the AI the exact grouping to use
+  const earlierGroups = groupOrdersByShift(calculatedImpact.earlierOrders);
+  const laterGroups = groupOrdersByShift(calculatedImpact.laterOrders);
+  const deadlineGroups = groupOrdersByDelay(calculatedImpact.deadlineMisses);
+  
+  return `
+You are a production scheduling advisor for a feed manufacturing plant.
+Analyze the scheduling impact of combining orders on ${context.line}.
+
+COMBINED ORDER:
+  Product: ${context.combiningOrders[0]?.name}
+  Total Volume: ${context.combinedVolume} MT
+  Production Time: ${context.combinedProductionHours} hrs
+  Insertion Position: Priority ${context.insertionResult.prio}
+
+ORDER CONTEXT (N10D status, avail dates):
+${context.lineContext
+  .filter(o => !o.isBeingCombined)
+  .map(o => `  Prio ${o.prio}: ${o.name} | N10D: ${o.n10dStatus} | Avail: ${o.availDate} (${o.isDated ? 'DATED' : 'NON-DATED'})`)
+  .join('\n')}
+
+=== PRE-GROUPED DATA — USE THESE EXACT GROUPINGS ===
+
+${hasEarlier ? `Orders starting earlier (${calculatedImpact.earlierOrders.length} orders):
+${earlierGroups.map(g => `  Group: Prio ${g.prioRange} (${g.count} order${g.count > 1 ? 's' : ''}) — ${g.shiftFormatted} earlier
+  Orders: ${g.orders.map(o => `${o.name} (Prio ${o.prio}, N10D: ${o.n10dStatus || 'N/A'})`).join(', ')}`).join('\n')}` : ''}
+
+${hasLater ? `Orders starting later (${calculatedImpact.laterOrders.length} orders):
+${laterGroups.map(g => `  Group: Prio ${g.prioRange} (${g.count} order${g.count > 1 ? 's' : ''}) — ${g.shiftFormatted} later
+  Orders: ${g.orders.map(o => `${o.name} (Prio ${o.prio}, N10D: ${o.n10dStatus || 'N/A'})`).join(', ')}`).join('\n')}` : ''}
+
+${hasDeadlineMisses ? `Orders at risk of missing avail date (${calculatedImpact.deadlineMisses.length} orders):
+${deadlineGroups.map(g => `  Group: Prio ${g.prioRange} (${g.count} order${g.count > 1 ? 's' : ''}) — ~${g.delayDays} days late
+  Orders: ${g.orders.map(o => `${o.name} (Prio ${o.prio}, Avail: ${o.availDate}, N10D: ${o.n10dStatus || 'N/A'})`).join(', ')}`).join('\n')}` : ''}
+
+=== YOUR RESPONSE ===
+
+PART 1 — GROUPED BULLETS:
+Write ONE bullet per group above. Do NOT list individual orders separately.
+If a group has 1 order, write one bullet for that order.
+If a group has 2+ orders, write ONE grouped bullet with a prio range.
+
+MANDATORY FORMAT per bullet:
+- Earlier: ✅ Prio [range] ([count] orders) — all start ~[time] earlier. Notable: [pick 2-3 Critical/Urgent orders from the group].
+- Later: ⚠ Prio [range] ([count] orders) — all start ~[time] later. Notable: [pick 2-3 Critical/Urgent orders].
+- Deadline: ⛔ Prio [range] ([count] orders) — all exceed avail date by ~[X] days. Notable: [pick 2-3 Critical/Urgent orders].
+
+For single orders: ⚠ Prio [X]: [Name] — starts [time] later. [N10D status].
+
+ONLY include sections that have data. Skip sections with no orders entirely.
+
+TIME FORMAT — MANDATORY:
+- 0.17 hrs = 10 min
+- 4.18 hrs = 4 hrs 11 min  
+- 7.59 hrs = 7 hrs 35 min
+- 11.73 hrs = 11 hrs 44 min
+- 15.86 hrs = 15 hrs 52 min
+- 24.71 hrs = 1 day 43 min
+Do NOT use decimal hours. Always convert.
+
+PART 2 — SUMMARY:
+Write "---SUMMARY---" on its own line, then 3-5 sentences.
+This is MANDATORY even if there are only earlier orders.
+Each sentence on its own line.
+Assess severity, mention Critical/Urgent orders, give recommendation.
+Do NOT repeat the grouped bullets.
+Do NOT use markdown.
+
+CRITICAL RULES:
+- You MUST have at most ${earlierGroups.length + laterGroups.length + deadlineGroups.length} bullet lines total (one per group).
+- NEVER list orders individually if they belong to a group of 2+ orders.
+- NEVER output more than 6 bullet lines total across all sections.
+- If the pre-grouped data shows 1 group for "later" with 9 orders, your output must be 1 bullet for that group, NOT 9 separate bullets.
+  `;
+}
+```
+
+---
+
+## 2. HELPER — PRE-GROUP ORDERS BY SHIFT
+
+```javascript
+function groupOrdersByShift(orders) {
+  if (!orders || orders.length === 0) return [];
+  
+  // Group by similar shift (round to 2 decimal places for matching)
+  const groups = {};
+  
+  orders.forEach(order => {
+    const key = order.shiftHrs.toFixed(2);
+    if (!groups[key]) {
+      groups[key] = {
+        shiftHrs: order.shiftHrs,
+        shiftFormatted: order.shiftFormatted,
+        orders: []
+      };
+    }
+    groups[key].orders.push(order);
+  });
+  
+  // Convert to array and calculate ranges
+  return Object.values(groups).map(group => {
+    const sortedOrders = group.orders.sort((a, b) => a.prio - b.prio);
+    const prios = sortedOrders.map(o => o.prio);
+    
+    let prioRange;
+    if (prios.length === 1) {
+      prioRange = String(prios[0]);
+    } else {
+      prioRange = `${prios[0]}–${prios[prios.length - 1]}`;
+    }
+    
+    return {
+      shiftHrs: group.shiftHrs,
+      shiftFormatted: group.shiftFormatted,
+      prioRange,
+      count: sortedOrders.length,
+      orders: sortedOrders
+    };
+  }).sort((a, b) => b.shiftHrs - a.shiftHrs);
+}
+
+function groupOrdersByDelay(deadlineMisses) {
+  if (!deadlineMisses || deadlineMisses.length === 0) return [];
+  
+  const groups = {};
+  
+  deadlineMisses.forEach(order => {
+    const key = order.delayDays;
+    if (!groups[key]) {
+      groups[key] = {
+        delayDays: order.delayDays,
+        orders: []
+      };
+    }
+    groups[key].orders.push(order);
+  });
+  
+  return Object.values(groups).map(group => {
+    const sortedOrders = group.orders.sort((a, b) => a.prio - b.prio);
+    const prios = sortedOrders.map(o => o.prio);
+    
+    let prioRange;
+    if (prios.length === 1) {
+      prioRange = String(prios[0]);
+    } else {
+      prioRange = `${prios[0]}–${prios[prios.length - 1]}`;
+    }
+    
+    return {
+      delayDays: group.delayDays,
+      prioRange,
+      count: sortedOrders.length,
+      orders: sortedOrders
+    };
+  }).sort((a, b) => b.delayDays - a.delayDays);
+}
+```
+
+---
+
+## 3. VALIDATION LAYER — AUTO-GROUP IF AI FAILS TO GROUP
+
+After parsing the AI response, check if the output has too many individual lines. If so, auto-group using the calculated data as fallback.
+
+```javascript
+function validateAndFixGrouping(parsedResponse, calculatedImpact) {
+  const maxBullets = 6;
+  
+  const totalBullets = parsedResponse.earlierSection.length + 
+                       parsedResponse.laterSection.length + 
+                       parsedResponse.deadlineSection.length;
+  
+  if (totalBullets <= maxBullets) {
+    // AI output is properly grouped
+    return parsedResponse;
+  }
+  
+  // AI failed to group — auto-generate grouped output from calculated data
+  console.warn(`AI output has ${totalBullets} bullets (max ${maxBullets}). Auto-grouping from calculated data.`);
+  
+  const result = {
+    earlierSection: [],
+    laterSection: [],
+    deadlineSection: [],
+    summary: parsedResponse.summary // Keep AI summary
+  };
+  
+  // Auto-group earlier
+  if (calculatedImpact.earlierOrders.length > 0) {
+    const groups = groupOrdersByShift(calculatedImpact.earlierOrders);
+    result.earlierSection = groups.map(g => {
+      const notables = pickNotableOrders(g.orders);
+      if (g.count === 1) {
+        return `✅ Prio ${g.prioRange}: ${g.orders[0].name} — starts ${g.shiftFormatted} earlier. ${g.orders[0].n10dStatus !== 'N/A' ? g.orders[0].n10dStatus + '.' : ''}`;
+      }
+      return `✅ Prio ${g.prioRange} (${g.count} orders) — all start ~${g.shiftFormatted} earlier.${notables ? ' Notable: ' + notables + '.' : ''}`;
+    });
+  }
+  
+  // Auto-group later
+  if (calculatedImpact.laterOrders.length > 0) {
+    const groups = groupOrdersByShift(calculatedImpact.laterOrders);
+    result.laterSection = groups.map(g => {
+      const notables = pickNotableOrders(g.orders);
+      if (g.count === 1) {
+        return `⚠ Prio ${g.prioRange}: ${g.orders[0].name} — starts ${g.shiftFormatted} later. ${g.orders[0].n10dStatus !== 'N/A' ? g.orders[0].n10dStatus + '.' : ''}`;
+      }
+      return `⚠ Prio ${g.prioRange} (${g.count} orders) — all start ~${g.shiftFormatted} later.${notables ? ' Notable: ' + notables + '.' : ''}`;
+    });
+  }
+  
+  // Auto-group deadlines
+  if (calculatedImpact.deadlineMisses.length > 0) {
+    const groups = groupOrdersByDelay(calculatedImpact.deadlineMisses);
+    result.deadlineSection = groups.map(g => {
+      const notables = pickNotableOrders(g.orders);
+      if (g.count === 1) {
+        return `⛔ Prio ${g.prioRange}: ${g.orders[0].name} — new completion exceeds avail date ${g.orders[0].availDate} by ~${g.delayDays} days. ${g.orders[0].n10dStatus !== 'N/A' ? g.orders[0].n10dStatus + '.' : ''}`;
+      }
+      return `⛔ Prio ${g.prioRange} (${g.count} orders) — all exceed avail date by ~${g.delayDays} days.${notables ? ' Notable: ' + notables + '.' : ''}`;
+    });
+  }
+  
+  return result;
+}
+
+function pickNotableOrders(orders) {
+  // Pick Critical first, then Urgent, then others — max 2-3
+  const critical = orders.filter(o => o.n10dStatus === 'Critical');
+  const urgent = orders.filter(o => o.n10dStatus === 'Urgent');
+  const monitor = orders.filter(o => o.n10dStatus === 'Monitor');
+  
+  const notable = [...critical, ...urgent, ...monitor].slice(0, 3);
+  
+  if (notable.length === 0) {
+    // Pick first 2 unique product names
+    const seen = new Set();
+    const unique = [];
+    for (const o of orders) {
+      if (!seen.has(o.name)) {
+        seen.add(o.name);
+        unique.push(o);
+      }
+      if (unique.length >= 2) break;
+    }
+    return unique.map(o => `${o.name} (Prio ${o.prio})`).join(', ');
+  }
+  
+  return notable.map(o => `${o.name} (Prio ${o.prio}) is ${o.n10dStatus}`).join(', ');
+}
+```
+
+---
+
+## 4. INTEGRATE VALIDATION INTO THE FLOW
+
+```javascript
+async function generateImpact() {
+  setIsLoading(true);
+  setAiResponse(null);
+  setUseFallback(false);
+  
+  const calculated = buildSchedulingImpactData(group, lineOrders);
+  setCalculatedImpact(calculated);
+  
+  const hasAny = calculated.earlierOrders.length > 0 ||
+                 calculated.laterOrders.length > 0 ||
+                 calculated.deadlineMisses.length > 0;
+  
+  if (!hasAny) {
+    setIsLoading(false);
+    return;
+  }
+  
+  try {
+    const prompt = buildSchedulingImpactPrompt(context, calculated);
+    const response = await callAI(prompt);
+    const parsed = parseSchedulingImpactResponse(response);
+    
+    // Validate and fix grouping if AI listed individual orders
+    const validated = validateAndFixGrouping(parsed, calculated);
+    
+    const aiHasContent = validated.earlierSection.length > 0 ||
+                         validated.laterSection.length > 0 ||
+                         validated.deadlineSection.length > 0;
+    
+    if (aiHasContent) {
+      setAiResponse(validated);
+    } else {
+      setUseFallback(true);
+    }
+  } catch (error) {
+    console.error('Scheduling impact AI failed:', error);
+    setUseFallback(true);
+  }
+  
+  setIsLoading(false);
+}
+```
+
+---
+
+## VERIFICATION
+
+### AI grouping
+1. ✅ 9 orders all starting 4 hrs 11 min later → ONE bullet: "⚠ Prio 7–17 (9 orders) — all start ~4 hrs 11 min later"
+2. ✅ 16 orders all starting 10 min earlier → ONE bullet: "✅ Prio 3–18 (16 orders) — all start ~10 min earlier"
+3. ✅ Mixed shifts: 2 orders at 15 hrs 52 min + 8 orders at 11 hrs 44 min → TWO bullets
+4. ✅ 1 order → listed individually
+5. ✅ 2-3 orders → listed individually
+
+### Validation fallback
+6. ✅ If AI outputs 12 individual bullets → auto-grouped to 2-3 grouped bullets
+7. ✅ Auto-grouping uses calculated data (always accurate)
+8. ✅ AI summary preserved even when bullets are auto-grouped
+9. ✅ Max 6 bullets total across all sections
+
+### Notable orders
+10. ✅ Critical orders mentioned first in "Notable"
+11. ✅ Urgent orders mentioned second
+12. ✅ Max 2-3 notable orders per group
+13. ✅ If no Critical/Urgent, picks unique product names
+
+### Time format
+14. ✅ No decimal hours in output
+15. ✅ Auto-grouped bullets use formatTimeShift (human-readable)
+
+### Summary always present
+16. ✅ Summary appears with only earlier orders
+17. ✅ Summary appears with only later orders
+18. ✅ Summary appears with all sections
+19. ✅ Summary separated by border-top from bullets
+```

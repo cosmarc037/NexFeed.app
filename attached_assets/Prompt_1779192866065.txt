@@ -1,0 +1,157 @@
+Please add an **AI-powered demand analysis** component to the **SKU Monitoring** page, similar in concept to the existing **Production Insights** section in the All Feedmills tab.
+
+The goal is to help users interpret the demand data more easily and identify which SKUs may need attention based on historical demand vs current fulfilled/lined-up volumes.
+
+---
+
+## FEATURE NAME
+
+Add a new section in the SKU Monitoring page such as:
+
+- **Demand Insights**
+or
+- **AI Demand Insights**
+
+Recommended placement:
+- near the top of the page
+- above the detailed demand table and heatmap table
+
+---
+
+## PURPOSE
+
+The AI demand analysis should summarize what the demand data means for the current period.
+
+Instead of only showing raw numbers, the app should generate a short AI-powered interpretation of:
+- which SKUs are below historical demand
+- which SKUs have large remaining gaps
+- which SKUs are already covered or over-covered
+- which SKUs may require proactive production attention
+- which SKUs can be monitored without immediate action
+
+This should serve as an insight/recommendation layer only for now.
+
+Do not auto-create production orders.
+
+---
+
+## INPUTS THE AI SHOULD ANALYZE
+
+Use the SKU Monitoring data already available in the page, including:
+- historical demand benchmark
+- Done / delivered volume
+- Plotted / lined-up volume
+- remaining gap
+- coverage %
+- current selected period
+- monthly seasonality pattern if available
+
+---
+
+## OUTPUT SECTIONS
+
+Please include at least:
+
+### 1. Smart Summary
+A short AI-generated paragraph summarizing the current demand situation for the selected period.
+
+Example focus:
+- how many SKUs are below target
+- which high-volume SKUs have the largest gaps
+- whether some SKUs are already over-covered
+- whether the current month appears to be a peak-demand period
+
+### 2. Recommended Actions
+A short bullet list of suggested planner actions, such as:
+- prioritize specific under-covered SKUs
+- monitor certain SKUs with moderate gaps
+- avoid producing already over-covered SKUs
+- review SKUs with recurring seasonal peaks
+
+### 3. Optional Demand Risks / Opportunities
+If useful, also surface:
+- overproduction risk
+- large uncovered demand
+- seasonal peak reminders
+- stable recurring-demand SKUs
+
+---
+
+## EXAMPLE TYPES OF INSIGHT
+
+Examples of what the AI may say:
+- Several high-demand SKUs remain below historical benchmark for the current month
+- Poultry Express Chicken Layer Cr 50kg and PS Broiler Finisher NM-ANAS, Mini Pellets have the largest remaining gaps
+- Some gamefowl SKUs already exceed historical demand and may not need additional production
+- Current demand pattern suggests a seasonal spike for selected SKUs this month
+
+These are examples only; the final wording can vary.
+
+---
+
+## IMPORTANT SCOPE
+
+This AI demand component should:
+- summarize
+- explain
+- recommend
+
+But should **not**:
+- auto-generate production orders
+- auto-change sequencing
+- auto-change schedule dates
+- auto-adjust line assignments
+
+This is an AI planning insight layer only.
+
+---
+
+## OPTIONAL ACTION LINKING
+
+If practical, allow the AI insight card to reference specific SKUs already visible in the table, so users can quickly inspect the impacted rows.
+
+But keep the first version simple if needed.
+
+---
+
+## UI STYLE
+
+Please keep the visual style aligned with the existing **Production Insights** section used in All Feedmills, so the experience feels consistent across the application.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log:
+
+```javascript
+console.debug('[Demand AI Insights Input]', {
+  selectedPeriod,
+  timeGrain,
+  skuCount,
+  highGapSkus,
+  overCoveredSkus,
+});
+```
+
+```javascript
+console.debug('[Demand AI Insights Output]', {
+  summaryGenerated: true,
+  recommendationCount,
+  riskCount,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ SKU Monitoring page includes an AI-powered demand analysis section
+2. ✅ The section appears near the top of the page
+3. ✅ AI summarizes current demand coverage vs historical benchmark
+4. ✅ AI highlights under-covered and over-covered SKUs
+5. ✅ AI provides planner-style recommended actions
+6. ✅ No production orders are auto-created
+7. ✅ No scheduling or sequencing logic is automatically changed
+8. ✅ The UI feels consistent with the existing Production Insights pattern
+9. ✅ No route or console errors are introduced

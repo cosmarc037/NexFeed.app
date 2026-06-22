@@ -1,0 +1,261 @@
+```
+Please revisit and fix the actual order positioning for this AI strategy, because the resulting sequence is still not following what the strategy says it is doing, and it is performing worse than a clearly better manual arrangement.
+
+---
+
+## OBJECTIVE
+
+The selected AI strategy says it will:
+- place the red Gamefowl order last
+- cluster same-diameter orders to reduce diameter and color changeovers
+
+But the actual resulting order sequence does not reflect that well enough, and the measured changeover is still worse than a manually-arranged sequence that better follows the strategy intent.
+
+This needs to be fixed so the AI strategy is actually applied in the table the way it is described.
+
+---
+
+## STRATEGY BEING SHOWN
+
+### `Red-Last Diameter Clustering`
+Description:
+> Places red Gamefowl order last to avoid expensive red→non-red flush; clusters same-diameter orders to reduce diameter and color changeovers.
+
+Card metrics:
+- MTS adjusted: 5 / 5
+- Changeover time: 6.99 hr
+- Time-saved: +1.33 hr
+- Faithfulness: 75.0%
+
+---
+
+## WHAT IS WRONG
+
+The actual resulting order positions in the table are not following the intended strategy strongly enough.
+
+From the screenshot, the sequence is effectively:
+
+1. Swine · Brown · 3.00mm
+2. Gamefowl · Yellow · 4.00mm
+3. Poultry · Yellow · 4.00mm
+4. Gamefowl · Red · 3.00mm
+5. Gamefowl · Yellow · 3.00mm
+6. Gamefowl · Yellow · 3.00mm
+
+This is not a good implementation of the stated strategy because:
+- the red Gamefowl order is not last
+- the red order is still before two Gamefowl Yellow 3.00mm orders
+- this still creates the costly red → non-red transition that the strategy explicitly says it is trying to avoid
+- the sequence is not clustered in the strongest low-changeover way available within the visible lineup
+
+So the strategy description and the actual applied table are still not aligned.
+
+---
+
+## EXPECTED BETTER ARRANGEMENT
+
+If manually adjusted to more closely follow the stated strategy, the expected order would be:
+
+1. Gamefowl · Yellow · 4.00mm
+2. Poultry · Yellow · 4.00mm
+3. Swine · Brown · 3.00mm
+4. Gamefowl · Yellow · 3.00mm
+5. Gamefowl · Yellow · 3.00mm
+6. Gamefowl · Red · 3.00mm
+
+This manual ordering:
+- places the red Gamefowl order last
+- keeps the two Yellow 4.00mm orders together
+- keeps the two Gamefowl Yellow 3.00mm orders together
+- avoids the red → non-red outgoing penalty
+- produces a better total changeover
+
+### Expected result from manual calculation
+- Manual total changeover = **4.82 hr**
+- Standard Sequence changeover = **5.66 hr**
+- Expected time saved = **-0.84 hr** relative to Standard
+
+This is materially better than the current AI result of:
+- Changeover time = **6.99 hr**
+
+So the AI-applied sequence is underperforming against a plainly better arrangement.
+
+---
+
+## REQUEST
+
+Please revisit both the AI strategy execution and the actual order-positioning logic so this strategy is applied in a way that truly follows its intended clustering and red-last behavior.
+
+---
+
+## 1. ENFORCE THE "RED LAST" PART OF THE STRATEGY LITERALLY WHEN VALID
+
+If the strategy explicitly says:
+- place red Gamefowl order last
+
+then the execution should actually place the red Gamefowl order last whenever date and hard constraints allow it.
+
+In this case, the final lineup clearly does not do that.
+
+Please verify:
+- whether the AI intended the red order to be last
+- whether the execution layer failed to preserve that position
+- whether some hidden constraint overrode it
+- if so, whether the strategy description should have been different
+
+If no hard constraint prevents it, then the red Gamefowl order should actually be last.
+
+---
+
+## 2. CLUSTER SAME-DIAMETER / SAME-COMPATIBILITY BLOCKS MORE STRONGLY
+
+The strategy also says:
+- cluster same-diameter orders to reduce diameter and color changeovers
+
+Please improve the actual sequencing logic so that compatible blocks are more strongly kept together, for example:
+- Yellow 4.00mm block together
+- Yellow 3.00mm block together
+- Red 3.00mm placed at the end if that avoids expensive outgoing transitions
+
+The current applied order does not sufficiently preserve these obvious clusters.
+
+---
+
+## 3. OPTIMIZE USING THE REAL CHANGEOVER RULES, NOT JUST HIGH-LEVEL GROUPING
+
+Please use the actual changeover rules in the optimization:
+- 4mm → 3mm diameter penalty
+- Yellow → Brown penalty
+- Red → Any penalty
+- Any → Red/Green penalty
+- category penalty
+- stacking behavior
+
+The sequence should be chosen based on the actual total adjacent transition cost, not just a vague clustering idea.
+
+This case shows that a better total-cost arrangement exists, so the optimizer should be able to find it.
+
+---
+
+## 4. EVALUATE CANDIDATE ORDERINGS AGAINST KNOWN BETTER SEQUENCES
+
+If the AI strategy claims to reduce changeover, then the generated ordering should be tested against:
+- Standard Sequence baseline
+- any clearly better arrangement found within the same valid movable set
+
+At minimum, if the app can generate a candidate sequence with lower actual changeover than the currently selected AI result, prefer that lower-changeover candidate.
+
+In this case, a manual arrangement achieves **4.82 hr**, which is clearly better than **6.99 hr**.
+
+The strategy engine should not settle on the worse arrangement if the better one is still valid.
+
+---
+
+## 5. PRESERVE DATE SAFETY, BUT DO NOT LET IT BE USED AS A FALSE EXCUSE IF THE BETTER ARRANGEMENT IS STILL VALID
+
+The improvement should still respect:
+- avail dates
+- Future Dispatches
+- MTO constraints
+- line eligibility
+- other hard guards
+
+But if the better arrangement still respects those constraints, then the AI should pick it.
+
+Please verify that the manual arrangement above is still valid under the app’s actual hard rules.
+If it is valid, the optimizer should be able to reach something equivalent or close.
+
+---
+
+## 6. IMPROVE EXECUTION FAITHFULNESS BETWEEN STRATEGY INTENT AND TABLE POSITIONS
+
+The card says:
+- red last
+- clustered same diameter
+
+The final table should visibly reflect those exact intentions.
+
+Please improve the execution layer so the AI’s intended order positions are preserved more faithfully in the final applied table, instead of being diluted into a weaker sequence.
+
+---
+
+## 7. REASSESS CHANGEOVER AND TIME-SAVED FOR THIS STRATEGY AFTER FIXING THE ORDER
+
+Once the sequence is corrected:
+- recalculate total changeover
+- recalculate time-saved vs Standard
+- update the card metrics accordingly
+
+If the corrected sequence truly reaches around:
+- **4.82 hr** changeover
+then the card should show improvement instead of:
+- **6.99 hr**
+- **+1.33 hr**
+
+because the current metrics appear to reflect a suboptimal ordering.
+
+---
+
+## 8. REASSESS WHETHER THIS STRATEGY SHOULD BE RECOMMENDED IN ITS CURRENT FORM
+
+If the currently applied sequence is still worse than Standard, then it should not continue to be recommended in its broken form.
+
+Either:
+- fix the sequencing so it actually delivers the intended lower changeover
+or
+- do not recommend it
+
+The Recommended badge should not remain on a strategy whose applied table contradicts its own objective.
+
+---
+
+## 9. ADD DEBUG LOGGING TO TRACE WHY THE RED ORDER DID NOT END LAST
+
+Temporarily log:
+
+```javascript
+console.debug('[Red Last Strategy Execution]', {
+  lineId,
+  strategyId,
+  intendedBehavior: 'red-last diameter clustering',
+  candidateOrdersBefore: candidateOrders.map(o => ({
+    orderId: o.id,
+    item: o.item_description,
+    category: o.category,
+    color: o.color,
+    diameter: o.diameter,
+    availDate: o.avail_date,
+    movable: o.movable,
+  })),
+  finalOrdersAfter: finalOrders.map((o, index) => ({
+    position: index + 1,
+    orderId: o.id,
+    item: o.item_description,
+    category: o.category,
+    color: o.color,
+    diameter: o.diameter,
+    resultingCO: o.changeover,
+  })),
+  totalChangeover,
+  baselineChangeover,
+});
+```
+
+Also explicitly log:
+- why the red order was not placed last
+- whether a hard constraint blocked it
+- whether the optimizer compared this result to lower-cost valid alternatives
+
+---
+
+## 10. VERIFICATION
+
+1. ✅ The red Gamefowl 3.00mm order is actually placed last when the strategy says it should be last and no hard rule blocks it
+2. ✅ Same-diameter / compatible orders are more strongly clustered in the final table
+3. ✅ The optimizer uses the real changeover rules and total adjacent transition cost to choose the sequence
+4. ✅ The resulting order positions align much more closely with the AI strategy description
+5. ✅ Total changeover is recalculated after the corrected ordering is applied
+6. ✅ If a valid lower-changeover arrangement exists (such as the manual 4.82 hr arrangement), the app can now reach that or something meaningfully close
+7. ✅ The Recommended badge is only kept if the corrected strategy actually performs as intended
+8. ✅ The strategy card, resulting table, and changeover metrics are fully aligned
+```

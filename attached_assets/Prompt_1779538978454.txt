@@ -1,0 +1,240 @@
+Please update the **Start Date / Start Time resolution logic for downstream orders** with the following validation and auto-fill behavior.
+
+---
+
+## 1. APPLY THIS CHANGE ONLY TO 2ND ORDERS ONWARD
+
+Please apply this logic only to:
+- the **2nd order onward**
+- or any order that already has a **previous order** above it in the sequence
+
+Do **not** change the already-implemented fallback/default behavior for the **first order**.
+
+### Expected result
+The first-order logic remains as-is.
+
+This update only affects orders whose scheduling logic can reference a **previous order’s estimated completion datetime**.
+
+---
+
+## 2. IF USER SETS A START DATE BUT NO START TIME, DEFAULT THE TIME TO 8:00 AM
+
+If a user manually sets a **Start Date** for an order, but leaves **Start Time** blank:
+
+- keep the user-selected **Start Date**
+- automatically set **Start Time = 8:00 AM**
+
+### Expected result
+For downstream orders, a date-only manual input should resolve to:
+- `Start Date = selected date`
+- `Start Time = 8:00 AM`
+
+---
+
+## 3. VALIDATE START DATE SELECTION FOR DOWNSTREAM ORDERS
+
+When a user manually sets a **Start Date** for any order that has a previous order, please enforce the following date restrictions.
+
+### A. Do not allow past dates
+The user must not be able to select any date earlier than the current date.
+
+For example, if today is:
+- `May 23, 2026`
+
+the user must not be able to select:
+- `May 19, 2026`
+- `May 20, 2026`
+- `May 21, 2026`
+- `May 22, 2026`
+
+### B. Do not allow the same date as the previous order’s completion date
+If the previous order’s estimated completion date is:
+- `May 23, 2026`
+
+then the user should **not** be allowed to manually select:
+- `May 23, 2026`
+
+for the next order’s Start Date.
+
+### Reason
+That same-day scheduling case should already be resolved by sequence logic and/or the Start Time rule.
+
+If the user is explicitly setting a **Start Date** for a downstream order, it should represent a valid future scheduling date, not:
+- a past date
+- or the same date already occupied by the previous order’s completion date
+
+### Expected result
+For downstream orders, allowed Start Date choices must be:
+- not in the past
+- and strictly later than the previous order’s completion date’s calendar date
+
+---
+
+## 4. IF USER SETS A START TIME BUT NO START DATE, DERIVE THE DATE FROM THE PREVIOUS ORDER’S ESTIMATED COMPLETION
+
+If a user manually sets a **Start Time** for an order, but leaves **Start Date** blank:
+
+- look at the **previous order’s estimated completion datetime**
+- use that as the reference point for deriving the Start Date
+
+### Resolution logic
+Compare the user-entered Start Time against the **time-of-day** of the previous order’s estimated completion.
+
+#### If the entered Start Time is later than or equal to the previous order’s completion time
+Use the **same date** as the previous order’s estimated completion date.
+
+#### If the entered Start Time is earlier than the previous order’s completion time
+Use the **next calendar date** after the previous order’s estimated completion date.
+
+---
+
+## 5. TIME-ONLY EXAMPLES
+
+### Example A — Time aligns on the same day
+Previous order estimated completion:
+- `May 23, 2026, 12:00 PM`
+
+User sets:
+- `Start Time = 3:00 PM`
+- `Start Date = blank`
+
+Since `3:00 PM` is later than `12:00 PM`, the system should resolve to:
+- `Start Date = May 23, 2026`
+- `Start Time = 3:00 PM`
+
+### Example B — Time does not align on the same day
+Previous order estimated completion:
+- `May 23, 2026, 12:00 PM`
+
+User sets:
+- `Start Time = 10:00 AM`
+- `Start Date = blank`
+
+Since `10:00 AM` is earlier than `12:00 PM`, the system should resolve to:
+- `Start Date = May 24, 2026`
+- `Start Time = 10:00 AM`
+
+### Expected result
+A manually entered Start Time should still be respected, but the Start Date should be intelligently inferred based on sequence continuity.
+
+---
+
+## 6. USE THE PREVIOUS ORDER’S ESTIMATED COMPLETION AS THE REFERENCE POINT
+
+Please make sure this logic uses the **previous order’s estimated completion datetime** as the scheduling reference.
+
+This is important because the estimated completion date/time already cascades based on:
+- the first order’s start date/time
+- plus the production hours of preceding orders
+
+### Expected result
+The downstream Start Date / Start Time resolution should remain consistent with the app’s existing cascading schedule logic.
+
+---
+
+## 7. DO NOT BREAK EXISTING CASCADING COMPLETION LOGIC
+
+Please preserve the current scheduling behavior where:
+- estimated completion dates cascade from earlier orders
+- production hours continue to drive downstream timing
+- start and completion sequencing still work correctly
+
+This update should only improve how partially entered manual start fields are resolved.
+
+Do not break:
+- estimated completion date calculations
+- downstream cascading logic
+- first-order default logic
+- existing scheduling dependencies
+
+---
+
+## 8. VALIDATION / UX EXPECTATION
+
+Please make the behavior user-friendly and deterministic.
+
+### For Start Date input
+If the user tries to select:
+- a past date
+- or the same date as the previous order’s completion date
+
+then the app should prevent that selection or clearly reject it.
+
+### For Start Time input
+If the user enters only a time:
+- the app should automatically infer the correct Start Date
+- without requiring the user to manually calculate whether it should stay on the same day or move to the next day
+
+### Goal
+Make partial manual scheduling inputs behave predictably and align with production sequencing logic.
+
+---
+
+## IMPORTANT
+
+Please preserve the current first-order default behavior that is already implemented.
+
+This request is only for:
+- downstream orders
+- orders with a previous order reference
+- partial manual input handling for Start Date / Start Time
+
+Do not change unrelated scheduling logic unless needed for this behavior.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log how downstream Start Date / Start Time values are resolved.
+
+```javascript
+console.debug('[Start Date Only Resolution]', {
+  orderId,
+  previousEstimatedCompletion,
+  selectedStartDate,
+  resolvedStartTime: '08:00 AM',
+});
+```
+
+```javascript
+console.debug('[Start Date Validation]', {
+  orderId,
+  selectedStartDate,
+  todayDate,
+  previousCompletionDate,
+  isPastDate,
+  isSameAsPreviousCompletionDate,
+  allowed:
+    !isPastDate && !isSameAsPreviousCompletionDate,
+});
+```
+
+```javascript
+console.debug('[Start Time Only Resolution]', {
+  orderId,
+  previousEstimatedCompletion,
+  enteredStartTime,
+  previousCompletionTime,
+  resolvedStartDate,
+  resolutionRule:
+    enteredStartTime >= previousCompletionTime
+      ? 'same_day'
+      : 'next_day',
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ The new logic applies only to the **2nd order onward** or orders with a previous order
+2. ✅ The existing first-order fallback/default logic remains unchanged
+3. ✅ If a user sets **Start Date** only, the app auto-fills **Start Time = 8:00 AM**
+4. ✅ A user cannot select a **past Start Date**
+5. ✅ A user cannot select the **same calendar date as the previous order’s estimated completion date**
+6. ✅ If a user sets **Start Time** only and that time is later than the previous completion time, the app uses the **same date** as the previous completion date
+7. ✅ If a user sets **Start Time** only and that time is earlier than the previous completion time, the app uses the **next date**
+8. ✅ The manually entered Start Time is preserved when resolving the Start Date
+9. ✅ Estimated completion cascading still works correctly after the resolved Start Date / Start Time is applied
+10. ✅ No UI errors or console errors are introduced
+11. ✅ Debug logs clearly show why the app resolved the Start Date / Start Time the way it did

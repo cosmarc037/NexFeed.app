@@ -1,0 +1,167 @@
+Please improve the **AI vs Final Sequence** explanation so it clearly reflects that final position changes are caused by **date-first sorting**, and not by a misleading “manual reorder” interpretation.
+
+---
+
+## 1. MAKE THE REASON EXPLAIN THAT FINAL POSITION CHANGES CAN HAPPEN BECAUSE OF DATE-FIRST SORTING
+
+Right now, when the AI Rank and Final Rank differ, the explanation can be too generic or unclear.
+
+### Current issue
+A row may have:
+- `AI Rank = 5`
+- `Final Rank = 4`
+
+not because someone manually changed it, but because the final sort uses:
+- **suggested/effective date first**
+- and **AI rank only within the same date**
+
+### Required behavior
+Please make the explanation clearly state when a row moved because:
+- its AI-suggested/effective date is earlier than another row’s date
+- and the final date-first sort moved it ahead
+
+### Expected result
+Users can immediately understand that the row moved because of date ordering, not because of a vague or unexplained rank difference.
+
+---
+
+## 2. EXPLAIN THE REAL CAUSE OF MOVEMENT IN PLAIN LANGUAGE
+
+When a row’s Final Rank differs from its AI Rank, please explain the actual reason for that movement.
+
+### Example of the actual logic
+If:
+- `Order A = June 5, Rank 1`
+- `Order B = June 3, Rank 2`
+
+then the final visible order becomes:
+1. `Order B = June 3`
+2. `Order A = June 5`
+
+because the final sort uses:
+- earlier suggested/effective date first
+- rank only as a tiebreak within the same date
+
+### Expected result
+The explanation should describe this kind of movement explicitly, instead of only saying the AI rank differs.
+
+---
+
+## 3. REPLACE OR RENAME THE `MANUALLY REORDERED?` LABEL
+
+The current label:
+- `Manually Reordered?`
+
+is misleading.
+
+### Why
+The position change is not actually caused by a human manual reorder. It is usually caused by:
+- the final date-first sort
+- cross-line placement logic
+- or another final system-level ordering rule
+
+### Required change
+Please replace or rename this label to something more accurate, such as:
+- `Repositioned by Final Sort?`
+- `Date-Sorted?`
+- `Final Rank Adjusted?`
+- `Repositioned by Date?`
+
+### Goal
+Use wording that accurately reflects what happened.
+
+### Expected result
+Users are no longer misled into thinking a human manually changed the sequence.
+
+---
+
+## 4. MAKE THE REASON COLUMN MORE SPECIFIC WHEN AI RANK AND FINAL RANK DIFFER
+
+Please improve the `Reason` text so that when AI Rank and Final Rank differ, it can explicitly say things like:
+
+- this order was moved ahead because its suggested date is earlier
+- this order moved behind another order because that order belongs to an earlier date bucket
+- final position reflects date-first sorting, with AI rank preserved only within the same date
+
+### Goal
+Make the reasoning more transparent and easier to trust.
+
+### Expected result
+The reason column tells the user exactly why the displayed position differs from the AI’s raw rank.
+
+---
+
+## 5. KEEP THE DATE+RANK SORT LOGIC EXPLAINABLE IN THE UI
+
+Please make the explanation consistent with the actual final sort rule:
+
+### Final sort rule
+- **Primary sort:** suggested/effective date
+- **Secondary sort:** AI rank within the same date
+
+### Goal
+The UI should help users understand that Final Rank may differ from AI Rank because:
+- dates are sorted first
+- rank is applied inside each date group
+
+### Expected result
+The explanation layer matches the real sorting behavior.
+
+---
+
+## IMPORTANT
+
+Please improve the **AI vs Final Sequence** explanation so that:
+
+- when AI Rank and Final Rank differ, the reason clearly states whether this happened because of **date-first sorting**
+- the app explains the actual movement in plain language
+- the label `Manually Reordered?` is replaced with something more accurate
+- users can understand that final position changes are often caused by:
+  - earlier suggested/effective dates
+  - final date-bucket ordering
+  - with AI rank used only inside the same date group
+
+This is needed because the current wording makes it sound like a manual reorder happened, when in reality it is usually just the final date+rank sort.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log why Final Rank differs from AI Rank.
+
+```javascript
+console.debug('[AI vs Final Sequence Rank Difference Reason]', {
+  entityId,
+  aiRank,
+  finalRank,
+  suggestedDate,
+  reasonForDifference,
+  causedByDateFirstSort: true,
+});
+```
+
+```javascript
+console.debug('[AI vs Final Sequence Label Update]', {
+  oldLabel: 'Manually Reordered?',
+  newLabel: 'Repositioned by Final Sort?',
+});
+```
+
+```javascript
+console.debug('[AI vs Final Sequence Date+Rank Explanation]', {
+  entityId,
+  sortModel: ['suggestedDate ASC', 'aiRank ASC'],
+  explanationMatchesSortModel: true,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Rank-difference reasons clearly explain date-first sorting when applicable
+2. ✅ Users can understand why Final Rank differs from AI Rank
+3. ✅ The `Manually Reordered?` label is replaced with a more accurate one
+4. ✅ The Reason column becomes more specific and transparent
+5. ✅ The explanation matches the actual date+rank sort logic
+6. ✅ No UI errors or console errors are introduced

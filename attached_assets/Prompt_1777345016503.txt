@@ -1,0 +1,380 @@
+```
+Refine AI Balanced sequence so it preserves chronological sorting overall, while improving the order within flexible date ranges to reduce changeovers.
+
+---
+
+## OBJECTIVE
+
+Restore the previous AI Balanced behavior as the base, but improve the sorting logic so that:
+
+- chronological sorting is still preserved
+- protected orders (MTO, critical, urgent, monitor) remain governed by date rules
+- flexible orders (especially sufficient orders) can still receive AI-suggested dates
+- after dates are assigned, the final order should still be chronological
+- within the same date or within compatible flexible windows, refine the order to reduce changeovers
+
+Do NOT replace chronological sorting with block grouping.
+Do NOT let grouping fully override chronology.
+Instead, use changeover reduction as a secondary optimization layer inside chronological sequencing.
+
+---
+
+## 1. RESTORE CHRONOLOGICAL SORT AS THE PRIMARY RULE
+
+```javascript
+function sortOrdersChronologicallyWithBalancedTieBreak(orders, changeoverRules) {
+  return [...orders].sort((a, b) => {
+    const dateA = normalizeDate(a._aiSuggestedDate || a.target_avail_date);
+    const dateB = normalizeDate(b._aiSuggestedDate || b.target_avail_date);
+
+    const isAReal = isISODate(dateA);
+    const isBReal = isISODate(dateB);
+
+    // Real dates first
+    if (isAReal && isBReal) {
+      const diff = new Date(dateA) - new Date(dateB);
+      if (diff !== 0) return diff;
+    } else if (isAReal && !isBReal) {
+      return -1;
+    } else if (!isAReal && isBReal) {
+      return 1;
+    }
+
+    // Protected rank second
+    const rankA = getProtectedRank(a);
+    const rankB = getProtectedRank(b);
+    if (rankA !== rankB) return rankA - rankB;
+
+    // Same effective date / same protected rank:
+    // prefer lower changeover opportunity by material similarity
+    return compareMaterialCompatibility(a, b);
+  });
+}
+```
+
+---
+
+## 2. ADD MATERIAL-COMPATIBILITY TIEBREAKER
+
+This should only influence order when chronology is effectively equal.
+
+```javascript
+function compareMaterialCompatibility(a, b) {
+  const sigA = getMaterialSignature(a);
+  const sigB = getMaterialSignature(b);
+
+  // identical signatures = same priority
+  if (sigA === sigB) return 0;
+
+  // sort by category, then color, then diameter, then form
+  const catA = String(a.category || '').toLowerCase();
+  const catB = String(b.category || '').toLowerCase();
+  if (catA !== catB) return catA.localeCompare(catB);
+
+  const colorA = String(a.color || '').toLowerCase();
+  const colorB = String(b.color || '').toLowerCase();
+  if (colorA !== colorB) return colorA.localeCompare(colorB);
+
+  const diaA = String(a.diameter || '').toLowerCase();
+  const diaB = String(b.diameter || '').toLowerCase();
+  if (diaA !== diaB) return diaA.localeCompare(diaB);
+
+  const formA = String(a.form || '').toLowerCase();
+  const formB = String(b.form || '').toLowerCase();
+  return formA.localeCompare(formB);
+}
+```
+
+---
+
+## 3. KEEP AI DATE SUGGESTIONS, BUT LIMIT THEM TO SAFE/LOGICAL WINDOWS
+
+The AI can suggest dates, but those dates should still support chronological integrity.
+
+```javascript
+function applyBalancedDateHeuristic(ordersByLine, changeoverRules, n10dData) {
+  const result = {};
+
+  Object.entries(ordersByLine).forEach(([line, orders]) => {
+    const adjusted = orders.map(order => {
+      if (isProtectedOrder(order)) {
+        return {
+          ...order,
+          _aiSuggestedDate: normalizeDate(order.target_avail_date),
+          _aiDateReason: 'Protected order — fixed by hard rule',
+        };
+      }
+
+      const safeWindow = getBalancedSafeWindow(order, n10dData);
+      const suggestedDate = chooseBestBalancedDate({
+        order,
+        line,
+        orders,
+        safeWindow,
+        changeoverRules,
+      });
+
+      return {
+        ...order,
+        _originalAvailDate: normalizeDate(order.target_avail_date),
+        target_avail_date: suggestedDate,
+        _aiSuggestedDate: suggestedDate,
+        _dateAdjustedByAI: normalizeDate(order.target_avail_date) !== suggestedDate,
+        _aiDateReason: `Balanced heuristic selected ${suggestedDate} based on safe window, line load, and compatibility`,
+      };
+    });
+
+    // IMPORTANT: final output is still chronological
+    const sorted = sortOrdersChronologicallyWithBalancedTieBreak(adjusted, changeoverRules).map((o, i) => ({
+      ...o,
+      prio: i + 1,
+    }));
+
+    result[line] = sorted;
+  });
+
+  return result;
+}
+```
+
+---
+
+## 4. REFINE DATE SUGGESTION HEURISTIC — DO NOT LET IT BE RANDOM
+
+The AI should suggest dates based on:
+- earliest safe day
+- lightly loaded day
+- compatibility with nearby materials
+- no delay to protected orders
+
+```javascript
+function chooseBestBalancedDate({
+  order,
+  line,
+  orders,
+  safeWindow,
+  changeoverRules,
+}) {
+  const candidateDates = enumerateDates(safeWindow.start, safeWindow.end);
+
+  let bestDate = safeWindow.start;
+  let bestScore = -Infinity;
+
+  candidateDates.forEach(candidateDate => {
+    const score = scoreBalancedCandidateDate({
+      order,
+      candidateDate,
+      line,
+      orders,
+      changeoverRules,
+    });
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestDate = candidateDate;
+    }
+  });
+
+  return bestDate;
+}
+```
+
+---
+
+## 5. SCORE DATE CANDIDATES WITH CHRONOLOGY IN MIND
+
+Balanced should prefer:
+- earlier safe dates
+- dates with low queue load
+- dates that improve material compatibility
+- but not weird jumps that make chronology look broken
+
+```javascript
+function scoreBalancedCandidateDate({
+  order,
+  candidateDate,
+  line,
+  orders,
+  changeoverRules,
+}) {
+  let score = 0;
+
+  const loadMap = buildDailyLoadMap(orders, line);
+  const load = loadMap.get(candidateDate) || { orderCount: 0, totalHours: 0 };
+
+  // 1. Prefer lighter days
+  score += Math.max(0, 12 - load.totalHours) * 4;
+  score += Math.max(0, 4 - load.orderCount) * 2;
+
+  // 2. Prefer compatibility with orders already on that day
+  score += estimateCompatibilityGain(order, candidateDate, orders, changeoverRules) * 10;
+
+  // 3. Prefer earlier safe dates (balanced planning)
+  const today = startOfDay(new Date());
+  const candidate = startOfDay(new Date(candidateDate));
+  const daysFromToday = Math.round((candidate - today) / (1000 * 60 * 60 * 24));
+  score += Math.max(0, 20 - daysFromToday) * 0.75;
+
+  // 4. Penalize overloaded days
+  if (load.totalHours > 16) score -= 20;
+  if (load.totalHours > 20) score -= 30;
+
+  return score;
+}
+```
+
+---
+
+## 6. DO NOT REORDER PROTECTED ORDERS BEYOND THEIR DATE LOGIC
+
+Protected orders should stay governed by:
+- MTO fixed
+- critical today/asap
+- urgent / monitor not delayed beyond their target date
+
+```javascript
+function getProtectedRank(order) {
+  if (isMTOOrder(order)) return 0;
+
+  const status = String(order._n10dStatus || order.inferred_target_label || '').toLowerCase();
+
+  if (status === 'critical') return 1;
+  if (status === 'urgent' || status.includes('prio replenish')) return 2;
+  if (status === 'monitor') return 3;
+
+  return 4;
+}
+```
+
+---
+
+## 7. AI BALANCED FLOW — KEEP THE PREVIOUS GOOD STRUCTURE, JUST REFINE SORTING
+
+```javascript
+async function generateAIBalancedSequence(enrichedByLine, n10dData, masterData, changeoverRules) {
+  const prompt = buildAIBalancedPrompt(enrichedByLine, changeoverRules);
+
+  let aiResult = { strategy: {}, reasoning: '', dateAdjustments: [] };
+
+  try {
+    const response = await callAzureOpenAI(prompt);
+    aiResult = parseAIResponse(response);
+  } catch (error) {
+    console.error('AI Balanced generation failed:', error);
+    return generateStandardSequence(enrichedByLine);
+  }
+
+  // 1. Apply AI's proposed order as a soft signal
+  const aiReordered = applyAIReordering(enrichedByLine, aiResult);
+
+  // 2. Apply date heuristic
+  const withDates = applyBalancedDateHeuristic(aiReordered, changeoverRules, n10dData);
+
+  // 3. Final sort must still be chronological-first, compatibility-second
+  const finalResult = {};
+  Object.entries(withDates).forEach(([line, orders]) => {
+    finalResult[line] = sortOrdersChronologicallyWithBalancedTieBreak(orders, changeoverRules).map((o, i) => ({
+      ...o,
+      prio: i + 1,
+    }));
+  });
+
+  return {
+    id: 'ai_balanced',
+    name: 'AI Balanced',
+    theme: 'AI-Powered (Balanced)',
+    description: 'AI suggests practical dates and refines sequencing to reduce changeovers while preserving chronological logic',
+    icon: '🤖',
+    color: 'purple',
+    orders: finalResult,
+    metrics: calculateStrategyMetrics(finalResult),
+    aiReasoning: aiResult.reasoning || '',
+    dateAdjustments: collectDateAdjustments(finalResult),
+    isAIRecommended: false,
+  };
+}
+```
+
+---
+
+## 8. IMPORTANT: REMOVE THE OVERAGGRESSIVE BLOCK GROUPING LOGIC FROM AI BALANCED
+
+If the current AI Balanced uses logic like:
+- splitting into protected/flexible blocks
+- appending all flexible groups after protected groups
+- skipping final chronology
+
+remove that from AI Balanced.
+
+That logic was too strong and caused the output to stop making chronological sense.
+
+AI Balanced should be:
+- chronology first
+- compatibility second
+
+not:
+- compatibility first
+- chronology optional
+
+---
+
+## 9. KEEP UI DISPLAY OF AI DATE ADJUSTMENTS
+
+No change needed here except to ensure it reflects the refined logic.
+
+```javascript
+function collectDateAdjustments(ordersByLine) {
+  const changes = [];
+
+  Object.values(ordersByLine).flat().forEach(order => {
+    const originalDate = normalizeDate(order._originalAvailDate);
+    const newDate = normalizeDate(order._aiSuggestedDate || order.target_avail_date);
+
+    if (originalDate && newDate && originalDate !== newDate) {
+      changes.push({
+        order_id: order.id,
+        original: originalDate,
+        new: newDate,
+        reason: order._aiDateReason || order._aiReasoning || 'AI balanced adjustment',
+      });
+    }
+  });
+
+  return changes;
+}
+```
+
+---
+
+## VERIFICATION
+
+### Chronological integrity restored
+1. ✅ Final AI Balanced result is still sorted chronologically overall
+2. ✅ Orders do not appear in obviously illogical date order
+3. ✅ Protected orders still respect their hard date rules
+4. ✅ AI Balanced no longer disregards chronological sequencing
+
+### Changeover refinement preserved
+5. ✅ Within same date or same effective date band, compatible materials are ordered closer together
+6. ✅ Material compatibility is used as a secondary tie-breaker
+7. ✅ Similar materials are still favored where chronology allows
+8. ✅ AI Balanced reduces changeovers without breaking timeline logic
+
+### Date suggestions remain useful
+9. ✅ AI still suggests dates for flexible / sufficient orders
+10. ✅ Suggested dates are still based on safe windows
+11. ✅ Suggested dates are not random
+12. ✅ Dates help improve utilization and compatibility without destroying chronological sense
+
+### Protected vs flexible behavior
+13. ✅ MTO dates never change
+14. ✅ Critical stays today / ASAP
+15. ✅ Urgent / Monitor can move earlier but not later than deadline
+16. ✅ Sufficient orders remain flexible within their allowed windows
+
+### Regression prevention
+17. ✅ Previous “okay” behavior is restored as the base
+18. ✅ New refinement only improves sort quality instead of replacing it
+19. ✅ No full block append behavior that makes the schedule look wrong
+20. ✅ AI Balanced remains visibly different from Standard, but still sensible
+```

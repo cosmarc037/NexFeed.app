@@ -1,0 +1,261 @@
+Please update the **Suggested Pre-orders / Re-order suggestions** in the **Fulfillment (Demo)** workspace with the following structural and logic changes.
+
+---
+
+# 1. ADD GROUPED MAIN HEADERS ABOVE THE EXISTING COLUMN HEADERS
+
+Please add grouped main headers above the current table headers to better organize the information.
+
+## Proposed grouped structure
+
+### Order Details
+- `FPR`
+- `Planned Order`
+- `Material Code (SFG)`
+- `Material Code (FG)`
+- `Item Description`
+- `Volume (MT)`
+
+### Re-Order Details
+- `Volume to Produce (MT)`
+- `Batch Size`
+- `Production Time (with run-rate)`
+- `Inventory`
+- `AI Avail Date`
+- `Actions`
+
+### Goal
+Visually separate:
+- the original/source order context
+from
+- the generated replenishment/re-order context
+
+### Expected result
+The Suggested Pre-orders table becomes easier to understand, with a clear distinction between source-order information and re-order suggestion information.
+
+---
+
+# 2. ADD A NEW COLUMN: `VOLUME TO PRODUCE (MT)`
+
+Please add a new column in the **Re-Order Details** section called:
+
+- `Volume to Produce (MT)`
+
+### Goal
+This column should represent the actual production quantity for the generated re-order, which is different from the original source order volume.
+
+### Expected result
+Users can clearly see the distinction between:
+- the original/source order volume
+- and the generated replenishment volume to be produced
+
+---
+
+# 3. THE RE-ORDER SHOULD NOT PRODUCE THE DEDUCTED SOURCE ORDER VOLUME
+
+Please update the fulfillment logic so that when a user approves a suggested re-order, the system does **not** generate the new order using the original source order’s volume.
+
+### Important rule
+The generated re-order should **not** simply reproduce the same volume as the source order that was fulfilled from inventory.
+
+### Reason
+If the feature simply regenerates the exact original volume at a later date, it defeats the purpose of using inventory to fulfill the original demand quickly.
+
+### Expected result
+The re-order suggestion should behave as a replenishment order, not as an exact duplicate of the original fulfilled order.
+
+---
+
+# 4. USE `AVERAGE DAILY` AS THE BASIS FOR `VOLUME TO PRODUCE`
+
+Please use the product’s **Average Daily** value as the basis for the generated re-order’s **Volume to Produce (MT)**.
+
+### Example
+If:
+- Source order volume = `80 MT`
+- Inventory in Demo Future Dispatches = `90 MT`
+- Average Daily = `20 MT`
+
+and the user approves the suggestion,
+
+then:
+- the source order is treated as fulfilled using inventory
+- the source order’s `80 MT` is deducted from the inventory logic
+- but the generated re-order’s `Volume to Produce` should be:
+  - `20 MT`
+  - because it is based on **Average Daily**
+  - not the original `80 MT`
+
+### Expected result
+The generated re-order quantity reflects replenishment need based on Average Daily, not the original fulfilled volume.
+
+---
+
+# 5. WHEN THE USER APPROVES, DEDUCT THE SOURCE ORDER VOLUME FROM INVENTORY / ADJUSTED INVENTORY
+
+Please preserve and align the inventory logic such that when the user approves the suggested re-order:
+
+- the original/source order is treated as fulfilled using inventory
+- the source order volume is deducted from the product’s inventory state
+- the `Adjusted Inventory` reflects that deduction
+
+### Important
+This deduction should still use the **source order volume**, because that is the amount assumed to be fulfilled using stock.
+
+### Expected result
+The inventory side reflects the original order fulfillment, while the generated re-order quantity remains based on Average Daily.
+
+---
+
+# 6. KEEP THE SOURCE ORDER VOLUME AND RE-ORDER VOLUME AS SEPARATE CONCEPTS
+
+Please clearly preserve the difference between:
+
+### Source Order Volume
+- the original order quantity in the schedule
+- used when determining whether inventory can satisfy that order
+- deducted from inventory when approval happens
+
+### Volume to Produce
+- the generated replenishment/re-order quantity
+- based on **Average Daily**
+- used to create the actual new re-order in the sequence
+
+### Goal
+Avoid confusion between the demand being fulfilled from stock and the replenishment quantity being generated.
+
+### Expected result
+These two values should remain separate in both logic and UI.
+
+---
+
+# 7. USE `VOLUME TO PRODUCE` AS THE BASIS FOR PRODUCTION TIME CALCULATION
+
+Please update the production-time calculation for the generated re-order so that it uses:
+
+- `Volume to Produce (MT)`
+
+and **not** the original source order volume.
+
+### Example
+If:
+- source order = `80 MT`
+- average daily / volume to produce = `20 MT`
+
+then production time should be calculated using:
+- `20 MT`
+
+not:
+- `80 MT`
+
+### Expected result
+The displayed `Production Time` for the re-order suggestion correctly reflects the actual generated replenishment quantity.
+
+---
+
+# 8. DISPLAY THE RE-ORDER DETAILS USING THIS NEW LOGIC
+
+Please update the Suggested Pre-orders table so the re-order-specific fields reflect the new replenishment behavior.
+
+### In practice
+- `Volume (MT)` under **Order Details** should refer to the original/source order volume
+- `Volume to Produce (MT)` under **Re-Order Details** should refer to the generated replenishment quantity based on Average Daily
+- `Production Time` should be based on `Volume to Produce`
+- `Inventory` should still reflect the relevant available/adjusted inventory context
+- `AI Avail Date` should still reflect where the generated re-order best fits
+
+### Expected result
+The table accurately communicates both:
+- what original order is being satisfied using inventory
+- and what replenishment order is being proposed
+
+---
+
+# 9. KEEP THIS IN THE FULFILLMENT (DEMO) WORKSPACE ONLY
+
+Please apply these changes specifically to the **Suggested Pre-orders / Re-order suggestions** inside the **Fulfillment (Demo)** workspace.
+
+### Expected result
+The main application order behavior remains unchanged unless explicitly updated later.
+
+---
+
+# IMPORTANT
+
+Please implement the following major changes to the **Suggested Pre-orders** table in **Fulfillment (Demo)**:
+
+## Grouped headers
+### Order Details
+- FPR
+- Planned Order
+- Material Code (SFG)
+- Material Code (FG)
+- Item Description
+- Volume (MT)
+
+### Re-Order Details
+- Volume to Produce (MT)
+- Batch Size
+- Production Time (with run-rate)
+- Inventory
+- AI Avail Date
+- Actions
+
+## Logic changes
+- if inventory can satisfy the source order and the user approves the suggestion:
+  - the source order volume is deducted from inventory / adjusted inventory
+  - but the generated re-order volume must be based on **Average Daily**
+  - not the original source order volume
+- production time for the generated re-order must use `Volume to Produce`, not the source order volume
+
+This ensures the generated order behaves as a **replenishment order**, not as a duplicate of the original fulfilled order.
+
+---
+
+# DEBUG LOGGING
+
+Temporarily log the new source-vs-reorder volume behavior.
+
+```javascript
+console.debug('[Demo Re-Order Volume Logic]', {
+  sourceOrderId,
+  sourceOrderVolume,
+  inventoryBeforeApproval,
+  approvedUsingInventory: true,
+  deductedFromInventoryVolume: sourceOrderVolume,
+  averageDaily,
+  generatedReorderVolumeToProduce: averageDaily,
+});
+```
+
+```javascript
+console.debug('[Demo Re-Order Production Time Basis]', {
+  sourceOrderId,
+  sourceOrderVolume,
+  reorderVolumeToProduce,
+  productionTimeCalculatedFrom: 'reorderVolumeToProduce',
+});
+```
+
+```javascript
+console.debug('[Demo Suggested Pre-Orders Grouped Headers]', {
+  groupedHeaders: {
+    orderDetails: ['FPR', 'Planned Order', 'Material Code (SFG)', 'Material Code (FG)', 'Item Description', 'Volume (MT)'],
+    reorderDetails: ['Volume to Produce (MT)', 'Batch Size', 'Production Time', 'Inventory', 'AI Avail Date', 'Actions'],
+  },
+});
+```
+
+---
+
+# VERIFICATION
+
+1. ✅ Grouped main headers are added above the existing columns
+2. ✅ `Order Details` and `Re-Order Details` sections are visually distinct
+3. ✅ A new `Volume to Produce (MT)` column is added
+4. ✅ Source order volume remains visible separately from the re-order volume
+5. ✅ Approved fulfillment still deducts the source order volume from inventory
+6. ✅ Generated re-order volume is based on `Average Daily`, not the source order volume
+7. ✅ Production time is calculated from `Volume to Produce`
+8. ✅ The Suggested Pre-orders table accurately reflects replenishment logic
+9. ✅ No UI errors or console errors are introduced

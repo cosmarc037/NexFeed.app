@@ -1,0 +1,318 @@
+```
+Implement the following changes to the NexFeed application:
+
+---
+
+## 1. AUTO-SEQUENCE — ONLY MOVE NON-DATED ORDERS
+
+The auto-sequence feature must ONLY reposition non-dated orders (prio replenish, safety stocks, etc.). Dated orders with actual avail dates stay exactly where they are.
+
+### RULES
+
+**Dated orders (e.g., March 22, 2026):**
+- ❌ Do NOT move, reposition, or reorder
+- They stay in their exact current position in the table
+- The auto-sequence works AROUND them
+
+**Non-dated orders (prio replenish, safety stocks, for sched, etc.):**
+- ✅ These are the ONLY orders that get repositioned
+- Their new position is determined by their N10D target date
+- They get inserted between dated orders at the correct chronological position
+
+**Stock Sufficient orders:**
+- ✅ These get moved to the bottom (lowest priority)
+- They are non-dated orders with no urgent production need
+
+### EXAMPLE
+
+**Before auto-sequence:**
+```
+Prio 1: Order A | March 22           ← dated, stays
+Prio 2: Order B | prio replenish     ← non-dated, will move
+Prio 3: Order C | safety stocks      ← non-dated, will move
+Prio 4: Order D | March 24           ← dated, stays
+Prio 5: Order E | prio replenish     ← non-dated, will move
+```
+
+**N10D target dates:**
+```
+Order B: Target March 19
+Order C: Target March 25
+Order E: Stock Sufficient
+```
+
+**After auto-sequence:**
+```
+Prio 1: Order B | prio replenish     ← moved UP (Target Mar 19, before Mar 22)
+Prio 2: Order A | March 22           ← dated, UNMOVED
+Prio 3: Order D | March 24           ← dated, UNMOVED
+Prio 4: Order C | safety stocks      ← moved (Target Mar 25, after Mar 24)
+Prio 5: Order E | prio replenish     ← moved to bottom (Stock Sufficient)
+```
+
+---
+
+## 2. APPLY SEQUENCE — CHANGE AVAIL DATE OF NON-DATED ORDERS
+
+When the user clicks "Apply to Schedule" in the Auto-Sequence preview, non-dated orders that have N10D target dates get their avail date UPDATED to the target date. The original value is preserved as a reference.
+
+### BEHAVIOR ON APPLY
+
+**For non-dated orders with a target date (Needs Production):**
+
+When approved:
+- Avail Date changes from "prio replenish" to the target date (e.g., "March 25, 2026")
+- The original value is shown below: "Originally: prio replenish"
+- The Revert button (↩) is available so the user can revert back to "prio replenish"
+- `original_avail_date` stores "prio replenish" permanently
+
+**Display after approval:**
+```
+┌─────────────────────────────────┐
+│ March 25, 2026              ↩   │   ← new date from N10D
+│ Originally: prio replenish      │   ← grey text, 10px, italic
+└─────────────────────────────────┘
+```
+
+**For Stock Sufficient orders:**
+
+When approved:
+- Avail Date changes to "Stock sufficient"
+- The original value is shown below: "Originally: safety stocks"
+- The Revert button (↩) is available
+
+**Display after approval:**
+```
+┌─────────────────────────────────┐
+│ Stock sufficient            ↩   │   ← green text
+│ Originally: safety stocks       │   ← grey text, 10px, italic
+└─────────────────────────────────┘
+```
+
+**For dated orders (actual avail dates):**
+- ❌ No change to their avail date
+- They remain exactly as they were
+
+### REVERT FUNCTIONALITY
+
+Same as previously defined:
+- Click ↩ → confirmation dialog → reverts to original value
+- If reverted from a date back to "prio replenish", the order stays in its current position but becomes a non-dated order again
+- The revert icon only shows when current value ≠ original value
+
+---
+
+## 3. ALREADY-SEQUENCED ORDERS — ONLY MOVE IF TARGET DATE CHANGED
+
+When the user runs Auto-Sequence again after orders have already been sequenced:
+
+### RULES
+
+**Previously sequenced orders (avail date was changed from non-date to date by auto-sequence):**
+- If the N10D target date has NOT changed → ❌ do NOT move the order
+- If the N10D target date HAS changed → ✅ move to the new correct position and update the avail date
+
+**Never-sequenced non-dated orders:**
+- ✅ Evaluate and position based on their N10D target date (first-time sequencing)
+
+**Dated orders (original actual avail dates, not from auto-sequence):**
+- ❌ Never move
+
+### HOW TO IDENTIFY PREVIOUSLY SEQUENCED ORDERS
+
+Store a flag on each order to track whether its avail date was set by auto-sequence:
+
+```javascript
+{
+  avail_date: "March 25, 2026",
+  original_avail_date: "prio replenish",
+  avail_date_source: "auto_sequence",  // "sap_upload", "manual", "auto_sequence"
+  last_target_date: "2026-03-25"       // last N10D target date applied
+}
+```
+
+**Logic for subsequent auto-sequence:**
+
+```javascript
+function shouldMoveOrder(order, newTargetDate) {
+  // Never move orders with original actual avail dates
+  if (order.avail_date_source === 'sap_upload' && isDateValue(order.original_avail_date)) {
+    return false;
+  }
+  
+  // Never-sequenced non-dated order — always evaluate
+  if (order.avail_date_source !== 'auto_sequence') {
+    return true;
+  }
+  
+  // Previously sequenced — only move if target date changed
+  if (order.avail_date_source === 'auto_sequence') {
+    if (order.last_target_date !== newTargetDate) {
+      return true;  // target date changed, move to new position
+    }
+    return false;  // target date same, don't move
+  }
+}
+```
+
+### EXAMPLE — SUBSEQUENT AUTO-SEQUENCE
+
+**First auto-sequence (March 19 upload):**
+```
+Order B: prio replenish → March 25 (target from N10D)
+Order C: safety stocks → March 28 (target from N10D)
+```
+
+**Next day (March 20 upload), new N10D data:**
+```
+Order B: target date now March 23 (changed from 25 → 23)
+Order C: target date still March 28 (unchanged)
+```
+
+**Second auto-sequence result:**
+```
+Order B: ✅ MOVED — avail date updates from March 25 to March 23, repositioned
+Order C: ❌ NOT MOVED — target date unchanged, stays in current position
+```
+
+---
+
+## 4. DAILY TARGET DATE UPDATE — AUTO-RECALCULATE ON N10D UPLOAD
+
+When a new N10D file is uploaded daily, the app automatically recalculates target dates for ALL matched products, including orders that have already been sequenced.
+
+### TRIGGER
+
+- User uploads a new Next 10 Days file
+
+### BEHAVIOR
+
+**Step 1: Recalculate target dates**
+- For every product in the new N10D file, recalculate the target date using the cumulative loading algorithm
+- Compare the new target date with the previously stored target date
+
+**Step 2: Update stored target dates**
+- For each matched order, update the internal `last_target_date` field
+- This does NOT automatically change the avail date — that only happens via Auto-Sequence
+
+**Step 3: Update warning icons in the main table**
+- The ⚠ / ✅ icons in the Avail Date column update based on the new target dates
+- Tooltip on hover shows the updated target date
+- If a previously sequenced order's target date changed:
+  - Icon changes from ⚠ grey to ⚠ amber or ⚠ red (depending on urgency)
+  - Tooltip shows: "Target date changed: March 25 → March 23. Run Auto-Sequence to update."
+
+**Step 4: DO NOT auto-move orders**
+- The N10D upload does NOT automatically reposition orders
+- It only updates the internal target dates and visual indicators
+- The user must click Auto-Sequence to apply the new positions
+
+### NOTIFICATION
+
+After N10D upload with changed target dates:
+
+```
+✅ Next 10 Days Updated
+
+20 products recalculated.
+• 3 orders have updated target dates:
+  - Order B: March 25 → March 23
+  - Order F: March 28 → March 26  
+  - Order G: Stock sufficient → March 27 (now needs production)
+
+Run Auto-Sequence to apply updated positions.
+```
+
+---
+
+## 5. PRODUCTION INSIGHTS — REFLECT TARGET DATE CHANGES
+
+The Production Insights panel should highlight when target dates have changed since the last auto-sequence.
+
+**New insight type — Target date changed:**
+```
+📊 Target Date Updated
+
+Order B (Elite XP Startex, prio replenish) has an 
+updated stock target date. Previous target: March 25. 
+New target: March 23 (2 days earlier). 
+
+Run Auto-Sequence to update this order's position 
+in the schedule.
+```
+
+**New insight type — New production need:**
+```
+📊 New Production Need
+
+Order G (Gallimax Pigeon Pellet, safety stocks) was 
+previously "Stock sufficient" but updated stock data 
+now shows production is needed by March 27. 
+
+Run Auto-Sequence to prioritize this order.
+```
+
+---
+
+## 6. AUTO-SEQUENCE AI INSIGHTS — HIGHLIGHT CHANGES
+
+When the user clicks Auto-Sequence, the AI Sequence Analysis should clearly highlight what changed compared to the current arrangement.
+
+**New topic in AI insights — Changes from previous sequence:**
+
+```
+🔄 Changes Since Last Sequence
+
+3 orders have updated positions based on new stock data:
+
+• Order B (Elite XP Startex): Target moved from Mar 25 
+  to Mar 23. Repositioned from Prio 5 to Prio 3.
+
+• Order F (Classic Hog Growex): Target moved from Mar 28 
+  to Mar 26. Repositioned from Prio 8 to Prio 6.
+
+• Order G (Gallimax Pigeon Pellet): Previously stock 
+  sufficient, now needs production by Mar 27. Added 
+  to active sequence at Prio 7.
+
+7 orders unchanged — positions remain the same.
+```
+
+**For first-time sequencing (no previous sequence):**
+- This section is labeled "📊 Initial Sequence" instead of "Changes"
+- Lists all non-dated orders and where they were placed
+
+---
+
+## 7. STOCK SUFFICIENT — DISPLAY AND UPDATE
+
+### DISPLAY IN AVAIL DATE CELL
+
+**Stock Sufficient (after auto-sequence approval):**
+```
+┌─────────────────────────────────┐
+│ Stock sufficient            ↩   │   ← green text (#43a047)
+│ Originally: safety stocks       │   ← grey italic, 10px
+└─────────────────────────────────┘
+```
+
+### DAILY UPDATE — STOCK SUFFICIENT CAN BECOME NEEDS PRODUCTION
+
+If a new N10D upload shows that a previously Stock Sufficient product now has a red highlight (needs production):
+
+1. Internal target date updates from null to a specific date
+2. Warning icon changes from ✅ (green check) to ⚠ (amber warning)
+3. Tooltip updates: "Previously stock sufficient. Now needs production by March 27."
+4. Production Insights panel shows the change
+5. User runs Auto-Sequence to reposition the order
+
+**After subsequent auto-sequence approval:**
+```
+┌─────────────────────────────────┐
+│ March 27, 2026              ↩   │   ← new date
+│ Originally: safety stocks       │   ← original value preserved
+└─────────────────────────────────┘
+```
+
+The original value ALWAYS stays as "safety stocks" (or "prio replenish") — it never changes to "Stock sufficient" permanently. "Stock sufficient" is a temporary status that can change with daily N10D updates.
+```

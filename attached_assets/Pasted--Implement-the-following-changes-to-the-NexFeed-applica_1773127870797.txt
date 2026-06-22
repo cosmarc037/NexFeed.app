@@ -1,0 +1,161 @@
+```
+Implement the following changes to the NexFeed application:
+
+---
+
+## 1. SCHEDULING — REVISED SEQUENCING RULES
+
+Update the scheduling and sequencing logic to follow these core principles:
+
+**Principle 1 — No idle plant time:**
+- The plant should NEVER be idle when there are orders to produce.
+- If the earliest dated order is March 22 and today is March 10, the plant should NOT sit idle for 12 days waiting for that order.
+- Non-dated orders (prio replenish, safety stocks) must be slotted BEFORE dated orders to keep the plant running continuously from the current date until the dated orders need to start.
+
+**Principle 2 — Earliest Avail Date first among dated orders:**
+- When multiple orders have valid Avail Dates, they must be sorted by Avail Date from EARLIEST to LATEST.
+- March 19 comes before March 22, which comes before March 25, etc.
+- If two orders share the same Avail Date, maintain their original upload order or sort by Volume (larger first).
+
+**Principle 3 — Non-dated orders fill gaps and front-load the timeline:**
+- Non-dated orders are produced FIRST (starting from the current date/upload date at 08:00 AM) to keep the plant running.
+- They continue cascading until the first dated order needs to begin production.
+- If there are gaps between consecutive dated orders, additional non-dated orders fill those gaps.
+- Any remaining non-dated orders that don't fit in gaps are placed after the last dated order.
+
+**Principle 4 — Dated orders anchor to their Avail Dates:**
+- Each dated order must complete ON or BEFORE its Avail Date.
+- The system works backwards from each dated order's Avail Date to determine the latest possible Start Date/Time.
+- Non-dated orders are fitted into the time before and between these anchor points.
+
+**Corrected scheduling example:**
+
+Current date: March 10, 2026
+
+Orders in the line:
+- Order A: Avail Date March 22, Production Time 4 hours
+- Order B: Avail Date March 19, Production Time 6 hours
+- Order C: prio replenish, Production Time 5 hours
+- Order D: safety stocks, Production Time 4 hours
+- Order E: prio replenish, Production Time 3 hours
+- Order F: safety stocks, Production Time 8 hours
+
+**Incorrect sequence (current bug):**
+```
+Prio 1: Order A (March 22) — Start March 10, 08:00 AM ← wrong, March 22 before March 19
+Prio 2: Order B (March 19) — cascades ← wrong, should be before March 22
+Prio 3: Order C (prio replenish) — cascades
+Prio 4: Order D (safety stocks) — cascades
+...
+```
+
+**Correct sequence:**
+```
+Prio 1: Order C (prio replenish) — Start March 10, 08:00 AM ← fill plant time
+Prio 2: Order D (safety stocks) — cascades from Prio 1 ← fill plant time
+Prio 3: Order E (prio replenish) — cascades from Prio 2 ← fill plant time
+Prio 4: Order F (safety stocks) — cascades from Prio 3 ← fill plant time
+Prio 5: Order B (March 19) — cascades, completes on or before March 19 ✅ ← earliest date first
+Prio 6: Order A (March 22) — cascades, completes on or before March 22 ✅ ← later date after
+```
+
+The plant runs continuously from March 10 with no idle days.
+
+**On initial upload — auto-sequencing behavior:**
+- When orders are FIRST uploaded (no existing orders in the line), the system should automatically arrange them following these principles:
+  1. Sort dated orders by Avail Date (earliest first)
+  2. Calculate when each dated order needs to start (work backwards from Avail Date)
+  3. Calculate total available time before the first dated order's required start
+  4. Fill that time with non-dated orders
+  5. Fill gaps between dated orders with remaining non-dated orders
+  6. Place any leftover non-dated orders after the last dated order
+- This auto-arrangement happens automatically on upload — the user sees the orders already in an optimized sequence.
+
+**After initial upload — user control:**
+- The user can freely reorder via drag-and-drop.
+- The cascade recalculates after every reorder.
+- Conflict flags appear if any dated order's Completion exceeds its Avail Date.
+- The Auto-Sequence button is available to re-optimize at any time.
+
+---
+
+## 2. AUTO-SEQUENCE — INTERACTIVE TABLE FORMAT WITH DRAG AND DROP
+
+Redesign the Auto-Sequence simulation preview from a side-by-side comparison to an interactive table format where users can further adjust the proposed sequence before applying.
+
+**Revised simulation preview modal:**
+
+**Modal title:** "Auto-Sequence Preview — [Feedmill Name] [Line X]"
+
+**Modal size:** Full-screen or near full-screen overlay to accommodate the table.
+
+**Top section — Summary bar:**
+```
+Orders analyzed: [X] | Dated orders: [X] | Non-dated orders: [X] | Conflicts: [X] | Trade-offs: [X]
+```
+
+**AI Insights toggle:**
+- A collapsible section at the top (below summary bar) showing the AI's reasoning:
+  - "Placed [X] non-dated orders first to fill [Y] hours of production time from March 10 to March 19."
+  - "Sorted dated orders by Avail Date: March 19 → March 22 → March 25."
+  - "⚠ Trade-off: [Item Description] (prio replenish) requires 8 hours but only 6 hours available in gap between March 19 and March 22 orders. Placed after all dated orders instead."
+- Default: Collapsed (click to expand) so the table has maximum space.
+
+**Main section — Interactive simulation table:**
+
+The simulation table mirrors the interactive table layout with the same columns:
+- Prio | FPR | Planned Order [FG | SFG] | Material Code (FG) | Item Description | Form | Volume (MT) | Batch Size | Number of Batches | Start Date | Start Time | Avail Date | Completion Date
+
+**Key differences from the main interactive table:**
+- The table shows the AI-proposed sequence (orders already reordered by the AI).
+- ALL rows are draggable — the user can drag-and-drop rows to further adjust the sequence within the simulation.
+- When a row is moved, the cascade recalculates IN REAL-TIME within the simulation:
+  - All Start Dates, Start Times, and Completion Dates update immediately.
+  - Conflict flags update immediately (red highlight if Completion exceeds Avail Date).
+
+**Row visual indicators:**
+
+| Indicator | Meaning | Visual |
+|---|---|---|
+| ✅ Green left border | Order completes on or before Avail Date | 4px solid green (#43a047) left border |
+| ⚠️ Yellow left border | Non-dated order, tight fit in gap | 4px solid yellow (#f9a825) left border |
+| 🔴 Red left border | Completion exceeds Avail Date (conflict) | 4px solid red (#e53935) left border |
+| ⬜ Grey left border | Non-dated order, no deadline | 4px solid grey (#a1a8b3) left border |
+| 🔵 Blue background | Order was moved from its original position | Light blue background (#e3f2fd) |
+
+**Avail Date column in simulation:**
+- Valid dates: Dark Grey text, normal display.
+- Non-date values (prio replenish, safety stocks): Orange text (#fd5108) as per existing rule.
+
+**Drag-and-drop in simulation:**
+- Same drag-and-drop behavior as the main interactive table.
+- Grab cursor on empty row space, text cursor on text content.
+- Combined order groups move as a block.
+- After each drop:
+  - Prio numbers re-sequence (1, 2, 3, ...).
+  - Full cascade recalculates from Prio 1 down.
+  - Conflict indicators update.
+  - Summary bar updates (conflict count, trade-off count).
+
+**Real-time cascade preview:**
+- As the user drags a row, show a ghost preview of where it will land.
+- After dropping, the cascade animation shows Start Dates and Completion Dates rippling down the table (subtle animation, ~300ms per row).
+
+**Bottom section — Action buttons:**
+
+```
+[Apply to Schedule]  [Reset to AI Suggestion]  [Cancel]
+```
+
+- **Apply to Schedule:** Takes the current state of the simulation table (including any user drag-and-drop adjustments) and applies it to the main interactive table. All Prio numbers, Start Dates, Start Times, Completion Dates overwrite the current schedule. Triggers a full cascade recalculation on the main table.
+- **Reset to AI Suggestion:** Reverts the simulation table back to the original AI-proposed sequence, undoing any user adjustments within the simulation.
+- **Cancel:** Closes the modal without making any changes to the main table.
+
+**Confirmation dialog on Apply:**
+- "Apply this sequence to your current schedule? This will reorder all [X] orders in [Line X] and recalculate all scheduling dates."
+- [Confirm Apply] [Go Back]
+
+**Loading state:**
+- "Analyzing [X] orders... Building optimal sequence..." with progress animation.
+- After analysis completes, the table appears with the proposed sequence.
+```

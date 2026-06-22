@@ -1,0 +1,251 @@
+```
+Fix the drag/reorder validation so orders with status "Planned" are treated as not-yet-started orders and cannot be moved above active production statuses.
+
+---
+
+## PROBLEM TO FIX
+
+Currently, a row with status `Planned` can still be moved above an `On-going batching` order.
+
+This is incorrect.
+
+Based on the intended status flow:
+- Done
+- On-going bagging
+- On-going pelleting
+- On-going batching
+- Plotted / Planned / Hold / Cut / Combined with other PO
+- Cancel PO
+
+`Planned` must behave like the other not-yet-started statuses.
+
+However, it appears that only `Planned` is slipping through the drag/reorder validation, while the other statuses are already being handled correctly.
+
+This likely means `Planned` is missing from the blocked/not-yet-started validation logic.
+
+---
+
+## OBJECTIVE
+
+Make sure `Planned` is treated exactly like:
+- Plotted
+- Hold
+- Cut
+- Combined with other PO
+
+for drag/reorder and placement validation.
+
+A `Planned` order must not be allowed above:
+- Done
+- On-going batching
+- On-going pelleting
+- On-going bagging
+
+---
+
+## 1. ADD "PLANNED" TO THE NOT-YET-STARTED STATUS GROUP
+
+Find the helper or validation logic that identifies not-yet-started statuses.
+
+It likely looks something like:
+```javascript
+function isNotYetStartedStatus(status) {
+  const s = String(status || '').trim().toLowerCase();
+  return ['plotted', 'hold', 'cut', 'combined with other po'].includes(s);
+}
+```
+
+Update it to include `planned`:
+
+```javascript
+function isNotYetStartedStatus(status) {
+  const s = String(status || '').trim().toLowerCase();
+  return ['plotted', 'planned', 'hold', 'cut', 'combined with other po'].includes(s);
+}
+```
+
+This should be the shared source of truth for:
+- drag validation
+- placement checks
+- on-going status validation
+
+---
+
+## 2. MAKE SURE "PLANNED" GETS THE CORRECT FLOW RANK
+
+Check the status ranking helper.
+
+It should already place `planned` in the not-yet-started block, but verify this explicitly.
+
+```javascript
+function getStatusFlowRank(status) {
+  const s = String(status || '').trim().toLowerCase();
+
+  if (s === 'done') return 1;
+  if (s === 'on-going bagging') return 2;
+  if (s === 'on-going pelleting') return 3;
+  if (s === 'on-going batching') return 4;
+  if (['plotted', 'planned', 'hold', 'cut', 'combined with other po'].includes(s)) return 5;
+  if (s === 'cancel po') return 6;
+
+  return 5;
+}
+```
+
+If `planned` is missing here or routed incorrectly, fix it.
+
+---
+
+## 3. BLOCK DRAGGING A PLANNED ORDER ABOVE ON-GOING OR DONE ORDERS
+
+Update drag/drop validation so that if the dragged order is `Planned`, it cannot be dropped into a position that would place it above:
+- Done
+- On-going batching
+- On-going pelleting
+- On-going bagging
+
+### Example invalid case
+Current:
+- Done
+- On-going batching
+- Planned
+
+User tries to drag `Planned` above `On-going batching`
+
+This must be blocked.
+
+### Suggested validation pattern
+```javascript
+function isProtectedProductionBlockStatus(status) {
+  const s = String(status || '').trim().toLowerCase();
+  return [
+    'done',
+    'on-going batching',
+    'on-going pelleting',
+    'on-going bagging',
+  ].includes(s);
+}
+```
+
+Then if dragged order is not-yet-started and target placement would put it above any protected production-block row, reject the move.
+
+---
+
+## 4. USE SHARED STATUS HELPERS INSTEAD OF HARDCODED ONE-OFF CHECKS
+
+The issue likely happened because one drag validation path is using a partial hardcoded list that forgot `planned`.
+
+Refactor validation to reuse shared helpers like:
+- `isNotYetStartedStatus(status)`
+- `isInProductionStatus(status)`
+- `isProtectedProductionBlockStatus(status)`
+- `getStatusFlowRank(status)`
+
+Do not duplicate partial status arrays in multiple places.
+
+This will prevent `planned` from being missed in one logic branch.
+
+---
+
+## 5. ADD A SPECIFIC GUARD FOR THE DROP TARGET
+
+When dragging a `Planned` order:
+- if the new index would insert it before an order whose status is:
+  - Done
+  - On-going batching
+  - On-going pelleting
+  - On-going bagging
+then block the move
+
+### Suggested logic:
+```javascript
+function canMoveOrderToIndex(orders, fromIndex, toIndex) {
+  const movingOrder = orders[fromIndex];
+  const movingStatus = String(movingOrder?.status || '').trim().toLowerCase();
+
+  if (isNotYetStartedStatus(movingStatus)) {
+    const targetOrdersBefore = orders.slice(0, toIndex);
+    const hasProtectedStatusAbove = targetOrdersBefore.some(order =>
+      isProtectedProductionBlockStatus(order.status)
+    );
+
+    if (hasProtectedStatusAbove) {
+      return false;
+    }
+  }
+
+  return true;
+}
+```
+
+If your drag implementation works differently, apply the same rule in the appropriate handler.
+
+Important:
+- this should definitely catch `Planned`
+
+---
+
+## 6. SHOW A WARNING WHEN THIS HAPPENS
+
+If the user tries to drag a `Planned` order above an active production order, show a warning message.
+
+Suggested warning:
+```text
+A planned order cannot be placed above an order that is already done or currently in production.
+```
+
+Alternative:
+```text
+This planned order cannot be moved above the active production block.
+```
+
+---
+
+## 7. CHECK ANY SPECIAL CASE LOGIC FOR "PLANNED"
+
+Search for all places where status logic checks use lists like:
+- `['plotted', 'hold', 'cut']`
+- `status !== 'planned'`
+- `if (status === 'planned') return true`
+
+There may be a special case that accidentally exempts `Planned` from the reorder restriction.
+
+If found, remove the exemption and align `Planned` with the rest of the not-yet-started statuses.
+
+---
+
+## 8. ADD DEBUG LOGGING FOR DRAG VALIDATION
+
+Temporarily add logs to confirm `Planned` is being recognized correctly.
+
+```javascript
+console.debug('[Drag Validation]', {
+  movingOrderId: movingOrder?.id,
+  movingStatus: movingOrder?.status,
+  fromIndex,
+  toIndex,
+  isNotYetStarted: isNotYetStartedStatus(movingOrder?.status),
+  blocked: !canMoveOrderToIndex(orders, fromIndex, toIndex),
+});
+```
+
+This will help verify that:
+- `Planned` now returns true for not-yet-started
+- invalid moves are blocked
+
+---
+
+## 9. VERIFICATION
+
+### Planned status behavior
+1. ✅ `Planned` is included in the not-yet-started status group
+2. ✅ `Planned` gets the same placement rank as Plotted/Hold/Cut
+3. ✅ `Planned` can no longer be dragged above Done
+4. ✅ `Planned` can no longer be dragged above On-going batching
+5. ✅ `Planned` can no longer be dragged above On-going pelleting
+6. ✅ `Planned` can no longer be dragged above On-going bagging
+
+### Consistency
+7. ✅ `Planned` now behaves consistently with other not-yet-started statuses
+8. ✅ Shared helper logic is used so future status bugs are less likely
+9. ✅ User gets a warning when trying to make an invalid move

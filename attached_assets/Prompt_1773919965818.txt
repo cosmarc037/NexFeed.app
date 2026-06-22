@@ -1,0 +1,242 @@
+```
+Implement the following changes to the NexFeed application:
+
+---
+
+## UPLOAD HISTORY — TABLE FORMAT WITH SEARCH/FILTER
+
+Convert the Upload History section from a card/container list to a proper table format, with a search/date filter. Apply to BOTH Knowledge Base and Next 10 Days pages.
+
+---
+
+### UPLOAD HISTORY — TABLE LAYOUT
+
+Replace the current card-style entries with a proper data table:
+
+```
+Upload History
+
+🔍 Search by filename...    📅 Date filter    Showing 5 of 12 uploads
+
+┌────┬──────────────────────────┬─────────────────────────┬──────────┬────────┬──────────────┐
+│ #  │ File Name                │ Upload Date             │ Records  │ Status │ Actions      │
+├────┼──────────────────────────┼─────────────────────────┼──────────┼────────┼──────────────┤
+│ 1  │ Dummy 10 Days.xlsx       │ 03/19/2026 04:22 PM     │ 20       │ Active │  ↓    🗑     │
+│ 2  │ SAP Planned Orders.xlsx  │ 03/19/2026 04:12 PM     │ 46       │        │  ↓    🗑     │
+│ 3  │ Dummy 10 Days.xlsx       │ 03/19/2026 03:18 PM     │ 20       │        │  ↓    🗑     │
+│ 4  │ Dummy 10 Days.xlsx       │ 03/19/2026 01:47 PM     │ 20       │        │  ↓    🗑     │
+│ 5  │ Dummy 10 Days.xlsx       │ 03/19/2026 01:10 PM     │ 20       │        │  ↓    🗑     │
+└────┴──────────────────────────┴─────────────────────────┴──────────┴────────┴──────────────┘
+```
+
+---
+
+### TABLE COLUMNS
+
+| Column | Width | Alignment | Description |
+|---|---|---|---|
+| # | ~40px | Center | Row number (1, 2, 3...) |
+| File Name | ~35% | Left | Name of the uploaded file |
+| Upload Date | ~25% | Left | Date and time of upload (MM/DD/YYYY HH:MM AM/PM) |
+| Records | ~10% | Center | Number of records/products in the file |
+| Status | ~10% | Center | "Active" badge or empty |
+| Actions | ~10% | Center | Download (↓) and Delete (🗑) buttons |
+
+---
+
+### TABLE STYLING — MATCH KNOWLEDGE BASE DATA TABLE
+
+The upload history table must use the SAME styling as the main data tables:
+
+| Element | Styling |
+|---|---|
+| Header row background | White |
+| Header text | 10px, uppercase, font-weight 600, grey (#6b7280), letter-spacing 0.5px |
+| Header border-bottom | 1px solid #e5e7eb |
+| Data row background | White |
+| Data row border-bottom | 1px solid #f3f4f6 |
+| Data row hover | Very subtle grey (#fafafa) |
+| Data cell font-size | 12px |
+| Data cell color | Dark grey (#374151) |
+| Data cell padding | 10px 12px |
+| Row height | Compact, matching KB table density |
+
+**File Name column:**
+- Font-weight: 500 (medium).
+- Color: Dark text (#1a1a1a).
+
+**Upload Date column:**
+- Font-weight: 400 (regular).
+- Color: Grey (#6b7280).
+
+**Records column:**
+- Font-weight: 400.
+- Color: Grey (#6b7280).
+- Display as just the number (e.g., "20", "46"), no "products" suffix.
+
+**Status column:**
+- "Active" badge:
+  - Green text (#43a047), 10px, font-weight 600.
+  - Light green background (#dcfce7).
+  - Padding: 2px 8px.
+  - Border-radius: 4px.
+  - Small pill/badge shape.
+- Non-active rows: empty cell (no badge).
+
+**Actions column:**
+- Two icon buttons side by side, center-aligned.
+- Download (↓): Grey (#9ca3af), hover orange (#fd5108). Cursor: pointer.
+- Delete (🗑): Grey (#9ca3af), hover red (#e53935). Cursor: pointer.
+- Gap between icons: 10px.
+- Icon size: 14px.
+
+---
+
+### SEARCH AND DATE FILTER
+
+Above the upload history table, add a search bar and date filter, similar to the main data table search bars.
+
+```
+🔍 Search by filename...    📅 Date filter    Showing 5 of 12 uploads
+```
+
+**Search input:**
+
+| Property | Value |
+|---|---|
+| Width | ~250px |
+| Placeholder | "Search by filename..." |
+| Border | 1px solid #d1d5db |
+| Border radius | 6px |
+| Font size | 12px |
+| 🔍 icon | Inside input, left side, grey |
+| Focus border | Orange (#fd5108) |
+
+**Search behavior:**
+- Filters the upload history table in real-time.
+- Searches across file name.
+- Case-insensitive, partial match.
+
+**Date filter:**
+
+| Property | Value |
+|---|---|
+| Type | Date picker or date range picker |
+| Width | ~200px |
+| Placeholder | "Filter by date..." |
+| Border | 1px solid #d1d5db |
+| Border radius | 6px |
+| Font size | 12px |
+| 📅 icon | Inside input, left side, grey |
+| Focus border | Orange (#fd5108) |
+
+**Date filter behavior:**
+- Filters uploads by date.
+- Options:
+  - Select a single date → shows all uploads from that date.
+  - Select a date range → shows all uploads within the range.
+  - Clear filter → shows all uploads.
+
+**Upload count:**
+- "Showing X of Y uploads" — orange text (#fd5108), 12px.
+- Updates in real-time as user searches/filters.
+- Position: right of the date filter, same line.
+
+**Layout:**
+```
+[🔍 Search input]  [📅 Date filter]  Showing X of Y uploads
+```
+- All on one line, left-to-right.
+- Gap between elements: 12px.
+- Margin below (before table): 12px.
+
+---
+
+### TABLE MAX HEIGHT AND SCROLLING
+
+For pages with many uploads:
+
+| Property | Value |
+|---|---|
+| Max height | 300px |
+| Overflow-y | Auto (vertical scroll when exceeding max height) |
+| Sticky header | Table header row stays fixed when scrolling within the upload history |
+
+---
+
+### SECTION TITLE
+
+```
+Upload History
+```
+
+| Property | Value |
+|---|---|
+| Font size | 14px |
+| Font weight | 600 |
+| Color | Dark text (#1a1a1a) |
+| Margin top | 24px (space from main content above) |
+| Margin bottom | 12px (space before search bar) |
+
+---
+
+### COMPLETE VISUAL EXAMPLE
+
+```
+Upload History
+────────────────────────────────────────────────────────────
+
+🔍 Search by filename...   📅 Filter by date...   Showing 5 of 5 uploads
+
+┌────┬──────────────────────────────┬─────────────────────────┬─────────┬────────┬──────────┐
+│ #  │ FILE NAME                    │ UPLOAD DATE             │ RECORDS │ STATUS │ ACTIONS  │
+├────┼──────────────────────────────┼─────────────────────────┼─────────┼────────┼──────────┤
+│ 1  │ Dummy 10 Days.xlsx           │ 03/19/2026 04:22 PM     │ 20      │ Active │  ↓  🗑   │
+├────┼──────────────────────────────┼─────────────────────────┼─────────┼────────┼──────────┤
+│ 2  │ SAP Planned Orders.xlsx      │ 03/19/2026 04:12 PM     │ 46      │        │  ↓  🗑   │
+├────┼──────────────────────────────┼─────────────────────────┼─────────┼────────┼──────────┤
+│ 3  │ Dummy 10 Days.xlsx           │ 03/19/2026 03:18 PM     │ 20      │        │  ↓  🗑   │
+├────┼──────────────────────────────┼─────────────────────────┼─────────┼────────┼──────────┤
+│ 4  │ Dummy 10 Days.xlsx           │ 03/19/2026 01:47 PM     │ 20      │        │  ↓  🗑   │
+├────┼──────────────────────────────┼─────────────────────────┼─────────┼────────┼──────────┤
+│ 5  │ Dummy 10 Days.xlsx           │ 03/19/2026 01:10 PM     │ 20      │        │  ↓  🗑   │
+└────┴──────────────────────────────┴─────────────────────────┴─────────┴────────┴──────────┘
+```
+
+---
+
+### EMPTY STATE
+
+When no files have been uploaded:
+
+```
+Upload History
+────────────────────────────────────────────────────────────
+
+No uploads yet. Upload a file to get started.
+```
+
+- Grey text (#9ca3af), 12px, italic, centered within the table area.
+- Search bar and date filter hidden when no uploads exist.
+
+---
+
+### APPLIES TO BOTH PAGES
+
+Implement this IDENTICAL upload history table on:
+
+1. **Knowledge Base page** — showing only Knowledge Base file uploads.
+2. **Next 10 Days page** — showing only Next 10 Days file uploads.
+
+Each page has its own INDEPENDENT upload history. They do NOT share data.
+
+---
+
+### DELETE BUTTON BEHAVIOR
+
+Same as previously defined:
+- Click 🗑 → confirmation dialog appears.
+- Active file deletion shows extra warning.
+- Non-active file deletion is simpler.
+- Toast notification on successful delete.
+```

@@ -1,0 +1,239 @@
+Please fix the Daily utilization KPI in the auto-sequence cards.
+
+There are three issues to correct:
+
+1. the expand/collapse arrow is placed before the label instead of after it
+2. the expanded per-day breakdown is not displayed in a clean table-like format
+3. the expanded breakdown is not showing all relevant dates from the selected sequence
+
+The per-day breakdown must be grouped by **Avail Date**.
+
+---
+
+## OBJECTIVE
+
+Improve the Daily utilization KPI so it is:
+- visually clean
+- easy to scan
+- correctly grouped by Avail Date
+- fully reflective of all dates present in the selected sequence
+
+Right now the expanded section is not aligned to the intended UX.
+
+---
+
+## ISSUE 1 — CHEVRON / ARROW POSITION
+
+### Current problem
+The arrow is currently shown before the label, like:
+- `▾ Daily utilization`
+
+### Required fix
+Move the arrow so it appears **after** the label, like:
+
+Collapsed:
+- `Daily utilization ▸`
+
+Expanded:
+- `Daily utilization ▾`
+
+This should be the exact visible format.
+
+Do not place the arrow before the text.
+
+---
+
+## ISSUE 2 — PER-DAY BREAKDOWN LAYOUT IS MESSY
+
+### Current problem
+The expanded daily utilization content is rendered like loose text rows, making it hard to scan.
+
+### Required fix
+Render the expanded breakdown in a structured, table-like layout with aligned columns.
+
+It does not necessarily have to be a formal HTML table, but it should visually behave like one.
+
+### Required columns
+Each row should clearly and consistently show:
+
+- Date
+- Orders
+- Hours
+- Utilization %
+
+### Example layout
+
+```text
+Daily utilization ▾                         +14.0%
+
+Date           Orders      Hours      Utilization
+May 09, 2026   4 orders    16.0 hrs   66.7%
+May 11, 2026   2 orders     7.1 hrs   29.7%
+May 13, 2026   3 orders    12.4 hrs   51.7%
+May 14, 2026   5 orders    18.0 hrs   75.0%
+May 15, 2026   2 orders     8.2 hrs   34.2%
+May 22, 2026   1 order      3.0 hrs   12.5%
+
+Capacity utilization: Low
+```
+
+Make sure:
+- columns line up cleanly
+- rows are easy to compare
+- spacing is visually consistent
+
+---
+
+## ISSUE 3 — NOT ALL DATES ARE BEING SHOWN
+
+### Current problem
+The selected sequence clearly includes multiple avail dates, such as:
+- May 9
+- May 11
+- May 13
+- May 14
+- May 15
+- May 22
+
+But the Daily utilization breakdown only shows a subset, such as:
+- May 11
+- May 12
+
+This is incorrect.
+
+### Required fix
+The expanded breakdown must include **all relevant dates from the selected sequence**, grouped by **Avail Date**.
+
+Do not:
+- truncate the date list
+- show only a partial subset
+- silently exclude dates
+- group by the wrong field
+
+---
+
+## GROUPING RULE — USE AVAIL DATE
+
+The per-day Daily utilization breakdown must be grouped by:
+
+- **Avail Date**
+
+This is the required grouping basis.
+
+Do not group by:
+- Start Date
+- Estimated Completion Date
+- Production Start Date
+- any derived date unless it is explicitly the Avail Date bucket
+
+If the selected sequence contains orders with different avail dates, every avail date represented in that strategy’s resulting sequence should appear in the expanded breakdown.
+
+---
+
+## HOW TO AGGREGATE EACH AVAIL DATE ROW
+
+For each Avail Date in the selected sequence, aggregate:
+
+1. **Orders**
+   - total number of orders assigned to that Avail Date bucket
+
+2. **Hours**
+   - total used hours for that Avail Date bucket
+   - this should include:
+     - production hours
+     - plus changeovers assigned to that date
+
+3. **Utilization %**
+   - `(used hours / 24) * 100`
+   - because the plant operates 24/7
+
+### Example
+If Avail Date = May 14 and total used hours for that date = 18.0:
+- utilization = `18.0 / 24 = 75.0%`
+
+---
+
+## KEEP THE CARD KPI VALUE AS-IS
+
+Do not change the top-level KPI concept.
+
+The card header row should still show:
+- Daily utilization ▸ / ▾
+- the average utilization improvement vs Standard
+
+Example:
+- `Daily utilization ▾    +14.0%`
+
+Only fix:
+- the arrow placement
+- the breakdown layout
+- the date aggregation completeness
+
+---
+
+## STANDARD SEQUENCE SHOULD FOLLOW THE SAME RULES
+
+Make sure Standard Sequence also uses the same corrected behavior:
+- arrow after label
+- clean table-like expanded layout
+- all Avail Dates included
+- grouped by Avail Date
+
+This should be consistent across all strategy cards.
+
+---
+
+## UI / VISUAL EXPECTATIONS
+
+Please ensure:
+- the expanded section looks neat and structured
+- the summary KPI row remains compact
+- the per-day rows do not wrap awkwardly
+- date, orders, hours, and utilization are aligned in predictable columns
+- the footer text (`Capacity utilization: Improved/Low`) remains below the breakdown
+
+---
+
+## DEBUG / VALIDATION
+
+Temporarily log:
+
+```javascript
+console.debug('[Daily Utilization Breakdown]', {
+  strategyId,
+  title: strategy.title,
+  groupedBy: 'availDate',
+  availDatesFound: groupedRows.map(r => r.availDate),
+  groupedRows: groupedRows.map(r => ({
+    availDate: r.availDate,
+    orderCount: r.orderCount,
+    usedHours: r.usedHours,
+    utilizationPercent: r.utilizationPercent,
+  })),
+});
+```
+
+This should help verify:
+- the grouping is truly based on Avail Date
+- no dates are missing
+- the displayed rows match the selected sequence
+
+---
+
+## VERIFICATION
+
+1. ✅ The Daily utilization arrow is now placed after the label:
+   - `Daily utilization ▸`
+   - `Daily utilization ▾`
+2. ✅ The expanded Daily utilization content is displayed in a clean table-like layout
+3. ✅ The expanded layout includes aligned columns for:
+   - Date
+   - Orders
+   - Hours
+   - Utilization %
+4. ✅ The breakdown is grouped by **Avail Date**
+5. ✅ All Avail Dates present in the selected sequence are included in the expanded breakdown
+6. ✅ Dates are no longer missing or partially shown
+7. ✅ Hours still represent total used hours for that date, including production + changeovers
+8. ✅ Standard Sequence follows the same corrected behavior
+9. ✅ The KPI remains visually clean and easier to understand

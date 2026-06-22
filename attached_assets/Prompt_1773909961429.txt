@@ -1,0 +1,261 @@
+I can see the table is working now with dates, red highlights, and target dates. But the styling is a bit heavy compared to the app's minimalist design. Let me fix that:
+
+```
+Implement the following visual changes to the Next 10 Days preview table to match the app's minimalist look and feel:
+
+---
+
+## NEXT 10 DAYS TABLE — MINIMALIST STYLING
+
+The current table has colored header backgrounds (blue-grey, orange, green) that feel heavy. Simplify to match the app's clean, light design.
+
+---
+
+### MAIN HEADER GROUPS — SIMPLIFY
+
+**Current (too heavy):**
+- Product Details: Blue-grey background
+- Next 10 Days: Orange background
+- Tracking: Green background
+
+**Updated (minimalist):**
+
+| Header Group | Background | Text Color | Border |
+|---|---|---|---|
+| Product Details | White (#ffffff) | Dark grey (#374151) | Bottom: 2px solid #e5e7eb |
+| Next 10 Days | White (#ffffff) | Dark grey (#374151) | Bottom: 2px solid #e5e7eb |
+| Tracking | White (#ffffff) | Dark grey (#374151) | Bottom: 2px solid #e5e7eb |
+
+- All three headers: White background, same dark grey text.
+- Uppercase, 11px, font-weight 600, letter-spacing 0.5px.
+- NO colored backgrounds on main headers.
+- Subtle bottom border only.
+- To distinguish the groups, add a thin vertical divider (1px solid #e5e7eb) between groups.
+
+```
+┌──────────────────────────────┊─────────────────────────────┊──────────────────────────────┐
+│      PRODUCT DETAILS         ┊        NEXT 10 DAYS         ┊          TRACKING            │
+├──────────────────────────────┊─────────────────────────────┊──────────────────────────────┤
+```
+
+---
+
+### SUB-HEADERS (COLUMN NAMES) — SIMPLIFY
+
+**Current:** Dark colored text with uppercase.
+
+**Updated:**
+
+| Property | Value |
+|---|---|
+| Background | White (#ffffff) |
+| Text color | Grey (#9ca3af) |
+| Font size | 10px |
+| Font weight | 600 |
+| Text transform | Uppercase |
+| Letter spacing | 0.5px |
+| Border bottom | 1px solid #f3f4f6 (very light) |
+| Padding | 8px 12px |
+
+- Subtle, quiet headers that don't compete with the data.
+- Same grey as the app's other table headers.
+
+---
+
+### DATA ROWS — CLEAN AND LIGHT
+
+**Row styling:**
+
+| Property | Value |
+|---|---|
+| Background | White (#ffffff) |
+| Border bottom | 1px solid #f3f4f6 (barely visible) |
+| Padding | 12px per cell |
+| Font size | 13px |
+| Text color | Dark grey (#374151) |
+| Row hover | Very subtle grey (#fafafa) |
+
+**Alternating row colors:** Do NOT use alternating colors. Keep all rows white for a cleaner look matching the app's interactive table.
+
+---
+
+### BOLD VALUES — DUE FOR LOADING AND INVENTORY
+
+Keep these bold as specified:
+
+- Due for Loading: font-weight 700, dark text (#1a1a1a), center-aligned.
+- Inventory: font-weight 700, dark text (#1a1a1a), center-aligned.
+
+---
+
+### INVENTORY COLUMN — LIGHT GRAY HIGHLIGHT
+
+Keep the light grey background on the Inventory column but make it more subtle:
+
+| Property | Value |
+|---|---|
+| Background | #f9fafb (very light grey, almost white) |
+| Applies to | Header cell AND all data cells in Inventory column |
+
+- Subtle enough to be noticed but not distracting.
+- Bold text on the light grey makes it stand out just enough.
+
+---
+
+### RED HIGHLIGHTS — SOFTER
+
+The current red tints are a bit strong. Soften them:
+
+**Current:** Background #fef2f2, text #e53935
+
+**Updated:**
+
+| Property | Value |
+|---|---|
+| Background | #fff5f5 (very light pink, softer) |
+| Text color | #ef4444 (slightly softer red) |
+| Font weight | Regular (400) — not bold |
+
+- The red should be a hint, not a shout.
+- Users can still clearly see where the threshold is crossed.
+
+---
+
+### STATUS BADGES — MINIMALIST
+
+**Current:** Colored badges with borders look a bit heavy.
+
+**Updated:**
+
+**"Needs Production" badge:**
+
+| Property | Value |
+|---|---|
+| Background | Transparent |
+| Text color | #f59e0b (amber) |
+| Font size | 11px |
+| Font weight | 500 |
+| Border | None |
+| No badge shape — just colored text |
+
+**"Stock Sufficient" badge:**
+
+| Property | Value |
+|---|---|
+| Background | Transparent |
+| Text color | #43a047 (green) |
+| Font size | 11px |
+| Font weight | 500 |
+| Border | None |
+| No badge shape — just colored text |
+
+- Remove the rounded badge/pill shape.
+- Just use colored text — amber for Needs Production, green for Stock Sufficient.
+- Cleaner, lighter, matches the app's style.
+
+---
+
+### TARGET DATE — STYLING
+
+| Property | Value |
+|---|---|
+| Text color | #3b82f6 (blue) |
+| Font weight | 600 (semi-bold) |
+| Font size | 13px |
+| Center-aligned | Yes |
+
+- "—" for stock sufficient: grey (#9ca3af), regular weight.
+
+---
+
+### BAL. TO PRODUCE — STYLING
+
+| Property | Value |
+|---|---|
+| Positive values | Dark grey (#374151), regular weight |
+| Negative values | Display as blank (empty cell) |
+| Zero | Display as blank |
+| Center-aligned | Yes |
+
+---
+
+### DATE COLUMN VALUES — STYLING
+
+| Property | Value |
+|---|---|
+| Text color | Grey (#6b7280) — lighter than main data |
+| Font size | 12px (slightly smaller than 13px) |
+| Font weight | Regular (400) |
+| Center-aligned | Yes |
+| Empty cells | Blank (no "0.0") |
+
+- Date values should be visually quieter than the key metrics (Due for Loading, Inventory).
+- They are supporting data, not primary data.
+
+---
+
+### FROZEN COLUMNS — SHADOW
+
+Keep the freeze behavior but soften the shadow:
+
+| Property | Value |
+|---|---|
+| Border-right on last frozen column | 1px solid #e5e7eb (not 2px) |
+| Box shadow | 1px 0 3px rgba(0,0,0,0.03) (very subtle) |
+
+---
+
+### GROUP DIVIDERS
+
+Thin vertical lines between the three main groups:
+
+| Property | Value |
+|---|---|
+| Border | 1px solid #e5e7eb |
+| Spans | Full height of the table (header to last row) |
+| Position | Between Product Details and Next 10 Days, and between Next 10 Days and Tracking |
+
+---
+
+### OVERALL TABLE CONTAINER
+
+| Property | Value |
+|---|---|
+| Background | White (#ffffff) |
+| Border | 1px solid #e5e7eb |
+| Border radius | 8px |
+| Box shadow | 0 1px 3px rgba(0,0,0,0.04) (very subtle) |
+| Overflow-x | Auto (horizontal scroll for date columns) |
+| Padding | 0 (table fills container edge to edge) |
+
+---
+
+### STOCK LEVEL PREVIEW HEADER
+
+```
+Stock Level Preview (20 products)                    ↻ Refresh
+```
+
+| Property | Value |
+|---|---|
+| "Stock Level Preview" | Font-weight 600, 14px, dark grey (#1a1a1a) |
+| "(20 products)" | Font-weight 400, 13px, grey (#9ca3af) |
+| "Refresh" button | Grey text, grey icon, subtle hover (orange on hover) |
+| Background | White |
+| Padding | 12px 16px |
+| Border-bottom | 1px solid #f3f4f6 |
+
+---
+
+### COMPLETE VISUAL SUMMARY
+
+The table should feel like:
+- Clean white background throughout
+- Very light borders (#f3f4f6)
+- Quiet grey text for supporting data
+- Bold values only for Due for Loading and Inventory
+- Subtle red tints for threshold highlights
+- No colored header backgrounds
+- Status as simple colored text, no badges
+- Consistent with the interactive table and the rest of the app
+```

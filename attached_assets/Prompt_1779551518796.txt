@@ -1,0 +1,276 @@
+Please update the **shutdown status restriction logic** so that orders that were already `in_production` or `completed` retain their production-state behavior even if temporarily changed to another status such as `hold` or `cut`.
+
+---
+
+## 1. PRESERVE THE ORIGINAL PRODUCTION STATE FOR ORDERS THAT WERE ALREADY ONGOING OR DONE
+
+There is a behavior issue in the current shutdown status restriction logic.
+
+Right now, if an order was already:
+- `in_production` (ongoing), or
+- `completed` (done)
+
+and the user changes its status temporarily to something like:
+- `hold`
+- `cut`
+
+the app then treats that order as if it was never previously ongoing/done. As a result:
+- the `in_production` and `completed` options become disabled
+- the order is treated like a not-yet-started order
+- the user can no longer restore it back to its prior production-related state
+
+This is not the intended behavior.
+
+### Expected result
+If an order was already historically:
+- ongoing / in production, or
+- done / completed
+
+then changing it temporarily to another status should **not erase that production-state history or eligibility**.
+
+The order should still be recognized as one that had already progressed into production/completion, and it should still be allowed to return to:
+- `in_production`
+- `completed`
+
+as appropriate.
+
+---
+
+## 2. DISTINGUISH “CURRENT STATUS” FROM “ALREADY REACHED PRODUCTION STATE”
+
+Please update the logic so the app does not rely only on the order’s **current status** when deciding whether `in_production` and `completed` should remain available.
+
+Instead, the app should also consider whether the order had **already reached**:
+- `in_production`
+- or `completed`
+at any earlier point in its lifecycle.
+
+### Goal
+If the order has already been:
+- started,
+- in production,
+- or completed,
+
+then it should not be treated the same as an untouched/not-yet-started order, even if the current status is temporarily changed to:
+- `hold`
+- `cut`
+- or another non-production status
+
+### Expected result
+Orders that have already entered production history retain their ability to return to production-related statuses.
+
+---
+
+## 3. ALLOW RETURN TO “IN PRODUCTION” OR “COMPLETED” FOR ORDERS THAT WERE ALREADY THERE BEFORE
+
+If an order was previously:
+- `in_production`
+- or `completed`
+
+and is temporarily changed to:
+- `hold`
+- `cut`
+- or another allowed status
+
+then the app should still allow the user to move it back to:
+- `in_production`
+- `completed`
+
+provided this is otherwise valid under the workflow.
+
+### Example
+If an order was:
+- `in_production`
+
+then changed to:
+- `hold`
+
+the app should still allow that order to be changed back to:
+- `in_production`
+
+If an order was:
+- `completed`
+
+then changed to:
+- `cut` or `hold`
+
+the app should still allow that order to be changed back to:
+- `completed`
+or to the relevant prior operational state if your workflow supports that
+
+### Expected result
+Temporary status changes must not permanently remove access to statuses the order had already legitimately reached.
+
+---
+
+## 4. DO NOT TREAT THESE ORDERS AS “NOT YET STARTED” AFTER A TEMPORARY STATUS CHANGE
+
+Currently, the app appears to assume:
+
+- if current status is not `in_production` or `completed`
+- then the order is effectively not yet started
+
+That logic is too simplistic.
+
+### Please update this behavior
+If an order was previously in production or completed, and then changes to:
+- `hold`
+- `cut`
+
+the app must **not** reclassify it as a brand-new unstarted order for shutdown/status-option purposes.
+
+### Expected result
+The order should retain its previous production-state behavior and eligibility.
+
+---
+
+## 5. APPLY THIS TO SHUTDOWN STATUS RESTRICTIONS
+
+This is especially important during **line shutdown**.
+
+You previously restricted shutdown lines so users cannot assign:
+- `in_production`
+- `completed`
+
+to orders that are not yet started while shutdown is active.
+
+Please refine that rule as follows:
+
+### Refined shutdown rule
+- If an order has **never** reached `in_production` or `completed`, then while the line is in shutdown:
+  - do not allow it to newly move into `in_production` or `completed`
+
+- But if an order **already had** a prior state/history of `in_production` or `completed`, then changing it temporarily to `hold`, `cut`, or another non-terminal/non-active status should **not** permanently block it from returning to those statuses
+
+### Goal
+Preserve historical production-state eligibility for orders that were already underway or done.
+
+---
+
+## 6. USE HISTORY / STATE MEMORY / FLAGGING TO TRACK PRIOR PRODUCTION STATE
+
+Please implement or use a reliable way to remember whether the order had already reached:
+- `in_production`
+- `completed`
+
+This can be done using any suitable mechanism, such as:
+- status history
+- audit history
+- a boolean flag
+- a lifecycle marker
+- a derived “hasStartedProduction” / “hasBeenCompleted” state
+
+### Important
+Do not base the availability of `in_production` and `completed` solely on the current visible status value.
+
+### Expected result
+The system should retain memory of whether the order had already achieved those states previously.
+
+---
+
+## 7. PRESERVE EXISTING DIVERSION EXCLUSION FOR ORDERS THAT WERE ALREADY ONGOING OR DONE
+
+Please also ensure consistency with shutdown diversion behavior.
+
+If an order was already effectively:
+- ongoing / in production, or
+- done / completed
+
+then it should continue to be treated according to that production-state history for diversion logic as appropriate.
+
+### Important
+Do not accidentally reclassify an order as divertable just because its current visible status was temporarily changed to `hold` or `cut`.
+
+If the business rule is that the product was already being/has been produced, that meaning should remain intact.
+
+---
+
+## 8. DO NOT BREAK NORMAL STATUS CHANGES FOR TRULY NEW / UNSTARTED ORDERS
+
+Please preserve the stricter shutdown restriction for orders that have **never** reached:
+- `in_production`
+- `completed`
+
+For those truly unstarted orders on a shutdown line:
+- `in_production` should remain blocked
+- `completed` should remain blocked
+
+### Expected result
+This change should only preserve eligibility for orders that were already historically ongoing/done, not open the door for all shutdown-line orders to use those statuses.
+
+---
+
+## IMPORTANT
+
+Please preserve this distinction:
+
+### Orders that were never ongoing/done
+While line is in shutdown:
+- cannot newly move to `in_production`
+- cannot newly move to `completed`
+
+### Orders that were already ongoing/done before
+If temporarily changed to:
+- `hold`
+- `cut`
+- or another status
+
+they should still retain the ability to go back to:
+- `in_production`
+- `completed`
+
+Do not let a temporary status change erase the fact that the order had already been underway or completed.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log production-state memory and status-option eligibility during shutdown.
+
+```javascript
+console.debug('[Shutdown Production-State Memory]', {
+  orderId,
+  currentStatus,
+  hasBeenInProduction,
+  hasBeenCompleted,
+  hasReachedOperationalState:
+    hasBeenInProduction || hasBeenCompleted,
+});
+```
+
+```javascript
+console.debug('[Shutdown Status Eligibility]', {
+  orderId,
+  currentStatus,
+  shutdownActive,
+  hasBeenInProduction,
+  hasBeenCompleted,
+  allowInProduction,
+  allowCompleted,
+});
+```
+
+```javascript
+console.debug('[Status Change After Prior Operational State]', {
+  orderId,
+  fromStatus,
+  toStatus,
+  shutdownActive,
+  hasBeenInProduction,
+  hasBeenCompleted,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ If an order was previously `in_production`, then changed to `hold`, it can still be changed back to `in_production`
+2. ✅ If an order was previously `completed`, then changed to `hold` or `cut`, it can still be changed back to `completed`
+3. ✅ A temporary status change does not cause the app to treat a previously ongoing/done order as a brand-new unstarted order
+4. ✅ The app does not disable `in_production` / `completed` just because the current status changed away from those values
+5. ✅ During shutdown, orders that never reached `in_production` or `completed` still cannot newly move into those statuses
+6. ✅ During shutdown, orders that already had prior `in_production` or `completed` state retain access to those statuses
+7. ✅ Diversion logic does not incorrectly reclassify previously ongoing/done orders as divertable solely because of a temporary status change
+8. ✅ Existing status history and shutdown logic continue to work
+9. ✅ No UI errors or console errors are introduced

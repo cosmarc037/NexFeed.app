@@ -1,0 +1,280 @@
+Please enhance the **Future Dispatches** table by adding two new derived classification columns after **Status**:
+
+- **Volume**
+- **Velocity**
+
+These should be computed from the data already available in the table and displayed as **colored badges**, with the underlying score/percentage shown in a **tooltip**.
+
+---
+
+## 1. ADD TWO NEW COLUMNS AFTER `STATUS`
+
+Please add these new columns immediately after the existing **Status** column:
+
+- **Volume**
+- **Velocity**
+
+### Required display
+Each value should appear as a **badge**.
+
+### Goal
+Give users a quick visual indication of:
+- demand magnitude / volume importance
+- demand stability / variability
+
+### Expected result
+The Future Dispatches table now includes:
+- `Status`
+- `Volume`
+- `Velocity`
+
+in that order.
+
+---
+
+## 2. DERIVE `VOLUME` FROM DEMAND MAGNITUDE
+
+Please create a derived **Volume** classification based on the magnitude of demand.
+
+### Column name
+- **Volume**
+
+### Allowed values
+- **High**
+- **Moderate**
+- **Low**
+
+### Suggested basis
+Use the demand information already available in the table, such as:
+- **DFL**
+- daily demand across the next 10 days
+- optionally the total demand burden implied by these values
+
+### Recommended formula
+Use something like:
+
+- **10-day total demand = DFL + sum(next 10 days demand)**
+
+Then classify SKUs by relative demand magnitude across the dataset.
+
+### Suggested classification method
+Rank all SKUs by total 10-day demand, then classify by percentile:
+
+- **High** = top ~20%
+- **Moderate** = next ~30%
+- **Low** = remaining ~50%
+
+### Goal
+Approximate the client’s ABC concept using simple, defendable demand-based logic.
+
+### Expected result
+Each SKU receives a Volume badge of:
+- High
+- Moderate
+- Low
+
+based on its relative total demand magnitude.
+
+---
+
+## 3. DERIVE `VELOCITY` FROM DEMAND STABILITY / VARIABILITY
+
+Please create a derived **Velocity** classification based on how stable or erratic the daily demand is over the next 10 days.
+
+### Column name
+- **Velocity**
+
+### Allowed values
+- **Stable**
+- **Less Stable**
+- **Erratic**
+
+### Suggested basis
+Use the daily demand values already present in the next 10-day forecast columns.
+
+### Recommended method
+Calculate demand variability using the daily forecast values, for example by using:
+- mean
+- standard deviation
+- coefficient of variation (CV)
+
+Where:
+
+- `CV = standard deviation / mean`
+
+### Suggested classification
+- **Stable** → low variability
+- **Less Stable** → moderate variability
+- **Erratic** → high variability
+
+### Example threshold idea
+- Stable → `CV <= 0.5`
+- Less Stable → `0.5 < CV <= 1.0`
+- Erratic → `CV > 1.0`
+
+You may adjust thresholds as needed if a slightly different calibration works better for the available data.
+
+### Goal
+Approximate the client’s XYZ concept using the demand pattern already available in the Future Dispatches table.
+
+### Expected result
+Each SKU receives a Velocity badge of:
+- Stable
+- Less Stable
+- Erratic
+
+based on how variable its upcoming daily demand pattern is.
+
+---
+
+## 4. SHOW THE UNDERLYING RESULT / SCORE IN A TOOLTIP
+
+Please show the underlying computed result in a tooltip for both new columns.
+
+### For `Volume`
+When hovering over the badge, show the basis used for its classification, such as:
+- total 10-day demand
+- percentile position
+- or equivalent result/score used
+
+### For `Velocity`
+When hovering over the badge, show the basis used for its classification, such as:
+- coefficient of variation (CV)
+- or equivalent variability percentage/score used
+
+### Goal
+Let the user see the supporting number behind the badge without cluttering the table.
+
+### Expected result
+Both Volume and Velocity badges display a useful tooltip with the underlying computed metric.
+
+---
+
+## 5. USE BADGE COLORS FOR QUICK VISUAL SCANNING
+
+Please style the new columns as colored badges.
+
+### Suggested colors for `Volume`
+- **High** → red / strong orange
+- **Moderate** → amber / yellow
+- **Low** → blue / gray
+
+### Suggested colors for `Velocity`
+- **Stable** → green
+- **Less Stable** → amber / yellow
+- **Erratic** → red
+
+### Goal
+Make the classifications quick to scan visually.
+
+### Expected result
+The new columns are easy to interpret at a glance.
+
+---
+
+## 6. KEEP THIS AS A DERIVED / DUMMY FIRST VERSION USING EXISTING TABLE DATA
+
+This does not need to rely on external master data yet.
+
+### Important
+Use the data already present in the Future Dispatches table, such as:
+- DFL
+- daily forecast columns
+- Inventory if helpful
+- BAL. TO PROD if helpful
+
+### Goal
+Create a useful first-pass dummy version using currently available data.
+
+### Expected result
+The feature works from the uploaded Future Dispatches data without requiring a separate source.
+
+---
+
+## 7. HANDLE LOW-DEMAND / EDGE CASES REASONABLY
+
+Please make sure the logic handles low-demand or sparse-demand cases gracefully.
+
+### Examples
+- if total 10-day demand is near zero
+- if daily values are mostly zero with one spike
+- if coefficient of variation becomes unstable because of very small means
+
+### Goal
+Avoid broken or misleading classifications in edge cases.
+
+### Expected result
+Low-demand and sparse-demand SKUs are still classified reasonably.
+
+---
+
+## IMPORTANT
+
+Please add two new derived columns after **Status** in the **Future Dispatches** table:
+
+- **Volume**
+  - values: **High**, **Moderate**, **Low**
+  - shown as a badge
+  - tooltip shows the underlying score/result used
+
+- **Velocity**
+  - values: **Stable**, **Less Stable**, **Erratic**
+  - shown as a badge
+  - tooltip shows the underlying variability percentage/result used
+
+### Suggested logic
+- **Volume** → derived from demand magnitude using DFL + next 10 days demand
+- **Velocity** → derived from demand stability/variability using the next 10 days demand pattern
+
+This should be implemented as a first-pass dummy version using the data already available in the Future Dispatches table.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log the derived classification metrics.
+
+```javascript
+console.debug('[Future Dispatches Volume Classification]', {
+  materialCode,
+  dfl,
+  next10DayDemandTotal,
+  volumeScore,
+  percentileRank,
+  volumeClass,
+});
+```
+
+```javascript
+console.debug('[Future Dispatches Velocity Classification]', {
+  materialCode,
+  dailyValues,
+  meanDemand,
+  stdDevDemand,
+  coefficientOfVariation,
+  velocityClass,
+});
+```
+
+```javascript
+console.debug('[Future Dispatches New Columns]', {
+  columnsAddedAfterStatus: ['Volume', 'Velocity'],
+  volumeUsesTooltip: true,
+  velocityUsesTooltip: true,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ `Volume` column is added after `Status`
+2. ✅ `Velocity` column is added after `Status`
+3. ✅ Volume values are High / Moderate / Low
+4. ✅ Velocity values are Stable / Less Stable / Erratic
+5. ✅ Both columns are displayed as badges
+6. ✅ Both badges show tooltips with the underlying score/result
+7. ✅ Volume is derived from existing demand magnitude data
+8. ✅ Velocity is derived from existing 10-day demand variability data
+9. ✅ Edge cases are handled reasonably
+10. ✅ No UI errors or console errors are introduced

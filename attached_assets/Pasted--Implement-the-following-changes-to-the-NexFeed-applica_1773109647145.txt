@@ -1,0 +1,156 @@
+```
+Implement the following changes to the NexFeed application:
+
+---
+
+## 1. SMART COMBINE RECOMMENDATION CARD — LAYOUT REDESIGN
+
+Redesign the Smart Combine recommendation card layout for better readability.
+
+**Card header:**
+- Line 1: "[Item Description] | Combine Group [#]"
+  - Item Description: Bold, Dark Grey (#2e343a) text
+  - " | Combine Group [#]": Regular weight, Grey (#a1a8b3) text
+  - Both on the same line, separated by a pipe character
+- Example: "Elite XP Growex 2, Pellet 50kg | Combine Group 1"
+
+**Shared details section (below header):**
+- Displayed as a vertical list of label-value pairs, one per line:
+```
+Material Code (FG)     1000000000244
+Category               Poultry
+Form                   P
+Line                   Line 2
+Batch Size             4.00
+```
+- Labels: Regular weight, Grey (#a1a8b3) text, `white-space: nowrap`
+- Values: Bold, Dark Grey (#2e343a) text
+- Batch Size displays with 2 decimal places in the Smart Combine cards (e.g., "4.00", "3.50")
+
+**Individual orders section (below shared details):**
+- Each order is separated by a thin horizontal divider line
+- Each order displays:
+  - Left side (stacked):
+    - Line 1: "FPR: [value]"
+    - Line 2: "FG: [value]" (if FG exists)
+    - Line 3: "SFG: [value]" (if SFG exists)
+    - Line 4: "PMX: [value]" (if PMX exists, Line 5/Powermix only)
+  - Right side (stacked, right-aligned):
+    - Line 1: "[X] MT" (bold)
+    - Line 2: Avail Date value (grey text; displayed in Orange #fd5108 if not a valid date, e.g., "prio replenish", "safety stocks")
+  - Far right: X button to exclude the order from the group
+- Labels (FPR:, FG:, SFG:, PMX:) remain visible in the order list for clarity
+- Only show the lines that have values — if an order has no FG, skip that line; if it has no PMX, skip that line
+
+**Example card layout:**
+```
+Elite XP Growex 2, Pellet 50kg | Combine Group 1
+
+Material Code (FG)     1000000000244
+Category               Poultry
+Form                   P
+Line                   Line 2
+Batch Size             4.00
+
+─────────────────────────────────────
+FPR: 260310                    80 MT  ×
+FG: 5875151            prio replenish
+SFG: 6012345
+─────────────────────────────────────
+FPR: 260310                    80 MT  ×
+FG: 5878953            safety stocks
+SFG: 6012346
+─────────────────────────────────────
+
+Combined Volume: 160 MT
+
+[Insights & Warnings section]
+
+[Approve]  [Dismiss]
+```
+
+---
+
+## 2. COMBINE CRITERIA — ADD CATEGORY BACK
+
+Add Category back as a required matching criterion for combining orders.
+
+**Full combine criteria (ALL must match):**
+- Material Code (FG)
+- Form
+- Line (same feedmill line)
+- Batch Size
+- Category
+
+This applies to:
+- Smart Combine panel AI recommendations (criteria for identifying eligible groups)
+- Manual combine validation
+- Combine failure error messages (include Category mismatch as a possible failure reason)
+- Pre-Combine Insights & Warnings section (include Category in validation checks)
+
+**Combine failure message for Category mismatch:**
+"These orders cannot be combined because they belong to different Categories. All orders must share the same Category to be eligible for combining."
+
+---
+
+## 3. BATCH SIZE — 2 DECIMAL PLACES IN SMART COMBINE CARDS
+
+In the Smart Combine recommendation cards, display Batch Size with 2 decimal places.
+
+- Example: "4.00", "3.50", "2.75"
+- This applies ONLY within the Smart Combine recommendation cards (shared details section).
+- The Batch Size in the main interactive table retains its current formatting (as defined in the global decimal rules).
+
+---
+
+## 4. COLUMN CENTER-ALIGNMENT
+
+Apply center-alignment to both the column HEADER and cell VALUES for the following columns:
+
+| Column                | Header Alignment | Cell Value Alignment |
+|-----------------------|------------------|----------------------|
+| FPR                   | Center           | Center               |
+| Planned Order FG      | Center           | Center               |
+| Planned Order SFG     | Center           | Center               |
+| Planned Order PMX     | Center           | Center               |
+| Production Order FG1  | Center           | Center               |
+| Production Order SFG1 | Center           | Center               |
+| Production Order SFGPMX | Center         | Center               |
+| Material Code (SFG)   | Center           | Center               |
+| Material Code (FG)    | Center           | Center               |
+| Form                  | Center           | Center               |
+| Batch Size            | Center           | Center               |
+| Number of Batches     | Center           | Center               |
+| Number of Bags        | Center           | Center               |
+| Threads               | Center           | Center               |
+
+**Note on multi-line cells:**
+- For Planned Order and Production Order columns that display multiple values stacked (FG on Line 1, SFG on Line 2, PMX on Line 3), each line of text is individually center-aligned within the cell.
+- The column header text (e.g., "[FG | SFG]", "[FG1 | SFG1 | SFGPMX]") is also center-aligned.
+
+**All other columns not listed above retain their current alignment (left-aligned or as previously defined).**
+
+---
+
+## 5. TIME FORMAT — 12-HOUR FORMAT GLOBALLY
+
+All time displays throughout the application must use 12-hour format with AM/PM notation. No 24-hour format should be used anywhere.
+
+**Applies to:**
+- Start Time column (display and input/picker)
+- Completion Date time (Line 2: "Time: HH:MM AM/PM")
+- End Date time
+- History/audit trail timestamps
+- FPR Notes timestamps (e.g., "Combined orders: ... — March 09, 2026 02:30 PM")
+- Smart Combine card timestamps
+- Smart Assistant chat timestamps
+- Any other time display in the application
+
+**Format:** HH:MM AM/PM
+- Examples: "08:00 AM", "01:30 PM", "12:00 PM", "11:59 PM"
+- Leading zero on hours is optional but preferred for consistency (e.g., "08:00 AM" not "8:00 AM")
+
+**Time picker:**
+- The Start Time picker (and any other time picker) should display options in 12-hour format with AM/PM selection.
+- If the current picker uses 24-hour format, convert it to 12-hour format.
+```

@@ -1,0 +1,560 @@
+```
+Implement the following changes to the NexFeed application:
+
+---
+
+## 1. RESTRUCTURE SIDEBAR — GROUP OVERVIEW AND ANALYTICS UNDER "DASHBOARD"
+
+### BEFORE
+
+```
+Overview
+Orders
+  Feedmill 1
+  Feedmill 2
+  Feedmill 3
+  Powermix
+Analytics
+Configurations
+  Order History
+  Changeover Rules
+  Master Data
+  Future Dispatches
+```
+
+### AFTER
+
+```
+Dashboard
+  Overview
+  Analytics
+Orders
+  Feedmill 1
+  Feedmill 2
+  Feedmill 3
+  Powermix
+Configurations
+  Order History
+  Changeover Rules
+  Master Data
+  Future Dispatches
+```
+
+### SIDEBAR COMPONENT
+
+```jsx
+function Sidebar() {
+  const [dashboardExpanded, setDashboardExpanded] = useState(false);
+  const [ordersExpanded, setOrdersExpanded] = useState(false);
+  const [configExpanded, setConfigExpanded] = useState(false);
+  
+  return (
+    <nav className="sidebar">
+      {/* DASHBOARD — expandable */}
+      <div className="sidebar-group">
+        <button 
+          className="sidebar-parent"
+          data-tour="sidebar-dashboard"
+          onClick={() => setDashboardExpanded(!dashboardExpanded)}
+        >
+          <span className="sidebar-icon">📊</span>
+          <span className="sidebar-label">Dashboard</span>
+          <span className={`sidebar-chevron ${dashboardExpanded ? 'expanded' : ''}`}>
+            ▾
+          </span>
+        </button>
+        
+        {dashboardExpanded && (
+          <div className="sidebar-children">
+            <a 
+              data-tour="sidebar-overview"
+              className={`sidebar-child ${activePage === 'overview' ? 'active' : ''}`}
+              onClick={() => navigateTo('overview')}
+            >
+              <span className="sidebar-child-icon">🏭</span>
+              Overview
+            </a>
+            <a 
+              data-tour="sidebar-analytics"
+              className={`sidebar-child ${activePage === 'analytics' ? 'active' : ''}`}
+              onClick={() => navigateTo('analytics')}
+            >
+              <span className="sidebar-child-icon">📈</span>
+              Analytics
+            </a>
+          </div>
+        )}
+      </div>
+      
+      {/* ORDERS — expandable (existing) */}
+      <div className="sidebar-group">
+        <button 
+          className="sidebar-parent"
+          data-tour="sidebar-orders"
+          onClick={() => setOrdersExpanded(!ordersExpanded)}
+        >
+          <span className="sidebar-icon">📋</span>
+          <span className="sidebar-label">Orders</span>
+          <span className={`sidebar-chevron ${ordersExpanded ? 'expanded' : ''}`}>
+            ▾
+          </span>
+        </button>
+        
+        {ordersExpanded && (
+          <div className="sidebar-children">
+            <a 
+              className={`sidebar-child ${activeFeedmill === 'Feedmill 1' ? 'active' : ''}`}
+              onClick={() => navigateTo('orders', 'Feedmill 1')}
+            >
+              Feedmill 1
+              <span className="sidebar-child-count">{fm1Count}</span>
+            </a>
+            <a 
+              className={`sidebar-child ${activeFeedmill === 'Feedmill 2' ? 'active' : ''}`}
+              onClick={() => navigateTo('orders', 'Feedmill 2')}
+            >
+              Feedmill 2
+              <span className="sidebar-child-count">{fm2Count}</span>
+            </a>
+            <a 
+              className={`sidebar-child ${activeFeedmill === 'Feedmill 3' ? 'active' : ''}`}
+              onClick={() => navigateTo('orders', 'Feedmill 3')}
+            >
+              Feedmill 3
+              <span className="sidebar-child-count">{fm3Count}</span>
+            </a>
+            <a 
+              className={`sidebar-child ${activeFeedmill === 'Powermix' ? 'active' : ''}`}
+              onClick={() => navigateTo('orders', 'Powermix')}
+            >
+              Powermix
+              <span className="sidebar-child-count">{pmxCount}</span>
+            </a>
+          </div>
+        )}
+      </div>
+      
+      {/* CONFIGURATIONS — expandable (existing) */}
+      <div className="sidebar-group">
+        <button 
+          className="sidebar-parent"
+          data-tour="sidebar-configurations"
+          onClick={() => setConfigExpanded(!configExpanded)}
+        >
+          <span className="sidebar-icon">⚙</span>
+          <span className="sidebar-label">Configurations</span>
+          <span className={`sidebar-chevron ${configExpanded ? 'expanded' : ''}`}>
+            ▾
+          </span>
+        </button>
+        
+        {configExpanded && (
+          <div className="sidebar-children">
+            <a 
+              data-tour="sidebar-order-history"
+              className={`sidebar-child ${activePage === 'orderHistory' ? 'active' : ''}`}
+              onClick={() => navigateTo('orderHistory')}
+            >
+              Order History
+            </a>
+            <a 
+              data-tour="sidebar-changeover-rules"
+              className={`sidebar-child ${activePage === 'changeoverRules' ? 'active' : ''}`}
+              onClick={() => navigateTo('changeoverRules')}
+            >
+              Changeover Rules
+            </a>
+            <a 
+              data-tour="sidebar-master-data"
+              className={`sidebar-child ${activePage === 'masterData' ? 'active' : ''}`}
+              onClick={() => navigateTo('masterData')}
+            >
+              Master Data
+            </a>
+            <a 
+              data-tour="sidebar-future-dispatches"
+              className={`sidebar-child ${activePage === 'futureDispatches' ? 'active' : ''}`}
+              onClick={() => navigateTo('futureDispatches')}
+            >
+              Future Dispatches
+            </a>
+          </div>
+        )}
+      </div>
+    </nav>
+  );
+}
+```
+
+### AUTO-EXPAND WHEN CHILD IS ACTIVE
+
+```javascript
+// Auto-expand Dashboard if Overview or Analytics is the active page
+useEffect(() => {
+  if (activePage === 'overview' || activePage === 'analytics') {
+    setDashboardExpanded(true);
+  }
+}, [activePage]);
+
+// Auto-expand Orders if any feedmill is active
+useEffect(() => {
+  if (activePage === 'orders') {
+    setOrdersExpanded(true);
+  }
+}, [activePage]);
+
+// Auto-expand Configurations if any config page is active
+useEffect(() => {
+  if (['orderHistory', 'changeoverRules', 'masterData', 'futureDispatches'].includes(activePage)) {
+    setConfigExpanded(true);
+  }
+}, [activePage]);
+```
+
+---
+
+## 2. REMOVE STANDALONE ANALYTICS SIDEBAR ITEM
+
+Delete the old standalone "Analytics" sidebar item. It now lives under Dashboard.
+
+```jsx
+{/* REMOVE THIS — Analytics is now under Dashboard */}
+{/* <a className="sidebar-item" onClick={() => navigateTo('analytics')}>Analytics</a> */}
+```
+
+---
+
+## 3. STYLING
+
+```css
+.sidebar-group {
+  margin-bottom: 2px;
+}
+
+.sidebar-parent {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 10px 16px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  color: #374151;
+  transition: background 0.15s;
+  gap: 10px;
+}
+
+.sidebar-parent:hover {
+  background: #f3f4f6;
+}
+
+.sidebar-icon {
+  font-size: 16px;
+  flex-shrink: 0;
+  width: 20px;
+  text-align: center;
+}
+
+.sidebar-label {
+  flex: 1;
+  text-align: left;
+}
+
+.sidebar-chevron {
+  font-size: 12px;
+  color: #9ca3af;
+  transition: transform 0.2s;
+}
+
+.sidebar-chevron.expanded {
+  transform: rotate(180deg);
+}
+
+.sidebar-children {
+  padding-left: 20px;
+}
+
+.sidebar-child {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  font-size: 13px;
+  color: #6b7280;
+  cursor: pointer;
+  border-radius: 6px;
+  margin: 1px 8px;
+  transition: background 0.15s, color 0.15s;
+  text-decoration: none;
+}
+
+.sidebar-child:hover {
+  background: #f3f4f6;
+  color: #374151;
+}
+
+.sidebar-child.active {
+  background: #fd5108;
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.sidebar-child-icon {
+  margin-right: 8px;
+  font-size: 14px;
+}
+
+.sidebar-child-count {
+  font-size: 11px;
+  font-weight: 600;
+  background: rgba(0, 0, 0, 0.08);
+  padding: 1px 6px;
+  border-radius: 10px;
+}
+
+.sidebar-child.active .sidebar-child-count {
+  background: rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+}
+```
+
+---
+
+## 4. UPDATE PAGE DETECTION
+
+```javascript
+function getCurrentPage() {
+  const path = window.location.pathname;
+  const hash = window.location.hash;
+  
+  if (path.includes('/overview') || hash.includes('overview')) return 'overview';
+  if (path.includes('/analytics') || hash.includes('analytics')) return 'analytics';
+  if (path.includes('/orders') || hash.includes('orders')) return 'orders';
+  if (path.includes('/order-history') || hash.includes('order-history') || hash.includes('orderHistory')) return 'orderHistory';
+  if (path.includes('/changeover-rules') || hash.includes('changeover-rules') || hash.includes('changeoverRules')) return 'changeoverRules';
+  if (path.includes('/master-data') || hash.includes('master-data') || hash.includes('masterData')) return 'masterData';
+  if (path.includes('/future-dispatches') || hash.includes('future-dispatches') || hash.includes('futureDispatches')) return 'futureDispatches';
+  
+  // Fallback — check active sidebar
+  const activeSidebar = document.querySelector('.sidebar-child.active');
+  if (activeSidebar) {
+    const text = activeSidebar.textContent.toLowerCase();
+    if (text.includes('overview')) return 'overview';
+    if (text.includes('analytics')) return 'analytics';
+    if (text.includes('order history')) return 'orderHistory';
+    if (text.includes('changeover')) return 'changeoverRules';
+    if (text.includes('master data')) return 'masterData';
+    if (text.includes('future dispatches')) return 'futureDispatches';
+  }
+  
+  return 'overview';
+}
+```
+
+---
+
+## 5. UPDATE TOUR STEPS
+
+### REMOVE OLD STANDALONE ENTRIES
+
+Remove the old separate "Overview" and "Analytics" sidebar tour steps.
+
+### ADD NEW DASHBOARD TOUR STEPS
+
+**FULL APP TOUR:**
+
+```javascript
+// Dashboard parent
+{
+  target: '[data-tour="sidebar-dashboard"]',
+  title: 'Dashboard',
+  description: 'Your production dashboard. Contains the Overview for monitoring feedmill status and capacity, and Analytics for charts, KPIs, and insights.',
+  position: 'right'
+},
+
+// Dashboard > Overview
+{
+  target: '[data-tour="sidebar-overview"]',
+  title: 'Dashboard — Overview',
+  description: 'Bird\'s-eye view of all feedmills and lines. See production volumes, capacity utilization, category breakdowns, and run shutdown simulations.',
+  position: 'right',
+  page: 'overview'
+},
+
+// Dashboard > Analytics
+{
+  target: '[data-tour="sidebar-analytics"]',
+  title: 'Dashboard — Analytics',
+  description: 'Production analytics with key metric cards, visual charts (volume by category, orders by line, top items), and smart insights for data-driven planning.',
+  position: 'right',
+  page: 'analytics'
+},
+```
+
+**PAGE-SPECIFIC TOURS — unchanged content, just updated sidebar references:**
+
+Overview tour steps remain the same — they reference elements on the Overview page.
+
+Analytics tour steps remain the same — they reference elements on the Analytics page.
+
+### OVERVIEW PAGE TOUR
+
+```javascript
+const OVERVIEW_TOUR_STEPS = [
+  {
+    target: '[data-tour="overview-insights"]',
+    title: 'Smart Production Insight',
+    description: 'Insights about your overall production performance. Click to expand and see optimization suggestions, potential issues, and recommendations.',
+    position: 'bottom'
+  },
+  {
+    target: '[data-tour="overview-metrics"]',
+    title: 'Overview Metrics',
+    description: 'Quick summary of your production across all feedmills — total orders, active orders, completed orders, and urgent orders requiring attention.',
+    position: 'bottom'
+  },
+  {
+    target: '[data-tour="overview-line-monitoring"]',
+    title: 'Line Status Monitoring',
+    description: 'Monitor all feedmills and production lines at a glance. See volume, run rates, and capacity utilization for each line.',
+    position: 'bottom'
+  },
+  {
+    target: '[data-tour="overview-month-export"]',
+    title: 'Month & Export',
+    description: 'Select a month to view production data for that period. Click "Export Report" to download a summary of the production overview.',
+    position: 'bottom'
+  },
+  {
+    target: '[data-tour="overview-feedmill-cards"]',
+    title: 'Feedmill Cards',
+    description: 'Each card represents a feedmill with its lines. See total volume, run rate per line, progress bars for capacity, and category breakdown.',
+    position: 'top'
+  },
+  {
+    target: '[data-tour="overview-shutdown"]',
+    title: 'Shutdown Simulation',
+    description: 'Simulate a line shutdown to see the impact on production. Useful for planning maintenance — shows which orders would be delayed and by how much.',
+    position: 'top'
+  }
+];
+```
+
+### ANALYTICS PAGE TOUR
+
+```javascript
+const ANALYTICS_TOUR_STEPS = [
+  {
+    target: '[data-tour="analytics-metrics"]',
+    title: 'Key Metrics',
+    description: 'High-level production KPIs — total volume across all orders, average order size, completed count, and total order count.',
+    position: 'bottom'
+  },
+  {
+    target: '[data-tour="analytics-charts"]',
+    title: 'Charts & Visualizations',
+    description: 'Visual breakdowns of your production data — volume by category, order distribution across lines, and top ordered items. Helps identify trends and imbalances at a glance.',
+    position: 'bottom'
+  },
+  {
+    target: '[data-tour="analytics-smart-insight"]',
+    title: 'Smart Insights',
+    description: 'Analysis of your production data with actionable recommendations — which lines to rebalance, which products to prioritize, and optimization opportunities.',
+    position: 'top'
+  }
+];
+```
+
+### PAGE TOUR MAPPING — UPDATED
+
+```javascript
+function getPageTourSteps(currentPage) {
+  switch (currentPage) {
+    case 'overview':
+      return OVERVIEW_TOUR_STEPS;
+    case 'analytics':
+      return ANALYTICS_TOUR_STEPS;
+    case 'orders':
+      return ORDERS_TOUR_STEPS;
+    case 'orderHistory':
+      return ORDER_HISTORY_TOUR_STEPS;
+    case 'changeoverRules':
+      return CHANGEOVER_RULES_TOUR_STEPS;
+    case 'masterData':
+      return MASTER_DATA_TOUR_STEPS;
+    case 'futureDispatches':
+      return FUTURE_DISPATCHES_TOUR_STEPS;
+    default:
+      return FULL_APP_TOUR_STEPS;
+  }
+}
+```
+
+### CHANGEOVER RULES TOUR
+
+```javascript
+const CHANGEOVER_RULES_TOUR_STEPS = [
+  {
+    target: '[data-tour="changeover-rules-page"]',
+    title: 'Changeover Rules',
+    description: 'Configure additional changeover times for product transitions. These rules automatically add time when consecutive orders differ in diameter, color, or category. Values are per feedmill and stack when multiple conditions apply.',
+    position: 'bottom'
+  }
+];
+```
+
+---
+
+## 6. UPDATE CHATBOT SYSTEM PROMPT
+
+```
+APP NAVIGATION:
+- Dashboard
+  - Overview: Feedmill cards, line status, capacity monitoring, shutdown simulation
+  - Analytics: KPI cards, charts (volume by category, orders by line, top items), smart insights
+- Orders: Production order management per feedmill and line
+- Configurations
+  - Order History: Completed and cancelled orders archive
+  - Changeover Rules: Additional changeover time configuration
+  - Master Data: Product master data for auto-populating orders
+  - Future Dispatches: Dispatch forecast data for production prioritization
+```
+
+---
+
+## VERIFICATION
+
+### Sidebar structure
+1. ✅ "Dashboard" appears as expandable parent in sidebar
+2. ✅ Clicking "Dashboard" expands to show "Overview" and "Analytics"
+3. ✅ "Overview" navigates to the overview page
+4. ✅ "Analytics" navigates to the analytics page
+5. ✅ No standalone "Analytics" item in sidebar
+6. ✅ No standalone "Overview" item in sidebar
+7. ✅ Dashboard auto-expands when Overview or Analytics is active
+
+### Sidebar consistency
+8. ✅ Dashboard behaves like Orders — click to expand, children to navigate
+9. ✅ Configurations behaves the same — expandable with children
+10. ✅ Active child page is highlighted in orange
+11. ✅ Chevron rotates when expanded
+
+### Navigation
+12. ✅ Clicking "Overview" under Dashboard loads the overview page
+13. ✅ Clicking "Analytics" under Dashboard loads the analytics page
+14. ✅ Direct URL to /overview still works
+15. ✅ Direct URL to /analytics still works
+16. ✅ Page detection correctly identifies overview and analytics
+
+### Tour
+17. ✅ Full app tour references "Dashboard" as parent
+18. ✅ Full app tour has "Dashboard — Overview" and "Dashboard — Analytics" steps
+19. ✅ "This Page" tour on Overview shows overview-specific steps
+20. ✅ "This Page" tour on Analytics shows analytics-specific steps
+21. ✅ No orphaned tour steps referencing old standalone "Analytics"
+
+### Chatbot
+22. ✅ System prompt references Dashboard > Overview and Dashboard > Analytics
+```

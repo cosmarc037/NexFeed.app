@@ -1,0 +1,450 @@
+```
+Fix the Scheduling Impact to include deadline miss data from the same source as Alerts, and feed it to the AI:
+
+---
+
+## 1. SHARED DEADLINE CALCULATION — SINGLE SOURCE OF TRUTH
+
+Create a shared function that both Scheduling Impact and Alerts use:
+
+```javascript
+function calculateDeadlineMisses(group, lineOrders, calculatedShifts) {
+  const combiningOrders = group.orders;
+  const combiningIds = combiningOrders.map(o => o.id);
+  const line = group.line;
+  
+  const currentLineOrders = lineOrders
+    .filter(o => o.line === line && o.status !== 'Done' && o.status !== 'Cancel PO')
+    .sort((a, b) => a.prio - b.prio);
+  
+  // Determine lead order start date
+  const datedOrders = combiningOrders.filter(o => {
+    const avail = o.target_avail_date;
+    return avail && /^\d{4}-\d{2}-\d{2}/.test(avail) && !isNaN(Date.parse(avail));
+  });
+  
+  let leadOrder;
+  if (datedOrders.length > 0) {
+    leadOrder = datedOrders.sort((a, b) =>
+      new Date(a.target_avail_date) - new Date(b.target_avail_date)
+    )[0];
+  } else {
+    leadOrder = combiningOrders.sort((a, b) => a.prio - b.prio)[0];
+  }
+  
+  const leadStartDate = leadOrder?.start_date
+    ? new Date(leadOrder.start_date)
+    : new Date();
+  
+  // Combined production time
+  const combinedVolume = combiningOrders.reduce((s, o) => s + (parseFloat(o.volume) || 0), 0);
+  const combinedRate = parseFloat(combiningOrders[0].run_rate) || 0;
+  const combinedProdHrs = combinedRate > 0 ? combinedVolume / combinedRate : 0;
+  const combinedCO = combiningOrders[0]._changeoverTotal ?? parseFloat(combiningOrders[0].changeover) ?? 0;
+  
+  // Simulate the "after" schedule to get accurate completion times
+  let runningTime = 0;
+  let combinedDone = false;
+  const afterCompletion = {};
+  
+  currentLineOrders.forEach(order => {
+    const vol = parseFloat(order.volume) || 0;
+    const rate = parseFloat(order.run_rate) || 0;
+    const prodHrs = rate > 0 ? vol / rate : 0;
+    const co = order._changeoverTotal ?? parseFloat(order.changeover) ?? 0;
+    
+    if (combiningIds.includes(order.id)) {
+      if (order.id === leadOrder.id && !combinedDone) {
+        // Lead order — inject combined block
+        const startTime = runningTime;
+        runningTime += combinedProdHrs + combinedCO;
+        afterCompletion[order.id] = {
+          startHrs: startTime,
+          endHrs: startTime + combinedProdHrs
+        };
+        combinedDone = true;
+      }
+      return; // Skip other combine members
+    }
+    
+    // Non-combine order
+    const startTime = runningTime;
+    runningTime += prodHrs + co;
+    afterCompletion[order.id] = {
+      startHrs: startTime,
+      endHrs: startTime + prodHrs
+    };
+  });
+  
+  // Check each non-combine order for deadline miss
+  const deadlineMisses = [];
+  
+  currentLineOrders.forEach(order => {
+    if (combiningIds.includes(order.id)) return;
+    if (!afterCompletion[order.id]) return;
+    
+    const targetAvail = order.target_avail_date;
+    const isDated = targetAvail && /^\d{4}-\d{2}-\d{2}/.test(targetAvail) && !isNaN(Date.parse(targetAvail));
+    
+    if (!isDated) return;
+    
+    const availDateObj = new Date(targetAvail);
+    const newCompletionMs = leadStartDate.getTime() + (afterCompletion[order.id].endHrs * 60 * 60 * 1000);
+    const newCompletionDate = new Date(newCompletionMs);
+    
+    if (newCompletionDate > availDateObj) {
+      const delayMs = newCompletionDate.getTime() - availDateObj.getTime();
+      const delayHrs = delayMs / (1000 * 60 * 60);
+      const delayDays = Math.ceil(delayMs / (1000 * 60 * 60 * 24));
+      
+      // Get N10D status
+      const n10dProduct = group._n10dData?.find(
+        p => String(p.material_code_fg) === String(order.material_code_fg)
+      );
+      const n10dStatus = n10dProduct ? getProductStatus(
+        n10dProduct.due_for_loading, n10dProduct.inventory,
+        getDailyColumns(), n10dProduct, new Date()
+      ) : null;
+      
+      deadlineMisses.push({
+        prio: order.prio,
+        name: order.item_description,
+        fpr: order.fpr,
+        availDate: availDateObj.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
+        availDateISO: targetAvail,
+        newCompletion: newCompletionDate.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
+        newCompletionTime: newCompletionDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+        newCompletionFull: `${newCompletionDate.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })} ${newCompletionDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}`,
+        delayHrs: delayHrs,
+        delayFormatted: formatTimeShift(delayHrs),
+        delayDays: delayDays,
+        n10dStatus: n10dStatus || 'N/A'
+      });
+    }
+  });
+  
+  return deadlineMisses.sort((a, b) => b.delayHrs - a.delayHrs);
+}
+```
+
+---
+
+## 2. USE SHARED DEADLINE DATA IN BOTH SECTIONS
+
+```javascript
+function CombineGroup({ group, lineOrders, ... }) {
+  // Calculate deadlines ONCE — shared between Scheduling Impact and Alerts
+  const [sharedDeadlineMisses, setSharedDeadlineMisses] = useState([]);
+  
+  useEffect(() => {
+    const deadlines = calculateDeadlineMisses(
+      { ...group, orders: selectedOrders, _n10dData: n10dData },
+      lineOrders
+    );
+    setSharedDeadlineMisses(deadlines);
+  }, [selectedOrderKey]);
+  
+  return (
+    <>
+      {/* ... other cards ... */}
+      
+      {/* Scheduling Impact — receives shared deadline data */}
+      <SchedulingImpactCard
+        group={{ ...group, orders: selectedOrders }}
+        lineOrders={lineOrders}
+        context={analysisContext}
+        sharedDeadlineMisses={sharedDeadlineMisses}
+      />
+      
+      {/* Alerts — receives same shared deadline data */}
+      <AlertsCard
+        group={{ ...group, orders: selectedOrders }}
+        sharedDeadlineMisses={sharedDeadlineMisses}
+        combinedVolume={combinedVolume}
+      />
+    </>
+  );
+}
+```
+
+---
+
+## 3. UPDATE buildSchedulingImpactData — USE SHARED DEADLINES
+
+```javascript
+function buildSchedulingImpactData(group, lineOrders, sharedDeadlineMisses) {
+  // ... existing two-pass simulation for time shifts ...
+  // ... calculates earlierOrders and laterOrders ...
+  
+  // Use the SHARED deadline misses instead of calculating independently
+  return {
+    earlierOrders,
+    laterOrders,
+    deadlineMisses: sharedDeadlineMisses || []
+  };
+}
+```
+
+---
+
+## 4. UPDATE AI PROMPT — INCLUDE FULL DEADLINE DATA
+
+```javascript
+function buildSchedulingImpactPrompt(context, calculatedImpact) {
+  const hasEarlier = calculatedImpact.earlierOrders.length > 0;
+  const hasLater = calculatedImpact.laterOrders.length > 0;
+  const hasDeadlineMisses = calculatedImpact.deadlineMisses.length > 0;
+  
+  const earlierGroups = groupOrdersByShift(calculatedImpact.earlierOrders);
+  const laterGroups = groupOrdersByShift(calculatedImpact.laterOrders);
+  const deadlineGroups = groupOrdersByDelay(calculatedImpact.deadlineMisses);
+  
+  return `
+You are a production scheduling advisor for a feed manufacturing plant.
+Analyze the scheduling impact of combining orders on ${context.line}.
+
+COMBINED ORDER:
+  Product: ${context.combiningOrders[0]?.name}
+  Total Volume: ${context.combinedVolume} MT
+  Production Time: ${context.combinedProductionHours} hrs
+  Insertion Position: Priority ${context.insertionResult.prio}
+
+ORDER CONTEXT (N10D status, avail dates, current completion):
+${context.lineContext
+  .filter(o => !o.isBeingCombined)
+  .map(o => `  Prio ${o.prio}: ${o.name} | N10D: ${o.n10dStatus} | Avail: ${o.availDate} (${o.isDated ? 'DATED' : 'NON-DATED'}) | Current Completion: ${o.completionDate}`)
+  .join('\n')}
+
+=== PRE-GROUPED DATA — USE THESE EXACT GROUPINGS ===
+
+${hasEarlier ? `Orders starting earlier (${calculatedImpact.earlierOrders.length} orders):
+${earlierGroups.map(g => `  Group: Prio ${g.prioRange} (${g.count} order${g.count > 1 ? 's' : ''}) — ${g.shiftFormatted} earlier
+  Orders: ${g.orders.map(o => `${o.name} (Prio ${o.prio}, N10D: ${o.n10dStatus || 'N/A'})`).join(', ')}`).join('\n')}` : ''}
+
+${hasLater ? `Orders starting later (${calculatedImpact.laterOrders.length} orders):
+${laterGroups.map(g => `  Group: Prio ${g.prioRange} (${g.count} order${g.count > 1 ? 's' : ''}) — ${g.shiftFormatted} later
+  Orders: ${g.orders.map(o => `${o.name} (Prio ${o.prio}, N10D: ${o.n10dStatus || 'N/A'})`).join(', ')}`).join('\n')}` : ''}
+
+${hasDeadlineMisses ? `ORDERS AT RISK OF MISSING AVAIL DATE (${calculatedImpact.deadlineMisses.length} orders):
+THIS DATA IS CRITICAL — YOU MUST INCLUDE ALL OF THESE IN YOUR "Orders at risk" SECTION.
+${calculatedImpact.deadlineMisses.map(o => `  ⛔ Prio ${o.prio}: ${o.name}
+     New Completion: ${o.newCompletionFull}
+     Avail Date: ${o.availDate}
+     Delay: ~${o.delayFormatted} past avail date (~${o.delayDays} days)
+     N10D Status: ${o.n10dStatus}
+     FPR: ${o.fpr}`).join('\n')}` : ''}
+
+=== YOUR RESPONSE ===
+
+PART 1 — GROUPED BULLETS:
+
+Section order: Earlier → Later → At Risk of Missing Avail Date.
+Only include sections that have data.
+
+For "Orders starting earlier" and "Orders starting later": Group as instructed.
+For "Orders at risk of missing avail date": 
+  - List EACH order individually — do NOT group.
+  - Include the exact avail date, new completion date, delay amount, and N10D status.
+  - Format: ⛔ Prio [X]: [Name] — new completion [full date/time] exceeds avail date [date] by ~[delay]. [N10D status].
+  - This section is MANDATORY if the data above shows any at-risk orders.
+
+${hasDeadlineMisses ? `
+YOU MUST include the "Orders at risk of missing avail date" section.
+There are ${calculatedImpact.deadlineMisses.length} order(s) at risk. Do NOT skip them.
+Do NOT say "no risks" or "no delays" if at-risk orders exist above.
+` : ''}
+
+TIME FORMAT:
+- 0.17 hrs = 10 min
+- 4.18 hrs = 4 hrs 11 min
+- 10.00 hrs = 10 hrs
+Do NOT use decimal hours.
+
+PART 2 — SUMMARY:
+Write "---SUMMARY---" on its own line, then 3-5 sentences.
+MANDATORY.
+
+${hasDeadlineMisses ? `
+Your summary MUST mention the at-risk orders.
+Do NOT say "it is safe to proceed" or "no risks to avail dates" when there are orders at risk.
+Mention the specific orders, their avail dates, and the delay amount.
+Recommend caution or advise against combining if delays are severe.
+` : `
+If there are only earlier orders with no delays and no deadline misses, be positive and recommend proceeding.
+`}
+
+Each sentence on its own line.
+Do NOT use markdown.
+
+CRITICAL RULES:
+- At most ${earlierGroups.length + laterGroups.length} grouped bullets for earlier/later sections.
+- NEVER list individual orders for earlier/later if they belong to a group of 2+.
+- NEVER say "no risks" when the at-risk data above shows orders.
+- The "at risk" section data comes from the SAME calculation as the Alerts section — they must align.
+  `;
+}
+```
+
+---
+
+## 5. UPDATE VALIDATION — ENSURE DEADLINE SECTION EXISTS WHEN DATA EXISTS
+
+```javascript
+function validateAndFixGrouping(parsedResponse, calculatedImpact) {
+  const maxBullets = 6;
+  
+  let result = { ...parsedResponse };
+  
+  // CRITICAL: If deadline misses exist but AI didn't include them, force-add
+  if (calculatedImpact.deadlineMisses.length > 0 && result.deadlineSection.length === 0) {
+    console.warn('AI missed deadline section. Force-adding from calculated data.');
+    result.deadlineSection = calculatedImpact.deadlineMisses.map(o => 
+      `⛔ Prio ${o.prio}: ${o.name} — new completion ${o.newCompletionFull} exceeds avail date ${o.availDate} by ~${o.delayFormatted}. ${o.n10dStatus !== 'N/A' ? o.n10dStatus + '.' : ''}`
+    );
+  }
+  
+  // CRITICAL: If deadline misses exist but summary says "safe to proceed", fix summary
+  if (calculatedImpact.deadlineMisses.length > 0 && result.summary.length > 0) {
+    const summaryText = result.summary.join(' ').toLowerCase();
+    if (summaryText.includes('safe to proceed') || 
+        summaryText.includes('no risks') || 
+        summaryText.includes('no delays') ||
+        summaryText.includes('no orders at risk')) {
+      console.warn('AI summary contradicts deadline data. Replacing summary.');
+      
+      const atRiskNames = calculatedImpact.deadlineMisses
+        .slice(0, 3)
+        .map(o => `${o.name} (Prio ${o.prio})`)
+        .join(', ');
+      
+      result.summary = [
+        `The combination will push ${calculatedImpact.deadlineMisses.length} order(s) past their avail date.`,
+        `The most affected: ${atRiskNames}.`,
+        `${calculatedImpact.deadlineMisses[0].name} will be delayed by approximately ${calculatedImpact.deadlineMisses[0].delayFormatted} past its avail date of ${calculatedImpact.deadlineMisses[0].availDate}.`,
+        `Proceed with caution — review the at-risk orders before approving this combination.`
+      ];
+    }
+  }
+  
+  // Check total bullet count for earlier/later sections (deadline is always individual)
+  const earlierLaterBullets = result.earlierSection.length + result.laterSection.length;
+  
+  if (earlierLaterBullets > maxBullets) {
+    // Auto-group earlier and later
+    if (calculatedImpact.earlierOrders.length > 0) {
+      const groups = groupOrdersByShift(calculatedImpact.earlierOrders);
+      result.earlierSection = groups.map(g => {
+        const notables = pickNotableOrders(g.orders);
+        if (g.count === 1) {
+          return `✅ Prio ${g.prioRange}: ${g.orders[0].name} — starts ${g.shiftFormatted} earlier. ${g.orders[0].n10dStatus !== 'N/A' ? g.orders[0].n10dStatus + '.' : ''}`;
+        }
+        return `✅ Prio ${g.prioRange} (${g.count} orders) — all start ~${g.shiftFormatted} earlier.${notables ? ' Notable: ' + notables + '.' : ''}`;
+      });
+    }
+    
+    if (calculatedImpact.laterOrders.length > 0) {
+      const groups = groupOrdersByShift(calculatedImpact.laterOrders);
+      result.laterSection = groups.map(g => {
+        const notables = pickNotableOrders(g.orders);
+        if (g.count === 1) {
+          return `⚠ Prio ${g.prioRange}: ${g.orders[0].name} — starts ${g.shiftFormatted} later. ${g.orders[0].n10dStatus !== 'N/A' ? g.orders[0].n10dStatus + '.' : ''}`;
+        }
+        return `⚠ Prio ${g.prioRange} (${g.count} orders) — all start ~${g.shiftFormatted} later.${notables ? ' Notable: ' + notables + '.' : ''}`;
+      });
+    }
+  }
+  
+  return result;
+}
+```
+
+---
+
+## 6. UPDATE ALERTS CARD — USE SHARED DATA
+
+```jsx
+function AlertsCard({ group, sharedDeadlineMisses, combinedVolume, isAnalyzing, alertsAnalysis, onRefresh }) {
+  // Build alerts from shared deadline data + volume ceiling
+  const calculatedAlerts = [];
+  
+  // Deadline alerts — from shared source
+  sharedDeadlineMisses.forEach(dm => {
+    calculatedAlerts.push({
+      type: 'deadline',
+      message: `Combining will push downstream order FPR: ${dm.fpr} (${dm.name}) past its Avail Date by ${dm.delayFormatted}. New Completion: ${dm.newCompletionFull} → Avail Date: ${dm.availDate}`
+    });
+  });
+  
+  // Volume ceiling
+  if (combinedVolume > 200) {
+    calculatedAlerts.push({
+      type: 'volume_ceiling',
+      message: `Volume warning: The combined total of ${combinedVolume} MT exceeds the recommended ceiling of 200 MT.`
+    });
+  }
+  
+  return (
+    <div className="combine-card combine-card-alerts">
+      <div className="combine-card-header combine-card-header-alerts">
+        <span>⚠ Alerts</span>
+        <button className="combine-card-refresh" onClick={onRefresh}>
+          ↻ Refresh
+        </button>
+      </div>
+      <div className="combine-card-body combine-card-body-text">
+        {isAnalyzing ? (
+          <span className="combine-card-loading">Checking for alerts...</span>
+        ) : calculatedAlerts.length > 0 ? (
+          <div className="combine-alerts-list">
+            {calculatedAlerts.map((alert, index) => (
+              <div key={index} className="combine-alert-item">
+                <span className="combine-alert-item-icon">⚠</span>
+                <span className="combine-alert-item-text">{alert.message}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <span className="combine-alerts-none">
+            No alerts — all orders remain on schedule.
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+## VERIFICATION
+
+### Shared deadline data
+1. ✅ calculateDeadlineMisses() is the single source of truth
+2. ✅ Scheduling Impact uses shared data
+3. ✅ Alerts card uses shared data
+4. ✅ Both sections ALWAYS show the same at-risk orders
+
+### Scheduling Impact includes at-risk orders
+5. ✅ "Orders at risk of missing avail date" section appears when deadlines exist
+6. ✅ Each at-risk order listed individually with full details
+7. ✅ Includes avail date, new completion, delay amount, N10D status
+8. ✅ AI cannot say "no risks" when at-risk data exists
+
+### No contradictions
+9. ✅ Snip 3 scenario: "all start 10 min earlier" + Gall 21 at risk → Impact shows BOTH sections
+10. ✅ Summary mentions at-risk orders instead of saying "safe to proceed"
+11. ✅ If AI contradicts, validation layer fixes the summary
+12. ✅ If AI misses deadline section, validation force-adds it
+
+### Validation
+13. ✅ AI deadline section missing → auto-added from calculated data
+14. ✅ AI summary says "safe" but deadlines exist → summary replaced
+15. ✅ Earlier/later still grouped if too many bullets
+16. ✅ Deadline section always lists individually (not grouped)
+
+### Summary alignment
+17. ✅ Only positive when truly no risks
+18. ✅ Mentions at-risk orders when they exist
+19. ✅ Recommends caution when deadlines breached
+20. ✅ Always 3-5 sentences on separate lines
+```

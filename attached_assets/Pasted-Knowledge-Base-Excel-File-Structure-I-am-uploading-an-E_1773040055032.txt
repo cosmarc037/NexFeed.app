@@ -1,0 +1,32 @@
+Knowledge Base — Excel File Structure
+
+I am uploading an Excel file as the knowledge base for this application. Here is how to read and interpret the file:
+
+Sheet 1: Product Master Data
+This is the rules and data foundation of the optimization layer. Each row represents one SKU and contains:
+
+SKU Code — unique product identifier, used to link orders to product rules
+Description — human-readable product name
+Category — used for grouping/combining logic (products in the same category can potentially be batched together)
+Line Compatibility — defines which production line(s) can produce this SKU (used for auto-assigning lines)
+Packaging Type — used for combination logic (same packaging type = easier to group in sequence)
+Batch Size — standard production batch size (used for calculating run time)
+Run Rate — production throughput per hour/unit (used for time estimation and line balancing)
+Changeover Time — time required to switch to this product from another (used for sequencing optimization — minimize total changeover)
+Priority Level — scheduling weight (higher priority orders get scheduled first)
+Sheet 2: Order / Sales Order Data
+This is the input data that feeds into the production schedule. Each row represents one order:
+
+Order/SO Number — unique order reference
+Customer — customer name for reference
+SKU Code — links to Product Master for auto-populating product details
+Quantity — ordered quantity (used with batch size and run rate to calculate production time)
+Required Date — delivery deadline (used for sequencing and prioritization)
+Status — current order status (new, scheduled, in-progress, completed)
+How the App Should Use This Data:
+Auto-populate — When a user selects or inputs an SKU Code, the app pulls all product details (description, category, line compatibility, batch size, run rate, changeover time) from Sheet 1
+Suggest combinations — Group orders with the same category + packaging type to minimize changeover
+Assign lines — Match SKU's line compatibility to available production lines
+Sequence orders — Sort by priority level → required date → minimize changeover time between consecutive products
+Calculate time blocks — Use quantity ÷ run rate + changeover time to estimate production duration per order
+This Excel file IS the knowledge base. All automation logic should be derived from the data and rules within it.

@@ -1,0 +1,179 @@
+Please update the **generated order planned-order and material-code copying logic** based on the client’s latest instruction.
+
+---
+
+## 1. UPDATE THE GENERATED ORDER COPYING RULE
+
+Please revise the generated-order copy behavior so that generated orders no longer copy the source **FG** into the generated order’s **FG** field.
+
+### New client rule
+For generated orders:
+- copy only the **SFG1 planned order value** from the source order
+- copy only the **SFG1 material code** from the source order
+- place both into the generated order’s **SFG** fields
+- the generated order’s **FG** may be set to:
+  - `-----`
+  - or left blank
+
+### Expected result
+Generated orders should no longer use the source FG as the generated FG.
+
+Instead, the generated order should primarily carry the **SFG1-based values** in the **SFG** columns.
+
+---
+
+## 2. PLANNED ORDER MAPPING FOR GENERATED ORDERS
+
+Please update the planned-order mapping as follows:
+
+### Source → Generated mapping
+- Source **SFG1 Planned Order** → Generated **SFG Planned Order**
+- Generated **FG Planned Order** → `-----` or blank
+
+### Expected result
+The generated order’s planned-order section should show:
+- **FG = blank or `-----`**
+- **SFG = source SFG1 planned order**
+
+### Example
+If the source order has:
+- FG = `5925179`
+- SFG = `5881724`
+- SFG1 = `5924991`
+
+then the generated order should use:
+- FG = `-----` or blank
+- SFG = `5924991`
+
+---
+
+## 3. MATERIAL CODE MAPPING FOR GENERATED ORDERS
+
+Please update the material-code copy logic as follows:
+
+### Source → Generated mapping
+- Source **SFG1 Material Code** → Generated **SFG Material Code**
+- Generated **FG Material Code** should not be copied from the source FG for this flow
+
+### Expected result
+The generated order should carry the **SFG1 material code** in its **SFG material code** field.
+
+The generated order’s FG material code should remain blank or follow the current app behavior if that field is intentionally left empty for generated rows.
+
+---
+
+## 4. STOP COPYING SOURCE FG INTO GENERATED FG
+
+Please remove the previous generated-order logic that copied:
+- source **FG** into generated **FG**
+
+for this flow.
+
+### Expected result
+The generated order should no longer show the source FG planned order value as its FG.
+
+Instead:
+- FG should be blank or `-----`
+- SFG should carry the source SFG1-based planned order value
+- SFG material code should carry the source SFG1 material code
+
+---
+
+## 5. APPLY THIS TO THE GENERATED ORDER FLOW COVERED BY THE CLIENT COMMENT
+
+Please apply this updated rule to the relevant **generated order workflow** referenced by the client comment.
+
+### Important
+This request is intended to override the earlier generated-order copying assumption for this flow.
+
+If the current implementation still uses:
+- source FG
+- source SFG
+- or source FG + SFG1 combinations
+
+please replace that behavior with the new client-approved rule for the applicable generated orders.
+
+---
+
+## 6. DISPLAY FG AS BLANK OR `-----`
+
+For generated orders, the FG field may be displayed as:
+
+- `-----`
+- or blank
+
+Please use whichever presentation is already more consistent with the rest of the application.
+
+### Goal
+The generated order should clearly indicate that the relevant copied value is now the **SFG1-derived entry**, not an FG copied from the source order.
+
+---
+
+## 7. PRESERVE OTHER GENERATED ORDER LOGIC UNLESS NEEDED
+
+Please keep other generated-order behaviors unchanged unless they depend directly on this copying logic.
+
+Do not unintentionally break:
+- line routing logic
+- split-rule generation logic
+- sequencing
+- linked-order creation
+- generated-order history
+- validation or UI formatting
+
+This request is specifically to update:
+- planned-order copying
+- material-code copying
+for generated orders.
+
+---
+
+## IMPORTANT
+
+Please use this final rule for the affected generated orders:
+
+- copy only the **source SFG1 planned order value**
+- copy only the **source SFG1 material code**
+- place those into the generated order’s **SFG** fields
+- set generated **FG** to blank or `-----`
+
+Do not copy the source FG into the generated order FG field for this updated flow.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log the generated-order copy mapping.
+
+```javascript
+console.debug('[Generated Order Copy Mapping]', {
+  sourceFGPlannedOrder,
+  sourceSFGPlannedOrder,
+  sourceSFG1PlannedOrder,
+  sourceSFG1MaterialCode,
+  generatedFGPlannedOrder: '-----',
+  generatedSFGPlannedOrder: sourceSFG1PlannedOrder,
+  generatedSFGMaterialCode: sourceSFG1MaterialCode,
+});
+```
+
+```javascript
+console.debug('[Generated Order Field Population]', {
+  generatedOrderId,
+  fgDisplayValue,
+  sfgPlannedOrder,
+  sfgMaterialCode,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Generated orders no longer copy the source FG planned order into the generated FG field
+2. ✅ Generated orders copy the source `SFG1` planned order value into the generated `SFG` field
+3. ✅ Generated orders copy the source `SFG1` material code into the generated `SFG material code` field
+4. ✅ Generated FG is displayed as blank or `-----`
+5. ✅ Old FG-based copying logic is no longer applied for this updated flow
+6. ✅ Other generated-order behaviors remain unchanged
+7. ✅ No UI errors or console errors are introduced

@@ -1,0 +1,284 @@
+```
+Improve the AI strategy generation and execution for changeover-focused sequencing by giving the AI explicit access to the changeover rules tab / changeover matrix, so it can position orders in a way that actually reduces total changeover while still respecting date constraints.
+
+---
+
+## OBJECTIVE
+
+After comparing the Standard Sequence and the third AI-powered strategy, the AI-powered strategy is not effectively reducing changeover even though its description says it will cluster flexible orders to reduce costly red-to-yellow and diameter-change transitions.
+
+In the actual resulting table, the order flow still creates expensive transitions and ends up with worse total changeover than the Standard Sequence.
+
+We need to improve both:
+1. how the AI is prompted
+2. how the AI strategy is translated into the final table
+
+so that a changeover-focused AI strategy actually uses the changeover rules intelligently.
+
+---
+
+## CORE ISSUE
+
+The AI strategy currently appears to reason only at a high level:
+- cluster by color
+- cluster by diameter
+- cluster flexible orders
+
+But it does not appear to be using the actual changeover rules deeply enough.
+
+Example from the current case:
+The AI produces a flow like:
+- Yellow - 4.00mm
+- Red - 3.00mm
+- Brown - 3.00mm
+- Yellow - 4.00mm
+- Yellow - 4.00mm
+
+But from the changeover rules, we know:
+- Red → Yellow/Brown is costly (+1.00 hr)
+- Brown/Yellow → Red is lower (+0.50 hr)
+- Brown ↔ Yellow is only +0.33
+- diameter changes also add cost
+
+So the AI should understand that order positioning direction matters and should optimize based on the actual transition cost rules, not just on rough clustering labels.
+
+---
+
+## REQUIRED IMPROVEMENT
+
+For changeover-focused AI strategies:
+- provide the AI with the actual changeover rules tab / matrix
+- allow it to evaluate directional transition costs
+- have it sequence flexible orders in a way that minimizes total resulting changeover
+- still respect hard constraints like dates, Future Dispatches, MTO protection, and eligibility
+
+The goal is for the AI strategy to be meaningfully better than Standard Sequence when it claims to reduce changeover.
+
+---
+
+## 1. INCLUDE THE CHANGEOVER RULES TAB / MATRIX IN THE AI INPUT
+
+When generating changeover-oriented strategies, provide the AI with the actual changeover rules.
+
+This should include:
+- color transition costs
+- diameter transition costs
+- directional differences if applicable
+- any form/category changeover penalties
+- any base cleaning/change penalties
+
+### Example structure:
+```json
+{
+  "changeoverRules": {
+    "colorTransitions": {
+      "red->yellow": 1.00,
+      "red->brown": 1.00,
+      "yellow->red": 0.50,
+      "brown->red": 0.50,
+      "yellow->brown": 0.33,
+      "brown->yellow": 0.33
+    },
+    "diameterTransitions": {
+      "3.0->4.0": 0.50,
+      "4.0->3.0": 0.50
+    }
+  }
+}
+```
+
+Use the real rule values from the actual changeover tab, not placeholder examples.
+
+---
+
+## 2. EXPLICITLY TELL THE AI TO MINIMIZE TOTAL TRANSITION COST, NOT JUST “GROUP SIMILAR ORDERS”
+
+Update the AI prompt so it does not stop at vague clustering.
+
+Instruction should be closer to:
+- minimize total changeover cost across the full final sequence
+- use the provided changeover rules/matrix
+- consider directional costs between adjacent orders
+- avoid placing expensive transitions in the middle of otherwise compatible runs
+- cluster flexible orders into lower-cost transition paths where possible
+
+This is more precise than just saying:
+- reduce changeovers
+- group by color and diameter
+
+---
+
+## 3. PROVIDE THE AI WITH THE ACTUAL CURRENT LINE-UP
+
+The AI must see the actual before-sequence lineup, including for each order:
+- current position
+- item description
+- color
+- diameter
+- form
+- current avail date
+- whether the order is movable/flexible
+- whether the order is MTO protected
+- whether the order is date-locked
+- volume and production time
+- current changeover to next order if available
+
+This allows the AI to reason about:
+- what the current bad transitions are
+- where a reorder would reduce cost
+- what can be moved safely
+
+---
+
+## 4. TELL THE AI TO RESPECT HARD DATE CONSTRAINTS WHILE OPTIMIZING CHANGEOVER
+
+Very important:
+- the AI must not destroy date correctness just to reduce changeover
+- but within allowable windows, it should aggressively minimize transition cost
+
+Prompt it to:
+- preserve hard avail-date / Future Dispatches / MTO constraints
+- reorder only flexible orders
+- within those safe windows, choose the arrangement with lower total changeover
+
+This matches the expected business behavior.
+
+---
+
+## 5. HAVE THE AI REASON ABOUT DIRECTIONAL TRANSITION COSTS
+
+The AI should understand examples like:
+- Red in the middle of Yellow runs may be worse than putting Red at the start or end
+- Brown can sometimes bridge transitions better than Red
+- grouping all Yellow 4.00mm together may be better than splitting them with a Red/Brown 3.00mm order
+- one expensive transition may be better than multiple medium transitions depending on sequence
+
+This means the prompt should explicitly mention:
+- transition direction matters
+- cost is not always symmetric
+- choose the arrangement with lower overall sequence cost
+
+---
+
+## 6. LET THE AI PROPOSE A CONCRETE TARGET ORDERING / CLUSTERING PLAN
+
+The AI should not only return a high-level narrative.
+It should internally or explicitly propose:
+- which orders should be adjacent
+- which blocks should be clustered
+- which orders should move earlier/later
+- where high-cost transitions should be isolated or avoided
+
+This should then guide the execution layer more concretely.
+
+---
+
+## 7. IMPROVE THE EXECUTION LAYER SO IT MORE FAITHFULLY APPLIES THE AI’S CHANGEOVER CLUSTERING
+
+Even with a better prompt, the strategy will still underperform if the execution layer only partially honors the AI’s intended grouping.
+
+Review the strategy-application logic so it:
+- preserves AI-recommended adjacency when valid
+- does not overly dilute the AI ordering into a weak heuristic reorder
+- reflects the intended clustering more strongly in the final table
+
+This should improve both:
+- actual changeover reduction
+- faithfulness score
+
+---
+
+## 8. EVALUATE CANDIDATE ORDERINGS USING THE ACTUAL CHANGEOVER RULES
+
+If feasible, after the AI proposes a candidate ordering:
+- run the actual sequence through the app’s changeover engine
+- compute the true resulting changeover
+- compare against baseline
+- reject or downgrade poor reorderings that do not improve or meaningfully justify the tradeoff
+
+This creates a stronger alignment between AI intent and actual measured outcome.
+
+---
+
+## 9. UPDATE THE AI PROMPT WITH EXAMPLE EXPECTATIONS
+
+In the prompt, explain the kind of reasoning expected.
+
+Example instruction:
+```text
+When reducing changeover, do not just group by similarity in a general sense. Use the actual changeover rules. For example, if red-to-yellow is more expensive than yellow-to-red, account for direction when placing red orders. If multiple yellow 4.00mm orders can be clustered together, prefer arrangements that minimize repeated color and diameter breaks, while still respecting date-safe order windows.
+```
+
+This will make the model think in the right direction.
+
+---
+
+## 10. IMPROVE FAITHFULNESS FOR CHANGEOVER-REDUCTION STRATEGIES
+
+Once the AI has:
+- the lineup
+- the rules matrix
+- the actual movable constraints
+
+the final table should more visibly resemble the intended lower-changeover structure.
+
+The faithfulness score should improve because:
+- the strategy is more concrete
+- the execution is more faithful
+- the final arrangement should actually show compatible clustering
+
+---
+
+## 11. ADD DEBUG LOGGING TO TRACE THE DECISION INPUTS
+
+Temporarily log what the AI receives:
+
+```javascript
+console.debug('[AI Changeover Strategy Context]', {
+  lineId,
+  lineup: lineOrders.map((order, index) => ({
+    position: index + 1,
+    orderId: order.id,
+    item: order.item_description,
+    color: order.color,
+    diameter: order.diameter,
+    form: order.form,
+    availDate: order.avail_date,
+    movable: order.movable,
+  })),
+  changeoverRules,
+});
+```
+
+And after applying:
+```javascript
+console.debug('[AI Changeover Strategy Output]', {
+  lineId,
+  finalLineup: finalOrders.map((order, index) => ({
+    position: index + 1,
+    orderId: order.id,
+    item: order.item_description,
+    color: order.color,
+    diameter: order.diameter,
+    form: order.form,
+    resultingCO: order.changeover,
+  })),
+  totalChangeover,
+  baselineChangeover,
+  faithfulness,
+});
+```
+
+This will help verify whether the AI truly had the necessary information.
+
+---
+
+## 12. VERIFICATION
+
+1. ✅ The AI receives the actual changeover rules tab/matrix during changeover-focused strategy generation
+2. ✅ The AI sees the full current line-up and order attributes
+3. ✅ The AI is prompted to minimize total transition cost, not just vaguely cluster similar orders
+4. ✅ Directional transition costs are respected in the strategy generation
+5. ✅ Final AI-powered changeover strategies result in more sensible order grouping
+6. ✅ Changeover-focused AI strategies are more likely to outperform or meaningfully differ from Standard Sequence
+7. ✅ Faithfulness improves because the final table better reflects the intended clustering strategy

@@ -1,0 +1,524 @@
+```
+Implement the following fixes to the Knowledge Base:
+
+---
+
+## FIX 1: MERGE UPLOAD HISTORY AND EDIT HISTORY INTO ONE TABLE
+
+Remove the separate "Edit History" and "Upload History" sections. Combine them into a single "History" table.
+
+### CURRENT (WRONG)
+
+```
+┌─ Edit History ──────────────────────────────────────────┐
+│ DATE | TYPE | NOTES | REVERT                            │
+│ ...                                                     │
+└─────────────────────────────────────────────────────────┘
+
+┌─ Upload History ────────────────────────────────────────┐
+│ # | FILE NAME | UPLOAD DATE | RECORDS | STATUS | ACTIONS│
+│ ...                                                     │
+└─────────────────────────────────────────────────────────┘
+```
+
+### CORRECT — ONE UNIFIED TABLE
+
+```
+┌─ History ───────────────────────────────────────────────────────────────────────┐
+│ #  │ DATE                  │ TYPE        │ NOTES                    │ ACTIONS   │
+├────┼───────────────────────┼─────────────┼──────────────────────────┼───────────┤
+│ 1  │ Apr 4, 2026 1:30 PM  │ Manual Edit │ Manual edit — 1 row(s)   │  📥  ↩  🗑│
+│    │                       │             │ modified                 │           │
+├────┼───────────────────────┼─────────────┼──────────────────────────┼───────────┤
+│ 2  │ Apr 2, 2026 10:05 PM │ File Upload │ Uploaded new file:       │  📥  ↩  🗑│
+│    │                       │             │ Knowledge Base.xlsx      │           │
+│    │                       │             │ (353 records)            │           │
+└────┴───────────────────────┴─────────────┴──────────────────────────┴───────────┘
+```
+
+### UNIFIED HISTORY TABLE
+
+```jsx
+function KBHistory({ history, onDownload, onRevert, onDelete }) {
+  return (
+    <div className="kb-history-section">
+      <h3 className="kb-history-title">History</h3>
+      
+      <div className="kb-history-filters">
+        <input 
+          type="text" 
+          placeholder="Search history..." 
+          className="kb-history-search"
+        />
+        <input 
+          type="date" 
+          className="kb-history-date-filter"
+        />
+        <span className="kb-history-count">
+          Showing {history.length} entries
+        </span>
+      </div>
+      
+      <table className="kb-history-table">
+        <thead>
+          <tr>
+            <th style={{ width: 40 }}>#</th>
+            <th style={{ width: 180 }}>DATE</th>
+            <th style={{ width: 120 }}>TYPE</th>
+            <th>NOTES</th>
+            <th style={{ width: 120 }}>ACTIONS</th>
+          </tr>
+        </thead>
+        <tbody>
+          {history.map((entry, index) => (
+            <tr key={entry.id}>
+              <td>{index + 1}</td>
+              <td>{formatDateTimeFull(entry.timestamp)}</td>
+              <td>
+                <span className={`kb-history-type-badge ${entry.type}`}>
+                  {getTypeLabel(entry.type)}
+                </span>
+              </td>
+              <td>
+                <HistoryNotesCell 
+                  summary={entry.summary} 
+                  details={entry.details} 
+                />
+              </td>
+              <td className="kb-history-actions">
+                <button 
+                  className="kb-history-action-btn"
+                  onClick={() => onDownload(entry)}
+                  title="Download snapshot"
+                >
+                  📥
+                </button>
+                <button 
+                  className="kb-history-action-btn"
+                  onClick={() => onRevert(entry)}
+                  title="Revert to this version"
+                >
+                  ↩
+                </button>
+                <button 
+                  className="kb-history-action-btn delete"
+                  onClick={() => onDelete(entry)}
+                  title="Delete this entry"
+                >
+                  🗑
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+```
+
+### TYPE LABELS AND BADGES
+
+```javascript
+function getTypeLabel(type) {
+  switch (type) {
+    case 'file_upload': return 'File Upload';
+    case 'manual_edit': return 'Manual Edit';
+    case 'revert': return 'Revert';
+    default: return type;
+  }
+}
+```
+
+```css
+.kb-history-type-badge {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.kb-history-type-badge.file_upload {
+  color: #2563eb;
+  background: #eff6ff;
+}
+
+.kb-history-type-badge.manual_edit {
+  color: #7c3aed;
+  background: #f5f3ff;
+}
+
+.kb-history-type-badge.revert {
+  color: #ea580c;
+  background: #fff7ed;
+}
+```
+
+### NOTES FORMAT — PER TYPE
+
+```javascript
+// File upload note
+function createUploadHistoryEntry(filename, recordCount) {
+  return {
+    id: Date.now(),
+    type: 'file_upload',
+    timestamp: new Date().toISOString(),
+    summary: `Uploaded new file: ${filename} (${recordCount} records)`,
+    details: `File "${filename}" uploaded and applied as new Knowledge Base with ${recordCount} records.`,
+    snapshot: JSON.parse(JSON.stringify(kbData)),
+    user: getCurrentUser(),
+  };
+}
+
+// Manual edit note
+function createEditHistoryEntry() {
+  const { summary, details } = changeTracker.generateChangeSummary();
+  
+  return {
+    id: Date.now(),
+    type: 'manual_edit',
+    timestamp: new Date().toISOString(),
+    summary: summary,
+    details: details,
+    snapshot: JSON.parse(JSON.stringify(kbData)),
+    user: getCurrentUser(),
+  };
+}
+
+// Revert note
+function createRevertHistoryEntry(revertedEntry) {
+  return {
+    id: Date.now(),
+    type: 'revert',
+    timestamp: new Date().toISOString(),
+    summary: `Reverted to version from ${formatDateTimeFull(revertedEntry.timestamp)}`,
+    details: `Knowledge Base reverted to: ${revertedEntry.summary}`,
+    snapshot: JSON.parse(JSON.stringify(kbData)),
+    user: getCurrentUser(),
+  };
+}
+```
+
+### HISTORY TABLE STYLING
+
+```css
+.kb-history-section {
+  margin-top: 32px;
+}
+
+.kb-history-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #1a1a1a;
+  margin-bottom: 12px;
+}
+
+.kb-history-filters {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.kb-history-search {
+  padding: 6px 12px;
+  font-size: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  outline: none;
+  width: 200px;
+}
+
+.kb-history-date-filter {
+  padding: 6px 12px;
+  font-size: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  outline: none;
+}
+
+.kb-history-count {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.kb-history-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.kb-history-table thead th {
+  font-size: 10px;
+  font-weight: 600;
+  color: #6b7280;
+  text-transform: uppercase;
+  text-align: left;
+  padding: 8px 12px;
+  border-bottom: 2px solid #e5e7eb;
+}
+
+.kb-history-table tbody td {
+  font-size: 12px;
+  color: #374151;
+  padding: 10px 12px;
+  border-bottom: 1px solid #f3f4f6;
+  vertical-align: top;
+}
+
+.kb-history-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.kb-history-action-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 4px;
+  border-radius: 4px;
+  color: #9ca3af;
+}
+
+.kb-history-action-btn:hover {
+  color: #374151;
+  background: #f3f4f6;
+}
+
+.kb-history-action-btn.delete:hover {
+  color: #dc2626;
+  background: #fef2f2;
+}
+```
+
+---
+
+## FIX 2: PERSIST EDIT HISTORY ACROSS BROWSER REFRESH
+
+Store history in localStorage so it survives page refresh:
+
+```javascript
+function useKBHistory() {
+  const STORAGE_KEY = 'nexfeed_kb_history';
+  
+  const [history, setHistory] = useState(() => {
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY);
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  });
+  
+  // Save to localStorage whenever history changes
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(history));
+    } catch (e) {
+      console.warn('Failed to save KB history to localStorage:', e);
+    }
+  }, [history]);
+  
+  function addToHistory(entry) {
+    setHistory(prev => [entry, ...prev]); // Newest first
+  }
+  
+  function removeFromHistory(entryId) {
+    setHistory(prev => prev.filter(e => e.id !== entryId));
+  }
+  
+  function clearHistory() {
+    setHistory([]);
+    localStorage.removeItem(STORAGE_KEY);
+  }
+  
+  return {
+    history,
+    addToHistory,
+    removeFromHistory,
+    clearHistory
+  };
+}
+```
+
+### ALSO PERSIST KB DATA
+
+```javascript
+function useKBData() {
+  const STORAGE_KEY = 'nexfeed_kb_data';
+  
+  const [kbData, setKbData] = useState(() => {
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY);
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  });
+  
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(kbData));
+    } catch (e) {
+      console.warn('Failed to save KB data to localStorage:', e);
+    }
+  }, [kbData]);
+  
+  return [kbData, setKbData];
+}
+```
+
+---
+
+## FIX 3: "EDIT TABLE" — DARKER GRAY COLOR
+
+```css
+.kb-edit-link {
+  font-size: 13px;
+  color: #4b5563;           /* darker gray instead of orange */
+  text-decoration: underline;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.kb-edit-link:hover {
+  color: #1f2937;           /* even darker on hover */
+}
+```
+
+---
+
+## DELETE HISTORY ENTRY — WITH CONFIRMATION
+
+Same "Confirm" dialog as revert:
+
+```jsx
+function DeleteHistoryButton({ entry, onDelete }) {
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [confirmText, setConfirmText] = useState('');
+  
+  return (
+    <>
+      <button 
+        className="kb-history-action-btn delete"
+        onClick={() => setShowConfirm(true)}
+        title="Delete this entry"
+      >
+        🗑
+      </button>
+      
+      {showConfirm && (
+        <div className="dialog-overlay">
+          <div className="dialog-container" style={{ maxWidth: '440px' }}>
+            <div className="dialog-header">
+              <span>⚠ Delete History Entry</span>
+              <button className="dialog-close" onClick={() => setShowConfirm(false)}>✕</button>
+            </div>
+            
+            <div className="dialog-body">
+              <p style={{ fontSize: '12px', color: '#374151', lineHeight: 1.6 }}>
+                You are about to delete this history entry:
+              </p>
+              <p style={{ fontSize: '13px', fontWeight: 600, color: '#1a1a1a', margin: '8px 0' }}>
+                {formatDateTimeFull(entry.timestamp)} — {getTypeLabel(entry.type)}
+              </p>
+              <p style={{ fontSize: '11px', color: '#6b7280', marginBottom: '12px' }}>
+                {entry.summary}
+              </p>
+              <p style={{ fontSize: '12px', color: '#dc2626', lineHeight: 1.6 }}>
+                This action cannot be undone. The snapshot for this version will be permanently deleted.
+              </p>
+              <p style={{ fontSize: '12px', color: '#374151', lineHeight: 1.6, marginTop: '12px' }}>
+                Type <strong>Confirm</strong> to proceed:
+              </p>
+              <input
+                type="text"
+                value={confirmText}
+                onChange={(e) => setConfirmText(e.target.value)}
+                placeholder="Type Confirm"
+                style={{
+                  width: '100%',
+                  padding: '8px 12px',
+                  fontSize: '13px',
+                  border: '1px solid #e5e7eb',
+                  borderRadius: '6px',
+                  marginTop: '8px',
+                  outline: 'none'
+                }}
+              />
+            </div>
+            
+            <div className="dialog-footer" style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+              <button 
+                onClick={() => { setShowConfirm(false); setConfirmText(''); }}
+                style={{
+                  background: '#ffffff',
+                  color: '#374151',
+                  border: '1px solid #d1d5db',
+                  borderRadius: '6px',
+                  padding: '8px 20px',
+                  fontSize: '13px',
+                  cursor: 'pointer'
+                }}
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={() => {
+                  if (confirmText === 'Confirm') {
+                    onDelete(entry.id);
+                    setShowConfirm(false);
+                    setConfirmText('');
+                  }
+                }}
+                disabled={confirmText !== 'Confirm'}
+                style={{
+                  background: confirmText === 'Confirm' ? '#dc2626' : '#d1d5db',
+                  color: '#ffffff',
+                  border: 'none',
+                  borderRadius: '6px',
+                  padding: '8px 20px',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  cursor: confirmText === 'Confirm' ? 'pointer' : 'not-allowed'
+                }}
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+```
+
+---
+
+## VERIFICATION
+
+### Unified history table
+1. ✅ One "History" section — no separate "Edit History" and "Upload History"
+2. ✅ File uploads appear with type "File Upload" and blue badge
+3. ✅ Manual edits appear with type "Manual Edit" and purple badge
+4. ✅ Reverts appear with type "Revert" and orange badge
+5. ✅ All sorted by date (newest first)
+6. ✅ All have Download, Revert, Delete buttons
+
+### Persistence
+7. ✅ Edit history persists after browser refresh
+8. ✅ KB data persists after browser refresh
+9. ✅ Upload history persists after browser refresh
+
+### Edit Table link
+10. ✅ Darker gray color (#4b5563)
+11. ✅ Underlined text
+12. ✅ Darker on hover (#1f2937)
+
+### Notes column
+13. ✅ Upload: "Uploaded new file: filename.xlsx (353 records)"
+14. ✅ Manual edit: "Manual edit — 3 rows modified, 1 row added"
+15. ✅ Revert: "Reverted to version from Apr 2, 2026"
+16. ✅ Truncated with hover tooltip showing full details
+```

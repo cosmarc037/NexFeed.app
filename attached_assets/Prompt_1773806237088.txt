@@ -1,0 +1,95 @@
+```
+Implement the following changes to the NexFeed application:
+
+---
+
+## 1. ALL COLUMNS ARE HIDEABLE — NO EXCEPTIONS
+
+Remove the "always visible" restriction. EVERY column in the interactive table can be hidden, including Prio, FPR, Status, and the Readiness icon column.
+
+**Updated list — ALL hideable:**
+
+| Column | Hideable | Identifier |
+|---|---|---|
+| Readiness (headless) | ✅ | readiness |
+| Prio | ✅ | prio |
+| FPR | ✅ | fpr |
+| Planned Order FG | ✅ | planned_fg |
+| Planned Order SFG | ✅ | planned_sfg |
+| Planned Order PMX | ✅ | planned_pmx |
+| Production Order FG1 | ✅ | prod_fg1 |
+| Production Order SFG1 | ✅ | prod_sfg1 |
+| Production Order SFGPMX | ✅ | prod_sfgpmx |
+| Material Code (SFG) | ✅ | mat_code_sfg |
+| Material Code (FG) | ✅ | mat_code_fg |
+| Item Description | ✅ | item_desc |
+| Form | ✅ | form |
+| Volume (MT) | ✅ | volume |
+| Batch Size | ✅ | batch_size |
+| Number of Batches | ✅ | num_batches |
+| Number of Bags | ✅ | num_bags |
+| Production Time | ✅ | prod_time |
+| HA Info | ✅ | ha_info |
+| HA Prep | ✅ | ha_prep |
+| Status | ✅ | status |
+| Start Date | ✅ | start_date |
+| Start Time | ✅ | start_time |
+| Avail Date | ✅ | avail_date |
+| Completion Date | ✅ | completion_date |
+| FPR Notes | ✅ | fpr_notes |
+| Special Remarks | ✅ | special_remarks |
+| Threads | ✅ | threads |
+| Sacks | ✅ | sacks |
+| Markings | ✅ | markings |
+| Tags | ✅ | tags |
+| End Date | ✅ | end_date |
+| History | ✅ | history |
+
+**The drag handle column is the ONLY element that cannot be hidden** — it is a UI interaction element, not a data column.
+
+**Safety check:** If the user hides ALL columns except the drag handle, show a toast:
+```
+"At least one data column must be visible. Unhide a column to continue."
+```
+And prevent the last visible column from being hidden.
+
+---
+
+## 2. REMOVE SORTING BUTTONS FROM COLUMN HEADERS
+
+Remove all sorting buttons, sort icons, and sort click handlers from the column headers.
+
+**What to remove:**
+- ❌ Any sort arrow icons (▲▼, ↑↓) on column headers
+- ❌ Any clickable sort behavior on column headers (clicking a header should NOT sort the table)
+- ❌ Any sort indicator showing current sort direction
+- ❌ Any sort state management
+
+**Why:**
+- Sorting by column headers conflicts with the manual drag-and-drop ordering and the availability date chronological sorting rules.
+- The user controls order via drag-and-drop and auto-sort based on availability dates.
+- Column header sorting would override the user's manual arrangement, which is not desired.
+
+**What column headers should look like after removal:**
+- Clean text label only (e.g., "FPR", "Volume (MT)", "Status")
+- No icons, no arrows, no sort indicators
+- Not clickable for sorting purposes
+- Normal cursor (default) when hovering over the header text — NOT pointer cursor
+- The "Hide" text still appears on hover (as defined in the hideable columns feature)
+
+**What to keep:**
+- ✅ Column header text/labels remain
+- ✅ Column group headers remain
+- ✅ "Hide" hover interaction remains
+- ✅ Any column resizing functionality (if implemented) remains
+
+---
+
+### SEARCH AND FILTER — UNAFFECTED
+
+The search bar and filter functionality above the table are NOT affected by this change. Users can still:
+- Search across all fields
+- Filter by Form, Status, HA Prep, Readiness, etc.
+
+These are separate from column header sorting and remain fully functional.
+```

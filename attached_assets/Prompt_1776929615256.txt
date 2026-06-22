@@ -1,0 +1,315 @@
+```
+Fix: Recalculate N10D dates fresh in the preview, not from DB:
+
+---
+
+## 1. FIX runAutoSequenceWithProgress — RECALCULATE N10D FOR ALL ORDERS
+
+When building the snapshot for preview, force recalculation from current N10D:
+
+```javascript
+async function handlePlantLevelAutoSequence() {
+  try {
+    setProcessingPhase('scanning');
+    setProcessingStats({ processed: 0, total: 0, combined: 0, moved: 0 });
+    setShowProcessingOverlay(true);
+    
+    // Get ALL active orders from DB
+    const allActiveOrders = enrichedOrders.filter(
+      o => o.status !== 'Done' && o.status !== 'Cancel PO' &&
+           o.status !== 'In Production' && o.status !== 'On-going' &&
+           !o.parent_id
+    );
+    
+    // CRITICAL: Recalculate N10D dates for ALL orders using CURRENT N10D data
+    const ordersWithFreshN10D = allActiveOrders.map(order => {
+      const materialCode = String(order.material_code_fg || '').trim();
+      
+      // Check if this order had a date from OLD N10D
+      const hadOldN10DDate = order.date_source === 'n10d';
+      
+      // If it did, recalculate from CURRENT N10D data
+      if (hadOldN10DDate && n10dData && n10dData.length > 0 && materialCode) {
+        const n10dEntry = n10dData.find(n =>
+          String(n.material_code || n.material_code_fg || '').trim() === materialCode
+        );
+        
+        if (n10dEntry) {
+          const newInferredDate = n10dEntry.inferred_target_date || n10dEntry.target_date;
+          const newStatus = String(n10dEntry.status || n10dEntry.stock_status || '').trim();
+          
+          if (newInferredDate && /^\d{4}-\d{2}-\d{2}/.test(newInferredDate)) {
+            // OVERRIDE the old date with new one from current N10D
+            return {
+              ...order,
+              target_avail_date: newInferredDate,  // NEW date from latest N10D
+              inferred_target_date: newInferredDate,
+              inferred_target_label: newStatus,
+              _freshFromN10D: true,  // Flag that this is freshly calculated
+            };
+          }
+        }
+      }
+      
+      // Otherwise, keep as-is
+      return order;
+    });
+    
+    await new Promise(r => setTimeout(r, 100));
+    
+    // Build snapshot from recalculated orders
+    const snapshot = {};
+    ALL_LINES_ORDERED.forEach(line => {
+      snapshot[line] = ordersWithFreshN10D
+        .filter(o => normalizeLine(o.feedmill_line) === line)
+        .filter(o => !o.parent_id)
+        .sort((a, b) => (a.priority_seq || 0) - (b.priority_seq || 0))
+        .map(o => ({ ...JSON.parse(JSON.stringify(o)) }));
+    });
+    
+    setOriginalSnapshot(snapshot);
+    setSequencedResults(null);
+    
+    // Run auto-sequence with the FRESH N10D data
+    setProcessingPhase('combining');
+    await new Promise(r => setTimeout(r, 200));
+    
+    const onProgress = (stats) => {
+      setProcessingStats(prev => ({ ...prev, ...stats }));
+    };
+    
+    const onPhaseChange = (phase) => {
+      setProcessingPhase(phase);
+    };
+    
+    const { lineOrdersMap, combinedOrders, placementLog } = await runAutoSequenceWithProgress(
+      ordersWithFreshN10D,  // Pass the RECALCULATED orders
+      masterData,
+      n10dData,  // Latest N10D data
+      ALL_LINES_ORDERED,
+      changeoverRules,
+      onProgress,
+      onPhaseChange
+    );
+    
+    // Build results with fresh N10D dates
+    const results = {};
+    ALL_LINES_ORDERED.forEach(line => {
+      const lineOrders = lineOrdersMap[line] || [];
+      if (lineOrders.length === 0) {
+        results[line] = [];
+        return;
+      }
+      
+      // Enrich with N10D before sorting
+      const withN10D = lineOrders.map(order => {
+        const materialCode = String(order.material_code_fg || '').trim();
+        
+        if (order.date_source === 'n10d' && n10dData && n10dData.length > 0 && materialCode) {
+          const n10dEntry = n10dData.find(n =>
+            String(n.material_code || n.material_code_fg || '').trim() === materialCode
+          );
+          
+          if (n10dEntry) {
+            const newInferredDate = n10dEntry.inferred_target_date || n10dEntry.target_date;
+            const newStatus = String(n10dEntry.status || n10dEntry.stock_status || '').trim();
+            
+            if (newInferredDate && /^\d{4}-\d{2}-\d{2}/.test(newInferredDate)) {
+              return {
+                ...order,
+                target_avail_date: newInferredDate,
+                inferred_target_date: newInferredDate,
+                inferred_target_label: newStatus,
+              };
+            }
+          }
+        }
+        
+        return order;
+      });
+      
+      const originalLineOrders = snapshot[line] || [];
+      const withMovement = withN10D.map((order, index) => {
+        const newPrio = index + 1;
+        const originalIndex = originalLineOrders.findIndex(o => o.id === order.id);
+        let movement = 'same';
+        let movementDelta = 0;
+        
+        if (originalIndex >= 0) {
+          const originalPrio = originalIndex + 1;
+          movementDelta = originalPrio - newPrio;
+          if (movementDelta > 0) movement = 'up';
+          else if (movementDelta < 0) movement = 'down';
+        } else {
+          movement = 'new_to_line';
+        }
+        
+        return {
+          ...order,
+          prio: newPrio,
+          _originalPrio: originalIndex >= 0 ? originalIndex + 1 : -1,
+          _movement: movement,
+          _movementDelta: Math.abs(movementDelta),
+        };
+      });
+      
+      results[line] = withMovement;
+    });
+    
+    setSequencedResults(results);
+    
+    const stats = calculatePlantSummary(snapshot, results, combinedOrders, placementLog, ALL_LINES_ORDERED);
+    setSummaryStats(stats);
+    
+    setProcessingPhase('done');
+    await new Promise(r => setTimeout(r, 500));
+    
+    setShowProcessingOverlay(false);
+    setShowPlantAutoSequencePreview(true);
+    
+  } catch (error) {
+    console.error('Plant auto-sequence error:', error);
+    setShowProcessingOverlay(false);
+    toast.error(`Auto-sequence failed: ${error.message}`);
+  }
+}
+```
+
+---
+
+## 2. ENSURE preSortOrders USES LATEST N10D DATA
+
+```javascript
+function preSortOrders(orders, n10dData, masterData) {
+  return orders.map(order => {
+    const materialCode = String(order.material_code_fg || '').trim();
+    
+    // Hard SAP date — never override
+    if (order.date_source === 'hard_date' || 
+        (order.target_avail_date && /^\d{4}-\d{2}-\d{2}/.test(String(order.target_avail_date)) && order.date_source === 'hard_date')) {
+      return {
+        ...order,
+        _category: 'A',
+        _sortDate: new Date(order.target_avail_date),
+        _dateSource: 'hard_date',
+      };
+    }
+    
+    // N10D date — ALWAYS recalculate from current N10D data
+    if (n10dData && n10dData.length > 0 && materialCode) {
+      const n10dEntry = n10dData.find(n =>
+        String(n.material_code || n.material_code_fg || '').trim() === materialCode
+      );
+      
+      if (n10dEntry) {
+        const inferredDate = n10dEntry.inferred_target_date || n10dEntry.target_date;
+        const status = String(n10dEntry.status || n10dEntry.stock_status || '').trim();
+        
+        if (inferredDate && /^\d{4}-\d{2}-\d{2}/.test(inferredDate)) {
+          const dateObj = new Date(inferredDate);
+          
+          console.log(`[preSortOrders] ${order.item_description?.substring(0, 30)}: NEW N10D date = ${inferredDate}, Status = ${status}`);
+          
+          return {
+            ...order,
+            _category: status === 'Critical' ? 'C' : status === 'Urgent' ? 'B' : 'D',
+            _sortDate: dateObj,
+            _n10dStatus: status,
+            _availDateDisplay: status,
+            _dateSource: 'n10d',
+            target_avail_date: inferredDate,  // UPDATE to new date
+            inferred_target_date: inferredDate,
+            inferred_target_label: status,
+          };
+        }
+        
+        // Status only, no date
+        if (status === 'Critical') {
+          return {
+            ...order,
+            _category: 'C',
+            _n10dStatus: status,
+            _availDateDisplay: status,
+            _dateSource: 'n10d',
+            inferred_target_label: status,
+          };
+        }
+        
+        if (status === 'Urgent') {
+          return {
+            ...order,
+            _category: 'B',
+            _n10dStatus: status,
+            _availDateDisplay: status,
+            _dateSource: 'n10d',
+            inferred_target_label: status,
+          };
+        }
+        
+        if (['Sufficient', 'Safe', 'OK'].includes(status)) {
+          return {
+            ...order,
+            _category: 'D',
+            _n10dStatus: status,
+            _availDateDisplay: status,
+            _dateSource: 'n10d',
+            inferred_target_label: status,
+          };
+        }
+      }
+    }
+    
+    // Fallback
+    return {
+      ...order,
+      _category: 'E',
+      _dateSource: 'none',
+    };
+  });
+}
+```
+
+---
+
+## 3. ADD DEBUG LOGGING TO VERIFY DATES ARE UPDATED
+
+```javascript
+// In the preview rendering:
+
+console.log('=== PREVIEW ORDERS ===');
+Object.entries(sequencedResults).forEach(([line, orders]) => {
+  console.log(`\n[${line}]`);
+  orders.forEach((o, i) => {
+    console.log(
+      `  ${i + 1}. ${(o.item_description || '').substring(0, 30).padEnd(30)} | ` +
+      `Date: ${o.target_avail_date || 'NONE'} | Label: ${o.inferred_target_label || '—'}`
+    );
+  });
+});
+```
+
+---
+
+## VERIFICATION
+
+### N10D recalculation
+1. ✅ When auto-sequence starts, ALL orders with `date_source: 'n10d'` are recalculated
+2. ✅ Fresh N10D data (latest from DB) is used
+3. ✅ Old date (May 5) replaced with new date (April 11) BEFORE preview is shown
+4. ✅ Console logs show: "NEW N10D date = 2026-04-11"
+
+### Before/After tables
+5. ✅ Before table shows OLD dates (from DB before auto-sequence)
+6. ✅ After table shows NEW dates (recalculated from latest N10D)
+7. ✅ Example: Before "05 May 2026", After "11 April 2026"
+8. ✅ Both show the N10D label (e.g., "safety stocks", "prio replenish")
+
+### Example scenario
+- DB has: Gallimax = May 5, 2026 (from old N10D)
+- New N10D uploaded: Gallimax = April 11, 2026
+- User clicks Auto-Sequence
+- Before table: May 5
+- After table: April 11 ✓
+- User clicks Apply
+- DB updated: May 5 → April 11 ✓
+```

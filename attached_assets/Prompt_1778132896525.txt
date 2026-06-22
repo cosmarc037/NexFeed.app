@@ -1,0 +1,268 @@
+```
+Add a dynamic rightmost column in the After table so AI-powered strategies show Profit Score, while Standard Sequence with profitability applied continues to show Margin.
+
+---
+
+## OBJECTIVE
+
+In the Standard Sequence, when “Apply Profitability” is clicked, the After table already shows a rightmost column for **Margin**.
+
+We want to extend this behavior to the two AI-powered sequence options.
+
+### Required behavior:
+- If the active strategy is **Standard Sequence** with profitability applied:
+  - keep showing the **Margin** column
+- If the active strategy is **AI Strategy Option 1** or **AI Strategy Option 2**:
+  - show a **Profit Score** column at the end of the table instead
+  - each row should display that order’s profit score
+  - hovering the score should show a tooltip with the calculation formula
+
+---
+
+## 1. ADD A DYNAMIC FINAL COLUMN BASED ON ACTIVE STRATEGY
+
+Make the final column of the After table strategy-aware.
+
+### Behavior:
+- Standard Sequence (+ profitability applied) → final column = `Margin`
+- AI-powered sequence selected → final column = `Profit Score`
+
+This should update dynamically when the user switches strategies.
+
+### Example:
+```javascript
+const isStandard = activeStrategy === 'standard';
+const isAIStrategy = activeStrategy === 'ai_option_1' || activeStrategy === 'ai_option_2';
+
+const finalColumnLabel = isAIStrategy ? 'Profit Score' : 'Margin';
+```
+
+---
+
+## 2. KEEP MARGIN FOR STANDARD SEQUENCE
+
+For the Standard Sequence:
+- do not remove the current Margin behavior
+- keep using the margin lookup by material code exactly as it works now
+
+This change is only about adding a different final-column mode for AI-powered sequences.
+
+---
+
+## 3. SHOW PROFIT SCORE FOR AI-POWERED STRATEGIES
+
+For AI-powered strategies:
+- append a `Profit Score` column at the end of the table
+- display the order’s profit score for that row
+
+Use the existing score if already computed.
+If the score is stored under a different field, use that field consistently.
+
+Possible existing fields to check:
+- `_profitScore`
+- `profit_score`
+- `_profitabilityScore`
+- `ai_profit_score`
+
+Use the real current source of truth.
+
+### Example row display:
+```jsx
+<td>
+  <span className="profit-score-pill">
+    {formatProfitScore(order._profitScore)}
+  </span>
+</td>
+```
+
+---
+
+## 4. TOOLTIP CONTENT SHOULD ONLY SHOW THE FORMULA
+
+For the Profit Score tooltip, keep the content simple.
+
+### Required tooltip format:
+```text
+Profit Score: xx.x
+Margin / (production hours + changeover)
+```
+
+So when the user hovers the Profit Score value, the tooltip should only display:
+1. the final score value
+2. the formula
+
+Do not show a long component breakdown.
+Do not show extra explanation text unless needed for formatting.
+
+### Example tooltip content:
+```text
+Profit Score: 8.7
+Margin / (production hours + changeover)
+```
+
+---
+
+## 5. ENSURE THE FORMULA MATCHES THE ACTUAL LOGIC
+
+The tooltip formula must reflect the real calculation:
+
+### Formula:
+```text
+profit score = margin / (production hours + changeover)
+```
+
+Use the actual values already calculated by the app.
+
+If the displayed score is rounded:
+- that is fine
+- but the tooltip label should still show the same final rounded score value
+
+---
+
+## 6. MAKE SURE THE SCORE ITSELF IS CALCULATED FROM THE CORRECT VALUES
+
+The Profit Score shown in the AI strategy column should be based on:
+
+```javascript
+profitScore = margin / (productionHours + changeover)
+```
+
+Where:
+- `margin` = the margin value for that product
+- `productionHours` = the row’s production hours
+- `changeover` = the row’s changeover hours
+
+Use the actual row-level values already displayed in the table.
+
+If needed, compute/store:
+
+```javascript
+order._profitScore = margin / (productionHours + changeover);
+```
+
+Make sure:
+- production hours are the displayed/effective row hours
+- changeover is the actual row CO value
+- not raw/default placeholders
+
+---
+
+## 7. UPDATE THE TABLE HEADER DYNAMICALLY
+
+The After table header should switch between:
+- `Margin`
+and
+- `Profit Score`
+
+depending on the active strategy.
+
+This should happen immediately when the strategy card changes.
+
+---
+
+## 8. KEEP THE COLUMN AT THE END OF THE TABLE
+
+As requested:
+- place the Profit Score column at the far right / end of the table
+- same general placement where Margin currently appears in Standard Sequence
+
+This keeps the layout familiar.
+
+---
+
+## 9. HANDLE MISSING SCORE SAFELY
+
+If an AI strategy row does not have a valid score:
+- show `—`
+- disable or omit the tooltip
+- do not break the table
+
+### Example:
+```jsx
+{order._profitScore != null ? (
+  <Tooltip
+    content={
+      <>
+        <div>Profit Score: {formatProfitScore(order._profitScore)}</div>
+        <div>Margin / (production hours + changeover)</div>
+      </>
+    }
+  >
+    <span className="profit-score-pill">
+      {formatProfitScore(order._profitScore)}
+    </span>
+  </Tooltip>
+) : (
+  '—'
+)}
+```
+
+---
+
+## 10. OPTIONAL: STYLE THE PROFIT SCORE SIMILAR TO MARGIN
+
+For consistency, style the Profit Score value similarly to the margin pill/tag if desired.
+
+Example:
+- soft badge
+- slightly emphasized numeric value
+- hover cursor to indicate tooltip availability
+
+---
+
+## 11. APPLY ONLY TO THE ACTIVE STRATEGY VIEW
+
+Do not permanently add both Margin and Profit Score at the same time unless explicitly intended.
+
+Preferred behavior:
+- Standard → show Margin
+- AI option 1 / 2 → show Profit Score
+
+This keeps the UI clean and strategy-specific.
+
+---
+
+## 12. ADD DEBUG LOGGING TO VERIFY VALUES
+
+Temporarily log:
+
+```javascript
+console.debug('[Profit Score Column]', {
+  activeStrategy,
+  orderId: order.id,
+  item: order.item_description,
+  margin: order._margin,
+  productionHours: order.production_time_hours,
+  changeover: order.changeover,
+  profitScore: order._profitScore,
+});
+```
+
+This helps verify:
+- the right column is shown for the active strategy
+- the score formula is using the intended values
+
+---
+
+## 13. VERIFICATION
+
+### Standard behavior
+1. ✅ Standard Sequence with profitability applied still shows Margin
+2. ✅ Existing margin lookup behavior remains unchanged
+
+### AI strategy behavior
+3. ✅ AI Strategy Option 1 shows Profit Score at the end of the table
+4. ✅ AI Strategy Option 2 shows Profit Score at the end of the table
+5. ✅ Each row displays the correct score
+
+### Tooltip behavior
+6. ✅ Hovering Profit Score shows:
+   - `Profit Score: xx.x`
+   - `Margin / (production hours + changeover)`
+7. ✅ Tooltip stays simple and formula-only
+8. ✅ Missing scores are handled safely with `—`
+
+### UI behavior
+9. ✅ Column header changes dynamically based on active strategy
+10. ✅ The new column appears at the far right/end of the table
+```

@@ -1,0 +1,155 @@
+Please expand the status gating rules for Powermix-generated orders so they also respect prior-order execution sequencing within their own line.
+
+There are currently cases where a generated order can be set to `On-going` or `Done` even though its prior order in the same line is still not started. This is incorrect.
+
+---
+
+## REQUIRED RULE FOR GENERATED ORDERS
+
+For a generated order in its destination line, users must **not** be allowed to set the status to:
+- `On-going`
+- `Done`
+
+if its immediate prior order in the same line is still in a non-started state such as:
+- `Plotted`
+- `Planned`
+- or any equivalent not-yet-started status
+
+### Allow only if prior order status is:
+- `On-going`
+- `Done`
+
+---
+
+## EXAMPLES
+
+### Invalid
+Order A: `Plotted`
+Order B: `On-going`
+
+This is wrong because Order A has not yet started.
+
+### Invalid
+If the prior order is not yet `On-going` or `Done`, the next generated order must not be selectable as:
+- `On-going`
+- `Done`
+
+### Valid
+Order A: `Done`
+Order B: `On-going`
+Order C: `Plotted`
+
+This is correct.
+
+---
+
+## SCOPE
+
+This rule applies to the generated orders created from Line 5 / Powermix split logic.
+
+Please validate the generated order against:
+- the immediate previous order in the same destination line
+- using the actual visual/sequence order in that line
+
+---
+
+## FIRST ORDER EDGE CASE
+
+If the generated order is the first order in the line and has no prior order:
+- do not apply the prior-order block
+- allow normal status behavior
+
+---
+
+## UI BEHAVIOR
+
+When the prior order is not yet `On-going` or `Done`:
+- `On-going`
+- `Done`
+
+should not be selectable for the generated order
+
+If disabling options is not clean in the current UI, blocking on selection/save with a clear validation message is acceptable.
+
+---
+
+## SUGGESTED VALIDATION MESSAGE
+
+Use a message similar to:
+
+**Cannot update this order to On-going or Done because the prior order in the line has not started yet.**
+
+You may improve wording slightly, but keep the meaning clear.
+
+---
+
+## IMPORTANT: PRESERVE THE EXISTING LINE 5 SOURCE-ORDER RULE
+
+Keep the previously required status dependency rule as well:
+
+A source order in Line 5 / Powermix must not be allowed to move to:
+- `On-going`
+- `Done`
+
+unless its linked generated order is already:
+- `On-going`
+- `Done`
+
+So after this update there should be two rules:
+
+### Rule A — Source Line 5 order
+Source Line 5 order cannot move to `On-going` / `Done` unless linked generated order is already `On-going` / `Done`
+
+### Rule B — Generated order
+Generated order cannot move to `On-going` / `Done` unless its prior order in the same line is already `On-going` / `Done`
+
+Both rules must be respected.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log:
+
+```javascript
+console.debug('[Powermix Generated Prior Order Status Check]', {
+  generatedOrderId,
+  lineId,
+  priorOrderId,
+  priorOrderStatus,
+  attemptedStatus,
+  allowed,
+});
+```
+
+```javascript
+console.debug('[Powermix Generated Status Blocked]', {
+  generatedOrderId,
+  attemptedStatus,
+  priorOrderId,
+  priorOrderStatus,
+  reason: 'prior_order_not_started',
+});
+```
+
+```javascript
+console.debug('[Powermix Source Status Gate Check]', {
+  sourceOrderId,
+  sourceLine: 'line_5',
+  attemptedStatus,
+  linkedGeneratedOrderId,
+  linkedGeneratedOrderStatus,
+  allowed,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Generated order cannot be changed to `On-going` if prior order is still `Plotted` / not started
+2. ✅ Generated order cannot be changed to `Done` if prior order is still `Plotted` / not started
+3. ✅ First order in the line is not incorrectly blocked by prior-order rule
+4. ✅ Source Line 5 order still cannot move to `On-going` / `Done` unless linked generated order is already `On-going` / `Done`
+5. ✅ Both source-order and generated-order gating rules coexist correctly
+6. ✅ App shows clear validation when status change is blocked

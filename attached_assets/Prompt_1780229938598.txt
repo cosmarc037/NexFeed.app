@@ -1,0 +1,199 @@
+Please update the **Suggested Pre-orders / Re-order Details** table in the **Fulfillment (Demo)** workspace with the following layout, styling, alignment, and FPR corrections.
+
+---
+
+# 1. HIDE THE `PLANNED ORDER` COLUMN
+
+Please remove or hide the `Planned Order` column from the Suggested Pre-orders table.
+
+### Reason
+There is currently no clear value in showing this column in the pre-order suggestion table.
+
+### Expected result
+The Suggested Pre-orders table should no longer display the `Planned Order` column.
+
+---
+
+# 2. REVISIT THE COLUMN DISTRIBUTION AGAIN AND PREVENT HEADER OVERLAP
+
+Please revisit the table column distribution and ensure the headers no longer overlap with one another.
+
+### Current issue
+Some header titles are still overlapping or visually colliding due to spacing/width constraints.
+
+### Expected behavior
+Columns should be redistributed properly so that:
+- header titles remain readable
+- no header overlaps another
+- each column has enough space relative to its content
+
+### Expected result
+The Suggested Pre-orders table should have properly spaced columns with no overlapping header titles.
+
+---
+
+# 3. CENTER-ALIGN ALL COLUMNS EXCEPT `FPR`, `ITEM DESCRIPTION`, AND `ACTIONS`
+
+Please update the alignment rules so that:
+
+### Left-aligned columns
+- `FPR`
+- `Item Description`
+- `Actions`
+
+### Center-aligned columns
+All other columns should be center-aligned, including fields such as:
+- `Material Code (SFG)`
+- `Material Code (FG)`
+- `Volume (MT)`
+- `Vol to Produce (MT)`
+- `Batch Size`
+- `Production Time`
+- `Inventory`
+- `AI Avail Date`
+
+### Expected result
+The table should have clearer visual balance and better readability, with only the key descriptive/action columns left-aligned.
+
+---
+
+# 4. USE LIGHT GRAY BACKGROUND FOR THE MAIN HEADERS AND SUB-HEADERS
+
+Please apply a **light gray background** to:
+- the grouped main headers
+- the sub-headers/column headers
+
+### Goal
+Visually distinguish the table header area from the outer yellow section header/container.
+
+### Expected result
+The grouped header rows and sub-header row should have a soft light gray background so they are visually separated from the yellow Suggested Pre-orders container header.
+
+---
+
+# 5. DO NOT BOLD THE ITEM DESCRIPTION
+
+Please ensure the `Item Description` text is **not bold**.
+
+### Current issue
+The item description appears visually heavier than intended.
+
+### Expected result
+The item description should use normal text weight unless another specific emphasis is required elsewhere.
+
+---
+
+# 6. RENAME `AI-SUGGESTED AVAIL DATE` TO `AI AVAIL DATE`
+
+Please rename the column header currently shown as:
+
+- `AI-Suggested Avail Date`
+
+to:
+
+- `AI Avail Date`
+
+### Expected result
+The column header is shorter, cleaner, and easier to fit in the table.
+
+---
+
+# 7. UPDATE THE FPR COLUMN TO TREAT SUGGESTED PRE-ORDERS AS NEW ORDERS
+
+Since the suggested pre-orders are no longer just copies of the source orders and are now treated as **new generated replenishment orders**, please update the FPR logic accordingly.
+
+### Required rule
+The FPR should reflect the **current date** because this is a **new order**.
+
+### Important
+We previously agreed that the FPR should use:
+- the current **PH date**
+- in `YYMMDD` format
+
+### Example
+If today in PH time is:
+- `May 31, 2026`
+
+then the generated pre-order FPR should be:
+- `260531`
+
+and **not**
+- `260528`
+
+### Expected result
+Suggested pre-orders must no longer inherit or display the source order’s old FPR date.
+They must be treated as new orders and use a new FPR based on the current PH date.
+
+---
+
+# 8. APPLY THE NEW FPR RULE TO THE SUGGESTION TABLE DISPLAY
+
+Please make sure the FPR shown inside the Suggested Pre-orders table is updated immediately to reflect the new-order logic.
+
+### Expected result
+The table should display the correct current-date-based FPR for all suggested pre-orders.
+
+---
+
+# IMPORTANT
+
+Please apply the following updates to the **Suggested Pre-orders** table in **Fulfillment (Demo)**:
+
+- hide the `Planned Order` column
+- redistribute columns properly to prevent header overlap
+- center-align all columns except:
+  - `FPR`
+  - `Item Description`
+  - `Actions`
+- use a **light gray background** for both grouped main headers and sub-headers
+- ensure `Item Description` is **not bold**
+- rename `AI-Suggested Avail Date` to `AI Avail Date`
+- treat suggested pre-orders as **new orders**, so the `FPR` must use the current **PH date** in `YYMMDD` format
+
+Example:
+- May 31, 2026 → `260531`
+
+---
+
+# DEBUG LOGGING
+
+Temporarily log the updated table formatting and FPR generation behavior.
+
+```javascript
+console.debug('[Demo Suggested Pre-Orders Table Updates]', {
+  plannedOrderColumnHidden: true,
+  columnsRedistributed: true,
+  centerAlignedColumnsApplied: true,
+  lightGrayHeadersApplied: true,
+  itemDescriptionBold: false,
+  aiAvailDateHeader: 'AI Avail Date',
+});
+```
+
+```javascript
+console.debug('[Demo Suggested Pre-Order FPR New Order Logic]', {
+  suggestionId,
+  treatedAsNewOrder: true,
+  timezone: 'Asia/Manila',
+  currentPhDate,
+  generatedFpr,
+  format: 'YYMMDD',
+});
+```
+
+---
+
+# VERIFICATION
+
+1. ✅ The `Planned Order` column is hidden
+2. ✅ Header titles no longer overlap
+3. ✅ Columns are redistributed more cleanly across the table
+4. ✅ Only `FPR`, `Item Description`, and `Actions` remain left-aligned
+5. ✅ All other columns are center-aligned
+6. ✅ Main headers and sub-headers use a light gray background
+7. ✅ Item Description is no longer bold
+8. ✅ `AI-Suggested Avail Date` is renamed to `AI Avail Date`
+9. ✅ Suggested pre-orders use a new FPR based on the current PH date
+10. ✅ Example: May 31, 2026 generates `260531`
+11. ✅ Suggested pre-orders no longer inherit the source order’s old FPR
+12. ✅ No UI errors or layout regressions are introduced

@@ -1,0 +1,305 @@
+Clear. Here's the prompt:
+
+```
+Implement the following changes to the NexFeed application:
+
+---
+
+## AVAILABILITY DATE SORTING — SMART DATE SEQUENCING
+
+### CORE RULE
+
+Orders with actual availability dates must maintain CHRONOLOGICAL sequence relative to each other. Non-dated orders (prio replenish, safety stocks, for sched, etc.) can be placed anywhere freely — they are not constrained by this rule.
+
+**Think of it as:** Dated orders are "anchored" in a timeline. You can insert non-dated orders anywhere between, above, or below them, but you cannot rearrange dated orders out of chronological sequence.
+
+---
+
+### VALID AND INVALID ARRANGEMENTS
+
+**✅ Valid — dated orders are in chronological order:**
+```
+Prio 1: prio replenish              ← non-dated, can be anywhere
+Prio 2: March 17, 2026              ← dated
+Prio 3: safety stocks               ← non-dated, between dates is fine
+Prio 4: prio replenish              ← non-dated
+Prio 5: March 22, 2026              ← dated, AFTER March 17 ✅
+Prio 6: safety stocks               ← non-dated
+Prio 7: March 28, 2026              ← dated, AFTER March 22 ✅
+```
+
+**✅ Valid — dated orders at top, non-dated below:**
+```
+Prio 1: March 17, 2026
+Prio 2: March 22, 2026
+Prio 3: March 28, 2026
+Prio 4: prio replenish
+Prio 5: safety stocks
+Prio 6: prio replenish
+```
+
+**✅ Valid — non-dated orders before any dated orders:**
+```
+Prio 1: prio replenish
+Prio 2: safety stocks
+Prio 3: March 17, 2026
+Prio 4: March 22, 2026
+```
+
+**✅ Valid — same date orders can be in any order relative to each other:**
+```
+Prio 1: March 22, 2026 (Order A)
+Prio 2: March 22, 2026 (Order B)    ← same date, freely reorderable ✅
+Prio 3: March 22, 2026 (Order C)    ← same date, freely reorderable ✅
+Prio 4: March 28, 2026
+```
+
+**❌ Invalid — dated orders out of chronological order:**
+```
+Prio 1: March 22, 2026              ← March 22 BEFORE March 17 ❌
+Prio 2: prio replenish
+Prio 3: March 17, 2026              ← March 17 AFTER March 22 ❌
+```
+
+**❌ Invalid:**
+```
+Prio 1: March 28, 2026              ← ❌
+Prio 2: March 17, 2026              ← ❌
+Prio 3: March 22, 2026
+```
+
+---
+
+### ON SAP UPLOAD / INITIAL LOAD — AUTO-SORT
+
+When orders are first loaded from SAP upload:
+
+**Step 1: Separate dated and non-dated orders**
+- Dated orders: orders with an actual date as availability (e.g., "March 17, 2026")
+- Non-dated orders: orders with text-based availability ("prio replenish", "safety stocks", "for sched", etc.)
+
+**Step 2: Sort dated orders chronologically**
+- Sort all dated orders by availability date, earliest first.
+- Orders with the SAME date maintain their original upload sequence relative to each other.
+
+**Step 3: Keep non-dated orders in upload position**
+- Non-dated orders remain in their original uploaded position relative to each other.
+- They are placed AFTER all dated orders by default (since they were uploaded together and have no date priority).
+
+**Step 4: Combine into final sequence**
+```
+[Dated orders sorted chronologically] + [Non-dated orders in upload order]
+```
+
+**Step 5: Assign Prio numbers**
+- Re-number all orders: 1, 2, 3, ...
+
+**Example:**
+
+SAP upload order (raw):
+```
+Upload 1: Order A | March 22, 2026
+Upload 2: Order B | prio replenish
+Upload 3: Order C | safety stocks
+Upload 4: Order D | March 17, 2026
+Upload 5: Order E | prio replenish
+Upload 6: Order F | March 28, 2026
+```
+
+After auto-sort:
+```
+Prio 1: Order D | March 17, 2026      ← earliest date
+Prio 2: Order A | March 22, 2026      ← next date
+Prio 3: Order F | March 28, 2026      ← latest date
+Prio 4: Order B | prio replenish      ← non-dated, original upload order preserved
+Prio 5: Order C | safety stocks       ← non-dated
+Prio 6: Order E | prio replenish      ← non-dated
+```
+
+---
+
+### DRAG-AND-DROP — DATE SEQUENCE ENFORCEMENT
+
+When a user drags and drops an order, the app must validate the drop position to ensure dated orders remain in chronological sequence.
+
+---
+
+#### DRAGGING A DATED ORDER
+
+When the user drags an order that has an availability date:
+
+**Allowed drops:**
+- ABOVE any order with a LATER or SAME availability date.
+- BELOW any order with an EARLIER or SAME availability date.
+- ABOVE or BELOW any non-dated order (non-dated orders don't constrain placement).
+
+**Blocked drops:**
+- BELOW an order with a LATER availability date (would put an earlier date after a later date).
+- ABOVE an order with an EARLIER availability date (would put a later date before an earlier date).
+
+**Examples:**
+
+Current order:
+```
+Prio 1: March 17
+Prio 2: safety stocks
+Prio 3: March 22
+Prio 4: prio replenish
+Prio 5: March 28
+```
+
+User drags "March 22":
+- ✅ Can drop between Prio 1 (March 17) and Prio 2 (safety stocks) — still after March 17.
+- ✅ Can drop between Prio 4 (prio replenish) and Prio 5 (March 28) — still before March 28.
+- ✅ Can drop between Prio 1 (March 17) and Prio 3 (current position) — still after March 17.
+- ❌ CANNOT drop above Prio 1 (March 17) — would put March 22 before March 17.
+- ❌ CANNOT drop below Prio 5 (March 28) — would put March 22 after March 28.
+
+User drags "March 17":
+- ✅ Can drop above Prio 1 (top of table) — no earlier dated order above.
+- ✅ Can drop between Prio 2 (safety stocks) and Prio 3 (March 22) — still before March 22.
+- ❌ CANNOT drop below Prio 3 (March 22) — would put March 17 after March 22.
+
+---
+
+#### DRAGGING A NON-DATED ORDER
+
+When the user drags a non-dated order (prio replenish, safety stocks, etc.):
+
+- ✅ Can drop ANYWHERE — no restrictions.
+- Non-dated orders are free agents.
+- They can go above all dated orders, between dated orders, or below all dated orders.
+
+---
+
+#### DROP REJECTION — NOTIFICATION
+
+When a user attempts to drop a dated order in an invalid position:
+
+**Step 1: Block the drop**
+- The order snaps back to its original position.
+- The drop does NOT complete.
+
+**Step 2: Show a notification toast**
+
+```
+┌─────────────────────────────────────────────────────┐
+│ ⚠ Cannot place order here                           │
+│                                                     │
+│ FPR: 260309 (March 22, 2026) cannot be placed       │
+│ before FPR: 260315 (March 17, 2026). Orders with    │
+│ availability dates must stay in chronological order. │
+│                                                     │
+│ March 17 → March 22 → March 28                      │
+│                                                     │
+└─────────────────────────────────────────────────────┘
+```
+
+**Toast styling:**
+- Position: Top-right of the screen (or top-center).
+- Background: Light amber (#fef3c7).
+- Border: 1px solid #fcd34d.
+- Border-left: 3px solid #f59e0b.
+- Text: Dark amber (#92400e), 13px.
+- Icon: ⚠ warning icon.
+- Auto-dismiss after 5 seconds.
+- Has a close (×) button.
+- Smooth slide-in animation from top.
+
+**Toast content includes:**
+- The FPR and date of the order being dragged.
+- The FPR and date of the order it would violate against.
+- A mini visual showing the correct chronological sequence.
+- Brief explanation of the rule.
+
+---
+
+#### VISUAL HINT DURING DRAG
+
+While the user is actively dragging a dated order, provide visual hints about valid/invalid drop zones:
+
+**Valid drop zone:**
+- The drop indicator line (horizontal line showing where the order will be placed) is displayed in GREEN (#43a047) or the normal color.
+
+**Invalid drop zone:**
+- The drop indicator line is displayed in RED (#e53935) or not shown at all.
+- The cursor changes to a "not-allowed" icon (🚫) when hovering over an invalid zone.
+
+**This gives the user immediate visual feedback BEFORE they release the drop.**
+
+---
+
+### VALIDATION ALGORITHM
+
+```
+function isValidDropPosition(draggedOrder, targetIndex, allOrders) {
+  
+  // If dragged order has no date, always allow
+  if (!isDateValue(draggedOrder.availability)) {
+    return true;
+  }
+  
+  const draggedDate = parseDate(draggedOrder.availability);
+  
+  // Get all OTHER dated orders (excluding the one being dragged)
+  const otherDatedOrders = allOrders
+    .filter(o => o.id !== draggedOrder.id && isDateValue(o.availability))
+    .map(o => ({
+      ...o,
+      date: parseDate(o.availability),
+      index: allOrders.indexOf(o)
+    }));
+  
+  // Find dated orders that would be ABOVE the target position
+  const datedOrdersAbove = otherDatedOrders
+    .filter(o => o.index < targetIndex);
+  
+  // Find dated orders that would be BELOW the target position
+  const datedOrdersBelow = otherDatedOrders
+    .filter(o => o.index >= targetIndex);
+  
+  // Check: all dated orders ABOVE must have date <= draggedDate
+  const aboveValid = datedOrdersAbove
+    .every(o => o.date <= draggedDate);
+  
+  // Check: all dated orders BELOW must have date >= draggedDate
+  const belowValid = datedOrdersBelow
+    .every(o => o.date >= draggedDate);
+  
+  return aboveValid && belowValid;
+}
+```
+
+**Key points:**
+- Only DATED orders are constrained.
+- Non-dated orders are ignored in the validation.
+- Same-date orders are always valid relative to each other (<=, >= allows equality).
+
+---
+
+### EDGE CASES
+
+**Edge case 1 — Combined orders with mixed dates:**
+- If a combined group's lead has a date, the entire block follows the lead's date constraint.
+- The lead order's availability date determines where the block can be placed.
+
+**Edge case 2 — Cut orders with same date:**
+- Both cut portions inherit the same availability date from the original.
+- They can be freely reordered relative to each other (same date = no constraint).
+- But both must respect the chronological sequence with other dated orders.
+
+**Edge case 3 — Changing an order's availability date:**
+- If a user somehow changes an order's availability date (e.g., via edit), re-validate the sequence.
+- If the new date creates a violation, auto-sort the dated orders to restore chronological order.
+- Show a toast: "Orders have been re-sorted to maintain date sequence."
+
+**Edge case 4 — New SAP upload adds orders to an existing line:**
+- New dated orders are inserted into the correct chronological position among existing dated orders.
+- New non-dated orders are placed at the end (after existing orders).
+- Existing order positions are preserved as much as possible.
+- If a new dated order's date falls between existing dated orders, it is inserted between them.
+
+**Edge case 5 — Auto-Sequence:**
+- The AI Auto-Sequence must also respect the date chronological rule.
+- The AI can move non-dated orders freely but must keep dated orders in chronological sequence.
+```

@@ -1,0 +1,169 @@
+```
+Implement the following fixes:
+
+---
+
+## FIX 1: AI HEADER COLOR — SINGLE SUBTLE YELLOW
+
+Both the header ("AI") and sub-header ("Smart Insight") should use the SAME single subtle yellow color. Not two different shades.
+
+```css
+.ai-header {
+  background: #fef9e7 !important;    /* single subtle yellow */
+  color: #92400e !important;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  text-align: center;
+  padding: 6px 8px;
+  letter-spacing: 0.5px;
+}
+
+.ai-subheader {
+  background: #fef9e7 !important;    /* SAME subtle yellow */
+  color: #1a1a1a !important;
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
+  padding: 6px 8px;
+}
+```
+
+| Element | Background | Same color? |
+|---|---|---|
+| "AI" header | #fef9e7 | ✅ Yes |
+| "Smart Insight" sub-header | #fef9e7 | ✅ Yes — same |
+
+One subtle yellow for both. No darker/lighter variations.
+
+---
+
+## FIX 2: COMPLETION DATE — BACK UNDER SCHEDULING
+
+Completion Date was moved to NOTES header by mistake. Put it back under SCHEDULING where it belongs.
+
+### CURRENT (WRONG)
+
+```
+│   SCHEDULING          │    AI    │           NOTES                    │
+├────┬──────┬───────────┼──────────┼──────────────┬──────────┬──────────┤
+│Start│Start │Avail      │  Smart   │ Completion   │FPR Notes │Sp.       │
+│Date │Time  │Date       │  Insight │ Date         │          │Remarks   │
+```
+
+Completion Date is under NOTES — WRONG.
+
+### CORRECT
+
+```
+│       SCHEDULING                 │    AI    │       NOTES            │
+├────┬──────┬───────────┬──────────┼──────────┼──────────┬─────────────┤
+│Start│Start │Avail      │Completion│  Smart   │FPR Notes │Sp.          │
+│Date │Time  │Date       │Date      │  Insight │          │Remarks      │
+```
+
+Completion Date is under SCHEDULING — CORRECT.
+
+### COLUMN ORDER (LEFT TO RIGHT)
+
+```
+... SCHEDULING .................. | .. AI .. | .... NOTES ....
+Start Date | Start Time | Avail Date | Completion Date | Smart Insight | FPR Notes | Special Remarks
+```
+
+### HEADER STRUCTURE
+
+```jsx
+<thead>
+  <tr>
+    <th colSpan={/* order details */}>ORDER DETAILS</th>
+    <th colSpan={/* production params */}>PRODUCTION PARAMETERS</th>
+    <th colSpan={/* operator */}>OPERATOR</th>
+    <th colSpan={4}>SCHEDULING</th>          {/* Start Date, Start Time, Avail Date, Completion Date */}
+    <th colSpan={1} className="ai-header">AI</th>   {/* Smart Insight */}
+    <th colSpan={2}>NOTES</th>               {/* FPR Notes, Special Remarks */}
+  </tr>
+  
+  <tr>
+    {/* ... other sub-headers ... */}
+    
+    {/* SCHEDULING — 4 columns */}
+    <th>Start Date</th>
+    <th>Start Time</th>
+    <th>Avail Date</th>
+    <th>Completion Date</th>
+    
+    {/* AI — 1 column */}
+    <th className="ai-subheader">Smart Insight</th>
+    
+    {/* NOTES — 2 columns */}
+    <th>FPR Notes</th>
+    <th>Special Remarks</th>
+  </tr>
+</thead>
+```
+
+### COLSPAN SUMMARY
+
+| Header group | Columns | Colspan |
+|---|---|---|
+| SCHEDULING | Start Date, Start Time, Avail Date, Completion Date | 4 |
+| AI | Smart Insight | 1 |
+| NOTES | FPR Notes, Special Remarks | 2 |
+
+---
+
+## FIX 3: HIDDEN STATE — USE SAME TOGGLE AS OTHER COLUMNS
+
+The Smart Insight column when hidden should use the exact same toggle button mechanism as other columns.
+
+Find the existing toggle button code used for other columns (FPR Notes, Special Remarks, etc.) and apply the same pattern:
+
+```javascript
+// Existing pattern — find it in the codebase
+// Something like:
+const [visibleColumns, setVisibleColumns] = useState({
+  start_date: true,
+  start_time: true,
+  avail_date: true,
+  completion_date: true,
+  smart_insight: true,     // Add this
+  fpr_notes: true,
+  special_remarks: true,
+});
+
+function toggleColumn(columnKey) {
+  setVisibleColumns(prev => ({
+    ...prev,
+    [columnKey]: !prev[columnKey]
+  }));
+}
+```
+
+When hidden, Smart Insight should collapse to the same thin strip / hidden state as other toggled columns:
+
+```css
+/* Use the EXACT same class/pattern as other hidden columns */
+/* Find what class other columns use when toggled off */
+/* Apply the same to smart_insight */
+```
+
+---
+
+### VERIFICATION
+
+1. Header colors
+   - ✅ "AI" header: subtle yellow (#fef9e7)
+   - ✅ "Smart Insight" sub-header: same subtle yellow (#fef9e7)
+   - ✅ Single color — no darker/lighter variation
+
+2. Column order
+   - ✅ Completion Date is under SCHEDULING
+   - ✅ Smart Insight is under AI (between SCHEDULING and NOTES)
+   - ✅ FPR Notes and Special Remarks are under NOTES
+
+3. Hidden state
+   - ✅ Toggle button works same as other columns
+   - ✅ Collapses to same thin strip as other hidden columns
+   - ✅ No huge empty block
+```

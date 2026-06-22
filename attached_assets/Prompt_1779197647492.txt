@@ -1,0 +1,162 @@
+Please correct the **Delivered to Date** logic in the **SKU Monitoring / Detailed Demand View** table.
+
+The current behavior appears to count completed orders in the wrong monitoring period because it is not properly considering the order’s **End Date**.
+
+---
+
+## REQUIRED BEHAVIOR
+
+The **Delivered to Date** column must only count an order if the order was actually completed within the selected monitoring period.
+
+This means the app must use the order’s:
+- **End Date**
+
+to determine which month/day/quarter/year the completed order belongs to.
+
+---
+
+## EXAMPLE
+
+If the monitoring row is for:
+- **May 2025**
+
+and an order is:
+- status = `Done`
+- quantity = 22 MT
+- but **End Date = June 10, 2026**
+
+then that order must **not** be counted in **Delivered to Date** for May.
+
+It should only be counted in the monitoring period that matches its End Date.
+
+---
+
+## PERIOD MAPPING RULE
+
+Please make Delivered to Date period-aware using **End Date**.
+
+### Monthly view
+- count only orders whose **End Date falls within the selected month**
+
+### Daily view
+- count only orders whose **End Date falls on the selected day**
+
+### Quarterly view
+- count only orders whose **End Date falls within the selected quarter**
+
+### Yearly view
+- count only orders whose **End Date falls within the selected year**
+
+---
+
+## DATA SOURCE RULE
+
+### Delivered to Date
+Please ensure this column references:
+- **Order History**
+
+not the active Orders table.
+
+Reason:
+Completed orders should come from the historical/completed order records.
+
+### Lined-up (MT)
+Please ensure this column continues to reference:
+- the **active Orders table**
+
+Reason:
+Lined-up volume should reflect currently active / pipeline orders, not completed historical ones.
+
+---
+
+## STATUS RULES
+
+### Delivered to Date
+Source: **Order History**
+Count only:
+- `Done`
+
+Use:
+- **End Date** to place the order in the correct monitoring period
+
+### Lined-up (MT)
+Source: **Orders table**
+Count statuses:
+- `Plotted`
+- `Planned`
+- `Cut`
+- `On-going`
+- `Combined with other PO`
+
+Exclude:
+- `Done`
+- `Cancel PO`
+
+---
+
+## IMPORTANT
+
+Do not count a Done order in a monitoring period just because:
+- its avail date was in that month
+- or the row is for that month
+- or the order existed earlier
+
+For Delivered to Date, the deciding field must be:
+- **End Date**
+
+because that is when the order was actually completed.
+
+---
+
+## GOAL
+
+The monitoring table should accurately answer:
+- how much demand has actually been fulfilled within this period
+- based on when the order truly ended/completed
+
+This is critical for valid month/day/year monitoring.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log:
+
+```javascript
+console.debug('[SKU Monitoring Delivered To Date Source]', {
+  source: 'order_history',
+  selectedTimeGrain,
+  selectedPeriod,
+});
+```
+
+```javascript
+console.debug('[SKU Monitoring Delivered Period Match]', {
+  orderId,
+  status,
+  endDate,
+  selectedPeriod,
+  includedInDeliveredToDate,
+});
+```
+
+```javascript
+console.debug('[SKU Monitoring LinedUp Source]', {
+  source: 'active_orders',
+  includedStatuses: ['Plotted', 'Planned', 'Cut', 'On-going', 'Combined with other PO'],
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Delivered to Date uses **Order History** as its data source
+2. ✅ Delivered to Date counts only orders with status = `Done`
+3. ✅ Delivered to Date uses **End Date** to determine the correct period
+4. ✅ A Done order with End Date in June is not counted in a May monitoring row
+5. ✅ Daily / Monthly / Quarterly / Yearly views all use End Date correctly
+6. ✅ Lined-up (MT) continues to use the active Orders table
+7. ✅ Lined-up (MT) still counts only active pipeline statuses
+8. ✅ No double counting occurs between delivered and lined-up values
+9. ✅ Monitoring values now align with the actual completion period of orders

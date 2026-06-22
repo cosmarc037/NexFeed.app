@@ -1,0 +1,641 @@
+```
+Fix the combine feature to handle combining with existing combined orders:
+
+---
+
+## 1. FIX THE COMBINE ALGORITHM — DETECT EXISTING COMBINED ORDERS
+
+When scanning for matchable orders, if we find an order that is ALREADY a lead (has original_order_ids), we should:
+- NOT treat the lead as a single order
+- Instead, pull its CHILDREN and merge them into the new combined group
+- Delete/ignore the old lead since a new one will be created
+
+```javascript
+function findMatchableOrders(order, materialCode, formulaVersion, allLines, lineOrdersMap, processedIds, masterData) {
+  const matches = [];
+  
+  for (const line of allLines) {
+    const lineOrders = lineOrdersMap[line] || [];
+    
+    for (const candidate of lineOrders) {
+      if (candidate.id === order.id) continue;
+      if (candidate._processed || processedIds.has(candidate.id)) continue;
+      if (['Done', 'Cancel PO', 'In Production', 'On-going'].includes(candidate.status)) continue;
+      
+      // Skip CHILD orders — they belong to a lead and should not be matched independently
+      if (candidate.parent_id) continue;
+      
+      const candidateMaterial = String(candidate.material_code_fg || '').trim();
+      const candidateFormula = candidate.formula_version || '—';
+      
+      if (candidateMaterial !== materialCode) continue;
+      if (candidateFormula !== formulaVersion) continue;
+      
+      const candidateLine = normalizeLine(candidate.feedmill_line || candidate._originalLine);
+      const runRateOnLine = getProductRunRateOnLine(candidate, candidateLine, masterData);
+      
+      // Check if this candidate is an EXISTING combined lead
+      const isExistingLead = candidate.original_order_ids && candidate.original_order_ids.length > 0;
+      
+      if (isExistingLead) {
+        // This is a lead — get its effective volume (volume_override)
+        const leadVolume = parseFloat(candidate.volume_override) || 
+                          parseFloat(candidate.volume) || 
+                          parseFloat(candidate.total_volume_mt) || 0;
+        
+        matches.push({
+          order: candidate,
+          volume: leadVolume,
+          line: candidateLine,
+          isPlanned: candidate._isPlanned || candidate.status === 'Planned',
+          runRate: runRateOnLine,
+          isExistingLead: true,
+          originalChildIds: candidate.original_order_ids,
+        });
+      } else {
+        // Regular single order
+        const candidateVolume = parseFloat(candidate.volume) || 
+                               parseFloat(candidate.total_volume_mt) || 0;
+        
+        matches.push({
+          order: candidate,
+          volume: candidateVolume,
+          line: candidateLine,
+          isPlanned: candidate._isPlanned || candidate.status === 'Planned',
+          runRate: runRateOnLine,
+          isExistingLead: false,
+        });
+      }
+    }
+  }
+  
+  matches.sort((a, b) => {
+    const volumeDiff = a.volume - b.volume;
+    if (Math.abs(volumeDiff) > 0.01) return volumeDiff;
+    return (b.runRate || 0) - (a.runRate || 0);
+  });
+  
+  return matches;
+}
+```
+
+---
+
+## 2. FIX COMBINE GREEDY — HANDLE EXISTING LEADS
+
+When an existing lead is being absorbed into a new combined group, we need to:
+- Use the lead's CHILDREN as the actual sub-orders (not the lead itself)
+- The old lead record will be deleted on apply
+
+```javascript
+function combineOrdersGreedy(baseOrder, baseVolume, matches, maxMT, allOrders) {
+  const combined = [];
+  let totalVolume = baseVolume;
+  
+  // Check if baseOrder itself is an existing lead
+  const baseIsLead = baseOrder.original_order_ids && baseOrder.original_order_ids.length > 0;
+  let baseChildren = [];
+  
+  if (baseIsLead) {
+    // Base is already a lead — use its effective volume
+    totalVolume = parseFloat(baseOrder.volume_override) || 
+                  parseFloat(baseOrder.volume) || 
+                  parseFloat(baseOrder.total_volume_mt) || 0;
+    
+    // Find its children
+    baseChildren = allOrders.filter(o => 
+      String(o.parent_id) === String(baseOrder.id)
+    );
+  }
+  
+  for (const match of matches) {
+    if (totalVolume + match.volume <= maxMT) {
+      combined.push(match);
+      totalVolume += match.volume;
+    }
+  }
+  
+  return {
+    combinedOrders: combined,
+    totalVolume,
+    baseOrder,
+    baseVolume: baseIsLead ? totalVolume - combined.reduce((s, m) => s + m.volume, 0) : baseVolume,
+    baseIsExistingLead: baseIsLead,
+    baseChildren,
+  };
+}
+```
+
+---
+
+## 3. FIX PLACE COMBINED ORDER — RESOLVE CHILDREN FROM EXISTING LEADS
+
+```javascript
+function placeCombinedOrder(order, combineResult, allLines, lineOrdersMap, lineTotalMT, masterData, processedIds, allOrders) {
+  const { combinedOrders, totalVolume, baseIsExistingLead, baseChildren } = combineResult;
+  
+  // Build the REAL sub-orders list
+  // If base is existing lead → its children are the real sub-orders
+  // If base is regular → base itself is a sub-order
+  const realSubOrders = [];
+  
+  if (baseIsExistingLead && baseChildren.length > 0) {
+    // Base was a lead — use its children as sub-orders
+    baseChildren.forEach(child => {
+      const childVolume = parseFloat(child.volume) || parseFloat(child.total_volume_mt) || 0;
+      realSubOrders.push({
+        order: child,
+        volume: childVolume,
+        line: normalizeLine(child.feedmill_line || child._originalLine),
+      });
+    });
+  } else {
+    // Base is a regular order
+    const baseVolume = parseFloat(order.volume) || parseFloat(order.total_volume_mt) || 0;
+    realSubOrders.push({
+      order: order,
+      volume: baseVolume,
+      line: normalizeLine(order.feedmill_line || order._originalLine),
+    });
+  }
+  
+  // For each match, same logic — if match is existing lead, use its children
+  for (const match of combinedOrders) {
+    if (match.isExistingLead && match.originalChildIds) {
+      // Find the actual children of this lead
+      const matchChildren = allOrders.filter(o =>
+        String(o.parent_id) === String(match.order.id)
+      );
+      
+      if (matchChildren.length > 0) {
+        matchChildren.forEach(child => {
+          const childVolume = parseFloat(child.volume) || parseFloat(child.total_volume_mt) || 0;
+          realSubOrders.push({
+            order: child,
+            volume: childVolume,
+            line: normalizeLine(child.feedmill_line || child._originalLine),
+          });
+        });
+      } else {
+        // Children not found — treat lead as a single order
+        realSubOrders.push({
+          order: match.order,
+          volume: match.volume,
+          line: match.line,
+        });
+      }
+    } else {
+      // Regular order
+      realSubOrders.push({
+        order: match.order,
+        volume: match.volume,
+        line: match.line,
+      });
+    }
+  }
+  
+  // Recalculate total from real sub-orders
+  const realTotalVolume = realSubOrders.reduce((sum, s) => sum + s.volume, 0);
+  
+  // Track old lead IDs that need to be deleted on apply
+  const oldLeadIdsToDelete = [];
+  if (baseIsExistingLead) {
+    oldLeadIdsToDelete.push(order.id);
+  }
+  combinedOrders.forEach(match => {
+    if (match.isExistingLead) {
+      oldLeadIdsToDelete.push(match.order.id);
+    }
+  });
+  
+  // Check Planned lock
+  const plannedSubOrder = realSubOrders.find(s => 
+    s.order._isPlanned || s.order.status === 'Planned'
+  );
+  let destinationLine = null;
+  let wasLockedByPlanned = false;
+  
+  if (plannedSubOrder) {
+    destinationLine = plannedSubOrder.line;
+    wasLockedByPlanned = true;
+  }
+  
+  // Remove ALL constituent orders AND old leads from lines
+  realSubOrders.forEach(sub => {
+    const sourceLine = sub.line;
+    lineTotalMT[sourceLine] = (lineTotalMT[sourceLine] || 0) - sub.volume;
+    lineOrdersMap[sourceLine] = (lineOrdersMap[sourceLine] || []).filter(o => o.id !== sub.order.id);
+    sub.order._processed = true;
+    processedIds.add(sub.order.id);
+  });
+  
+  // Also remove old leads from lines
+  oldLeadIdsToDelete.forEach(leadId => {
+    allLines.forEach(line => {
+      const beforeCount = (lineOrdersMap[line] || []).length;
+      lineOrdersMap[line] = (lineOrdersMap[line] || []).filter(o => o.id !== leadId);
+      const removed = beforeCount - (lineOrdersMap[line] || []).length;
+      if (removed > 0) {
+        // Don't double-subtract MT — lead's volume was virtual (volume_override)
+        // The real MT was already subtracted via children above
+      }
+    });
+    processedIds.add(leadId);
+  });
+  
+  // Evaluate queue times if not locked
+  let lineScores = [];
+  if (!wasLockedByPlanned) {
+    const eligibleLines = allLines.filter(line =>
+      canProduceOnLine(order, line, masterData)
+    );
+    
+    if (eligibleLines.length === 0) {
+      destinationLine = normalizeLine(order.feedmill_line || order._originalLine);
+    } else {
+      lineScores = eligibleLines.map(line => {
+        const currentMT = lineTotalMT[line] || 0;
+        const runRate = getLineRunRate(line);
+        const queueTime = runRate > 0 ? currentMT / runRate : Infinity;
+        const lineNumber = parseInt(line.match(/\d+/)?.[0] || '99');
+        return { line, runRate, totalMTBefore: currentMT, queueTimeBefore: queueTime, totalMTAfter: currentMT + realTotalVolume, queueTimeAfter: runRate > 0 ? (currentMT + realTotalVolume) / runRate : Infinity, lineNumber };
+      });
+      
+      lineScores.sort((a, b) => {
+        const diff = a.queueTimeBefore - b.queueTimeBefore;
+        if (Math.abs(diff) > 0.001) return diff;
+        return a.lineNumber - b.lineNumber;
+      });
+      
+      destinationLine = lineScores[0].line;
+    }
+  }
+  
+  // Build combined order
+  const firstChild = realSubOrders[0];
+  const combinedOrder = {
+    ...JSON.parse(JSON.stringify(firstChild.order)),
+    id: `__combined_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+    volume: realTotalVolume,
+    total_volume_mt: realTotalVolume,
+    feedmill_line: destinationLine,
+    line: destinationLine,
+    status: 'Planned',
+    _isCombined: true,
+    _isNewCombinedLead: true,
+    _oldLeadIdsToDelete: oldLeadIdsToDelete,
+    _combinedFrom: realSubOrders.map(s => ({
+      id: s.order.id,
+      line: s.line,
+      fpr: s.order.fpr,
+      volume: s.volume,
+      total_volume_mt: s.volume,
+      item_description: s.order.item_description,
+      form: s.order.form,
+      material_code_fg: s.order.material_code_fg,
+      material_code_sfg: s.order.material_code_sfg,
+      planned_order_fg: s.order.planned_order_fg,
+      planned_order_sfg: s.order.planned_order_sfg,
+      batch_size: s.order.batch_size,
+      batches: s.order.batches,
+      production_time: s.order.production_time,
+      target_avail_date: s.order.target_avail_date,
+      category: s.order.category,
+    })),
+    _combinedFromLines: [...new Set(realSubOrders.map(s => s.line))],
+    _originalLine: normalizeLine(order.feedmill_line || order._originalLine),
+    _movedFromLine: normalizeLine(order.feedmill_line || order._originalLine) !== destinationLine
+      ? normalizeLine(order.feedmill_line || order._originalLine)
+      : null,
+  };
+  
+  const batchSize = parseFloat(combinedOrder.batch_size) || 1;
+  combinedOrder.batches = Math.ceil(realTotalVolume / batchSize);
+  
+  // Place
+  lineTotalMT[destinationLine] = (lineTotalMT[destinationLine] || 0) + realTotalVolume;
+  if (!lineOrdersMap[destinationLine]) lineOrdersMap[destinationLine] = [];
+  lineOrdersMap[destinationLine].push(combinedOrder);
+  
+  // Log
+  const logEntry = {
+    type: 'combined',
+    product: firstChild.order.item_description,
+    materialCode: firstChild.order.material_code_fg,
+    ordersCount: realSubOrders.length,
+    fromLines: [...new Set(realSubOrders.map(s => s.line))],
+    toLine: destinationLine,
+    totalVolume: realTotalVolume,
+    wasLockedByPlanned,
+    absorbedExistingLeads: oldLeadIdsToDelete.length,
+    individualVolumes: realSubOrders.map(s => ({
+      id: s.order.id,
+      name: s.order.item_description,
+      volume: s.volume,
+      fromLine: s.line,
+      fpr: s.order.fpr,
+    })),
+    lineScores: lineScores.map(ls => ({ ...ls })),
+    bestLineReason: lineScores.length > 0 ? { ...lineScores[0] } : { line: destinationLine, runRate: getLineRunRate(destinationLine) },
+  };
+  
+  return { combinedOrder, logEntry };
+}
+```
+
+---
+
+## 4. FIX APPLY — HANDLE OLD LEADS AND NEW LEADS
+
+```javascript
+async function applySequencedResultsToDB(sequencedResults, options = {}) {
+  const { label = 'Auto-sequence' } = options;
+  
+  const combinedLeadMap = {};
+  const oldLeadsToDelete = new Set();
+  
+  for (const [line, lineOrders] of Object.entries(sequencedResults)) {
+    if (!lineOrders || lineOrders.length === 0) continue;
+    
+    let prioCounter = 1;
+    
+    // Get In Production offset
+    const currentOrders = queryClient.getQueryData(["orders"]) || [];
+    const inProductionOnLine = currentOrders.filter(o =>
+      normalizeLine(o.feedmill_line) === line &&
+      (o.status === 'In Production' || o.status === 'On-going')
+    );
+    prioCounter = inProductionOnLine.length + 1;
+    
+    for (const order of lineOrders) {
+      if (order.status === 'In Production' || order.status === 'On-going') continue;
+      
+      if (order._isCombined && order._combinedFrom && order._combinedFrom.length > 1) {
+        // === COMBINED ORDER ===
+        
+        // Collect old leads that need to be deleted
+        if (order._oldLeadIdsToDelete) {
+          order._oldLeadIdsToDelete.forEach(id => oldLeadsToDelete.add(id));
+        }
+        
+        const realTotalVolume = order._combinedFrom.reduce((sum, sub) => {
+          return sum + (parseFloat(sub.volume) || parseFloat(sub.total_volume_mt) || 0);
+        }, 0);
+        
+        const volumeOverride = realTotalVolume > 0 ? realTotalVolume : null;
+        const allChildIds = order._combinedFrom.map(sub => sub.id);
+        const firstChild = order._combinedFrom[0];
+        
+        // Validate all child IDs exist in DB before proceeding
+        const validChildIds = [];
+        for (const childId of allChildIds) {
+          try {
+            // Quick check — try to read the order
+            const exists = currentOrders.find(o => String(o.id) === String(childId));
+            if (exists) {
+              validChildIds.push(childId);
+            } else {
+              console.warn(`  [Skip] Child ${childId} not found in DB — may be an old lead`);
+            }
+          } catch {
+            console.warn(`  [Skip] Child ${childId} check failed`);
+          }
+        }
+        
+        if (validChildIds.length === 0) {
+          console.error(`  [Error] No valid children for combined order — skipping`);
+          continue;
+        }
+        
+        // Create NEW lead
+        const newLead = await createOrderMutation.mutateAsync({
+          data: {
+            fpr: firstChild.fpr,
+            feedmill_line: line,
+            priority_seq: prioCounter,
+            material_code_fg: firstChild.material_code_fg,
+            material_code_sfg: firstChild.material_code_sfg,
+            item_description: firstChild.item_description,
+            form: firstChild.form,
+            batch_size: firstChild.batch_size,
+            run_rate: firstChild.run_rate || order.run_rate,
+            category: firstChild.category,
+            color: firstChild.color || order.color,
+            diameter: firstChild.diameter || order.diameter,
+            formula_version: firstChild.formula_version || order.formula_version,
+            changeover: firstChild.changeover || order.changeover,
+            planned_order_fg: firstChild.planned_order_fg,
+            planned_order_sfg: firstChild.planned_order_sfg,
+            target_avail_date: order.target_avail_date || firstChild.target_avail_date,
+            volume_override: volumeOverride,
+            original_order_ids: validChildIds,
+            parent_id: null,
+            status: 'Planned',
+            total_volume_mt: volumeOverride,
+          }
+        });
+        
+        const newLeadId = newLead.id;
+        combinedLeadMap[order.id] = newLeadId;
+        console.log(`  [New Lead] ${newLeadId}: ${firstChild.item_description}, ${volumeOverride} MT, ${validChildIds.length} children`);
+        
+        // Update ALL children — clear old parent_id, set new one
+        for (const childId of validChildIds) {
+          try {
+            await updateOrderMutation.mutateAsync({
+              id: childId,
+              data: {
+                parent_id: newLeadId,
+                feedmill_line: line,
+                priority_seq: null,
+                status: 'Planned',
+              }
+            });
+            console.log(`    [Child] ${childId}: parent_id=${newLeadId}`);
+          } catch (error) {
+            console.error(`    [Error] Failed to update child ${childId}:`, error);
+          }
+        }
+        
+        prioCounter++;
+        
+      } else {
+        // === REGULAR ORDER ===
+        const updateData = {
+          feedmill_line: line,
+          priority_seq: prioCounter,
+          parent_id: null,
+          volume_override: null,
+          original_order_ids: null,
+          status: 'Planned',
+        };
+        
+        if (order._category === 'B' || order._category === 'C') {
+          if (order._targetDate) {
+            updateData.target_avail_date = order._targetDate;
+            updateData.last_target_date = order._targetDate;
+            updateData.avail_date_source = 'auto_sequence';
+          }
+        }
+        if (order._category === 'D') {
+          if (order._targetDate) {
+            updateData.target_avail_date = order._targetDate;
+            updateData.last_target_date = order._targetDate;
+            updateData.avail_date_source = 'auto_sequence';
+          }
+        }
+        
+        try {
+          await updateOrderMutation.mutateAsync({
+            id: order.id,
+            data: updateData
+          });
+        } catch (error) {
+          console.error(`  [Error] Failed to update order ${order.id}:`, error);
+          // If this order was an old lead that got absorbed, it may have been deleted
+          if (oldLeadsToDelete.has(order.id)) {
+            console.log(`  [Info] Order ${order.id} was an old lead — skipping`);
+          }
+        }
+        
+        prioCounter++;
+      }
+    }
+  }
+  
+  // Delete old leads that were absorbed into new combined groups
+  for (const oldLeadId of oldLeadsToDelete) {
+    try {
+      await deleteOrderMutation.mutateAsync(oldLeadId);
+      console.log(`  [Deleted old lead] ${oldLeadId}`);
+    } catch (error) {
+      console.warn(`  [Warn] Could not delete old lead ${oldLeadId}:`, error);
+      // May already be gone — that's OK
+    }
+  }
+  
+  // Refetch
+  await queryClient.invalidateQueries({ queryKey: ["orders"] });
+  await new Promise(resolve => setTimeout(resolve, 500));
+  
+  // Cascade
+  for (const [line, lineOrders] of Object.entries(sequencedResults)) {
+    if (!lineOrders || lineOrders.length === 0) continue;
+    
+    const topLevel = lineOrders
+      .filter(o => o.status !== 'In Production' && o.status !== 'On-going')
+      .map((o, i) => {
+        const realId = combinedLeadMap[o.id] || o.id;
+        return { ...o, id: realId, priority_seq: i + 1, feedmill_line: line };
+      });
+    
+    await cascadeSchedule(topLevel, 0);
+  }
+  
+  await queryClient.invalidateQueries({ queryKey: ["orders"] });
+  
+  const totalOrders = Object.values(sequencedResults).reduce((s, lo) => s + lo.length, 0);
+  const combinedCount = Object.keys(combinedLeadMap).length;
+  const linesUsed = Object.keys(sequencedResults).filter(l => (sequencedResults[l] || []).length > 0).length;
+  
+  return { totalOrders, combinedCount, linesUsed };
+}
+```
+
+---
+
+## 5. DEADLINE CHECK BEFORE COMBINING
+
+```javascript
+function wouldCombineBreakDeadlines(order, combineResult, line, lineOrdersMap, changeoverRules) {
+  // Simulate placing the combined order and check if downstream orders miss dates
+  const lineOrders = [...(lineOrdersMap[line] || [])];
+  const combinedVolume = combineResult.totalVolume;
+  
+  // Calculate how much extra time this combined order adds
+  const runRate = getLineRunRate(line);
+  if (runRate <= 0) return true;
+  
+  const additionalHours = combinedVolume / runRate;
+  
+  // Check each downstream dated order on this line
+  const now = new Date();
+  let cumulativeHours = 0;
+  
+  for (const existingOrder of lineOrders) {
+    const vol = parseFloat(existingOrder.volume) || parseFloat(existingOrder.total_volume_mt) || 0;
+    cumulativeHours += vol / runRate;
+    
+    const availDate = existingOrder.target_avail_date;
+    if (availDate && /^\d{4}-\d{2}-\d{2}/.test(availDate)) {
+      const deadline = new Date(availDate);
+      const estimatedCompletion = new Date(now.getTime() + (cumulativeHours + additionalHours) * 3600000);
+      
+      if (estimatedCompletion > deadline) {
+        console.log(`  [Deadline check] Combining would cause ${existingOrder.item_description} to miss deadline ${availDate}`);
+        return true; // Would break deadline
+      }
+    }
+  }
+  
+  return false; // Safe to combine
+}
+```
+
+Add this check in the main algorithm:
+
+```javascript
+// In plantLevelAutoSequence — after finding matches and before combining:
+if (matches.length > 0) {
+  const combineResult = combineOrdersGreedy(order, orderVolume, matches, MAX_COMBINE_MT, allOrders);
+  
+  if (combineResult.combinedOrders.length > 0) {
+    // Check if combining would break any downstream deadlines
+    const wouldBreak = wouldCombineBreakDeadlines(
+      order, combineResult, 
+      bestDestinationLine, // evaluate which line first
+      lineOrdersMap, changeoverRules
+    );
+    
+    if (wouldBreak) {
+      console.log(`  [Skip combine] Would break downstream deadlines for ${order.item_description}`);
+      // Fall through to single order placement
+    } else {
+      // Proceed with combine
+      const placement = placeCombinedOrder(...);
+      // ...
+      continue;
+    }
+  }
+}
+```
+
+---
+
+## VERIFICATION
+
+### Combining with existing combined orders
+1. ✅ Detects existing leads via original_order_ids
+2. ✅ Extracts REAL children from existing leads
+3. ✅ Old leads tracked for deletion
+4. ✅ New lead created with all real children
+5. ✅ Old leads deleted from DB after apply
+
+### "Not found" error fixed
+6. ✅ Child IDs validated against DB before updating
+7. ✅ Old lead IDs skipped if they no longer exist
+8. ✅ Try/catch around each child update
+9. ✅ Warnings logged but don't crash the apply
+
+### Deadline protection
+10. ✅ Before combining, checks if downstream orders would miss avail dates
+11. ✅ If combining would cause delays, skips the combine
+12. ✅ Order still evaluated for queue time placement (just not combined)
+13. ✅ After placement, re-sorts by date to minimize impact
+
+### Apply handles all scenarios
+14. ✅ New combined: creates new lead + sets parent_id on all children
+15. ✅ Absorbed existing lead: deletes old lead + creates new lead
+16. ✅ Regular order: updates feedmill_line + priority_seq
+17. ✅ Status set to "Planned" on all orders
+```

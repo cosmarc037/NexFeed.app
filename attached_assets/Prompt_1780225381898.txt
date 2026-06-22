@@ -1,0 +1,193 @@
+Please update the **Suggested Pre-orders** section in the **Fulfillment (Demo)** workspace so it is displayed in a **table-style layout** similar to the existing production/orders table, while still preserving the current pre-order details shown in each card.
+
+---
+
+## 1. RESTRUCTURE THE SUGGESTED PRE-ORDERS LIST INTO A TABLE-LIKE LAYOUT
+
+The current Suggested Pre-orders UI is displayed as a set of large stacked cards, where each suggested pre-order contains fields like:
+- FPR
+- Planned FG
+- Planned SFG
+- Planned SFG1
+- Volume
+- Batch Size
+- Batches
+- Run Rate
+- Production Time
+- On-hand Inventory
+- AI Suggested Available Date
+- Line
+- Approve / Dismiss actions
+
+This layout works, but it is harder to scan and compare multiple suggested orders side by side.
+
+### Expected result
+Please restructure the Suggested Pre-orders section so each suggested pre-order is presented more like a **single row in a table**, aligned visually with the table shown elsewhere in the app.
+
+---
+
+## 2. MAKE THE SECTION VISUALLY CONSISTENT WITH THE EXISTING TABLE UI
+
+The updated Suggested Pre-orders layout should follow the same general visual structure and scanning behavior as the existing production/order table.
+
+### Goal
+Users should be able to:
+- scan suggested pre-orders quickly
+- compare values across rows easily
+- understand the information without needing to read through large card blocks
+
+### Expected result
+The layout should feel like part of the same UI system as the existing table, including:
+- row-based structure
+- consistent spacing
+- aligned columns
+- comparable typography and hierarchy
+- actions placed consistently on the far right
+
+---
+
+## 3. KEEP THE CURRENT DETAILS, BUT PRESENT THEM AS TABLE COLUMNS OR COMPACT ROW CONTENT
+
+Do not remove the currently displayed business details. Instead, reorganize them into a more compact table structure.
+
+### Include these details
+Each row should preserve the currently relevant fields, including:
+- Type / PRE-ORDER badge
+- FPR
+- Product name
+- Planned FG
+- Planned SFG
+- Planned SFG1
+- Volume
+- Batch Size
+- Batches
+- Run Rate
+- Production Time
+- On-hand Inventory
+- AI Suggested Available Date
+- Line
+- Approve / Dismiss actions
+
+### Expected result
+The existing information remains available, but the presentation is cleaner, denser, and easier to compare across multiple suggested rows.
+
+---
+
+## 4. HIGHLIGHT THE MOST IMPORTANT CURRENT DETAILS
+
+Even though the section is being converted into a table-like layout, the most important values should still stand out visually.
+
+### Priority values to emphasize
+Please visually emphasize important values such as:
+- Volume
+- On-hand Inventory
+- AI Suggested Available Date
+- Product name
+
+### Expected result
+The updated UI should not feel like a plain data dump. It should retain clear hierarchy so users can quickly identify the most important operational details in each suggested pre-order.
+
+---
+
+## 5. ALLOW FOR COMPACT TABLE BEHAVIOR WITHOUT LOSING CLARITY
+
+If showing every field directly in the main row makes the layout too wide or too dense, use a compact fallback pattern.
+
+### Acceptable options
+Any clear equivalent is acceptable, such as:
+- a compact main row with essential columns visible
+- an expandable row for lower-priority details
+- a secondary details panel revealed on expand
+- responsive collapsing of less critical fields
+
+### Preferred direction
+Keep the primary row highly scannable, while preserving access to all currently shown information.
+
+### Expected result
+The Suggested Pre-orders section looks more like a structured table, but still supports full detail visibility when needed.
+
+---
+
+## 6. KEEP THE EXISTING SECTION PURPOSE, ACTIONS, AND CONTENT SEMANTICS
+
+This request is only about improving the **presentation/layout** of the Suggested Pre-orders section.
+
+### Keep intact
+Please preserve:
+- the section purpose as **Suggested Pre-orders**
+- the existing row meaning and business logic
+- Approve / Dismiss actions
+- the displayed suggested order data
+- the overall workflow in the Fulfillment (Demo) workspace
+
+### Expected result
+Only the layout changes from card-style presentation to a more table-oriented structure; the underlying functionality and meaning remain unchanged.
+
+---
+
+## 7. APPLY THIS ONLY TO THE FULFILLMENT (DEMO) SUGGESTED PRE-ORDERS SECTION
+
+This update should apply specifically to the **Suggested Pre-orders** area in the **Fulfillment (Demo)** workspace.
+
+### Expected result
+The demo fulfillment experience becomes easier to scan and compare, without affecting unrelated tables or sections elsewhere in the app.
+
+---
+
+## IMPORTANT
+
+Please convert the **Suggested Pre-orders** display from a card-based layout into a **table-like row layout** that matches the style and scanning behavior of the existing table UI.
+
+The updated layout should:
+- preserve the current order details
+- improve readability across multiple suggestions
+- keep important values visually highlighted
+- retain Approve / Dismiss actions
+- remain semantically the same feature, only with improved structure
+
+If necessary, use expandable rows or compact detail handling for secondary information, but the overall experience should clearly resemble a table rather than stacked cards.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log the rendered Suggested Pre-orders layout mode and visible fields.
+
+```javascript
+console.debug('[Demo Suggested Pre-Orders Layout]', {
+  section: 'suggested_preorders',
+  oldLayout: 'card_list',
+  newLayout: 'table_like',
+  preservedFields: [
+    'type',
+    'fpr',
+    'product_name',
+    'planned_fg',
+    'planned_sfg',
+    'planned_sfg1',
+    'volume',
+    'batch_size',
+    'batches',
+    'run_rate',
+    'production_time',
+    'on_hand_inventory',
+    'ai_suggested_available_date',
+    'line',
+    'actions',
+  ],
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ The Suggested Pre-orders section is no longer displayed as large stacked cards
+2. ✅ Each suggested pre-order is presented in a table-like row structure
+3. ✅ The current business details are still visible or accessible
+4. ✅ Important values like Volume, On-hand Inventory, AI Suggested Available Date, and Product name remain visually emphasized
+5. ✅ Approve / Dismiss actions are preserved and remain usable
+6. ✅ The updated layout is visually consistent with the existing table UI
+7. ✅ The change applies only to the Suggested Pre-orders section in the Fulfillment (Demo) workspace
+8. ✅ No functionality, data meaning, or workflow behavior is unintentionally changed
+9. ✅ No UI regressions or alignment issues are introduced

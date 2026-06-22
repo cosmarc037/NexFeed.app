@@ -1,0 +1,198 @@
+Please redesign the shutdown modal into a side-by-side two-column layout.
+
+The goal is to make the shutdown setup and impact analysis easier to understand and use.
+
+Instead of stacking all content vertically, use a layout where:
+
+- the **left side** contains the shutdown details / form inputs
+- the **right side** contains the impact analysis and affected orders
+
+This should improve usability by allowing users to define the shutdown and see the consequences at the same time.
+
+---
+
+## REQUIRED LAYOUT
+
+Design the shutdown modal with two main panels:
+
+### LEFT PANEL — DETAILS
+This panel should contain the key shutdown input fields:
+
+- Shutdown Type
+- Reason
+- Downtime Window
+- Notes
+
+Suggested left-panel structure:
+
+#### Details
+- Shutdown Type
+- Reason
+- Downtime Window
+  - Start
+  - End
+  - Duration (derived, if shown)
+- Notes
+
+This should be the form/input side.
+
+---
+
+### RIGHT PANEL — IMPACT ANALYSIS
+This panel should contain the impact analysis and affected orders.
+
+Suggested right-panel contents:
+- impact summary
+- affected orders
+- order risk highlights
+- target/avail date effect
+- diversion feasibility where applicable
+
+This should be the analysis/result side.
+
+---
+
+## DESIRED VISUAL STRUCTURE
+
+Conceptually like this:
+
+Details | Impact Analysis
+
+Where the user can:
+- define shutdown parameters on the left
+- immediately see the affected orders and risks on the right
+
+Please make the two-column structure visually balanced and readable.
+
+---
+
+## LEFT PANEL CONTENT
+
+Under the left panel / Details section, include:
+
+### 1. Shutdown Type
+Options:
+- Planned
+- Unplanned
+
+### 2. Reason
+Reason dropdown remains
+
+### 3. Downtime Window
+Include:
+- Start datetime
+- End datetime
+- optional derived duration display
+
+### 4. Notes
+Optional notes text area
+
+---
+
+## RIGHT PANEL CONTENT
+
+Under the right panel / Impact Analysis section, include:
+
+### 1. Impact summary
+Examples:
+- affected line
+- active orders
+- total affected volume
+- available alternate lines
+
+### 2. Affected orders list
+Each affected order should show:
+- order name
+- volume
+- production time
+- avail/target date
+- adjusted completion due to shutdown
+- risk level
+- diversion feasibility
+
+### 3. Highlighting
+Orders should be visually highlighted according to impact level, for example:
+- low risk
+- medium risk
+- high risk / delay risk
+
+The right side should feel like the analytical result panel.
+
+---
+
+## LIVE UPDATE BEHAVIOR
+
+The right-side Impact Analysis panel should update dynamically as users change values on the left side, especially:
+- Shutdown Type
+- Reason
+- Start datetime
+- End datetime
+
+Most importantly, changing the downtime window should recalculate the affected-order analysis.
+
+---
+
+## KEEP THE SHUTDOWN HEADER / CONTEXT
+
+The modal should still clearly show:
+- line being shut down
+- modal title like “Shutdown Line 1”
+
+If useful, top-level summary data can remain in the modal header or be integrated cleanly above the right-side impact section.
+
+---
+
+## RESPONSIVENESS
+
+If modal width is insufficient on smaller screens:
+- gracefully stack the two panels vertically
+- but on normal desktop width, prefer the side-by-side layout
+
+Desktop should prioritize the two-column experience.
+
+---
+
+## BUTTONS
+
+Keep the bottom actions:
+- Cancel
+- Confirm Shutdown
+
+No need to change the action placement unless needed for spacing.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log:
+
+```javascript
+console.debug('[Shutdown Modal Layout]', {
+  layoutMode, // side_by_side | stacked_fallback
+  modalWidth,
+  leftPanelRendered,
+  rightPanelRendered,
+});
+```
+
+```javascript
+console.debug('[Shutdown Impact Live Refresh]', {
+  shutdownType,
+  reason,
+  startDateTime,
+  endDateTime,
+  impactAnalysisRecomputed,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Shutdown modal uses a side-by-side layout on desktop
+2. ✅ Left panel contains shutdown details and form inputs
+3. ✅ Right panel contains impact analysis and affected orders
+4. ✅ Shutdown Type, Reason, Downtime Window, and Notes are grouped under Details
+5. ✅ Affected orders are clearly shown under Impact Analysis
+6. ✅ Right-side analysis updates when left-side shutdown inputs change
+7. ✅ Modal remains usable on smaller screens with graceful fallback if needed

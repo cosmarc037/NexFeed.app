@@ -1,0 +1,277 @@
+```
+Update the sequence insight system so row-level sequence insights are always AI-generated for all strategies, including Standard Sequence and profitability-adjusted sequences.
+
+---
+
+## OBJECTIVE
+
+Currently, row-level sequence insights are not consistently AI-generated.
+
+Based on the current behavior:
+- Standard Sequence, profitability OFF → local deterministic insight
+- AI Strategy 1 / 2, profitability OFF → AI-generated insight
+- Any strategy, profitability ON → local deterministic insight fallback
+
+We want to change this.
+
+## New required behavior:
+For all strategies and all final visible sequence states, row-level sequence insights must always be AI-generated.
+
+This includes:
+- Standard Sequence
+- AI Strategy Option 1
+- AI Strategy Option 2
+- Standard Sequence with Profitability applied
+- AI Strategy Option 1 with Profitability applied
+- AI Strategy Option 2 with Profitability applied
+
+No strategy should fall back to local deterministic row-level insight text as the default final explanation.
+
+---
+
+## 1. REMOVE THE LOCAL-ONLY INSIGHT DEFAULT FOR FINAL DISPLAY
+
+Current local generators such as:
+- `buildStandardInsight`
+- `buildProfitabilityAdjustedStandardInsight`
+
+may still be kept internally as temporary fallback logic if needed for resilience, but they should no longer be the primary/default final row insight shown to the user.
+
+The desired final row insight should be AI-generated in all strategy modes.
+
+---
+
+## 2. ALWAYS GENERATE AI INSIGHTS FROM THE FINAL VISIBLE SEQUENCE
+
+The AI insight generation must be based on the final sequence currently being shown in the UI.
+
+That means the AI input should reflect:
+- current strategy selection
+- current row order
+- current row positions
+- current profitability-applied state
+- current order metadata (dates, MTO, Future Dispatches, margin if relevant, changeover if relevant)
+
+Do not reuse stale AI text from an earlier sequence state if the order positions have changed.
+
+### Core rule:
+If the visible sequence changes, regenerate AI row insights for that final sequence.
+
+---
+
+## 3. STANDARD SEQUENCE SHOULD ALSO GET AI-GENERATED ROW INSIGHTS
+
+Even if Standard Sequence is rule-based in how it arranges rows, the explanation shown to the user should still be AI-generated.
+
+This means:
+- Standard Sequence ordering logic can remain deterministic/rule-based
+- but the row-level explanation should be written by AI using the final ordered list and the reasons behind the placement
+
+So:
+- arrangement logic and explanation logic can be different
+- the sequence itself can still be rule-based
+- but the explanation must be AI-generated
+
+---
+
+## 4. PROFITABILITY-ADJUSTED SEQUENCES MUST TRIGGER AI REGENERATION
+
+Currently, when profitability is ON, the app falls back to local deterministic insight because the row positions change and older AI text may become stale.
+
+We want to fix this properly by regenerating AI insights after profitability reorders the sequence.
+
+### Required behavior:
+When profitability is applied:
+1. recalculate the final row order
+2. regenerate AI row-level insights for that new final order
+3. render those new AI-generated insights
+
+Do not fall back to local rule text just because the rows moved.
+
+---
+
+## 5. STRATEGY SWITCHING MUST LOAD OR REGENERATE THE CORRECT AI INSIGHTS
+
+When user switches between:
+- Standard Sequence
+- AI Strategy 1
+- AI Strategy 2
+
+the displayed row-level insights must correspond to the currently active strategy’s final sequence.
+
+If profitability is OFF:
+- use AI insights for that strategy’s final sequence
+
+If profitability is ON:
+- use AI insights for that profitability-adjusted version of the selected strategy
+
+Do not mix insights from one strategy into another.
+
+---
+
+## 6. ADD A STRATEGY-SPECIFIC + PROFITABILITY-SPECIFIC INSIGHT CACHE KEY
+
+If insights are cached, cache them against the full sequence state, not just order ID.
+
+The cache key should include at least:
+- line ID
+- strategy ID / strategy type
+- profitability applied flag
+- final order sequence (ordered IDs)
+- any relevant line-level metadata used for explanation
+
+### Example:
+```javascript
+const insightCacheKey = JSON.stringify({
+  lineId,
+  strategyId,
+  profitabilityApplied,
+  orderedOrderIds: orders.map(o => o.id),
+});
+```
+
+This ensures:
+- Standard Sequence AI insights are separate from AI Strategy insights
+- profitability-adjusted insights are separate from non-profitability insights
+- stale text is not reused after a reorder
+
+---
+
+## 7. REGENERATE BOTH SHORT AND LONG INSIGHTS VIA AI
+
+Where applicable, ensure both:
+- short insight
+- expanded / “more” insight
+
+are AI-generated and aligned to the same final sequence state.
+
+Do not generate one via AI and the other locally if that creates mismatch.
+
+---
+
+## 8. DEFINE A CONSISTENT AI PROMPT FOR ALL STRATEGIES
+
+Build or update the AI prompt so it can explain row placement regardless of strategy type.
+
+The prompt should tell the AI:
+- what strategy is active
+- whether profitability was applied
+- the order’s current position in the final visible sequence
+- the reasons that influenced placement:
+  - avail date
+  - Future Dispatches status
+  - MTO protection
+  - changeover considerations
+  - category/color grouping
+  - profitability prioritization if applied
+
+### The AI should explain:
+- why the order is in its current place
+- what constraints were respected
+- whether higher margin affected ordering
+- without contradicting the actual visible row position
+
+---
+
+## 9. KEEP LOCAL BUILDERS ONLY AS FAILSAFE FALLBACK, NOT PRIMARY PATH
+
+You may keep local builders like:
+- `buildStandardInsight`
+- `buildProfitabilityAdjustedStandardInsight`
+
+only as emergency fallback if AI generation fails.
+
+But the default intended path should be:
+- AI-generated row insight for all strategy modes
+
+If AI fails:
+- then use fallback text temporarily
+- but do not treat local generation as the normal expected output
+
+---
+
+## 10. CLEARLY MARK OR HANDLE INSIGHT REGENERATION WHEN PROFITABILITY IS TOGGLED
+
+When profitability is toggled ON/OFF:
+- invalidate current row insights for the active strategy
+- regenerate AI insights for the new final sequence state
+- do not continue showing old insight text from the previous toggle state
+
+This is necessary because profitability changes order positions and reasoning.
+
+---
+
+## 11. HANDLE PERFORMANCE CAREFULLY
+
+Because AI generation may be more expensive now, do not regenerate unnecessarily.
+
+Only regenerate when needed:
+- strategy changes
+- profitability toggled
+- line refreshed/re-analyzed
+- final sequence changes
+
+Use caching keyed to final sequence state to avoid redundant calls.
+
+---
+
+## 12. UPDATE THE UI TO HANDLE LOADING/REFRESH OF AI INSIGHTS
+
+If needed, show a light loading state while AI row-level insights are being regenerated after:
+- strategy switch
+- profitability apply
+- refresh
+
+Do not leave stale text in place pretending it still matches the new order.
+
+A temporary loading state is better than a wrong explanation.
+
+---
+
+## 13. ADD DEBUG LOGGING TO VERIFY THE NEW FLOW
+
+Temporarily log:
+
+```javascript
+console.debug('[AI Sequence Insight Generation]', {
+  lineId,
+  strategyId,
+  profitabilityApplied,
+  orderedOrderIds: orders.map(o => o.id),
+  insightSource: 'ai',
+});
+```
+
+And when fallback is used:
+```javascript
+console.warn('[AI Sequence Insight Fallback Used]', {
+  lineId,
+  strategyId,
+  profitabilityApplied,
+  reason,
+});
+```
+
+This will help confirm:
+- all normal paths use AI
+- fallback is only used when truly necessary
+
+---
+
+## 14. VERIFICATION
+
+### Source consistency
+1. ✅ Standard Sequence row insights are now AI-generated
+2. ✅ AI Strategy 1 row insights remain AI-generated
+3. ✅ AI Strategy 2 row insights remain AI-generated
+4. ✅ Profitability-adjusted row insights are also AI-generated
+
+### Alignment
+5. ✅ If profitability changes row order, AI insights are regenerated for the new final sequence
+6. ✅ Row insights always match the currently visible strategy and order position
+7. ✅ Ordinal references in insights remain accurate after reorder
+
+### Reliability
+8. ✅ Local deterministic builders are no longer the primary display path
+9. ✅ Fallback is only used when AI generation truly fails
+10. ✅ Caching prevents stale insights from being reused across different sequence states

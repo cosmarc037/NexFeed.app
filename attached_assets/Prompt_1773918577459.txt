@@ -1,0 +1,100 @@
+```
+Implement the following changes to the NexFeed application:
+
+---
+
+## AI STOCK INSIGHTS — MATCH ANALYTICS TAB SMART INSIGHT STYLE
+
+Update the AI Stock Insights section on the Next 10 Days page to look identical to the "Smart Insight" section found in the Analytics tab.
+
+---
+
+### REMOVE
+
+- ❌ Remove collapsible behavior (no chevron, no toggle)
+- ❌ Remove border/outline around the container
+- ❌ Remove any card-style background or border-radius
+- ❌ Remove any colored background (no orange tint, no grey tint)
+
+---
+
+### STYLING — MATCH ANALYTICS "SMART INSIGHT" EXACTLY
+
+```
+✨ AI Stock Insights                                 ↻ Refresh
+1. 20 products analyzed — 15 need production, 2 are stock 
+   sufficient, and 3 have critical stock levels.
+2. Gallimax 3 Maintenance is the most urgent with a target 
+   date of Mar 19, needing 28.6 MT to meet inventory.
+3. 8 products including Elite XP Startex are unlikely to meet 
+   targets within 10 days — start production early.
+```
+
+| Element | Styling |
+|---|---|
+| Container background | Transparent / none (no background) |
+| Container border | None |
+| Container border-radius | None |
+| Container padding | 12px 0 (vertical padding only, no horizontal — flush with page content) |
+| Container margin | 12px 0 (space above and below) |
+
+**Header row:**
+
+| Element | Styling |
+|---|---|
+| ✨ icon | Orange sparkle icon, same as Analytics Smart Insight icon |
+| "AI Stock Insights" | 13px, font-weight 600, dark text (#1a1a1a) |
+| "↻ Refresh" | Orange text (#fd5108), 11px, with refresh icon. Hover: slightly darker. Cursor: pointer. |
+| Layout | Title left, Refresh right, same line |
+
+**Content:**
+
+| Element | Styling |
+|---|---|
+| Font size | 12px (match Analytics Smart Insight body text) |
+| Font weight | 400 (regular) |
+| Color | Grey (#6b7280) — match Analytics insight text color |
+| Line height | 1.6 |
+| Margin top | 6px (below header) |
+
+**Numbered list format:**
+- Use numbered list format (1. 2. 3.) matching the Analytics Smart Insight style.
+- Each insight is a numbered paragraph.
+- No bullet points, no emoji prefixes — just numbers.
+- Numbers in same grey color as the text.
+
+---
+
+### AUTO-GENERATE
+
+- Insights generate AUTOMATICALLY when:
+  1. A Next 10 Days file is uploaded.
+  2. User navigates to the Next 10 Days page (show cached if available).
+  3. User clicks "Refresh".
+
+- No manual "Generate" button needed.
+- Loading state: "Analyzing stock levels..." in grey italic with subtle spinner.
+- Cache: show cached insights if less than 5 minutes old.
+
+---
+
+### NOT COLLAPSIBLE
+
+- Always visible.
+- No chevron icon.
+- No collapse/expand toggle.
+- Static section, always showing insights.
+
+---
+
+### EMPTY STATE (NO FILE UPLOADED)
+
+```
+✨ AI Stock Insights
+Upload a Next 10 Days file to generate stock insights.
+```
+
+- Same layout, no border.
+- Grey text (#9ca3af), 12px, italic.
+- Refresh button hidden.
+```

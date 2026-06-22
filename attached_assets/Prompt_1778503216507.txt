@@ -1,0 +1,199 @@
+```
+Please fix the apply-to-schedule behavior so that when a selected AI sequence suggests updated order dates in the auto-sequence preview, those same AI-suggested dates are what get applied and shown in the schedule table.
+
+---
+
+## OBJECTIVE
+
+There is a mismatch between the auto-sequence preview and the applied schedule.
+
+In the AI sequence preview:
+- the AI is clearly suggesting updated dates for orders
+- examples shown in the preview include dates such as:
+  - `May 11`
+  - `May 22`
+
+However, after applying to schedule:
+- the order table still shows the old dates coming from Future Dispatches / original Avail Date
+- examples:
+  - `May 9`
+  - `May 18`
+
+This means the app is not applying the AI’s suggested dates into the actual schedule.
+
+We need to fix this.
+
+---
+
+## REQUIRED BEHAVIOR
+
+Once the user selects an AI sequence and clicks Apply to Schedule:
+
+- the schedule must use the **AI-suggested effective dates**
+- the visible **Avail Date** in the schedule/order table must reflect those applied AI dates
+- do not fall back to the original Future Dispatch / raw source date after apply
+
+---
+
+## 1. USE THE AI-SUGGESTED DATE AS THE SOURCE OF TRUTH WHEN APPLYING
+
+The preview already computes the effective AI-suggested date for each order.
+
+When the user applies the selected strategy, the schedule should persist and display that same date.
+
+Do not continue using:
+- raw Future Dispatch date
+- original source avail date
+- stale pre-sequence date
+
+Use:
+- the final AI-suggested date shown in the preview
+
+---
+
+## 2. ALIGN THE APPLIED SCHEDULE WITH THE PREVIEW RESULT
+
+If the preview shows:
+- Order A → `May 11`
+- Order B → `May 22`
+
+then after applying, the schedule/order table must also show:
+- Order A → `May 11`
+- Order B → `May 22`
+
+The preview and the applied schedule must match.
+
+If the user sees one date in preview and a different one after apply, the sequence application is incomplete.
+
+---
+
+## 3. UPDATE THE VISIBLE AVAIL DATE IN THE SCHEDULE TABLE
+
+This is not only an internal scheduling fix.
+
+The visible **Avail Date** column in the schedule/order table should reflect the applied AI-suggested date.
+
+So after apply:
+- the schedule’s Avail Date should no longer show the old raw Future Dispatch date
+- it should show the AI-applied effective date
+
+This is required so the schedule table reflects the actual selected sequence outcome.
+
+---
+
+## 4. KEEP THE ORIGINAL FUTURE DISPATCH SOURCE DATE IN THE BACKGROUND IF NEEDED, BUT DO NOT DISPLAY IT AS THE APPLIED SCHEDULE DATE
+
+If the app still needs the original Future Dispatch / source date for reference or audit logic:
+- keep it internally if needed
+
+But after applying an AI sequence:
+- the schedule table’s active displayed Avail Date should be the AI-applied date
+- not the original raw source date
+
+In short:
+- preserve source if needed
+- but display and use the applied AI date in the schedule
+
+---
+
+## 5. ENSURE THE APPLY PAYLOAD INCLUDES THE FINAL AI DATE
+
+Please verify the apply-to-schedule payload includes the AI-suggested effective date for each order.
+
+Likely issue:
+- preview is using a computed/derived date field
+- apply is still saving the original date field
+
+Please update apply logic so it uses the final resolved AI date field instead.
+
+For example, if preview rows already have something like:
+- `suggested_avail_date`
+- `ai_effective_date`
+- `resolved_schedule_date`
+
+then apply-to-schedule should use that exact field.
+
+---
+
+## 6. DO NOT REVERT TO FUTURE DISPATCH DATES AFTER APPLY
+
+Once an AI sequence is selected and applied:
+- do not recalculate the order table using only the raw Future Dispatch dates
+- do not overwrite the selected AI dates with the source dates
+- do not display stale dates after apply
+
+The final applied schedule must honor the selected AI strategy’s date decisions.
+
+---
+
+## 7. REVIEW THE SPECIFIC CASE SHOWN
+
+Please inspect the case where:
+
+### Preview shows
+- `May 11`
+- `May 22`
+
+### Applied schedule shows
+- `May 9`
+- `May 18`
+
+This is wrong.
+
+Expected behavior:
+- the schedule should show the same AI-suggested dates from the preview
+
+Please fix the pipeline so the selected preview dates are what get committed.
+
+---
+
+## 8. KEEP THE REST OF THE AI LOGIC INTACT
+
+Do not rewrite the AI sequencing engine.
+
+Do not change:
+- 3-Dimension Analysis logic
+- strategy generation
+- recommendation logic
+- order clustering logic
+
+This request is only to fix the handoff from:
+- preview result
+to
+- applied schedule
+
+Specifically for the AI-suggested dates.
+
+---
+
+## 9. ADD DEBUG LOGGING FOR DATE APPLY PIPELINE
+
+Temporarily log:
+
+```javascript
+console.debug('[Apply AI Suggested Dates]', {
+  orderId,
+  item: order.item_description,
+  originalFutureDispatchDate: order.original_avail_date,
+  previewSuggestedDate: order.ai_suggested_date,
+  appliedScheduleDate: payload.avail_date,
+});
+```
+
+This will help verify:
+- the preview date is correct
+- the apply payload carries that same date
+- the schedule is storing/showing the same applied date
+
+---
+
+## VERIFICATION
+
+1. ✅ The selected AI sequence’s suggested dates are now included in the apply-to-schedule flow
+2. ✅ The schedule’s visible Avail Date column reflects the AI-suggested dates after apply
+3. ✅ The schedule no longer falls back to the original Future Dispatch/raw source dates after apply
+4. ✅ Preview and applied schedule now show the same order dates
+5. ✅ Original Future Dispatch/source dates can still be kept internally if needed, but are not shown as the applied schedule dates
+6. ✅ The rest of the AI sequencing logic remains unchanged
+7. ✅ Cases where preview shows `May 11/May 22` but schedule shows `May 9/May 18` are fixed
+```

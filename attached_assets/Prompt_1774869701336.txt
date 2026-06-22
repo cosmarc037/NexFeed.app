@@ -1,0 +1,178 @@
+```
+Implement the following fix to the Auto-Sequence Preview tooltip:
+
+---
+
+## FIX: TOOLTIP BEING CUT OFF AND NOT CENTERED
+
+The tooltip is appearing at the edge of the modal and getting clipped. Fix it so the tooltip is always centered relative to the hovered row and fully visible within the viewport.
+
+---
+
+### THE PROBLEM
+
+- Tooltip appears at the mouse position near the right edge
+- Gets cut off by the modal boundary
+- Smart Insight text is clipped on the right side
+- Not centered — awkwardly positioned
+
+---
+
+### THE FIX
+
+### STEP 1: CENTER THE TOOLTIP HORIZONTALLY ABOVE THE ROW
+
+Instead of positioning at the mouse cursor, center the tooltip above or below the hovered row:
+
+```javascript
+function getTooltipPosition(rowElement, tooltipWidth, tooltipHeight) {
+  const rowRect = rowElement.getBoundingClientRect();
+  const viewportWidth = window.innerWidth;
+  const viewportHeight = window.innerHeight;
+  const padding = 16;
+  
+  // Center horizontally relative to the viewport
+  let x = (viewportWidth - tooltipWidth) / 2;
+  
+  // Position vertically — prefer above the row
+  let y = rowRect.top - tooltipHeight - 8;
+  
+  // If not enough space above, place below the row
+  if (y < padding) {
+    y = rowRect.bottom + 8;
+  }
+  
+  // If still goes off bottom, center vertically
+  if (y + tooltipHeight + padding > viewportHeight) {
+    y = (viewportHeight - tooltipHeight) / 2;
+  }
+  
+  // Ensure horizontal bounds
+  if (x < padding) x = padding;
+  if (x + tooltipWidth + padding > viewportWidth) {
+    x = viewportWidth - tooltipWidth - padding;
+  }
+  
+  return { x, y };
+}
+```
+
+### STEP 2: USE ROW REF FOR POSITIONING
+
+```jsx
+function AutoSequenceRow({ order, n10dData, today }) {
+  const rowRef = useRef(null);
+  const [showTooltip, setShowTooltip] = useState(false);
+  const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
+  const timeoutRef = useRef(null);
+  
+  const TOOLTIP_WIDTH = 480;
+  const TOOLTIP_HEIGHT = 200;
+  
+  function handleMouseEnter() {
+    timeoutRef.current = setTimeout(() => {
+      if (rowRef.current) {
+        const pos = getTooltipPosition(
+          rowRef.current, 
+          TOOLTIP_WIDTH, 
+          TOOLTIP_HEIGHT
+        );
+        setTooltipPos(pos);
+      }
+      setShowTooltip(true);
+    }, 300);
+  }
+  
+  function handleMouseLeave() {
+    clearTimeout(timeoutRef.current);
+    setShowTooltip(false);
+  }
+  
+  return (
+    <>
+      <tr
+        ref={rowRef}
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
+      >
+        {/* ... row cells ... */}
+      </tr>
+      
+      {showTooltip && (
+        <TooltipPortal>
+          <ProductTooltip
+            data={getAutoSequenceTooltipData(order, n10dData, today)}
+            position={tooltipPos}
+          />
+        </TooltipPortal>
+      )}
+    </>
+  );
+}
+```
+
+### STEP 3: TOOLTIP CSS — CENTERED
+
+```css
+.product-tooltip {
+  position: fixed;
+  z-index: 99999;
+  pointer-events: none;
+  
+  /* Sizing */
+  min-width: 480px;
+  max-width: 560px;
+  
+  /* Appearance */
+  background: #1a1a1a;
+  color: #ffffff;
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  
+  /* Animation */
+  animation: tooltipFadeIn 0.15s ease;
+}
+
+@keyframes tooltipFadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+```
+
+---
+
+### APPLY SAME FIX TO N10D TABLE TOOLTIP
+
+Use the same centered positioning approach for the N10D tooltip:
+
+```jsx
+function N10DTableRow({ product, dailyColumns, today }) {
+  const rowRef = useRef(null);
+  
+  // Same positioning logic — center horizontally, above/below row
+  function handleMouseEnter() {
+    timeoutRef.current = setTimeout(() => {
+      if (rowRef.current) {
+        const pos = getTooltipPosition(
+          rowRef.current, 
+          TOOLTIP_WIDTH, 
+          TOOLTIP_HEIGHT
+        );
+        setTooltipPos(pos);
+      }
+      setShowTooltip(true);
+    }, 300);
+  }
+  
+  // ... rest same
+}
+```
+
+---
+
+### APPLY TO
+
+- ✅ Auto-Sequence Preview tooltip — center and prevent clipping
+- ✅ N10D Table tooltip — same centered positioning
+- ❌ Do NOT change any other tooltips
+```

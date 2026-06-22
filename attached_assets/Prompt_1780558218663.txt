@@ -1,0 +1,181 @@
+Please revisit the current **Auto-Sequence ranking architecture** so that the **AI itself can provide the final rank**, instead of the frontend/browser still assembling the final displayed order from separate AI outputs.
+
+---
+
+## 1. CONFIRM THAT THE AI IS STILL NOT DIRECTLY PROVIDING `FINAL RANK`
+
+Based on the current implementation, it appears that:
+
+- **Strategy Rank** is AI-generated
+- **Suggested Date** is AI-generated
+- but **Final Rank** is still frontend/browser-computed after sorting:
+  - `suggestedDate ASC`
+  - then `strategyRank ASC`
+
+### Goal
+Make this architecture explicit and confirm whether Final Rank is still not directly returned by the AI.
+
+### Expected result
+We should clearly identify whether the AI is still only providing inputs to the final sort rather than the final rank itself.
+
+---
+
+## 2. REVISIT WHETHER THE AI CAN DIRECTLY RETURN THE FINAL RANK
+
+Since the AI already has context on:
+- suggested/effective dates
+- strategy priorities
+- urgency / future dispatch status
+- grouping / changeovers
+- underloaded-day opportunities
+- sequencing logic
+
+please revisit whether the AI can directly return the **final sequence rank** itself.
+
+### Goal
+Allow the AI to produce one unified final order instead of:
+- one strategy rank
+- one suggested date
+- then a frontend-derived final order
+
+### Expected result
+The AI should ideally return a final ranking that already integrates both:
+- date logic
+- and strategy logic
+
+as one whole decision.
+
+---
+
+## 3. REDUCE THE SPLIT BETWEEN AI OUTPUT AND FRONTEND-ASSEMBLED FINAL ORDER
+
+Right now, the sequence still appears split between:
+- AI-provided Strategy Rank
+- AI-provided Suggested Date
+- frontend/browser-assembled Final Rank
+
+### Concern
+This means the AI is not yet fully the final source of truth for order placement.
+
+### Goal
+Move toward a sequencing flow where the AI itself returns the final order, rather than the frontend constructing it from multiple intermediate fields.
+
+### Expected result
+The final sequence becomes more holistically AI-driven.
+
+---
+
+## 4. REVISIT WHETHER `STRATEGY RANK` AND `SUGGESTED DATE` CAN BE UNIFIED INTO ONE FINAL AI ORDERING DECISION
+
+The current model still treats:
+- ranking
+- and date
+
+as separate AI outputs that are later combined.
+
+Please revisit whether the AI can instead treat these as one integrated decision and return:
+- the final intended order
+- with the suggested date already reflected inside that ordering
+
+### Goal
+Make the AI treat sequencing as one whole judgment instead of two fields that later need reconciliation.
+
+### Expected result
+The AI output becomes more unified and easier to trust.
+
+---
+
+## 5. MAKE THE AI’S FINAL RANK THE PRIMARY SOURCE OF TRUTH IF PRACTICAL
+
+If practical, please move toward a model where:
+- the AI’s returned Final Rank is the primary sequence source of truth
+- rather than relying on frontend date-first sorting to derive the final order
+
+### Goal
+Reduce the need for browser-side final-order construction.
+
+### Expected result
+The sequencing becomes cleaner and closer to a truly AI-driven final order.
+
+---
+
+## 6. KEEP THE AI DATE-AWARE, BUT LET THE AI OWN THE FINAL ORDER IF POSSIBLE
+
+Please keep the AI fully aware of:
+- suggested/effective date
+- urgency
+- dispatch status
+- capacity balancing / underloaded days
+- grouping
+- changeovers
+- and strategy goals
+
+but revisit whether the AI can own the final order directly, instead of only providing separate components that the frontend later combines.
+
+### Goal
+The AI should sequence the orders as one integrated ranking decision.
+
+### Expected result
+The final sequence becomes more aligned with the goal of holistic AI sequencing.
+
+---
+
+## IMPORTANT
+
+Please revisit the current ranking architecture.
+
+Right now it appears that:
+- **Strategy Rank** is AI-generated
+- **Suggested Date** is AI-generated
+- but **Final Rank** is still frontend/browser-computed
+
+Please evaluate whether the AI can instead directly return the **Final Rank** itself, since it already has context on:
+- dates
+- urgency
+- strategy
+- sequencing logic
+- and underloaded-day considerations
+
+The goal is to move away from a split architecture and toward a cleaner model where the AI returns one unified final sequence order.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log the current rank architecture and whether Final Rank is still frontend-assembled.
+
+```javascript
+console.debug('[Auto-Sequence Rank Architecture Review]', {
+  strategyId,
+  strategyRankProvidedByAI: true,
+  suggestedDateProvidedByAI: true,
+  finalRankProvidedByAI: false,
+  finalRankComputedInFrontend: true,
+});
+```
+
+```javascript
+console.debug('[Auto-Sequence Unified Final Rank Evaluation]', {
+  strategyId,
+  evaluatingDirectAiFinalRank: true,
+});
+```
+
+```javascript
+console.debug('[Auto-Sequence Final Rank Source Of Truth]', {
+  strategyId,
+  currentSource: 'frontend_sort_from_ai_fields',
+  targetSource: 'ai_direct_final_rank',
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Confirm whether Final Rank is still frontend/browser-computed
+2. ✅ Revisit whether the AI can directly return Final Rank
+3. ✅ Reduce the split between AI output and frontend-assembled final order
+4. ✅ Evaluate whether date and strategy can be unified into one final AI ordering decision
+5. ✅ Move closer to a truly AI-driven final ranking model if practical
+6. ✅ No UI errors or console errors are introduced

@@ -1,0 +1,161 @@
+Please refine the diversion behavior for combined orders so they are treated as a single group during diversion.
+
+Currently, the app is still allowing sub-orders to behave too independently, which causes incorrect diversion behavior.
+
+Please implement the following rules.
+
+---
+
+## 1. WHEN A COMBINED ORDER IS DIVERTED, ITS SUB-ORDERS MUST ALSO MOVE
+
+If a combined order is diverted, the diversion must include:
+- the lead order
+- all of its linked sub-orders
+
+The app must not divert only the lead order while leaving the sub-orders behind.
+
+### Required behavior
+When a lead order is diverted:
+- move the entire combined group together
+- preserve their group relationship in the destination line
+
+The combined order should behave as one diversion unit.
+
+---
+
+## 2. SUB-ORDERS SHOULD NOT BE DIVERTED INDEPENDENTLY
+
+When orders are combined, the sub-orders must not be independently divertible.
+
+### Required behavior
+- sub-orders should not be selectable as standalone diversion targets
+- sub-orders should not show diversion behavior independent from the lead order
+- only the **lead order** should act as the diversion control point
+
+If a user attempts to divert a sub-order directly, the app should block it or ignore it appropriately.
+
+### Correct behavior
+- only the lead order can be diverted
+- when the lead is diverted, all sub-orders move with it
+
+This means combined orders are treated as a whole.
+
+---
+
+## 3. PRESERVE LEAD VS SUB VISUAL DISTINCTION FOR DIVERTABLE COMBINED ORDERS
+
+Currently, combined orders already use blue highlighting where:
+- lead order is a darker shade
+- sub-orders are a lighter shade
+
+Please extend the same visual principle to the diversion-eligible state.
+
+### For combined orders that are divertable (e.g. due to shutdown)
+If the group is highlighted in yellow because it can be diverted:
+- the **lead order** should use a darker yellow highlight
+- the **sub-orders** should use a lighter yellow highlight
+
+This should help users distinguish:
+- the lead/controller row
+- from the supporting sub-order rows
+
+---
+
+## 4. PRESERVE LEAD VS SUB VISUAL DISTINCTION FOR ALREADY DIVERTED COMBINED ORDERS
+
+Similarly, when the combined order has already been diverted and is highlighted in green:
+
+### Required behavior
+- the **lead order** should use a darker green highlight
+- the **sub-orders** should use a lighter green highlight
+
+This should mirror the same lead/sub pattern used in the blue combined-order state and the yellow divertable state.
+
+---
+
+## 5. COMBINED ORDER DIVERSION SHOULD BE GROUP-BASED
+
+Please ensure the diversion logic treats the combined order group as one entity for:
+- diversion eligibility
+- diversion action
+- moved destination line
+- visual state/highlighting
+
+### Important
+Do not evaluate or move sub-orders as if they were unrelated standalone rows once they belong to a combined order group.
+
+---
+
+## 6. UI / INTERACTION EXPECTATION
+
+### Lead order
+- may show diversion affordance / right-click diversion logic if applicable
+- acts as the group controller
+
+### Sub-orders
+- should not independently offer diversion
+- should visually follow the lead’s diversion state
+- should move together with the lead
+
+---
+
+## 7. PRESERVE GROUP RELATIONSHIP AFTER DIVERSION
+
+When the combined order group is diverted:
+- keep the lead/sub relationship intact in the destination line
+- do not flatten or separate the group
+- do not leave sub-orders in the original line
+
+The diverted result should still visually and logically behave as one combined group.
+
+---
+
+## 8. DEBUG LOGGING
+
+Temporarily log:
+
+### diversion eligibility
+```javascript
+console.debug('[Combined Order Diversion Eligibility]', {
+  leadOrderId,
+  subOrderIds,
+  isCombinedGroup,
+  leadCanBeDiverted,
+  subOrdersIndividuallyDivertible: false,
+});
+```
+
+### diversion execution
+```javascript
+console.debug('[Combined Order Diversion Execution]', {
+  leadOrderId,
+  subOrderIds,
+  sourceLine,
+  destinationLine,
+  movedAsGroup: true,
+});
+```
+
+### highlight state
+```javascript
+console.debug('[Combined Order Highlight State]', {
+  leadOrderId,
+  subOrderIds,
+  highlightMode, // blue_combined | yellow_divertable | green_diverted
+  leadShade,
+  subShade,
+});
+```
+
+---
+
+## 9. VERIFICATION
+
+1. ✅ When a combined lead order is diverted, all sub-orders move with it
+2. ✅ Sub-orders cannot be diverted independently
+3. ✅ Only the lead order acts as the diversion control point
+4. ✅ Combined groups stay intact after diversion
+5. ✅ Yellow divertable highlight uses darker shade for lead and lighter shade for sub-orders
+6. ✅ Green diverted highlight uses darker shade for lead and lighter shade for sub-orders
+7. ✅ Existing blue combined-order lead/sub visual distinction remains intact
+8. ✅ Sub-orders are no longer left behind when lead order is diverted

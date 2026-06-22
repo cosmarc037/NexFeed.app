@@ -1,0 +1,196 @@
+Please improve the auto-sequence strategy cards so they show whether a proposed sequence will result in overdue, delayed, or otherwise compromised orders, using a simple summarized risk metric on the card.
+
+---
+
+## OBJECTIVE
+
+Right now the strategy cards show:
+- MTS adjusted
+- Changeover time
+- Time-saved
+
+But they do not show an important operational consequence of the sequence:
+- whether the proposed order arrangement causes any orders to become overdue, delayed, or otherwise compromised against future dispatch / target / stockout timing
+
+This is a gap because a strategy may look acceptable on the card while still producing red overdue orders in the preview table.
+
+We want the cards to surface this risk clearly, while keeping the card UI clean.
+
+---
+
+## REQUIRED IMPROVEMENT
+
+Add a simple summarized risk indicator to each strategy card:
+
+- `Orders at risk: X`
+
+This should represent the total number of orders in that proposed sequence that become:
+- overdue
+- delayed
+- compromised / at-risk
+
+This keeps the card easy to scan.
+
+---
+
+## 1. USE A SINGLE SUMMARY METRIC ON THE CARD
+
+On each strategy card, add one visible metric:
+
+- `Orders at risk: X`
+
+This should be shown alongside the other card metrics.
+
+For example, cards would show:
+- MTS adjusted
+- Changeover time
+- Time-saved
+- Orders at risk
+
+This should apply to:
+- Standard Sequence
+- AI sequence cards
+
+So users can compare risk across all available strategies.
+
+---
+
+## 2. CALCULATE "ORDERS AT RISK" FROM THE ACTUAL RESULTING SEQUENCE
+
+The value of `Orders at risk` must be based on the actual proposed resulting sequence for that strategy.
+
+Use the final simulated sequence and determine how many orders become:
+- overdue
+- delayed
+- compromised / at-risk
+
+Do not use rough approximations.
+It should be based on the actual preview result.
+
+---
+
+## 3. KEEP THE BREAKDOWN OUT OF THE CARD, BUT AVAILABLE ELSEWHERE
+
+Do not show a multi-line breakdown on the card.
+
+Instead:
+- keep the card simple with `Orders at risk: X`
+
+If needed, the breakdown can appear in:
+- tooltip
+- expanded AI reasoning
+- debug/logging
+- or another supporting detail area
+
+For example, the reasoning may say:
+- `Orders at risk: 3 (1 overdue, 1 delayed, 1 compromised)`
+
+But the card itself should only show:
+- `Orders at risk: 3`
+
+---
+
+## 4. ALIGN THE SUMMARY METRIC WITH TABLE HIGHLIGHTING
+
+If the preview table shows orders as:
+- overdue
+- late
+- compromised
+
+then those same orders should contribute to the `Orders at risk` count on the card.
+
+The card and the preview table must tell the same story.
+
+If a strategy visibly creates red overdue rows, the card should reflect that through its risk count.
+
+---
+
+## 5. DEFINE WHAT COUNTS AS "AT RISK"
+
+`Orders at risk` should include the total number of orders that fall into any of these categories under the proposed sequence:
+- overdue
+- delayed
+- compromised / at-risk
+
+Please use the app’s actual timing / target / future dispatch logic where available.
+
+The goal is for one number to summarize all service/deadline risk caused by the sequence.
+
+---
+
+## 6. SHOW THE BREAKDOWN IN AI REASONING
+
+In the expanded AI reasoning, include the more detailed breakdown.
+
+Example:
+- `Orders at risk: 3 (1 overdue, 1 delayed, 1 compromised)`
+
+Or:
+- `Orders at risk: 0`
+
+This keeps the card simple while still letting users inspect the operational risk in more detail.
+
+---
+
+## 7. USE THIS METRIC IN RECOMMENDATION LOGIC TOO
+
+This should not be display-only.
+
+If a strategy causes more orders at risk, that should influence:
+- recommendation
+- auto-selection
+- strategy ranking
+
+For example:
+- a strategy with lower changeover but higher `Orders at risk` may be worse overall than a safer strategy
+
+So include this metric in the recommendation logic as an important operational factor.
+
+---
+
+## 8. KEEP THE CARD LAYOUT CLEAN
+
+Add the new metric in a way that preserves readability.
+
+Recommended visible card metrics:
+- MTS adjusted
+- Changeover time
+- Time-saved
+- Orders at risk
+
+Do not clutter the card with extra explanatory text.
+
+---
+
+## 9. ADD DEBUG LOGGING FOR RISK SUMMARY
+
+Temporarily log:
+
+```javascript
+console.debug('[Sequence Risk Summary]', {
+  strategyId,
+  title: strategy.title,
+  ordersAtRisk,
+  overdueCount,
+  delayedCount,
+  compromisedCount,
+});
+```
+
+This helps verify:
+- the summary count is correct
+- the breakdown matches the displayed risk count
+- recommendation logic sees the same result
+
+---
+
+## VERIFICATION
+
+1. ✅ Each strategy card now shows a simple summarized metric: `Orders at risk: X`
+2. ✅ The metric is based on the actual resulting proposed sequence
+3. ✅ Standard Sequence also shows the same metric for fair comparison
+4. ✅ Orders at risk includes overdue, delayed, and compromised orders
+5. ✅ The card summary aligns with the overdue/late/compromised highlighting in the preview table
+6. ✅ Expanded AI reasoning includes the risk breakdown behind the summarized count
+7. ✅ Recommendation logic now considers `Orders at risk` as an important operational factor
+8. ✅ The card remains clean and readable while surfacing sequence risk

@@ -1,0 +1,236 @@
+```
+Implement the following changes to the NexFeed application:
+
+---
+
+## 1. CANCEL ORDER — CONFIRMATION DIALOG WITH REASON
+
+When a user changes an order's status to "Cancel", a confirmation dialog must appear requiring a cancellation reason before the action is processed.
+
+**Dialog trigger:**
+- User selects "Cancel" from the status dropdown on any order row.
+- The status does NOT change immediately — the dialog opens first.
+- If the user dismisses the dialog, the status reverts to its previous value.
+
+**Dialog layout:**
+
+```
+╔══════════════════════════════════════════════════╗
+║  ⚠ Cancel Order                                  ║
+║                                                   ║
+║  Are you sure you want to cancel this order?      ║
+║                                                   ║
+║  FPR: [260309]                                    ║
+║  Item: [Elite XP Growex 2, Pellet 50kg]           ║
+║  Volume: [80 MT]                                  ║
+║                                                   ║
+║  Cancellation Reason *                            ║
+║  ┌─────────────────────────────────┐              ║
+║  │ Select a reason          ▼     │              ║
+║  └─────────────────────────────────┘              ║
+║                                                   ║
+║  Additional Notes (optional)                      ║
+║  ┌─────────────────────────────────┐              ║
+║  │                                 │              ║
+║  │                                 │              ║
+║  └─────────────────────────────────┘              ║
+║                                                   ║
+║         [Go Back]    [Confirm Cancel]             ║
+╚══════════════════════════════════════════════════╝
+```
+
+**Cancellation reason dropdown options:**
+- Client request
+- Material unavailable
+- Scheduling conflict
+- Duplicate order
+- Quality issue
+- Management decision
+- Other
+
+**Validation:**
+- Cancellation Reason dropdown is REQUIRED (*). The "Confirm Cancel" button is disabled until a reason is selected.
+- Additional Notes is optional free-text.
+- If "Other" is selected, the Additional Notes field becomes REQUIRED (user must explain).
+
+**Button styles:**
+- [Go Back]: Grey outlined button. Closes dialog, reverts status.
+- [Confirm Cancel]: Red filled button (#e53935), white text. Processes the cancellation.
+
+---
+
+## 2. CANCEL ORDER — FPR NOTES + ROW BEHAVIOR
+
+**FPR Notes auto-entry on cancel:**
+- When the user confirms cancellation, the FPR Notes field is automatically updated with:
+  ```
+  Cancelled: [Reason] — [Month DD, YYYY HH:MM AM/PM]
+  ```
+- If Additional Notes were provided:
+  ```
+  Cancelled: [Reason] — [Month DD, YYYY HH:MM AM/PM]. [Additional Notes]
+  ```
+- Example:
+  ```
+  Cancelled: Material unavailable — March 10, 2026 02:30 PM
+  ```
+  ```
+  Cancelled: Other — March 10, 2026 02:30 PM. Supplier delayed shipment by 2 weeks.
+  ```
+- This text is APPENDED to any existing FPR Notes content (does not overwrite).
+
+**Row behavior after cancellation:**
+
+**Immediate visual changes:**
+- The cancelled order row moves to the BOTTOM of the interactive table, below all active orders.
+- The row is greyed out:
+  - All text: light grey (#c0c7d0)
+  - Background: light grey tint (#f5f5f5)
+  - Opacity: 0.7
+  - Strikethrough on the Item Description text
+- Status badge shows "Cancelled" in red (#e53935) with a strikethrough or X icon.
+
+**Scheduling impact:**
+- The cancelled order is EXCLUDED from the cascade.
+- Downstream orders skip over the cancelled order as if it doesn't exist.
+- When an order is cancelled, all downstream Completion Dates recalculate (they shift earlier since the cancelled order's production time and changeover are removed from the chain).
+
+**Row ordering in the interactive table:**
+```
+Active orders (Prio 1, 2, 3, ...) ← normal scheduling
+────────────────────────────────────
+Done orders (at the top, as per existing behavior)
+────────────────────────────────────
+Cancelled orders (at the bottom, greyed out)
+```
+
+Wait — you mentioned Done orders go to the top. Let me clarify:
+
+```
+Done orders (greyed out, at the top)
+────────────────────────────────────
+Active orders (Prio 1, 2, 3, ...) ← normal scheduling
+────────────────────────────────────
+Cancelled orders (greyed out, at the bottom)
+```
+
+**Cancelled orders are NOT draggable** — they cannot be reordered.
+
+**Auto-removal after end of day:**
+- At 12:00 AM (midnight) of the NEXT day after cancellation, the cancelled order is automatically removed from the interactive table.
+- The order is moved to the Order History page under the "Cancelled Orders" tab (see Section 4).
+- Example: Order cancelled on March 10 at 2:30 PM → removed from interactive table at March 11, 12:00 AM → appears in Order History > Cancelled Orders.
+
+---
+
+## 3. SAP UPLOAD — "CANCEL PO" STATUS FROM PO STATUS COLUMN
+
+When uploading a SAP Excel file, the system must read the "PO Status" column and handle cancelled orders.
+
+**Column mapping:**
+- SAP column: "PO Status" (case-insensitive matching: "po status", "PO Status", "PO STATUS", etc.)
+- If the value is "Cancelled" (case-insensitive: "cancelled", "CANCELLED", "Cancelled"):
+  - Set the order's status in the app to "Cancel PO"
+
+**"Cancel PO" behavior:**
+- "Cancel PO" is a DISTINCT status from user-initiated "Cancelled".
+  - "Cancelled" = user manually cancelled the order in the app
+  - "Cancel PO" = SAP planned order was cancelled at source
+
+**FPR Notes auto-entry for Cancel PO:**
+- When a Cancel PO order is uploaded, automatically set FPR Notes to:
+  ```
+  Cancelled: Cancelled from SAP Planned Order — [Upload Date, HH:MM AM/PM]
+  ```
+- Example:
+  ```
+  Cancelled: Cancelled from SAP Planned Order — March 10, 2026 08:00 AM
+  ```
+
+**Row behavior for Cancel PO (same as user-cancelled):**
+- Row moves to the BOTTOM of the interactive table, below all active orders.
+- Greyed out styling:
+  - All text: light grey (#c0c7d0)
+  - Background: light grey tint (#f5f5f5)
+  - Opacity: 0.7
+  - Strikethrough on Item Description
+- Status badge shows "Cancel PO" in red (#e53935) with a distinct label so users can differentiate from user-cancelled.
+- Excluded from scheduling cascade.
+- NOT draggable.
+- Auto-removed at midnight of the next day and moved to Order History > Cancelled Orders.
+
+**Status badge distinction:**
+
+| Status | Badge Color | Badge Text | Source |
+|---|---|---|---|
+| Cancelled | Red (#e53935) | Cancelled | User manually cancelled in app |
+| Cancel PO | Red (#e53935) with orange outline (#fd5108) | Cancel PO | SAP PO Status = Cancelled |
+
+The slight visual difference (orange outline on Cancel PO) helps users distinguish between the two at a glance.
+
+**Cancel PO orders are read-only:**
+- Users cannot edit any fields on a Cancel PO order.
+- Users cannot change the status of a Cancel PO order (it is locked).
+- If the user needs to reinstate a Cancel PO order, they must do so in SAP and re-upload.
+
+---
+
+## 4. ORDER HISTORY — COMPLETED AND CANCELLED TABS
+
+Update the Order History page to have two tabs separating completed orders from cancelled orders.
+
+**Tab structure:**
+
+```
+[Completed Orders]    [Cancelled Orders]
+```
+
+**Tab placement:**
+- These tabs sit at the top of the Order History page content area, below the page title.
+- Active tab: Orange (#fd5108) underline or background, matching the app's tab styling.
+- Inactive tab: Grey text, no underline.
+
+**Completed Orders tab:**
+- Shows all orders with status "Done".
+- This is the existing Order History content (previously all orders went here).
+- Table columns: Same as the interactive table but read-only.
+- Sorted by completion date (most recent first).
+- Order count badge: "Completed Orders (42)"
+
+**Cancelled Orders tab:**
+- Shows all orders with status "Cancelled" or "Cancel PO" that have been auto-removed from the interactive table (after midnight of the next day).
+- Table columns: Same as the interactive table but read-only, plus:
+  - **Cancellation Reason column:** Shows the reason from the cancel dialog (for user-cancelled) or "SAP Planned Order Cancelled" (for Cancel PO).
+  - **Cancelled Date column:** Shows the date/time the order was cancelled.
+  - **Cancelled By column:** Shows "User" for user-cancelled or "SAP Import" for Cancel PO.
+- Sorted by cancelled date (most recent first).
+- Order count badge: "Cancelled Orders (8)"
+
+**Tab behavior with Line filters (from previous change):**
+- The line filter tabs (All, Line 1-7) work within each primary tab:
+  - "Completed Orders" + "Line 2" → shows completed orders from Line 2
+  - "Cancelled Orders" + "Line 2" → shows cancelled orders from Line 2
+
+**Empty states:**
+- Completed Orders tab with no data: "No completed orders yet."
+- Cancelled Orders tab with no data: "No cancelled orders yet."
+
+---
+
+## 5. STATUS DROPDOWN — UPDATED OPTIONS
+
+Update the status dropdown to include the full list of statuses:
+
+| Status | How it's set | Color |
+|---|---|---|
+| Pending | Default on upload | Grey (#a1a8b3) |
+| On-going | User manually sets | Blue (#1976d2) |
+| On-going pelleting | User manually sets | Blue (#1976d2) |
+| Done | User manually sets | Green (#43a047) |
+| Cancelled | User manually sets (via cancel dialog) | Red (#e53935) |
+| Cancel PO | Auto-set from SAP upload | Red (#e53935) with orange outline |
+
+**"Cancel PO" is NOT available in the status dropdown** — it can only be set by the SAP upload process. Users cannot manually set an order to "Cancel PO".
+
+**"Cancelled" in the dropdown triggers the cancel dialog** — it does not immediately change the status. The dialog must be completed first.
+```

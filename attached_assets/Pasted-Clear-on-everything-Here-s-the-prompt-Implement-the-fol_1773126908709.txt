@@ -1,0 +1,188 @@
+Clear on everything. Here's the prompt:
+
+```
+Implement the following changes to the NexFeed application:
+
+---
+
+## 1. FIX CASCADE SCHEDULING — SINGLE CONTINUOUS TIMELINE
+
+There is a bug where multiple orders are cascading from the same parent order instead of sequentially. Fix the cascade so that all orders in a line follow a strict single continuous timeline.
+
+**Bug description:**
+- Orders N+1 and N+2 are both inheriting their Start Date/Time from Order N's Completion Date, instead of Order N+1 cascading from Order N, and Order N+2 cascading from Order N+1.
+- This results in overlapping Start Times and incorrect scheduling.
+
+**Correct cascade logic:**
+
+```
+Order 1: Start Date/Time = Explicitly set (first order)
+Order 1: Completion Date/Time = Start + Production Hours + Changeover
+
+Order 2: Start Date/Time = Order 1 Completion Date/Time + Changeover
+Order 2: Completion Date/Time = Start + Production Hours + Changeover
+
+Order 3: Start Date/Time = Order 2 Completion Date/Time + Changeover
+Order 3: Completion Date/Time = Start + Production Hours + Changeover
+
+... and so on for ALL orders in sequence.
+```
+
+**Rules:**
+- Each order's Start Date/Time is STRICTLY derived from the IMMEDIATELY PREVIOUS order's Completion Date/Time + Changeover Time.
+- No two orders in the same line should ever have overlapping time ranges.
+- No order should cascade from any order other than the one directly above it in the Prio sequence.
+- This applies to ALL orders regardless of whether they have a valid Avail Date or not.
+
+**Validation:**
+- After any reorder, insert, delete, combine, or upload action, recalculate the ENTIRE cascade from Prio 1 down to the last order.
+- If at any point Order N's Start Date/Time does NOT equal Order (N-1)'s Completion Date/Time + Changeover, flag it as a cascade error and auto-correct.
+
+---
+
+## 2. FIX START DATE — WORK BACKWARDS FROM AVAIL DATE FOR FIRST ORDER
+
+The first order in a line (Prio 1) currently defaults to the upload date (current date) at 08:00 AM regardless of its Avail Date. This is incorrect. If the first order has a valid Avail Date, the Start Date should be calculated by working backwards from the Avail Date.
+
+**Current behavior (incorrect):**
+```
+Order 1: Avail Date = March 22, 2026
+         Start Date = March 10, 2026  ← upload date, wrong
+         Start Time = 08:00 AM
+         Completion = March 10, 2026 08:19 AM  ← 12 days too early
+```
+
+**Correct behavior:**
+```
+Order 1: Avail Date = March 22, 2026
+         Production Hours = ~19 minutes (0.32 hours)
+         Start Date = March 22, 2026  ← near the Avail Date
+         Start Time = calculated by working backwards
+         Completion = March 22, 2026, before end of day  ← on or before Avail Date
+```
+
+**Logic for first order (Prio 1):**
+
+**If the first order has a valid Avail Date:**
+- Work backwards:
+  - Completion Date/Time = Avail Date, targeting completion during production hours (e.g., complete by 6:00 PM on the Avail Date as a reasonable default, or end of day)
+  - Start Date/Time = Completion Date/Time - Production Hours - Changeover Time (if applicable)
+- Example: Avail Date March 22. Production time 4 hours. Changeover 30 min.
+  - Target Completion: March 22, 6:00 PM
+  - Start: March 22, 1:30 PM
+
+**If the first order has NO valid Avail Date (prio replenish, safety stocks, etc.):**
+- Default to current date (upload date), 08:00 AM (existing fallback behavior).
+
+**Logic for subsequent orders (Prio 2+):**
+
+All subsequent orders cascade from the previous order:
+- Order N Start = Order (N-1) Completion + Changeover
+
+**However**, if a subsequent order has a valid Avail Date and the natural cascade places its Completion Date BEYOND its Avail Date:
+- Flag the row with a red conflict highlight (#ffebee) and red ⚠ icon.
+- Display tooltip: "Scheduling conflict: This order's completion date ([date]) exceeds its Avail Date ([date]). Consider reordering using Auto-Sequence."
+
+If a subsequent order has a valid Avail Date and the natural cascade places its Completion Date well BEFORE its Avail Date (large gap):
+- No conflict, but the Auto-Sequence feature may later suggest reordering to utilize the gap.
+
+---
+
+## 3. AUTO-SEQUENCE — INTELLIGENT REORDERING SUGGESTION
+
+The Auto-Sequence feature (previously defined) should specifically handle the scenario where dated orders are placed early in the sequence, creating unnecessary idle time or early completions.
+
+**Enhanced AI logic for Auto-Sequence:**
+
+**Priority rules for building the proposed sequence:**
+
+**Rule 1 — Group orders by Avail Date proximity:**
+- Sort all dated orders by Avail Date (earliest first).
+- Determine the earliest Avail Date in the entire line. This becomes the "first anchor."
+
+**Rule 2 — Fill time before the first anchor with non-dated orders:**
+- Calculate the time available from NOW (upload date, 08:00 AM) until the first dated order needs to start (worked backwards from its Avail Date).
+- Fill this time with non-dated orders (prio replenish, safety stocks) that fit within the available window.
+- Select non-dated orders whose production time best fills the gap (minimize idle time).
+
+**Rule 3 — Between dated orders, fill gaps with non-dated orders:**
+- After each dated order completes, check when the next dated order needs to start.
+- If there is a gap, fill it with non-dated orders.
+
+**Rule 4 — Remaining non-dated orders go to the end:**
+- Any non-dated orders that don't fit in gaps are placed after the last dated order.
+
+**Example scenario from user's data:**
+
+Current (incorrect) sequence:
+```
+Prio 1: Dated order (Avail: March 22) — Start: March 10, 08:00 AM ← too early
+Prio 2: prio replenish — cascades from Prio 1
+Prio 3: prio replenish — cascades from Prio 2
+Prio 4: safety stocks — cascades from Prio 3
+Prio 5: safety stocks — cascades from Prio 4
+Prio 6: safety stocks — cascades from Prio 5
+```
+
+Proposed (correct) Auto-Sequence:
+```
+Prio 1: prio replenish — Start: March 10, 08:00 AM (fill time before March 22)
+Prio 2: prio replenish — cascades from Prio 1
+Prio 3: safety stocks — cascades from Prio 2
+Prio 4: safety stocks — cascades from Prio 3
+Prio 5: safety stocks — cascades from Prio 4
+Prio 6: Dated order (Avail: March 22) — cascades from Prio 5, completes on or before March 22 ✅
+```
+
+AI Insight: "Moved [Item Description] (Avail Date: March 22) from Prio 1 to Prio 6. Placed 5 non-dated orders (prio replenish, safety stocks) first to maximize production uptime from March 10 through March 22. Dated order now completes on [date/time], on schedule. ✅"
+
+**If non-dated orders fill the gap and there is STILL idle time:**
+- AI notes: "After placing all non-dated orders, there is [X] hours of idle time before the dated order starts. Consider requesting additional orders or scheduling maintenance during this window."
+
+**If non-dated orders EXCEED the gap:**
+- AI notes: "⚠ Non-dated orders require [X] total hours but only [Y] hours are available before the dated order must start. [Z] non-dated orders have been placed after the dated order. Review if any non-dated orders should be prioritized over meeting the Avail Date."
+
+**Multiple dated orders scenario:**
+
+```
+Upload date: March 10
+Dated Order A: Avail March 15 (4 hours production)
+Dated Order B: Avail March 22 (6 hours production)
+Non-dated orders: 5 orders totaling 80 hours production
+
+Proposed sequence:
+Prio 1-X: Non-dated orders filling March 10 through ~March 14
+Prio X+1: Dated Order A — completes on or before March 15 ✅
+Prio X+2 to Y: Non-dated orders filling gap March 15 through ~March 21
+Prio Y+1: Dated Order B — completes on or before March 22 ✅
+Prio Y+2+: Remaining non-dated orders after March 22
+```
+
+---
+
+## 4. FIRST ORDER START DATE — HANDLE EDGE CASES
+
+**Edge case 1 — All orders are non-dated:**
+- First order starts at upload date, 08:00 AM.
+- All orders cascade forward continuously.
+
+**Edge case 2 — All orders are dated:**
+- Sort by Avail Date (earliest first).
+- First order works backwards from its Avail Date.
+- Subsequent orders cascade. If there are gaps between dated orders, the time is idle (no gap fillers available).
+- AI Auto-Sequence notes available idle time.
+
+**Edge case 3 — First order is non-dated, later orders are dated:**
+- First order starts at upload date, 08:00 AM.
+- Non-dated orders run first, filling time.
+- When a dated order is reached in the cascade, verify its Completion Date is on or before its Avail Date. If not, flag conflict.
+
+**Edge case 4 — First order is dated with very near Avail Date (e.g., tomorrow):**
+- Work backwards. If production time requires starting before the current time today, push Start Date to immediately (current date, current time or 08:00 AM, whichever is applicable).
+- Flag if completion will exceed Avail Date.
+
+**Edge case 5 — First order is dated with Avail Date in the past:**
+- Flag as overdue (red highlight).
+- Start immediately (current date, 08:00 AM).
+- AI warns: "This order's Avail Date ([date]) has already passed. Scheduling for immediate production."
+```

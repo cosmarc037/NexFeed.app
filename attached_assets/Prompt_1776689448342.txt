@@ -1,0 +1,200 @@
+```
+Fix: Planned orders participate in chronological sorting within their line:
+
+---
+
+## 1. UPDATE THE autoSequenceSort — ALL ORDERS SORT BY DATE
+
+```javascript
+function autoSequenceSort(orders, changeoverRules) {
+  // ALL orders sort chronologically — no exceptions for Planned
+  // Sort priority:
+  // 1. Category C (critical/urgent non-dated) — at the TOP
+  // 2. Category A (dated) — sorted by avail date ascending
+  // 3. Category B (N10D targeted) — sorted by inferred date ascending
+  // 4. Category D (stock sufficient) — sorted by inferred date ascending
+  // 5. Category E (no data) — at the bottom
+  
+  // NO special handling for Planned — they sort by date like everything else
+  
+  const catC = orders.filter(o => o._category === 'C')
+    .sort((a, b) => {
+      if (a._n10dStatus === 'Critical' && b._n10dStatus !== 'Critical') return -1;
+      if (a._n10dStatus !== 'Critical' && b._n10dStatus === 'Critical') return 1;
+      return 0;
+    });
+  
+  const catA = orders.filter(o => o._category === 'A')
+    .sort((a, b) => a._sortDate - b._sortDate);
+  
+  const catB = orders.filter(o => o._category === 'B')
+    .sort((a, b) => a._sortDate - b._sortDate);
+  
+  const catD = orders.filter(o => o._category === 'D')
+    .sort((a, b) => a._sortDate - b._sortDate);
+  
+  const catE = orders.filter(o => o._category === 'E');
+  
+  const sorted = [...catC, ...catA, ...catB, ...catD, ...catE];
+  
+  sorted.forEach((order, index) => {
+    order.prio = index + 1;
+    order.priority_seq = index + 1;
+  });
+  
+  return sorted;
+}
+```
+
+---
+
+## 2. UPDATE evaluateAndMoveOrder — PLANNED CAN STILL BE RE-SORTED
+
+The "Planned" lock should only apply to LINE assignment, not to position within the line:
+
+```javascript
+function evaluateAndMoveOrder(order, orderVolume, currentLine, allLines, lineOrdersMap, lineTotalMT, masterData, processedIds) {
+  
+  // Planned orders: DO NOT move to a different line
+  // But they CAN be re-sorted within their current line
+  if (order._isPlanned || order.status === 'Planned') {
+    // Keep on current line — don't evaluate queue time for other lines
+    order._processed = true;
+    processedIds.add(order.id);
+    
+    // Just make sure it stays on its current line
+    // The autoSequenceSort will handle its position chronologically
+    return { logEntry: null };
+  }
+  
+  // Non-planned: evaluate queue time across all lines
+  const eligibleLines = allLines.filter(line =>
+    canProduceOnLine(order, line, masterData)
+  );
+  
+  if (eligibleLines.length === 0) {
+    order._processed = true;
+    processedIds.add(order.id);
+    return { logEntry: null };
+  }
+  
+  // Remove from current line
+  lineTotalMT[currentLine] = (lineTotalMT[currentLine] || 0) - orderVolume;
+  lineOrdersMap[currentLine] = (lineOrdersMap[currentLine] || []).filter(o => o.id !== order.id);
+  
+  // Find best line by queue time
+  const lineScores = eligibleLines.map(line => {
+    const currentMT = lineTotalMT[line] || 0;
+    const runRate = getLineRunRate(line);
+    const queueTime = runRate > 0 ? currentMT / runRate : Infinity;
+    const lineNumber = parseInt(line.match(/\d+/)?.[0] || '99');
+    return {
+      line, runRate, totalMTBefore: currentMT, queueTimeBefore: queueTime,
+      totalMTAfter: currentMT + orderVolume,
+      queueTimeAfter: runRate > 0 ? (currentMT + orderVolume) / runRate : Infinity,
+      lineNumber,
+    };
+  });
+  
+  lineScores.sort((a, b) => {
+    const diff = a.queueTimeBefore - b.queueTimeBefore;
+    if (Math.abs(diff) > 0.001) return diff;
+    return a.lineNumber - b.lineNumber;
+  });
+  
+  const bestLine = lineScores[0].line;
+  
+  order.feedmill_line = bestLine;
+  order.line = bestLine;
+  order.status = 'Planned';
+  order._processed = true;
+  processedIds.add(order.id);
+  
+  lineTotalMT[bestLine] = (lineTotalMT[bestLine] || 0) + orderVolume;
+  if (!lineOrdersMap[bestLine]) lineOrdersMap[bestLine] = [];
+  lineOrdersMap[bestLine].push(order);
+  
+  let logEntry = null;
+  if (bestLine !== currentLine) {
+    order._movedFromLine = currentLine;
+    logEntry = {
+      type: 'moved',
+      product: order.item_description,
+      materialCode: order.material_code_fg,
+      fromLine: currentLine,
+      toLine: bestLine,
+      volume: orderVolume,
+      fpr: order.fpr,
+      lineScores: lineScores.map(ls => ({ ...ls })),
+      bestLineReason: { ...lineScores[0] },
+      fromLineReason: {
+        line: currentLine,
+        queueTime: lineScores.find(ls => ls.line === currentLine)?.queueTimeBefore || 0,
+        runRate: getLineRunRate(currentLine),
+      },
+    };
+  }
+  
+  return { logEntry };
+}
+```
+
+---
+
+## 3. CLARIFY THE RULES
+
+```
+PLANNED STATUS RULES:
+======================
+
+LINE ASSIGNMENT:
+  - Planned orders: STAY on their current line (not moved)
+  - Non-planned orders: can be moved to the line with lowest queue time
+
+POSITION WITHIN LINE:
+  - ALL orders (including Planned) sort chronologically:
+    1. Critical/Urgent (no date) — top
+    2. Dated orders — by avail date ascending (Apr 19 before Apr 20)
+    3. N10D targeted — by inferred date ascending
+    4. Stock sufficient — by inferred date ascending
+    5. No data — bottom
+
+COMBINING:
+  - Planned orders: CAN be combined (if match found)
+  - But combined order stays on the Planned order's line
+  - Non-planned orders: can be combined and moved
+
+STATUS ON APPLY:
+  - Lead orders: "Planned"
+  - Child orders: "Combined with other PO" (with pre_combine_status saved)
+  - Regular orders: "Planned"
+```
+
+---
+
+## VERIFICATION
+
+### Chronological sorting always applies
+1. ✅ Apr 19 always comes before Apr 20
+2. ✅ Apr 20 always comes before Apr 21
+3. ✅ Apr 30 orders grouped together at the end
+4. ✅ Planned orders do NOT keep their old prio — they re-sort by date
+5. ✅ New orders interleave correctly with existing Planned orders
+
+### Planned stays on same line
+6. ✅ Planned orders not moved to different line
+7. ✅ Planned orders CAN be re-sorted within their line
+8. ✅ Planned orders CAN be combined (if match found)
+9. ✅ Combined order stays on Planned order's line
+
+### Non-planned can move
+10. ✅ Non-planned orders evaluated for queue time
+11. ✅ Placed on line with lowest queue time
+12. ✅ Can be combined across lines
+
+### Example from snip fixed
+13. ✅ Before: Apr 20 (Prio 1), Apr 19 (Prio 2) — WRONG
+14. ✅ After fix: Apr 19 (Prio 1), Apr 20 (Prio 2) — CORRECT
+15. ✅ Apr 21 comes after Apr 20
+16. ✅ Apr 30 group sorted at the end
+```

@@ -1,0 +1,343 @@
+```
+Implement a strict order-status flow and placement rule so orders in production cannot be placed below not-yet-started orders, and replace the generic "In production" status with the specific On-going production stages.
+
+---
+
+## OBJECTIVE
+
+We need to enforce a production-aware order flow in the table.
+
+Current status options include:
+- Plotted
+- Planned
+- Hold
+- Cut
+- In production
+- On-going batching
+- On-going pelleting
+- On-going bagging
+- Done
+- Cancel PO
+
+We want to improve this so that:
+1. order placement follows a strict operational flow
+2. on-going production orders are treated as actively being produced
+3. not-yet-started orders cannot appear above currently-produced orders
+4. "In production" is no longer used as a standalone row status
+5. the Overview tab can still count all On-going* orders as "In Production"
+
+---
+
+## 1. DEFINE THE STATUS FLOW / TABLE BLOCK ORDER
+
+The order table should follow this top-to-bottom placement hierarchy:
+
+1. Done
+2. On-going bagging
+3. On-going pelleting
+4. On-going batching
+5. Plotted / Planned / Hold / Cut / Combined with other PO
+6. Cancel PO
+
+This means:
+- completed orders remain above all others
+- currently running orders come next
+- not-yet-started orders come after currently running orders
+- cancelled orders remain at the bottom
+
+---
+
+## 2. TREAT ON-GOING* AS THE TRUE "IN PRODUCTION" STATUSES
+
+Remove "In production" as a selectable/displayed row status.
+
+Keep only the specific statuses:
+- On-going batching
+- On-going pelleting
+- On-going bagging
+
+These should be the statuses used in the order rows.
+
+However, for summary/counting purposes (e.g. Overview tab), count these statuses as "In Production".
+
+### Example helper:
+```javascript
+function isInProductionStatus(status) {
+  const normalized = String(status || '').trim().toLowerCase();
+  return [
+    'on-going batching',
+    'on-going pelleting',
+    'on-going bagging',
+  ].includes(normalized);
+}
+```
+
+Use this helper in Overview / KPI / badges / counters.
+
+---
+
+## 3. REMOVE "IN PRODUCTION" FROM STATUS DROPDOWN
+
+In the status dropdown:
+- remove `In production` as a selectable status option
+
+Visible status choices should instead include:
+- Plotted
+- Planned
+- Hold
+- Cut
+- On-going batching
+- On-going pelleting
+- On-going bagging
+- Done
+- Cancel PO
+
+This avoids redundancy.
+
+---
+
+## 4. ENFORCE FIXED STATUS GROUP PLACEMENT IN THE TABLE
+
+Create a status-priority ranking function:
+
+```javascript
+function getStatusFlowRank(status) {
+  const s = String(status || '').trim().toLowerCase();
+
+  if (s === 'done') return 1;
+  if (s === 'on-going bagging') return 2;
+  if (s === 'on-going pelleting') return 3;
+  if (s === 'on-going batching') return 4;
+  if (['plotted', 'planned', 'hold', 'cut', 'combined with other po'].includes(s)) return 5;
+  if (s === 'cancel po') return 6;
+
+  return 5;
+}
+```
+
+Use this ranking to ensure the table never renders:
+- Planned/Plotted/Hold/Cut above On-going*
+- non-started orders above Done
+- Cancelled above active orders
+
+---
+
+## 5. BLOCK INVALID REORDERING ACROSS STATUS GROUPS
+
+Users should not be able to drag a non-started order above:
+- Done
+- On-going batching
+- On-going pelleting
+- On-going bagging
+
+Likewise, users should not be able to drag:
+- an On-going order below non-started orders
+if that would break the production flow
+
+### Rule:
+Reordering must not violate the status group hierarchy.
+
+### Example invalid case:
+- Planned order dragged above an On-going batching order
+
+This should be blocked with a warning.
+
+### Suggested warning text:
+```text
+This order cannot be placed above an order that is already in production.
+Please finish or reorder the active production orders first.
+```
+
+---
+
+## 6. VALIDATE ON-GOING STATUS CHANGES AGAINST PRIOR ORDERS
+
+Users should not be able to change an order to:
+- On-going batching
+- On-going pelleting
+- On-going bagging
+
+if a prior order above it is still in a not-yet-started state, such as:
+- Plotted
+- Planned
+- Hold
+- Cut
+
+Because this would imply the user is starting a later order while an earlier one is still waiting.
+
+### Rule:
+When user selects an On-going* status:
+- check orders above the target order
+- if any earlier order is still not yet in production and not done/cancelled, show warning and block the change
+
+### Suggested helper:
+```javascript
+function isNotYetStartedStatus(status) {
+  const s = String(status || '').trim().toLowerCase();
+  return ['plotted', 'planned', 'hold', 'cut', 'combined with other po'].includes(s);
+}
+
+function canSetOnGoingStatus(orders, targetIndex) {
+  const priorOrders = orders.slice(0, targetIndex);
+
+  return !priorOrders.some(order => isNotYetStartedStatus(order.status));
+}
+```
+
+---
+
+## 7. SHOW A WARNING WHEN USER TRIES TO START A LATER ORDER TOO EARLY
+
+If user selects On-going* for an order while a prior order is still not started, show warning and do not allow the change.
+
+### Suggested warning message:
+```text
+A prior order is not yet being produced. Consider processing the earlier order first before marking this order as on-going.
+```
+
+Alternative:
+```text
+This order cannot be marked as on-going because an earlier order is still in Plotted/Planned/Hold/Cut status.
+```
+
+---
+
+## 8. ALLOW NATURAL PROGRESSION WITHIN ON-GOING STATUSES
+
+The On-going statuses themselves should represent production stage:
+
+- On-going batching
+- On-going pelleting
+- On-going bagging
+
+These should be treated as valid “currently in production” states.
+
+Optional stricter rule if desired later:
+- do not allow jumping directly to On-going bagging unless operationally intended
+
+But for now, main requirement is:
+- On-going* means currently being produced
+- active production block must stay above not-yet-started orders
+
+---
+
+## 9. KEEP DONE AND CANCEL PO FLOW AS SPECIAL BLOCKS
+
+### Done
+- should stay above production and planned orders
+- if there is already an existing top-3 done logic, keep it
+
+### Cancel PO
+- should stay at the bottom
+- keep existing cancelled flow logic if already implemented
+
+This status-flow change should work alongside existing done/cancel handling.
+
+---
+
+## 10. OVERVIEW TAB: COUNT ON-GOING* AS "IN PRODUCTION"
+
+Since we are removing the standalone "In production" row status, update the Overview tab so that:
+
+### In Production count =
+count of orders whose status is one of:
+- On-going batching
+- On-going pelleting
+- On-going bagging
+
+### Example:
+```javascript
+const inProductionCount = orders.filter(order => isInProductionStatus(order.status)).length;
+```
+
+This preserves Overview behavior without needing a redundant row status.
+
+---
+
+## 11. KEEP AUTO-SEQUENCE / PLANNING DEFAULTS
+
+Initial/default statuses remain:
+
+- uploaded order → `Plotted`
+- auto-sequenced order → `Planned`
+
+Users can still manually choose:
+- Hold
+- Cut
+- Done
+- Cancel PO
+- On-going batching
+- On-going pelleting
+- On-going bagging
+
+But these selections must respect the status flow rules above.
+
+---
+
+## 12. OPTIONAL: VISUALLY GROUP STATUSES IN TABLE ORDER
+
+If helpful, the table can internally or visually behave like these blocks:
+
+### Block 1
+- Done
+
+### Block 2
+- On-going bagging
+- On-going pelleting
+- On-going batching
+
+### Block 3
+- Plotted
+- Planned
+- Hold
+- Cut
+- Combined with other PO
+
+### Block 4
+- Cancel PO
+
+Even if not visually labeled, the ordering logic should follow this block behavior.
+
+---
+
+## 13. ADD DEBUG LOGGING FOR STATUS FLOW VALIDATION
+
+Temporarily log when:
+- invalid On-going* status selection is blocked
+- invalid drag/reorder is blocked
+- Overview count uses On-going* statuses
+
+Example:
+```javascript
+console.debug('[Status Flow Check]', {
+  targetOrderId: order.id,
+  targetStatus: newStatus,
+  blocked: true,
+  reason: 'prior_order_not_started',
+});
+```
+
+---
+
+## 14. VERIFICATION
+
+### Status model
+1. ✅ "In production" is removed as a selectable row status
+2. ✅ On-going batching / pelleting / bagging are the only row-level in-production statuses
+3. ✅ Overview still counts On-going* statuses as In Production
+
+### Table placement
+4. ✅ Done orders remain above active/inactive orders
+5. ✅ On-going* orders remain above Plotted/Planned/Hold/Cut orders
+6. ✅ Cancel PO remains at the bottom
+7. ✅ Planned/Plotted orders no longer appear above currently produced orders
+
+### User actions
+8. ✅ User cannot drag non-started orders above on-going or done orders if it violates status flow
+9. ✅ User cannot mark an order as On-going* if a prior order is still not yet being produced
+10. ✅ Warning message appears when user attempts invalid On-going* status change
+
+### Consistency
+11. ✅ Auto-sequenced orders still become Planned
+12. ✅ Uploaded orders still start as Plotted
+13. ✅ Overview tab remains correct without needing standalone "In production"

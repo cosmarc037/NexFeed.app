@@ -1,0 +1,206 @@
+Please update the **Start Date / Start Time validation UX** to show a warning when the entered Start Date / Start Time is earlier than the previous order’s completion datetime.
+
+---
+
+## 1. ADD A WARNING WHEN START DATE / TIME IS EARLIER THAN THE PREVIOUS ORDER’S COMPLETION DATETIME
+
+Please add a visual warning for downstream orders when the manually entered **Start Date** and/or **Start Time** is earlier than the previous order’s completion datetime.
+
+### Goal
+If the user enters a start schedule that is not aligned with the previous order’s completion timing, the app should warn the user clearly instead of silently allowing the issue to go unnoticed.
+
+### Expected result
+If a downstream order’s resolved or manually entered **Start Date / Start Time** is earlier than the previous order’s completion datetime:
+- show a warning icon
+- show a tooltip/message explaining the issue
+
+---
+
+## 2. WARNING CONDITION
+
+Please trigger the warning when:
+
+- the current order has a **previous order**
+- and the current order’s **Start Date / Start Time**
+  is earlier than the **previous order’s completion datetime** or **estimated completion datetime** used by the sequence logic
+
+### Rule
+If:
+
+`current start datetime < previous completion datetime`
+
+then show the warning.
+
+### Examples
+If previous completion is:
+- `May 23, 2026, 12:00 PM`
+
+then these should trigger a warning:
+- `May 23, 2026, 10:00 AM`
+- `May 22, 2026, 3:00 PM`
+
+These should not trigger a warning:
+- `May 23, 2026, 12:00 PM`
+- `May 23, 2026, 1:00 PM`
+- `May 24, 2026, 8:00 AM`
+
+---
+
+## 3. SHOW A WARNING ICON AND TOOLTIP
+
+Please display a warning indicator in the row when the start schedule is misaligned.
+
+### UI behavior
+- show a warning icon on the affected order row
+- attach a tooltip or hover message
+
+### Suggested tooltip text
+- `Start date/time is earlier than the previous order’s completion date/time`
+- or
+- `Selected start date/time is not aligned with the previous completion date/time`
+- or
+- `This order starts before the previous order is expected to complete`
+
+Any wording is acceptable as long as it is clear and user-friendly.
+
+### Expected result
+Users can immediately see that the entered schedule conflicts with the sequence timing.
+
+---
+
+## 4. APPLY THIS TO MANUAL START DATE / TIME INPUTS AND RESOLVED START DATETIME
+
+Please base the warning on the **effective start datetime** of the row.
+
+That means the warning should work whether the start datetime came from:
+- manual Start Date entry
+- manual Start Time entry
+- a combination of both
+- auto-filled default time behavior
+- resolved downstream scheduling logic
+
+### Goal
+The warning should reflect the actual resulting start datetime that the app is using.
+
+---
+
+## 5. USE THE EXISTING SCHEDULING RELATIONSHIP AS CONTEXT
+
+Please keep this aligned with the app’s scheduling relationship and sequencing logic, including the existing timing flow such as:
+
+- `Avail Date`
+- `Estimated Completion Date`
+- `Start Date and Time`
+
+and the broader sequencing dependency where downstream orders should not begin earlier than the relevant completion point of the preceding order.
+
+### Expected result
+The warning should complement the current scheduling logic, not replace it.
+
+---
+
+## 6. DO NOT AUTOMATICALLY BLOCK OR OVERWRITE THE USER INPUT IN THIS CHANGE
+
+This request is mainly to add **warning visibility**.
+
+Unless necessary, do not automatically:
+- clear the entered Start Date / Start Time
+- overwrite the user input
+- force a different date/time
+
+### Goal
+Warn the user when the entered schedule is misaligned, while preserving visibility into what they entered.
+
+If validation/blocking already exists elsewhere, keep it as appropriate.
+But this specific change should ensure the warning is visible whenever misalignment occurs.
+
+---
+
+## 7. APPLY THIS ONLY TO ORDERS WITH A PREVIOUS ORDER REFERENCE
+
+This warning is relevant for:
+- the **2nd order onward**
+- or any order that has a **previous order** in the schedule
+
+Do not apply this warning to the first order unless there is a separate business rule for it.
+
+---
+
+## 8. OPTIONAL: KEEP THE WARNING LIVE AS THE USER EDITS
+
+If possible, make the warning update dynamically when the user edits:
+- Start Date
+- Start Time
+
+### Expected behavior
+- if the entered start becomes aligned, the warning disappears
+- if the entered start becomes earlier than the previous completion, the warning appears
+
+### Goal
+Provide immediate feedback without requiring the user to discover the issue later.
+
+---
+
+## IMPORTANT
+
+Please preserve the existing scheduling structure and use this warning to highlight misalignment.
+
+This is specifically a UX improvement so users can easily identify when:
+
+- `Start Date / Time < Previous Completion Date / Time`
+
+Suggested interpretation:
+- if the date is earlier than the previous completion date, warn
+- if the date is the same but the time is earlier than the previous completion time, warn
+- if both are aligned or later, no warning
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log warning evaluation for downstream schedule alignment.
+
+```javascript
+console.debug('[Start Schedule Alignment Check]', {
+  orderId,
+  previousCompletionDatetime,
+  currentStartDatetime,
+  hasWarning:
+    currentStartDatetime < previousCompletionDatetime,
+});
+```
+
+```javascript
+console.debug('[Start Schedule Warning UI]', {
+  orderId,
+  showWarningIcon,
+  tooltipMessage,
+});
+```
+
+```javascript
+console.debug('[Start Schedule Live Re-Evaluation]', {
+  orderId,
+  editedStartDate,
+  editedStartTime,
+  resolvedStartDatetime,
+  previousCompletionDatetime,
+  aligned:
+    resolvedStartDatetime >= previousCompletionDatetime,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ For downstream orders, a warning appears when Start Date / Start Time is earlier than the previous order’s completion datetime
+2. ✅ The warning does not appear when the Start Date / Start Time is equal to or later than the previous completion datetime
+3. ✅ A warning icon is visible on affected rows
+4. ✅ A tooltip clearly explains that the start schedule is earlier than the previous completion datetime
+5. ✅ The warning works for manual Start Date input
+6. ✅ The warning works for manual Start Time input
+7. ✅ The warning works based on the effective resolved Start Date / Start Time used by the row
+8. ✅ The warning applies only to orders with a previous order reference
+9. ✅ Existing scheduling logic remains intact
+10. ✅ No UI errors or console errors are introduced

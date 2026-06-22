@@ -1,0 +1,188 @@
+Please improve the **Auto-Sequence AI** so that it better utilizes **open earlier dates** and does not leave obvious schedule gaps when there are later flexible orders that could be safely advanced.
+
+---
+
+## 1. MAKE THE AI MORE AGGRESSIVE ABOUT USING OPEN EARLIER DATES
+
+There are still cases where the AI leaves visible earlier dates unused, even though there are later flexible orders that appear eligible for advancement.
+
+### Current issue
+The sequence sometimes shows patterns like:
+- orders on `June 5`, then the next flexible orders start on `June 9`
+- orders on `June 8`, then the next flexible orders jump to `June 14`
+- today is around `June 4`, but the next suggested production dates still start much later
+
+### Goal
+The AI should use open earlier dates more aggressively when safe.
+
+### Expected result
+The AI should no longer leave obvious earlier gaps if there are later flexible orders that can be brought forward.
+
+---
+
+## 2. DO NOT SKIP OPEN DAYS WITHOUT A STRONG REASON
+
+If there are open or lightly loaded days between two suggested date groups, the AI should not skip those days unless there is a strong operational reason.
+
+### Examples of the issue
+- `June 5` is used, but `June 6`, `June 7`, `June 8` are left unused, then work resumes on `June 9`
+- `June 8` is used, but later flexible orders remain on `June 14`
+- today is underutilized but the AI still starts flexible work several days later
+
+### Goal
+Make skipped earlier dates rare and intentional, not routine.
+
+### Expected result
+If an earlier date is skipped, it should be because the AI truly determined it should not be used — not because it overlooked the opportunity.
+
+---
+
+## 3. HAVE THE AI ACTIVELY SEARCH FOR GAP-FILLING OPPORTUNITIES ACROSS EARLIER DAYS
+
+Please make the AI more actively look for open days between:
+- the earliest scheduled work
+- and later flexible orders
+
+### The AI should consider questions like:
+- Is there open capacity on `today` or `tomorrow`?
+- Are there empty days between the current scheduled blocks?
+- Are there later MTS/flexible orders that could safely move into those empty dates?
+- Would moving them earlier improve utilization without violating business rules?
+
+### Goal
+Make gap-filling behavior more deliberate and more effective.
+
+### Expected result
+The AI should identify and use earlier gap-filling opportunities more often.
+
+---
+
+## 4. MAKE THE AI BETTER USE THE SAFE ADVANCEMENT WINDOW FOR FLEXIBLE ORDERS
+
+For flexible / MTS / Sufficient orders, the AI should make better use of the allowable advancement window.
+
+### Current concern
+Even when the order appears flexible enough to move earlier, the AI still leaves it on a much later date while earlier dates remain empty.
+
+### Goal
+Use the available flexibility more effectively.
+
+### Expected result
+Flexible orders should more often move into earlier underutilized dates when it makes operational sense.
+
+---
+
+## 5. MAKE THE AI BALANCE GROUPING / CHANGEOVER WITH REAL DATE UTILIZATION
+
+The AI should still consider:
+- grouping
+- changeover reduction
+- material clustering
+- flow optimization
+
+but these should not cause the AI to ignore obvious open earlier dates without good reason.
+
+### Goal
+Do not let grouping logic dominate so strongly that the schedule ends up visibly underutilized across earlier days.
+
+### Expected result
+The final schedule should feel both:
+- operationally grouped
+- and date-utilization aware
+
+---
+
+## 6. IF THE AI LEAVES A GAP, MAKE THE REASON CLEAR
+
+If the AI intentionally keeps later flexible work on a later date even though earlier dates appear open, the explanation should make that clear.
+
+### Example of what the AI should explain
+- why `June 6–8` were not used
+- why a flexible order stayed on `June 9` or `June 14`
+- why the earlier date was not the better placement despite appearing open
+
+### Goal
+Make skipped earlier dates understandable to the user.
+
+### Expected result
+When gaps remain, users can see a clear reason rather than assuming the AI missed the opportunity.
+
+---
+
+## 7. KEEP THIS IMPROVEMENT ESPECIALLY STRONG FOR MTS / FLEXIBLE ORDERS
+
+This improvement should especially apply to:
+- MTS orders
+- Sufficient orders
+- other flexible/advanceable orders
+
+### Goal
+These are the orders that should help the AI fill open earlier days.
+
+### Expected result
+The AI should use these orders more effectively to smooth utilization and reduce unnecessary gaps.
+
+---
+
+## IMPORTANT
+
+Please improve Auto-Sequence so that the AI better utilizes **open earlier dates** and does not leave obvious gaps such as:
+
+- `June 5` then next work on `June 9`
+- `June 8` then next work on `June 14`
+- underutilized `today` / earlier days while later flexible work remains on much later dates
+
+The AI should:
+- actively search for earlier gap-filling opportunities
+- use the safe advancement window more effectively
+- and not skip open earlier dates without a strong reason
+
+This is needed because the current output still feels like the AI is leaving unused dates even when later flexible orders could likely be advanced safely.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log earlier-gap detection and advancement opportunity handling.
+
+```javascript
+console.debug('[Auto-Sequence Earlier Gap Detection]', {
+  strategyId,
+  line,
+  openEarlierDates,
+  laterFlexibleOrders,
+  gapDetected: true,
+});
+```
+
+```javascript
+console.debug('[Auto-Sequence Gap-Fill Opportunity Evaluation]', {
+  strategyId,
+  orderId,
+  originalSuggestedDate,
+  earlierOpenDates,
+  couldAdvanceEarlier,
+  aiChoseEarlierPlacement,
+});
+```
+
+```javascript
+console.debug('[Auto-Sequence Skipped Earlier Date Reason]', {
+  strategyId,
+  orderId,
+  skippedEarlierDates,
+  reasonForSkipping,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ AI more actively uses open earlier dates
+2. ✅ Obvious earlier gaps are reduced
+3. ✅ Later flexible orders are advanced earlier more often when safe
+4. ✅ Gap-filling opportunities are evaluated more deliberately
+5. ✅ Grouping/changeover logic no longer hides obvious date-utilization opportunities
+6. ✅ When gaps remain, the reason is clearer
+7. ✅ No UI errors or console errors are introduced

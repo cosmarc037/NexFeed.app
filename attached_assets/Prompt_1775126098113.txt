@@ -1,0 +1,302 @@
+```
+Implement the following fixes:
+
+---
+
+## FIX 1: DATE ONLY OR TIME ONLY — FALLBACK RULES
+
+When only one of Start Date or Start Time is set, use fallback values.
+
+### RULES
+
+| Has Date? | Has Time? | Behavior |
+|---|---|---|
+| ✅ Yes | ✅ Yes | Use both as-is |
+| ✅ Yes | ❌ No | Use date + 8:00 AM as default time |
+| ❌ No | ✅ Yes | Use time + date from previous order's completion |
+| ❌ No | ❌ No | Cascade from previous order's completion |
+
+### IMPLEMENTATION
+
+```javascript
+function getEffectiveStartDateTime(order, previousEndTime) {
+  const hasDate = order.start_date && order.start_date.trim() !== '' 
+    && order.start_date !== 'Set start date';
+  const hasTime = order.start_time && order.start_time.trim() !== '' 
+    && order.start_time !== 'Set start time';
+  
+  // Both date and time set
+  if (hasDate && hasTime) {
+    return parseDateTime(order.start_date, order.start_time);
+  }
+  
+  // Date only — use 8:00 AM as default time
+  if (hasDate && !hasTime) {
+    const date = parseDate(order.start_date);
+    if (date) {
+      date.setHours(8, 0, 0, 0);
+      return date;
+    }
+  }
+  
+  // Time only — use date from previous order's completion
+  if (!hasDate && hasTime && previousEndTime) {
+    const prevDate = new Date(previousEndTime);
+    const timeParts = order.start_time.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+    if (timeParts) {
+      let hours = parseInt(timeParts[1]);
+      const minutes = parseInt(timeParts[2]);
+      const ampm = timeParts[3].toUpperCase();
+      if (ampm === 'PM' && hours !== 12) hours += 12;
+      if (ampm === 'AM' && hours === 12) hours = 0;
+      
+      prevDate.setHours(hours, minutes, 0, 0);
+      return prevDate;
+    }
+  }
+  
+  // Neither — cascade from previous order
+  if (previousEndTime) {
+    return new Date(previousEndTime);
+  }
+  
+  return null;
+}
+```
+
+### UPDATE CASCADE FUNCTION — BOTH ORDER TABLE AND PREVIEW
+
+```javascript
+function recalculateCompletionDates(orders) {
+  orders.sort((a, b) => a.prio - b.prio);
+  
+  let currentEndTime = null;
+  
+  for (let i = 0; i < orders.length; i++) {
+    const order = orders[i];
+    
+    // Skip Done and Cancelled
+    if (order.status === 'Done' || order.status === 'Cancel PO') {
+      continue;
+    }
+    
+    const productionTime = parseFloat(order.production_time) || 0;
+    const changeover = parseFloat(order.changeover) || 0;
+    const totalTime = productionTime + changeover;
+    
+    // If completion is overridden — keep it, use as anchor for next orders
+    if (order._completionOverridden) {
+      const overriddenDateTime = parseDateTime(
+        order.completion_date,
+        order.completion_time
+      );
+      if (overriddenDateTime) {
+        currentEndTime = overriddenDateTime;
+      }
+      // DO NOT skip — continue to next order so it cascades from override
+      continue;
+    }
+    
+    // Get effective start time using fallback rules
+    const startDateTime = getEffectiveStartDateTime(order, currentEndTime);
+    
+    if (startDateTime) {
+      // Store cascaded start for display
+      if (!order.start_date || order.start_date === 'Set start date') {
+        order._cascadedStartDate = formatDateFull(startDateTime);
+      }
+      if (!order.start_time || order.start_time === 'Set start time') {
+        order._cascadedStartTime = formatTime(startDateTime);
+      }
+      
+      const completionDateTime = new Date(
+        startDateTime.getTime() + (totalTime * 60 * 60 * 1000)
+      );
+      
+      order.completion_date = formatDateFull(completionDateTime);
+      order.completion_time = formatTime(completionDateTime);
+      
+      currentEndTime = completionDateTime;
+    }
+  }
+}
+```
+
+---
+
+## FIX 2: ORDER TABLE — OVERRIDE MUST CASCADE TO BELOW ORDERS
+
+When a user overrides a completion date in the ORDER TABLE, all downstream orders must recalculate their completion dates based on the overridden value. Currently this is broken — below orders don't update.
+
+### THE PROBLEM
+
+```
+Order 1: Start = 8:00 AM, Completion = 12:22 PM
+Order 2: Cascaded, Completion = 02:50 PM
+Order 3: Cascaded, Completion = 05:10 PM
+
+User overrides Order 1 completion to 4:00 PM:
+
+EXPECTED:
+Order 1: Completion = 4:00 PM (overridden)
+Order 2: Cascaded from 4:00 PM → Completion = 06:28 PM (UPDATED)
+Order 3: Cascaded from 6:28 PM → Completion = 08:48 PM (UPDATED)
+
+ACTUAL (BUG):
+Order 1: Completion = 4:00 PM (overridden)
+Order 2: Completion = 02:50 PM (NOT UPDATED ❌)
+Order 3: Completion = 05:10 PM (NOT UPDATED ❌)
+```
+
+### THE FIX
+
+After a completion date override, trigger recalculation for the entire line:
+
+```javascript
+function handleCompletionOverride(order, newDate, newTime, line) {
+  // Set the override
+  order.completion_date = formatDateFull(newDate);
+  order.completion_time = newTime || formatTime(newDate);
+  order._completionOverridden = true;
+  
+  // MUST recalculate ALL downstream orders
+  const lineOrders = getOrdersForLine(line);
+  recalculateCompletionDates(lineOrders);
+}
+```
+
+### ENSURE THE CASCADE FUNCTION HANDLES OVERRIDES CORRECTLY
+
+The key is in the cascade function — when it hits an overridden order, it should:
+1. ✅ Keep the overridden value
+2. ✅ Use the overridden value as `currentEndTime`
+3. ✅ Continue to the NEXT order and cascade from the override
+4. ❌ Do NOT skip downstream orders
+
+```javascript
+// In recalculateCompletionDates():
+
+if (order._completionOverridden) {
+  const overriddenDateTime = parseDateTime(
+    order.completion_date,
+    order.completion_time
+  );
+  if (overriddenDateTime) {
+    currentEndTime = overriddenDateTime;
+  }
+  continue; // Skip THIS order's calculation, but currentEndTime is set
+  // So the NEXT order will cascade from currentEndTime
+}
+```
+
+The `continue` skips recalculating the overridden order itself, but `currentEndTime` is updated so the NEXT iteration picks it up. This is the correct behavior — verify the order table's cascade function matches this exactly.
+
+### ALSO TRIGGER CASCADE ON THESE EVENTS IN ORDER TABLE
+
+```javascript
+// When override is set
+function handleCompletionOverrideProceed(order, newDate, line) {
+  order.completion_date = formatDateFull(newDate);
+  order.completion_time = formatTime(newDate);
+  order._completionOverridden = true;
+  
+  recalculateCompletionDates(getOrdersForLine(line)); // MUST call this
+}
+
+// When override is removed
+function handleRemoveOverride(order, line) {
+  order._completionOverridden = false;
+  
+  recalculateCompletionDates(getOrdersForLine(line)); // MUST call this
+}
+
+// When start date changes
+function handleStartDateChange(order, newDate, line) {
+  order.start_date = formatDateFull(newDate);
+  
+  recalculateCompletionDates(getOrdersForLine(line)); // MUST call this
+}
+
+// When start time changes
+function handleStartTimeChange(order, newTime, line) {
+  order.start_time = newTime;
+  
+  recalculateCompletionDates(getOrdersForLine(line)); // MUST call this
+}
+
+// When production time or volume changes
+function handleProductionDataChange(order, field, value, line) {
+  order[field] = value;
+  
+  recalculateCompletionDates(getOrdersForLine(line)); // MUST call this
+}
+
+// When orders are reordered (drag)
+function handleOrderReorder(line) {
+  recalculateCompletionDates(getOrdersForLine(line)); // MUST call this
+}
+
+// When new order is added
+function handleAddOrder(newOrder, line) {
+  addOrderToLine(newOrder, line);
+  
+  recalculateCompletionDates(getOrdersForLine(line)); // MUST call this
+}
+
+// When order is removed
+function handleRemoveOrder(order, line) {
+  removeOrder(order);
+  
+  recalculateCompletionDates(getOrdersForLine(line)); // MUST call this
+}
+```
+
+---
+
+## VERIFICATION
+
+### Fallback rules
+1. ✅ Date only (no time) → uses 8:00 AM
+   ```
+   Start Date: April 2, 2026 | Start Time: empty
+   → Effective start: April 2, 2026 08:00 AM
+   ```
+
+2. ✅ Time only (no date) → uses previous order's completion date
+   ```
+   Previous completion: April 2, 2026 12:22 PM
+   Start Date: empty | Start Time: 02:00 PM
+   → Effective start: April 2, 2026 02:00 PM
+   ```
+
+3. ✅ Neither → cascades from previous completion
+   ```
+   Previous completion: April 2, 2026 12:22 PM
+   → Effective start: April 2, 2026 12:22 PM
+   ```
+
+4. ✅ Both set → uses both as-is
+   ```
+   Start Date: April 3, 2026 | Start Time: 08:00 AM
+   → Effective start: April 3, 2026 08:00 AM
+   ```
+
+### Override cascade — Order Table
+5. ✅ Override completion → below orders recalculate
+6. ✅ Override set to later time → below orders shift later
+7. ✅ Override set to earlier time → below orders shift earlier
+8. ✅ Remove override → returns to auto-calculated, below orders recalculate
+
+### Override cascade — Preview
+9. ✅ Same behavior as order table (already working)
+
+### Trigger points
+10. ✅ Override completion → cascade
+11. ✅ Remove override → cascade
+12. ✅ Change start date → cascade
+13. ✅ Change start time → cascade
+14. ✅ Change volume/production time → cascade
+15. ✅ Reorder/drag → cascade
+16. ✅ Add new order → cascade
+17. ✅ Remove order → cascade
+```

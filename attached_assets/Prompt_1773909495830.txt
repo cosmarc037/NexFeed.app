@@ -1,0 +1,165 @@
+```
+Implement the following visual changes to the Next 10 Days preview table:
+
+---
+
+## 1. FREEZE COLUMNS — PRODUCT DETAILS
+
+Freeze the first 4 columns so they remain visible when scrolling horizontally through the date columns.
+
+**Frozen columns (sticky left):**
+- Material Code
+- Category
+- Item Description
+- Due for Loading
+
+**Behavior:**
+- These 4 columns stay fixed on the left side of the table.
+- When the user scrolls right to see date columns, Inventory, etc., the frozen columns remain visible.
+- A subtle right border/shadow on the last frozen column (Due for Loading) to indicate the freeze boundary:
+  - Border-right: 2px solid #e5e7eb
+  - Box shadow: 2px 0 4px rgba(0,0,0,0.05) on the freeze edge
+
+**Implementation:**
+- Apply `position: sticky; left: 0;` to each frozen column with appropriate left offsets.
+- Material Code: `left: 0`
+- Category: `left: [Material Code width]`
+- Item Description: `left: [Material Code + Category width]`
+- Due for Loading: `left: [Material Code + Category + Item Description width]`
+- Set `z-index: 2` on frozen columns so they stay above scrolling content.
+- Set `background: white` on frozen column cells to prevent content showing through.
+
+---
+
+## 2. MAIN HEADER GROUPS
+
+Add grouped main headers above the individual column headers, organizing columns into three sections.
+
+**Header structure:**
+
+```
+┌──────────────────────────────────────┬──────────────────────────────────────┬──────────────────────────────────────┐
+│          PRODUCT DETAILS             │           NEXT 10 DAYS              │             TRACKING                 │
+├──────────┬──────────┬────────┬───────┼───────┬───────┬───────┬─────────────┼───────────┬──────────┬────────┬──────┤
+│ Material │ Category │ Item   │ Due   │Mar-18 │Mar-19 │Mar-20 │ ... │Mar-28│ Inventory │ Bal. to  │ Target │Status│
+│ Code     │          │ Desc   │for Ldg│       │       │       │     │      │           │ Produce  │ Date   │      │
+├──────────┼──────────┼────────┼───────┼───────┼───────┼───────┼─────┼──────┼───────────┼──────────┼────────┼──────┤
+│ data     │ data     │ data   │ data  │ data  │ data  │ data  │     │      │ data      │ data     │ data   │ data │
+└──────────┴──────────┴────────┴───────┴───────┴───────┴───────┴─────┴──────┴───────────┴──────────┴────────┴──────┘
+```
+
+**Main header group — "PRODUCT DETAILS":**
+- Spans: Material Code, Category, Item Description, Due for Loading
+- Styling:
+  - Background: Light blue-grey (#f8fafc)
+  - Text: Dark grey (#374151), uppercase, 11px, font-weight 600, letter-spacing 0.5px
+  - Border-bottom: 2px solid #e5e7eb
+  - Text-align: center
+  - Padding: 8px
+
+**Main header group — "NEXT 10 DAYS":**
+- Spans: All date columns (Mar-18 through Mar-28, dynamically generated)
+- Styling:
+  - Background: Light orange tint (#fff7ed)
+  - Text: Dark orange (#c2410c), uppercase, 11px, font-weight 600, letter-spacing 0.5px
+  - Border-bottom: 2px solid #fed7aa
+  - Text-align: center
+  - Padding: 8px
+
+**Main header group — "TRACKING":**
+- Spans: Inventory, Bal. to Produce, Target Date, Status
+- Styling:
+  - Background: Light green tint (#f0fdf4)
+  - Text: Dark green (#166534), uppercase, 11px, font-weight 600, letter-spacing 0.5px
+  - Border-bottom: 2px solid #bbf7d0
+  - Text-align: center
+  - Padding: 8px
+
+**Sub-headers (individual column names):**
+- Sit below the main header groups.
+- Styling:
+  - Background: White
+  - Text: Grey (#6b7280), uppercase, 10px, font-weight 600, letter-spacing 0.5px
+  - Border-bottom: 1px solid #e5e7eb
+  - Text-align: center for date columns and Due for Loading
+  - Text-align: left for Material Code, Category, Item Description
+
+---
+
+## 3. BOLD VALUES — DUE FOR LOADING AND INVENTORY
+
+Make the values in "Due for Loading" and "Inventory" columns bold so users can easily compare them.
+
+**Due for Loading column:**
+- Cell values: font-weight 700 (bold), dark text (#1a1a1a)
+- Example: **455.3** instead of 455.3
+
+**Inventory column:**
+- Cell values: font-weight 700 (bold), dark text (#1a1a1a)
+- Example: **759.3** instead of 759.3
+
+**All other numeric columns:** Regular weight (400), standard dark grey text.
+
+---
+
+## 4. INVENTORY COLUMN — LIGHT GRAY HIGHLIGHT
+
+Highlight the entire Inventory column (header AND all data cells) with a light grey background to make it visually distinct for easy comparison with Due for Loading.
+
+**Styling:**
+- Column header cell: background #f3f4f6 (light grey)
+- ALL data cells in the Inventory column: background #f3f4f6 (light grey)
+- This creates a vertical grey stripe down the Inventory column.
+- The bold text on the grey background makes the Inventory values stand out.
+
+**The grey highlight applies regardless of other row styling:**
+- Normal rows: grey background on Inventory cell
+- Red-highlighted rows (cumulative exceeded): the Inventory cell keeps grey background, NOT red. The Inventory value itself is not part of the cumulative loading — it's the TARGET, so it should always be grey.
+
+---
+
+## 5. CENTER-ALIGN DUE FOR LOADING VALUES
+
+Center-align the values in the "Due for Loading" column.
+
+**Due for Loading:**
+- Header: center-aligned (already in the sub-header)
+- Cell values: center-aligned, bold
+
+**Also center-align the following for consistency:**
+- All date column values: center-aligned
+- Inventory values: center-aligned, bold, grey background
+- Bal. to Produce values: center-aligned
+
+**Left-aligned columns:**
+- Material Code: left-aligned
+- Category: left-aligned
+- Item Description: left-aligned
+- Target Date: center-aligned
+- Status: center-aligned
+
+---
+
+## COMPLETE VISUAL EXAMPLE
+
+```
+┌──────────────────────────────────────────┬─────────────────────────────────────┬──────────────────────────────────────┐
+│           PRODUCT DETAILS                │          NEXT 10 DAYS              │            TRACKING                  │
+├────────────┬──────────┬──────────┬───────┼──────┬──────┬──────┬──────┬────────┼───────────┬─────────┬────────┬───────┤
+│ MATERIAL   │ CATEGORY │ ITEM     │ DUE   │MAR-18│MAR-19│MAR-20│ ...  │ MAR-28 │ INVENTORY │ BAL. TO │ TARGET │STATUS │
+│ CODE       │          │ DESC     │FOR LDG│      │      │      │      │        │           │ PRODUCE │ DATE   │       │
+├────────────┼──────────┼──────────┼───────┼──────┼──────┼──────┼──────┼────────┼───────────┼─────────┼────────┼───────┤
+│1000000000039│Gamefowl │Gallimax  │**455.3**│ 10.0│ 29.0│ 51.7│ ...  │  10.0  │ **759.3** │         │ Mar 23 │Needs  │
+│            │          │2 Plus... │       │      │      │      │      │ (RED)  │  (GREY)   │         │        │Prod.  │
+├────────────┼──────────┼──────────┼───────┼──────┼──────┼──────┼──────┼────────┼───────────┼─────────┼────────┼───────┤
+│1000000000915│Gamefowl │Salto Baby│**25.2**│  1.8│  0.5│  5.5│ ...  │   1.0  │ **23.4**  │         │   —    │Stock  │
+│            │          │Stag...  │ (RED) │(RED) │(RED) │(RED) │      │ (RED)  │  (GREY)   │         │        │Suff.  │
+└────────────┴──────────┴──────────┴───────┴──────┴──────┴──────┴──────┴────────┴───────────┴─────────┴────────┴───────┘
+
+LEGEND:
+- **bold** = Due for Loading and Inventory values are bold
+- (GREY) = Inventory column has light grey background (#f3f4f6)
+- (RED) = Cells where cumulative loading >= Inventory have red tint (#fef2f2, red text)
+- Frozen: Material Code, Category, Item Description, Due for Loading stay fixed on scroll
+```
+```

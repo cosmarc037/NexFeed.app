@@ -1,0 +1,211 @@
+```
+Confirm and enforce the correct Future Dispatches field interpretation across the app, especially in Product Insights and any stock/demand reasoning.
+
+---
+
+## CONFIRMED BUSINESS LOGIC
+
+The correct interpretation is:
+
+- Inventory = current stock on hand
+- Due for Loading (DFL) = demand / required dispatch quantity
+
+### Interpretation rules
+- If DFL > Inventory → not enough stock to meet demand → shortage / stockout risk
+- If DFL < Inventory → enough stock to meet demand → buffer remains
+- If DFL = Inventory → exactly enough stock
+
+### Examples
+- Inventory = 10, DFL = 15 → short by 5
+- Inventory = 10, DFL = 5 → buffer of 5
+
+This is the intended logic and should remain the source of truth.
+
+Do NOT reverse these fields.
+
+---
+
+## OBJECTIVE
+
+Make sure every part of the app consistently follows this logic:
+- Inventory = stock
+- DFL = demand
+
+This applies especially to:
+- Product Insights
+- Future Dispatches summaries
+- critical/urgent/monitor/sufficient status logic
+- AI-generated explanations
+- template-based/fallback stock coverage text
+- auto-sequence prioritization where Future Dispatches are involved
+
+---
+
+## 1. KEEP THE STATUS LOGIC ALIGNED TO THE CONFIRMED MAPPING
+
+Status interpretation should continue to follow:
+
+- DFL >= Inventory (at current point) → Critical
+- cumulative demand breaches inventory within 3 days → Urgent
+- breach projected within 4–10 days → Monitor
+- inventory covers all demand in the 10-day window → Sufficient
+
+Do not reverse this logic.
+
+---
+
+## 2. VERIFY PRODUCT INSIGHT TEXT USES THE CORRECT MAPPING
+
+Product Insight text must treat:
+- Inventory as stock
+- DFL as demand
+
+### Correct style examples
+
+#### Sufficient example
+```text
+This product is on Sufficient. Current inventory (153.1 MT) comfortably covers the required demand (37.8 MT), leaving a 115.3 MT buffer. No immediate production action is needed.
+```
+
+#### Critical example
+```text
+This product is on Critical. Current inventory (181.5 MT) is below the required demand (194.2 MT), creating a 12.7 MT deficit. Immediate production is needed to prevent stockout.
+```
+
+This is the correct wording direction.
+
+---
+
+## 3. STANDARDIZE THE SUPPLY/DEMAND HELPER
+
+Create or confirm a shared helper like:
+
+```javascript
+function getFutureDispatchSupplyDemandContext(row) {
+  const inventory = parseFloat(row.inventory ?? 0) || 0;        // stock
+  const dueForLoading = parseFloat(row.due_for_loading ?? 0) || 0; // demand
+
+  const balance = Number((inventory - dueForLoading).toFixed(2));
+
+  return {
+    inventory,
+    dueForLoading,
+    balance,
+    isSufficient: balance >= 0,
+    isShort: balance < 0,
+    deficit: balance < 0 ? Math.abs(balance) : 0,
+    buffer: balance >= 0 ? balance : 0,
+  };
+}
+```
+
+Interpretation:
+- `balance >= 0` → inventory covers demand
+- `balance < 0` → shortage
+
+Use this helper consistently across the app.
+
+---
+
+## 4. ENSURE PRODUCT INSIGHT TEMPLATES MATCH THE CONFIRMED RULE
+
+Review all Product Insight text templates and ensure they say:
+
+### Correct wording:
+- `Current inventory (...) covers the required demand (...)`
+- `Current inventory (...) is below the required demand (...)`
+- `creating a deficit`
+- `leaving a buffer`
+
+Do not generate wording that implies:
+- Inventory is demand
+- DFL is stock
+
+---
+
+## 5. ENSURE AI PROMPTS ALSO USE THE CORRECT MAPPING
+
+Update/confirm prompts that mention Future Dispatches so they explicitly instruct:
+
+```text
+Interpret Future Dispatches as follows:
+- Inventory = current stock on hand
+- Due for Loading (DFL) = demand / required dispatch quantity
+
+If DFL is greater than Inventory, stock is insufficient.
+If Inventory is greater than DFL, stock is sufficient.
+```
+
+This ensures AI-generated explanations stay correct.
+
+---
+
+## 6. REVIEW ANY USER-FACING TEXT THAT MAY STILL CAUSE CONFUSION
+
+Check:
+- Product Insights
+- Future Dispatches summary text
+- Actions Taken if they mention stock/demand
+- strategy reasoning
+- fallback messages
+- tooltips/column help
+
+Ensure none of them imply the reversed logic.
+
+---
+
+## 7. OPTIONAL: IMPROVE EXPLANATION CLARITY
+
+Where possible, make Product Insight wording slightly clearer by using:
+- `Current inventory`
+- `Required demand`
+- `Buffer`
+- `Deficit`
+
+This helps users understand the meaning quickly.
+
+### Example:
+```text
+Current inventory (153.1 MT) exceeds the required demand (37.8 MT), leaving a 115.3 MT buffer.
+```
+
+or
+
+```text
+Current inventory (181.5 MT) is 12.7 MT short of the required demand (194.2 MT).
+```
+
+---
+
+## 8. ADD DEBUG LOGGING TO VERIFY CONSISTENCY
+
+Temporarily log:
+
+```javascript
+console.debug('[Future Dispatches Logic Check]', {
+  orderId: row.id,
+  item: row.item_description,
+  inventory: parseFloat(row.inventory ?? 0) || 0,
+  dueForLoading: parseFloat(row.due_for_loading ?? 0) || 0,
+  balance: (parseFloat(row.inventory ?? 0) || 0) - (parseFloat(row.due_for_loading ?? 0) || 0),
+  interpretedAs: {
+    inventory: 'stock',
+    dueForLoading: 'demand',
+  },
+});
+```
+
+This helps confirm that all logic paths use the same meaning.
+
+---
+
+## 9. VERIFICATION
+
+1. ✅ Inventory is consistently treated as stock
+2. ✅ Due for Loading is consistently treated as demand
+3. ✅ If DFL > Inventory, the app correctly flags shortage / stockout risk
+4. ✅ If Inventory > DFL, the app correctly flags sufficient stock
+5. ✅ Product Insights use the correct stock-vs-demand wording
+6. ✅ AI-generated explanations use the correct mapping
+7. ✅ No part of the app still implies the reversed interpretation
+```

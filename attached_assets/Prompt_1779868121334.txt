@@ -1,0 +1,264 @@
+Please update the **Revert Order** feature so that reverting an order back to its original line uses **smart insertion / sequence analysis**, similar to the **Diversion** feature, instead of trying to force the order back to its old priority position.
+
+---
+
+## 1. CHANGE THE REVERT LOGIC FROM “RESTORE OLD PRIORITY” TO “SMART REINSERTION ON THE ORIGINAL LINE”
+
+The current revert behavior appears to treat revert as if the order should simply go back to its old line and old priority position.
+
+This is no longer reliable, because by the time the order is reverted:
+- the original line may already have changed
+- new orders may have been added
+- some orders may have been completed, diverted, combined, or resequenced
+- the old priority number may no longer be the correct or best position
+
+### New intended behavior
+Revert should mean:
+- return the order to its **original line**
+- then determine the **best current insertion point** on that line based on the line’s present sequence
+
+### Expected result
+The reverted order should be inserted into the most appropriate position on the original line based on current queue conditions, not forced back to its historic priority number.
+
+---
+
+## 2. MAKE REVERT USE A SIMILAR INSERTION ANALYSIS TO DIVERSION
+
+Please make the revert flow work similarly to the Diversion flow by analyzing where the order should be placed when it returns to its original line.
+
+### The revert analysis should determine:
+- the recommended insertion priority on the original line
+- which orders would shift because of that insertion
+- whether the placement may cause delays or downstream impact
+- whether the placement preserves the best available sequencing logic
+
+### Goal
+The revert feature should not act as a blind “put it back where it used to be” function.
+
+It should intelligently evaluate the current state of the original line and place the order where it fits best now.
+
+---
+
+## 3. USE CURRENT LINE CONDITIONS WHEN DECIDING THE REVERT POSITION
+
+Please base the revert insertion logic on the **current queue state** of the original line at the moment revert is performed.
+
+### The analysis should consider current live conditions such as:
+- current orders on the original line
+- avail dates
+- scheduling sequence
+- downstream shift impact
+- production timing / queue effects
+- potential delay or compromise to other orders
+- other sequencing constraints already used by the app where applicable
+
+### Expected result
+The order is inserted where it best fits now, not where it used to fit before the diversion happened.
+
+---
+
+## 4. DO NOT FORCE THE OLD PRIORITY NUMBER JUST BECAUSE IT WAS THE HISTORICAL POSITION
+
+If an order originally came from:
+- `Prio 4`
+
+that does **not** automatically mean it should return to:
+- `Prio 4`
+
+when it is reverted.
+
+### Important
+The old priority may still happen to be the best current position, but it should be treated as:
+- a possible outcome
+not
+- a forced rule
+
+### Expected result
+The revert engine should compute the position fresh.
+
+If the best insertion is now:
+- `Prio 7`
+
+then the order should go to `Prio 7`.
+
+If the best insertion is:
+- `Prio 4`
+
+then it should go to `Prio 4`.
+
+---
+
+## 5. ADD A REVERT IMPACT ANALYSIS SIMILAR TO THE DIVERSION MODAL
+
+Please enhance the Revert modal so it shows a simple impact analysis similar to the Diversion dialog.
+
+### Suggested information to show
+- recommended insertion position on the original line
+- how many downstream orders will shift
+- any production-time / queue impact if relevant
+- any delay/risk considerations if relevant
+
+### Goal
+Users should understand why the reverted order is being placed in a particular position on its original line.
+
+### Expected result
+Revert becomes more transparent and explainable, similar to Diversion.
+
+---
+
+## 6. PRIORITIZE NOT CAUSING DELAY OR COMPROMISE TO OTHER ORDERS
+
+When deciding the revert placement, please prefer positions that:
+- fit the order into the original line logically
+- minimize disruption
+- avoid unnecessary delay to other orders
+- do not create avoidable compromise to the existing sequence
+
+### Goal
+The revert should be operationally safe and sequence-aware, not just historically faithful.
+
+### Expected result
+The chosen insertion point should reflect the best practical placement for the current line state.
+
+---
+
+## 7. MAKE THE REVERT HISTORY LOG THE ACTUAL COMPUTED REINSERTION RESULT
+
+Please update revert history so it reflects the **actual reinsertion position chosen by the smart revert analysis**.
+
+### Example
+If the order is reverted from:
+- `Line 2, Prio 2`
+
+back to:
+- `Line 1, Prio 7`
+
+then the history should say:
+- `Reverted. Moved from Prio 2 → 7`
+
+If the best reinsertion point is:
+- `Prio 4`
+
+then it should say:
+- `Reverted. Moved from Prio 2 → 4`
+
+### Expected result
+History should reflect the real final computed revert result, not the old historical priority unless that truly was the final chosen position.
+
+---
+
+## 8. KEEP THE REVERT DESTINATION LINE FIXED TO THE ORIGINAL LINE
+
+This change is only about improving **where** on the original line the order should land.
+
+### Important
+Revert should still mean:
+- return to the **original line**
+
+Do not change revert into a generic re-diversion to other lines.
+
+### Expected result
+The order still goes back to its original line, but with smarter placement on that line.
+
+---
+
+## 9. PRESERVE EXISTING REVERT GUARDRAILS
+
+Please preserve current revert eligibility rules such as:
+- original line must be active again
+- feedmill/original line must be available if that rule exists
+- line shutdown status must still be respected
+- valid revert availability conditions should still apply
+
+This request only changes the **placement logic after revert is allowed**.
+
+### Expected result
+The app still respects when a revert is allowed, but once allowed, it uses smart reinsertion on the original line.
+
+---
+
+## 10. ALIGN THE REVERT MODAL, FINAL TABLE POSITION, AND HISTORY
+
+Please ensure these three outputs all use the same final reinsertion result:
+
+- Revert modal / impact analysis
+- actual displayed table position on the original line
+- history entry
+
+### Expected result
+There should be no contradiction such as:
+- modal says `Prio 4`
+- history says `Prio 4`
+- but the table shows `Prio 7`
+
+All three should reflect the same computed reinsertion priority.
+
+---
+
+## IMPORTANT
+
+Please update the Revert feature so that it behaves like this:
+
+- revert returns the order to its **original line**
+- the app then performs a **smart insertion analysis** on that original line
+- the order is placed in the **best current position**
+- the app should prioritize avoiding delay or compromise to other orders
+- history and UI should reflect the actual computed final placement
+
+Do **not** force the order back to its old historical priority number unless that is still the best current placement.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log the revert insertion analysis and final chosen placement.
+
+```javascript
+console.debug('[Revert Smart Insertion Analysis]', {
+  orderId,
+  currentLine,
+  originalLine,
+  originalHistoricalPriority,
+  recommendedRevertPriority,
+  affectedOrdersShifted,
+  availDate,
+});
+```
+
+```javascript
+console.debug('[Revert Final Placement]', {
+  orderId,
+  sourceLineBeforeRevert,
+  originalLineAfterRevert,
+  finalInsertedPriority,
+  placementReason,
+});
+```
+
+```javascript
+console.debug('[Revert Consistency Check]', {
+  orderId,
+  modalSuggestedPriority,
+  finalInsertedPriority,
+  historyLoggedPriority,
+  allMatch:
+    modalSuggestedPriority === finalInsertedPriority &&
+    finalInsertedPriority === historyLoggedPriority,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Revert returns the order to its original line
+2. ✅ Revert no longer blindly forces the order back to its old historical priority number
+3. ✅ The app computes a best current insertion point on the original line
+4. ✅ The revert modal can show the recommended insertion position
+5. ✅ Revert placement considers current queue conditions such as avail dates and sequencing impact
+6. ✅ The chosen revert position aims to avoid unnecessary delay or disruption to other orders
+7. ✅ The final displayed table position matches the computed revert insertion position
+8. ✅ Revert history logs the actual final reinsertion priority
+9. ✅ Revert modal, table display, and history all remain consistent
+10. ✅ Existing revert eligibility guardrails remain intact
+11. ✅ No UI errors or console errors are introduced

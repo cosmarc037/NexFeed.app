@@ -1,0 +1,297 @@
+```
+Update the preview/after table volume display so app-adjusted MT is shown directly in the row, with visual styling and a tooltip explanation.
+
+---
+
+## OBJECTIVE
+
+Right now, the per-line summary is using the app-adjusted effective MT, while the preview table still shows the unadjusted/original row MT.
+
+Example:
+- combined order displays `73 MT` in the preview table
+- but the line summary shows `75 MT`
+- because the app adjusts 73 MT up to 75 MT to make it divisible by the batch size of 3
+
+This is technically correct in calculation, but confusing to users because:
+- the row shows 73
+- the summary shows 75
+
+We want the preview table to show the app-adjusted MT directly, so the table and summary are aligned.
+
+---
+
+## REQUIRED BEHAVIOR
+
+### If an order’s MT is app-adjusted
+The preview table should display the **adjusted MT**, not the raw/unadjusted MT.
+
+Example:
+- raw/original = `73 MT`
+- adjusted/effective = `75 MT`
+
+The row should show:
+- `75 MT`
+
+And this adjusted value should:
+- be displayed in **orange**
+- show a tooltip on hover explaining:
+  - why it was adjusted
+  - what the original MT was
+
+---
+
+## 1. DEFINE APP-ADJUSTED MT FOR DISPLAY
+
+An order is app-adjusted if:
+- it has no user override
+- and its raw/current volume is not divisible by its batch size
+- and the app rounds it up to the nearest valid batch multiple
+
+### Suggested helper:
+```javascript
+function adjustVolumeToBatchCeiling(volume, batchSize) {
+  const v = parseFloat(volume || 0) || 0;
+  const b = parseFloat(batchSize || 0) || 0;
+
+  if (b <= 0) return Number(v.toFixed(2));
+
+  return Number((Math.ceil(v / b) * b).toFixed(2));
+}
+
+function getRawOrderVolume(order) {
+  return Number(
+    parseFloat(
+      order.total_volume_mt ??
+      order.volume_mt ??
+      order.volume ??
+      0
+    ) || 0
+  );
+}
+
+function getBatchSize(order) {
+  return Number(
+    parseFloat(order.batch_size ?? order.batchSize ?? 0) || 0
+  );
+}
+
+function getVolumeOverride(order) {
+  const parsed = parseFloat(order.volume_override);
+  return Number.isNaN(parsed) ? null : Number(parsed.toFixed(2));
+}
+```
+
+### Determine app-adjusted state:
+```javascript
+function getOrderVolumeDisplayState(order) {
+  const override = getVolumeOverride(order);
+  const rawVolume = getRawOrderVolume(order);
+  const batchSize = getBatchSize(order);
+
+  if (override != null) {
+    return {
+      displayVolume: override,
+      originalVolume: rawVolume,
+      isUserOverride: true,
+      isAppAdjusted: false,
+      batchSize,
+    };
+  }
+
+  const adjusted = adjustVolumeToBatchCeiling(rawVolume, batchSize);
+  const isAppAdjusted = batchSize > 0 && adjusted !== rawVolume;
+
+  return {
+    displayVolume: adjusted,
+    originalVolume: rawVolume,
+    isUserOverride: false,
+    isAppAdjusted,
+    batchSize,
+  };
+}
+```
+
+Important:
+- for app-adjusted rows, the displayed volume should now be the adjusted value
+- not the original raw volume
+
+---
+
+## 2. UPDATE THE PREVIEW TABLE TO DISPLAY ADJUSTED MT
+
+In the Volume (MT) column:
+- display `displayVolume` from the helper above
+
+That means:
+- if order is app-adjusted, show the adjusted MT
+- if not app-adjusted, show the normal volume
+- if user override exists, still show the override value
+
+### Example:
+```jsx
+const volumeState = getOrderVolumeDisplayState(order);
+
+<td>
+  <span className={volumeState.isAppAdjusted ? 'volume-adjusted-app' : ''}>
+    {formatMT(volumeState.displayVolume)}
+  </span>
+</td>
+```
+
+This ensures the preview table now matches the line summary.
+
+---
+
+## 3. STYLE APP-ADJUSTED MT IN ORANGE
+
+If the order volume is app-adjusted:
+- make the displayed volume orange
+
+### Suggested CSS:
+```css
+.volume-adjusted-app {
+  color: #f59e0b; /* orange */
+  font-weight: 600;
+}
+```
+
+Keep styling subtle but noticeable.
+
+Only use this orange styling for:
+- app-adjusted rows
+
+Do not apply the same style automatically to non-adjusted rows.
+
+---
+
+## 4. ADD A TOOLTIP FOR APP-ADJUSTED VOLUME
+
+If the row is app-adjusted, show a tooltip on hover.
+
+### Tooltip should explain:
+- the volume was adjusted by the app
+- the original MT
+- the batch size
+- the adjusted MT
+
+### Example tooltip text:
+```text
+Adjusted by the app to 75 MT because the original volume of 73 MT is not divisible by the batch size of 3.
+Original volume: 73 MT
+```
+
+Alternative shorter version:
+```text
+App-adjusted to 75 MT.
+Original volume: 73 MT
+Batch size: 3
+```
+
+### Example JSX:
+```jsx
+{volumeState.isAppAdjusted ? (
+  <Tooltip
+    content={`Adjusted by the app to ${formatMT(volumeState.displayVolume)} because the original volume of ${formatMT(volumeState.originalVolume)} is not divisible by the batch size of ${volumeState.batchSize}. Original volume: ${formatMT(volumeState.originalVolume)}.`}
+  >
+    <span className="volume-adjusted-app">
+      {formatMT(volumeState.displayVolume)}
+    </span>
+  </Tooltip>
+) : (
+  <span>{formatMT(volumeState.displayVolume)}</span>
+)}
+```
+
+---
+
+## 5. OPTIONAL: SHOW ORIGINAL MT BELOW OR IN TOOLTIP ONLY
+
+Do not clutter the row too much.
+
+Preferred approach:
+- show only adjusted MT in the row
+- keep original MT in tooltip
+
+If there is already an “Original: X MT” pattern used elsewhere and it fits visually, you may optionally show:
+- `75 MT`
+- `Original: 73 MT`
+
+But tooltip-only is acceptable and cleaner.
+
+---
+
+## 6. ALIGN SUMMARY AND TABLE TO THE SAME DISPLAYED VALUE
+
+Once the row is updated:
+- the per-line summary should continue using the effective/app-adjusted volume
+- now the table and summary will match visually
+
+Example:
+- row shows `75 MT`
+- line summary totals include `75`
+- no mismatch/confusion
+
+This is the intended outcome.
+
+---
+
+## 7. DO NOT OVERRIDE USER-OVERRIDDEN LOGIC
+
+If the user manually overrides volume:
+- that override should still take precedence
+- do not label it as app-adjusted
+- do not show the orange app-adjusted styling unless you intentionally want a separate style for override
+
+For now:
+- only app-adjusted rows get orange styling + tooltip
+
+---
+
+## 8. APPLY THIS TO THE AUTO-SEQUENCE PREVIEW TABLES
+
+This should apply where users compare sequencing results, including:
+- After table
+- Before table if desired and relevant
+- any preview/order table in auto-sequence where MT is shown and app-adjusted MT is in effect
+
+At minimum, apply it to the After table where the mismatch is causing confusion.
+
+---
+
+## 9. ADD DEBUG LOGGING IF NEEDED
+
+Temporarily log volume display state:
+
+```javascript
+console.debug('[Volume Display State]', {
+  orderId: order.id,
+  rawVolume: volumeState.originalVolume,
+  displayVolume: volumeState.displayVolume,
+  batchSize: volumeState.batchSize,
+  isAppAdjusted: volumeState.isAppAdjusted,
+  isUserOverride: volumeState.isUserOverride,
+});
+```
+
+This helps verify:
+- 73 becomes 75 for display
+- only app-adjusted rows get styled
+- override rows are not misclassified
+
+---
+
+## 10. VERIFICATION
+
+### Display behavior
+1. ✅ App-adjusted rows now show adjusted MT in the preview table
+2. ✅ Example: 73 MT combined row now displays as 75 MT
+3. ✅ App-adjusted displayed MT is styled in orange
+4. ✅ Hovering the adjusted MT shows a tooltip explaining the adjustment and original MT
+
+### Consistency
+5. ✅ Preview table MT now matches the per-line summary total logic
+6. ✅ Users no longer see mismatched row MT vs summary MT
+
+### Logic
+7. ✅ User override still takes precedence and is not treated as app-adjusted
+8. ✅ Non-adjusted rows still display normally

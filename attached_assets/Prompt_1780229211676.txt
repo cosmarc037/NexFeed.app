@@ -1,0 +1,108 @@
+Please update the **Suggested Pre-orders / Re-order Details** volume formatting and calculation in the **Fulfillment (Demo)** workspace.
+
+---
+
+## 1. REMOVE DECIMAL PLACES FROM DISPLAYED VOLUME VALUES
+
+Please remove decimal places from the displayed values for:
+
+- `Volume (MT)`
+- `Volume to Produce (MT)`
+
+### Current issue
+Values are currently shown with decimals such as:
+- `80.0 MT`
+- `13.5 MT`
+- `5.5 MT`
+- `1.8 MT`
+
+### Expected behavior
+Display these without decimal places.
+
+### Example
+- `80.0 MT` → `80 MT`
+- `13.5 MT` → should display as an adjusted whole-number volume if applicable
+- `5.5 MT` → adjusted whole-number volume if applicable
+
+### Goal
+Keep the table cleaner and align the displayed production quantities with more usable batch-based values.
+
+---
+
+## 2. IF `VOLUME TO PRODUCE` IS NOT DIVISIBLE BY BATCH SIZE, ALLOW IT TO BE ADJUSTED
+
+If the generated **Volume to Produce (MT)** is not evenly divisible by the product’s **Batch Size**, it is okay to adjust the generated volume to a valid batch-based amount.
+
+### Goal
+Ensure the suggested re-order quantity is practical for production and aligned with batch sizing.
+
+### Expected behavior
+If:
+- `Volume to Produce` is derived from Average Daily
+- but it is not divisible by `Batch Size`
+
+then:
+- adjust it to a clean batch-compatible quantity
+
+### Important
+The adjusted result should still be reasonable and production-friendly.
+
+---
+
+## 3. USE THE ADJUSTED BATCH-COMPATIBLE `VOLUME TO PRODUCE` AS THE DISPLAYED VALUE
+
+If `Volume to Produce` needs to be adjusted because it is not divisible by batch size, please use the adjusted value as the one shown in the Suggested Pre-orders table.
+
+### Expected result
+Users see the final production-ready value, not the raw pre-adjustment decimal figure.
+
+---
+
+## 4. USE THE ADJUSTED `VOLUME TO PRODUCE` FOR DOWNSTREAM RE-ORDER CALCULATIONS
+
+If the `Volume to Produce` is adjusted to a batch-compatible amount, please make sure downstream calculations also use the adjusted value, including:
+
+- production time calculation
+- generated re-order quantity
+- other related re-order metrics where applicable
+
+### Expected result
+The displayed quantity and the calculated scheduling/production values remain consistent.
+
+---
+
+## IMPORTANT
+
+Please update the Suggested Pre-orders table so that:
+
+- displayed `Volume (MT)` has no decimal places
+- displayed `Volume to Produce (MT)` has no decimal places
+- if `Volume to Produce` is not divisible by batch size, it may be adjusted to a valid batch-compatible value
+- the adjusted batch-compatible value should be the one displayed and used for related calculations
+
+---
+
+## DEBUG LOGGING
+
+```javascript
+console.debug('[Demo Re-Order Volume Formatting]', {
+  sourceVolumeRaw,
+  sourceVolumeDisplayed,
+  reorderVolumeRaw,
+  reorderVolumeAdjusted,
+  reorderVolumeDisplayed,
+  batchSize,
+  adjustedForBatchCompatibility: reorderVolumeRaw !== reorderVolumeAdjusted,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ `Volume (MT)` displays with no decimal places
+2. ✅ `Volume to Produce (MT)` displays with no decimal places
+3. ✅ If `Volume to Produce` is not divisible by batch size, it is adjusted
+4. ✅ The displayed `Volume to Produce` reflects the adjusted batch-compatible amount
+5. ✅ Production time and other calculations use the adjusted re-order volume where applicable
+6. ✅ No UI errors or console errors are introduced

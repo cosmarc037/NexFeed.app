@@ -1,0 +1,154 @@
+```
+Implement the following fix:
+
+---
+
+## FIX: (+) INSERT ROW BUTTON — NOT CLIPPED
+
+The (+) button that appears between rows when hovering is being clipped on the left side because the table container has overflow hidden/auto and the button is positioned at -12px left (outside the container bounds).
+
+### THE FIX — ADD LEFT PADDING TO TABLE CONTAINER
+
+Add enough left padding to the table's scrollable container so the (+) button has room to render without being clipped.
+
+```css
+/* Add left padding to the KB table container */
+.kb-table-container {
+  padding-left: 16px;  /* Enough room for the (+) button */
+  overflow-x: auto;
+  overflow-y: auto;
+}
+```
+
+### ALSO ADJUST THE (+) BUTTON POSITION
+
+Since we added 16px padding, the button no longer needs to be at -12px. Adjust to sit neatly at the left edge:
+
+```css
+.kb-insert-btn {
+  position: absolute;
+  left: -14px;            /* Sits just inside the padded area */
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #fd5108;
+  color: #ffffff;
+  border: 2px solid #ffffff;  /* White border so it stands out */
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 700;
+  z-index: 6;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
+  transition: transform 0.15s, background 0.15s;
+}
+
+.kb-insert-btn:hover {
+  background: #e8490b;
+  transform: scale(1.15);
+}
+```
+
+### ENSURE THE INSERT LINE ROW HAS PROPER OVERFLOW
+
+```css
+.kb-insert-line-cell {
+  padding: 0 !important;
+  position: relative;
+  height: 8px;
+  overflow: visible !important;  /* Allow button to extend outside cell */
+}
+
+.kb-insert-line {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  z-index: 5;
+  overflow: visible;  /* Don't clip the button */
+}
+```
+
+### ENSURE TABLE AND ALL PARENTS ALLOW OVERFLOW FOR THE BUTTON
+
+```css
+/* The table itself */
+.kb-table {
+  overflow: visible;
+}
+
+/* The table body */
+.kb-table tbody {
+  overflow: visible;
+}
+
+/* Each row */
+.kb-insert-line-row {
+  overflow: visible;
+  height: 8px;
+}
+
+/* The scrollable container — add padding but keep scroll */
+.kb-table-scroll-wrapper {
+  overflow-x: auto;
+  overflow-y: auto;
+  padding-left: 16px;
+  margin-left: -16px;  /* Compensate so table alignment doesn't shift */
+}
+```
+
+### ALTERNATIVE — IF PADDING APPROACH DOESN'T WORK
+
+If the container structure makes padding difficult, move the button inside the first cell instead:
+
+```css
+.kb-insert-btn {
+  position: absolute;
+  left: 4px;              /* Inside the first cell, not outside */
+  top: 50%;
+  transform: translateY(-50%);
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #fd5108;
+  color: #ffffff;
+  border: 2px solid #ffffff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 700;
+  z-index: 6;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
+}
+```
+
+And make the first column (checkbox column) wide enough:
+
+```css
+.kb-select-cell {
+  width: 40px;       /* Was 32px — add extra room for the button */
+  min-width: 40px;
+  position: relative;
+  overflow: visible;
+}
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ (+) button fully visible — not clipped on left side
+2. ✅ Full circle shown, not half circle
+3. ✅ Hover between rows shows (+) button cleanly
+4. ✅ Button is clickable and inserts new row
+5. ✅ Red line extends across the full row
+6. ✅ Table content alignment not affected
+7. ✅ Horizontal scroll still works properly
+```

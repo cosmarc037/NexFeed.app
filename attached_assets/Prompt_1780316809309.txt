@@ -1,0 +1,151 @@
+Please revisit and fix the **Approve Re-order modal’s insertion recommendation logic** so that the recommended priority respects **chronological avail-date ordering** on the selected line.
+
+---
+
+## 1. MAKE THE RECOMMENDED PRIORITY FOLLOW AVAIL-DATE SORT ORDER
+
+There is currently a case where the modal recommends a priority that does not match the correct chronological order by avail date.
+
+### Current issue
+The modal may recommend:
+- `Line 2`
+- `Recommended Avail Date = June 1, 2026`
+- `Insertion Position = Priority 2`
+
+even when the current first order on that line has:
+- `Avail Date = June 5, 2026`
+
+### Why this is wrong
+If the inserted re-order has an earlier avail date than the first order already on that line, then it should be inserted before that first order.
+
+### Required rule
+If the re-order’s recommended avail date is earlier than the avail date of the current first row on the selected line, then the recommended insertion position must be:
+- `Priority 1`
+
+### Expected result
+The recommended priority should follow the same chronological avail-date ordering used by the final schedule.
+
+---
+
+## 2. TREAT CHRONOLOGICAL AVAIL-DATE ORDERING AS THE PRIORITY BASIS
+
+Please make sure the modal’s insertion recommendation logic respects this simple rule:
+
+- earlier avail date = earlier priority
+- later avail date = later priority
+
+### Goal
+The proposed insertion priority in the modal should align with how the schedule is ultimately expected to be ordered.
+
+### Expected result
+The AI/recommendation engine should not suggest a lower position for an order whose avail date is earlier than the rows above it.
+
+---
+
+## 3. IF THE RE-ORDER DATE IS EARLIEST ON THE SELECTED LINE, RECOMMEND PRIORITY 1
+
+Please specifically handle this case:
+
+### Rule
+If the selected line’s recommended avail date for the re-order is earlier than all currently scheduled avail dates on that line, then the modal should recommend:
+- `Priority 1`
+
+### Expected result
+The re-order becomes the first row on that line after insertion.
+
+---
+
+## 4. KEEP THE FINAL INSERTION CONSISTENT WITH THE CORRECTED RECOMMENDATION
+
+Once the modal recommends the corrected priority, the final applied insertion should continue to match that reviewed priority exactly.
+
+### Expected result
+If the corrected recommendation becomes:
+- `Priority 1`
+
+then after confirmation, the re-order should actually be inserted at:
+- `Prio 1`
+
+### Goal
+Keep both:
+- recommendation correctness
+- and modal/apply consistency
+
+---
+
+## 5. MAKE THE MODAL’S RECOMMENDATION LOGIC CONSISTENT WITH FINAL CHRONOLOGICAL SORTING
+
+The modal should not recommend an insertion priority that conflicts with the final schedule’s chronological avail-date sort logic.
+
+### Expected result
+The modal recommendation should already reflect the same ordering principle:
+- sort by avail date ascending
+
+### Goal
+Avoid situations where:
+- modal says `Priority 2`
+- but based on avail dates it should clearly be `Priority 1`
+
+---
+
+## IMPORTANT
+
+Please enforce this rule in the **Approve Re-order** modal:
+
+> If the selected line’s recommended avail date is earlier than the current first order’s avail date on that line, the modal must recommend **Priority 1**.
+
+More generally:
+- the recommended priority must follow chronological avail-date ordering on the selected line
+
+This ensures the modal recommendation is logically correct before the re-order is inserted.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log modal recommendation vs avail-date ordering.
+
+```javascript
+console.debug('[Approve Re-Order Priority Recommendation Check]', {
+  suggestionId,
+  selectedLine,
+  reorderRecommendedAvailDate,
+  firstExistingLineAvailDate,
+  shouldBePriority1:
+    reorderRecommendedAvailDate &&
+    firstExistingLineAvailDate &&
+    new Date(reorderRecommendedAvailDate) < new Date(firstExistingLineAvailDate),
+  recommendedPriority,
+});
+```
+
+```javascript
+console.debug('[Approve Re-Order Chronological Insertion Logic]', {
+  suggestionId,
+  selectedLine,
+  existingLineAvailDates,
+  reorderRecommendedAvailDate,
+  recommendedPriority,
+  basedOnChronologicalAvailDateSort: true,
+});
+```
+
+```javascript
+console.debug('[Approve Re-Order Final Insert Consistency]', {
+  suggestionId,
+  selectedLine,
+  modalRecommendedPriority,
+  finalInsertedPriority,
+  exactMatch: modalRecommendedPriority === finalInsertedPriority,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ The modal’s recommended priority respects chronological avail-date ordering
+2. ✅ If the re-order date is earlier than the first order’s date, the modal recommends `Priority 1`
+3. ✅ The corrected recommended priority still matches the final inserted priority
+4. ✅ The modal no longer recommends `Priority 2` when the re-order should clearly be first by date
+5. ✅ No UI errors or console errors are introduced

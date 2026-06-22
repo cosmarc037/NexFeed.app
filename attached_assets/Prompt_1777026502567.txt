@@ -1,0 +1,346 @@
+```
+Update to full term "Optimize Feedmill X" and "Optimize Line X":
+
+---
+
+## 1. UPDATE BUTTON LABELS
+
+### In Feedmill Tab (All sub-tab)
+```jsx
+// BEFORE:
+<button onClick={() => handleFeedmillAutoSequence(currentFeedmill)}>
+  ⚙️ Auto-Sequence ({getFeedmillShortName(currentFeedmill)})
+</button>
+
+// AFTER:
+<button onClick={() => handleFeedmillAutoSequence(currentFeedmill)}>
+  ⚙️ Optimize {getFeedmillFullName(currentFeedmill)}
+</button>
+
+function getFeedmillFullName(feedmill) {
+  if (feedmill === 'Feedmill 1' || feedmill === 'FM1') return 'Feedmill 1';
+  if (feedmill === 'Feedmill 2' || feedmill === 'FM2') return 'Feedmill 2';
+  if (feedmill === 'Feedmill 3' || feedmill === 'FM3' || feedmill === 'PMX') return 'Feedmill 3';
+  return feedmill;
+}
+```
+
+### In Line Tab
+```jsx
+// BEFORE:
+<button onClick={() => handleLineAutoSequence(currentLine)}>
+  ⚙️ Auto-Sequence ({getLineShortLabel(currentLine)})
+</button>
+
+// AFTER:
+<button onClick={() => handleLineAutoSequence(currentLine)}>
+  ⚙️ Optimize {getLineFullName(currentLine)}
+</button>
+
+function getLineFullName(line) {
+  const match = line.match(/\d+/);
+  return match ? `Line ${match[0]}` : line;
+}
+```
+
+### Keep "Auto-Sequence (All)" in All Feedmills Tab
+```jsx
+// KEEP AS-IS:
+<button onClick={handlePlantLevelAutoSequence}>
+  ✨ Auto-Sequence (All)
+</button>
+```
+
+---
+
+## 2. UPDATE MODAL/PREVIEW TITLES
+
+### Feedmill Optimize Preview
+```jsx
+// BEFORE:
+<h2>✨ Auto-Sequence — {feedmillShortName}</h2>
+<span className="optimize-subtitle">
+  Find orders from other lines that can be moved to {feedmill}...
+</span>
+
+// AFTER:
+<h2>⚙️ Optimize {getFeedmillFullName(currentFeedmill)}</h2>
+<span className="optimize-subtitle">
+  Find orders from other lines that can be moved to {getFeedmillFullName(currentFeedmill)}
+</span>
+```
+
+Example titles:
+- "⚙️ Optimize Feedmill 1"
+- "⚙️ Optimize Feedmill 2"
+- "⚙️ Optimize Feedmill 3"
+
+### Line Optimize Preview
+```jsx
+// BEFORE:
+<h2>✨ Auto-Sequence — {lineShortLabel}</h2>
+<span className="optimize-subtitle">
+  Find orders from other lines that can be moved to {line}...
+</span>
+
+// AFTER:
+<h2>⚙️ Optimize {getLineFullName(currentLine)}</h2>
+<span className="optimize-subtitle">
+  Find orders from other lines that can be moved to {getLineFullName(currentLine)}
+</span>
+```
+
+Example titles:
+- "⚙️ Optimize Line 1"
+- "⚙️ Optimize Line 2"
+- "⚙️ Optimize Line 7"
+
+---
+
+## 3. UPDATE STAT BADGES / LABELS
+
+### In Optimize Preview Header
+```jsx
+// BEFORE:
+<div className="optimize-stats">
+  <StatBadge label="Current Orders" value={totalCurrentOrders} />
+  <StatBadge label="Candidates Found" value={candidates.length} color="blue" />
+  <StatBadge label="Selected to Move" value={selectedCandidates.length} color="green" />
+  <StatBadge label="After" value={totalAfterOrders} />
+</div>
+
+// AFTER:
+<div className="optimize-stats">
+  <StatBadge label="Current Orders" value={totalCurrentOrders} />
+  <StatBadge label="Candidates Found" value={candidates.length} color="blue" />
+  <StatBadge label="Selected to Move" value={selectedCandidates.length} color="green" />
+  <StatBadge label="After Optimization" value={totalAfterOrders} />
+</div>
+```
+
+---
+
+## 4. UPDATE SECTION LABELS
+
+### Candidate Orders Section
+```jsx
+// BEFORE:
+<span className="optimize-candidates-title">
+  Orders available to move to {lineShortLabel}
+</span>
+
+// AFTER (Feedmill):
+<span className="optimize-candidates-title">
+  Orders available to move to {getFeedmillFullName(currentFeedmill)}
+</span>
+
+// AFTER (Line):
+<span className="optimize-candidates-title">
+  Orders available to move to {getLineFullName(currentLine)}
+</span>
+```
+
+Examples:
+- "Orders available to move to Feedmill 1"
+- "Orders available to move to Line 5"
+
+### Before/After Table Labels
+```jsx
+// KEEP SAME:
+<div className="optimize-table-label optimize-label-before">
+  Before — {currentBefore.length} orders
+</div>
+
+<div className="optimize-table-label optimize-label-after">
+  After — {afterLabel}
+</div>
+```
+
+---
+
+## 5. UPDATE PROCESSING OVERLAY TEXT
+
+```javascript
+// When feedmill optimize starts:
+setProcessingLabel(`Optimizing ${getFeedmillFullName(currentFeedmill)}`);
+
+// When line optimize starts:
+setProcessingLabel(`Optimizing ${getLineFullName(currentLine)}`);
+
+// Examples:
+// "Optimizing Feedmill 1"
+// "Optimizing Line 3"
+// "Optimizing Line 7"
+```
+
+---
+
+## 6. UPDATE TOAST MESSAGES
+
+```javascript
+// When feedmill optimize completes:
+toast.success(`${getFeedmillFullName(currentFeedmill)} optimization preview ready`);
+// e.g., "Feedmill 1 optimization preview ready"
+
+// When line optimize completes:
+toast.success(`${getLineFullName(currentLine)} optimization preview ready`);
+// e.g., "Line 3 optimization preview ready"
+
+// When applying feedmill optimization:
+toast.success(`${getFeedmillFullName(currentFeedmill)} optimization applied to schedule`);
+
+// When applying line optimization:
+toast.success(`${getLineFullName(currentLine)} optimization applied to schedule`);
+```
+
+---
+
+## 7. UPDATE BUTTON TOOLTIPS
+
+```jsx
+// Feedmill button tooltip:
+title={`Optimize ${getFeedmillFullName(currentFeedmill)} utilization — find and move orders from other lines`}
+// e.g., "Optimize Feedmill 1 utilization — find and move orders from other lines"
+
+// Line button tooltip:
+title={`Optimize ${getLineFullName(currentLine)} utilization — find and move orders from other lines`}
+// e.g., "Optimize Line 5 utilization — find and move orders from other lines"
+
+// All button tooltip (keep):
+title="Auto-Sequence entire plant — combine, move, and sort all orders"
+```
+
+---
+
+## 8. UPDATE PHASE LABELS IN PROCESSING OVERLAY
+
+```javascript
+const PROCESSING_PHASES = {
+  scanning: `Scanning orders for ${optimizeTarget}...`,
+  analyzing: `Analyzing candidates for ${optimizeTarget}...`,
+  calculating: `Calculating queue times for ${optimizeTarget}...`,
+  done: `${optimizeTarget} optimization complete!`,
+};
+
+// Example for Feedmill 1:
+// "Scanning orders for Feedmill 1..."
+// "Analyzing candidates for Feedmill 1..."
+// "Calculating queue times for Feedmill 1..."
+// "Feedmill 1 optimization complete!"
+
+// Example for Line 7:
+// "Scanning orders for Line 7..."
+// "Analyzing candidates for Line 7..."
+// "Calculating queue times for Line 7..."
+// "Line 7 optimization complete!"
+```
+
+---
+
+## 9. UPDATE LINE TABS WITHIN OPTIMIZE PREVIEW
+
+```jsx
+// In FeedmillBeforeAfterTabs — show full line names:
+
+<div className="optimize-line-tabs">
+  {feedmillLines.map(line => {
+    const beforeCount = (beforeOrders[line] || []).filter(o => !o.parent_id).length;
+    const afterCount = (afterOrders?.[line] || []).length;
+    const changes = (afterOrders?.[line] || []).filter(o => o._movement !== 'same').length;
+    
+    return (
+      <button
+        key={line}
+        className={`optimize-line-tab ${activeLineTab === line ? 'active' : ''}`}
+        onClick={() => setActiveLineTab(line)}
+      >
+        {getLineFullName(line)}
+        <span className="optimize-line-tab-count">{afterCount}</span>
+        {changes > 0 && <span className="optimize-line-tab-changes">{changes}</span>}
+      </button>
+    );
+  })}
+</div>
+
+// Example tabs for Feedmill 1:
+// [Line 1] 12  [Line 2] 8
+```
+
+---
+
+## 10. UPDATE SUBTITLE TEXT IN PREVIEW
+
+```jsx
+// Feedmill optimize preview subtitle:
+<span className="optimize-subtitle">
+  Find orders from other lines that can be moved to {getFeedmillFullName(currentFeedmill)} ({feedmillLines.map(l => getLineShortLabel(l)).join(' & ')})
+</span>
+// e.g., "Find orders from other lines that can be moved to Feedmill 1 (L1 & L2)"
+
+// Line optimize preview subtitle:
+<span className="optimize-subtitle">
+  Find orders from other lines that can be moved to {getLineFullName(currentLine)}
+</span>
+// e.g., "Find orders from other lines that can be moved to Line 5"
+```
+
+---
+
+## 11. UPDATE CSS CLASS NAMES (optional but recommended)
+
+Replace across stylesheets to use full terms:
+- `.optimize-feedmill-modal`
+- `.optimize-line-modal`
+- `.optimize-feedmill-preview`
+- `.optimize-line-preview`
+
+Or keep generic:
+- `.optimize-modal`
+- `.optimize-preview`
+- `.optimize-stats`
+- `.optimize-candidates`
+- `.optimize-table-label`
+
+---
+
+## 12. UPDATE HELP TEXT / DOCUMENTATION
+
+```javascript
+const HELP_TEXT = {
+  optimizeFeedmill: "Optimize Feedmill utilization by finding and moving orders from other lines. This helps balance load across the feedmill's production lines.",
+  optimizeLine: "Optimize Line utilization by finding and moving orders from other lines. This helps maximize production efficiency for the specific line.",
+  autoSequenceAll: "Auto-Sequence the entire plant to combine orders, move them across lines, and sort them by priority for optimal production flow.",
+};
+```
+
+---
+
+## SUMMARY OF FULL TERM CHANGES
+
+**Buttons:**
+- ✨ Auto-Sequence (All)
+- ⚙️ Optimize Feedmill 1
+- ⚙️ Optimize Feedmill 2
+- ⚙️ Optimize Feedmill 3
+- ⚙️ Optimize Line 1
+- ⚙️ Optimize Line 2
+- ... through ...
+- ⚙️ Optimize Line 7
+
+**Modal Titles:**
+- ⚙️ Optimize Feedmill 1
+- ⚙️ Optimize Line 5
+
+**Toast Messages:**
+- "Feedmill 1 optimization preview ready"
+- "Line 3 optimization applied to schedule"
+
+**Processing Overlay:**
+- "Optimizing Feedmill 2..."
+- "Optimizing Line 7 optimization complete!"
+
+**Result:**
+- All terminology uses full, descriptive names ✓
+- Clear distinction: "Auto-Sequence (All)" vs "Optimize [Feedmill/Line] X" ✓
+- Professional, easy-to-understand terminology ✓
+```

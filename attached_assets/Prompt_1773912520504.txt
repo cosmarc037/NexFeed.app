@@ -1,0 +1,98 @@
+Clear. Here's the focused prompt:
+
+```
+Implement the following visual change to the NexFeed application:
+
+---
+
+## AI STOCK INSIGHTS — LIGHT ORANGE CARD STYLE
+
+Update the AI Stock Insights section on the Next 10 Days page to match the Smart Production Summary card style, using a light orange background.
+
+### CONTAINER STYLING
+
+| Property | Value |
+|---|---|
+| Background | Light orange (#fff7ed) |
+| Border | 1px solid #fed7aa |
+| Border radius | 12px |
+| Padding | 20px 24px |
+| Margin top | 16px (below upload area) |
+| Margin bottom | 16px (above stock level preview) |
+| Box shadow | None |
+
+### HEADER ROW
+
+```
+✨ AI Stock Insights                                 ↻ Refresh
+```
+
+| Element | Styling |
+|---|---|
+| ✨ icon | Orange sparkle icon, matching the Smart Production Summary icon style |
+| "AI Stock Insights" | 14px, font-weight 700 (bold), dark text (#1a1a1a) |
+| "Refresh" button | Orange text (#fd5108), 12px, with refresh icon (↻). Hover: slightly darker orange. Cursor: pointer. |
+| Layout | Title on the left, Refresh on the far right, same line |
+
+### CONTENT
+
+AI-generated insight text sits directly below the header, no separation card or borders.
+
+| Property | Value |
+|---|---|
+| Font size | 12px |
+| Text color | Dark grey (#4b5563) |
+| Line height | 1.6 |
+| Margin top | 8px (below header) |
+
+**All insights flow as a continuous paragraph or short paragraphs, similar to how the Smart Production Summary shows a flowing narrative — not bullet cards.**
+
+**Example:**
+```
+✨ AI Stock Insights                                 ↻ Refresh
+
+20 products analyzed — 15 need production, 2 are stock 
+sufficient, and 3 have critical stock levels. Total balance 
+to produce is approximately 620 MT. Gallimax 3 Maintenance 
+is the most urgent with a target date of Mar 19 (tomorrow), 
+needing 28.6 MT to meet the 74.9 MT inventory target. 
+8 products including Elite XP Startex and Classic Hog Growex 
+are unlikely to meet targets within 10 days — start 
+production early. Salto Baby Stag and Gall 21 Chicken Layer 
+have sufficient stock and can be deprioritized.
+```
+
+- Flowing narrative style, not bullet points.
+- Concise but comprehensive.
+- References to specific products in semi-bold (#374151).
+- Urgent items mentioned first.
+
+### COLLAPSED STATE
+
+When collapsed:
+```
+┌──────────────────────────────────────────────────────────────┐
+│  ✨ AI Stock Insights                                    ▼   │
+└──────────────────────────────────────────────────────────────┘
+```
+
+- Same light orange background (#fff7ed) when collapsed.
+- Same border (#fed7aa).
+- Chevron ▼ on the right.
+- Click to expand.
+
+### EMPTY STATE (NO FILE UPLOADED)
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│  ✨ AI Stock Insights                                        │
+│                                                              │
+│  Upload a Next 10 Days file to generate stock insights.      │
+│                                                              │
+└──────────────────────────────────────────────────────────────┘
+```
+
+- Same light orange background.
+- Grey text (#9ca3af), 12px, italic.
+- Refresh button hidden.
+```

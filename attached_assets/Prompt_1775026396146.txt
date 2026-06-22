@@ -1,0 +1,488 @@
+```
+Implement the following fixes:
+
+---
+
+## FIX 1: WARNING DIALOG — ORANGE BUTTON AND REFRAMED TEXT
+
+### BUTTON COLOR
+
+```css
+.warning-dialog-ok-btn {
+  background: #fd5108;
+  color: #ffffff;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 20px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.warning-dialog-ok-btn:hover {
+  background: #e8490b;
+}
+```
+
+### REFRAMED WARNING TEXT — IN PRODUCTION
+
+When user tries to set an order to "In Production" but earlier priority orders are still Plotted/Hold/Custom:
+
+```
+╔════════════════════════════════════════════════════════╗
+║                                                        ║
+║  ⚠ Cannot Set In Production                      ✕   ║
+║                                                        ║
+║  There are orders at earlier priorities that have       ║
+║  not been produced or completed yet. Consider           ║
+║  producing or completing those orders first before      ║
+║  starting this one.                                    ║
+║                                                        ║
+║  Orders ahead that need attention:                     ║
+║  • Priority 1: Elite XP Startex — Plotted              ║
+║  • Priority 2: Gallimax Pigeon — Plotted               ║
+║                                                        ║
+║                                          [OK]          ║
+║                                     (orange button)    ║
+║                                                        ║
+╚════════════════════════════════════════════════════════╝
+```
+
+### REFRAMED WARNING TEXT — ON-GOING
+
+Same message when selecting On-going statuses:
+
+```
+╔════════════════════════════════════════════════════════╗
+║                                                        ║
+║  ⚠ Cannot Set On-going                           ✕   ║
+║                                                        ║
+║  There are orders at earlier priorities that have       ║
+║  not been produced or completed yet. Consider           ║
+║  producing or completing those orders first before      ║
+║  marking this order as on-going.                       ║
+║                                                        ║
+║  Orders ahead that need attention:                     ║
+║  • Priority 1: Elite XP Startex — Plotted              ║
+║                                                        ║
+║                                          [OK]          ║
+║                                                        ║
+╚════════════════════════════════════════════════════════╝
+```
+
+### CODE
+
+```javascript
+function canSetToInProductionOrOngoing(order, newStatus, allOrders) {
+  if (newStatus !== 'In Production' && !newStatus.startsWith('On-going')) {
+    return { allowed: true };
+  }
+  
+  const orderIndex = allOrders.findIndex(o => o.id === order.id);
+  
+  const allowedAbove = [
+    'Done', 'In Production', 
+    'On-going batching', 'On-going pelleting', 'On-going bagging',
+    'Planned', 'Cancel PO'
+  ];
+  
+  const problemOrders = [];
+  
+  for (let i = 0; i < orderIndex; i++) {
+    const aboveOrder = allOrders[i];
+    if (!allowedAbove.includes(aboveOrder.status)) {
+      problemOrders.push({
+        prio: i + 1,
+        name: aboveOrder.item_description,
+        status: aboveOrder.status
+      });
+    }
+  }
+  
+  if (problemOrders.length > 0) {
+    const statusLabel = newStatus === 'In Production' ? 'In Production' : 'On-going';
+    return {
+      allowed: false,
+      title: `Cannot Set ${statusLabel}`,
+      message: `There are orders at earlier priorities that have not been produced or completed yet. Consider producing or completing those orders first before ${newStatus === 'In Production' ? 'starting this one' : 'marking this order as on-going'}.`,
+      problemOrders: problemOrders
+    };
+  }
+  
+  // In Production — only 1 per line
+  if (newStatus === 'In Production') {
+    const existingInProduction = allOrders.find(
+      o => o.line === order.line && 
+           o.status === 'In Production' && 
+           o.id !== order.id
+    );
+    
+    if (existingInProduction) {
+      return {
+        allowed: false,
+        title: 'In Production Conflict',
+        message: `"${existingInProduction.item_description}" is currently In Production on this line. Consider marking it as Done or On-going before setting another order to In Production.`,
+        problemOrders: []
+      };
+    }
+  }
+  
+  return { allowed: true };
+}
+```
+
+### WARNING DIALOG COMPONENT
+
+```jsx
+function StatusWarningDialog({ title, message, problemOrders, onClose }) {
+  return (
+    <div className="dialog-overlay">
+      <div className="dialog-container" style={{ maxWidth: '440px' }}>
+        <div className="dialog-header">
+          <span>⚠ {title}</span>
+          <button className="dialog-close" onClick={onClose}>✕</button>
+        </div>
+        
+        <div className="dialog-body">
+          <p style={{ fontSize: '12px', color: '#374151', lineHeight: 1.6 }}>
+            {message}
+          </p>
+          
+          {problemOrders && problemOrders.length > 0 && (
+            <div style={{ marginTop: '12px' }}>
+              <p style={{ fontSize: '11px', color: '#6b7280', fontWeight: 600 }}>
+                Orders ahead that need attention:
+              </p>
+              <ul style={{ 
+                listStyle: 'none', 
+                padding: 0, 
+                margin: '8px 0 0 0' 
+              }}>
+                {problemOrders.map(o => (
+                  <li key={o.prio} style={{ 
+                    fontSize: '11px', 
+                    color: '#374151', 
+                    padding: '2px 0' 
+                  }}>
+                    • Priority {o.prio}: {o.name} — <em>{o.status}</em>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+        
+        <div className="dialog-footer" style={{ textAlign: 'right' }}>
+          <button className="warning-dialog-ok-btn" onClick={onClose}>
+            OK
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+## FIX 2: SEQUENCE ANALYSIS — UPDATE BASED ON STATUS
+
+The Sequence Analysis AI text must account for the statuses of orders and explain why certain orders are excluded or locked.
+
+### UPDATED AI PROMPT CONTEXT
+
+```javascript
+function buildSequenceAnalysisPrompt(previewOrders, excludedOrders) {
+  const excludedSummary = excludedOrders.map(o => 
+    `${o.item_description} (Priority ${o._originalPrio}, ${o.status})`
+  ).join(', ');
+  
+  const plannedOrders = previewOrders.filter(o => o.status === 'Planned');
+  const plannedSummary = plannedOrders.map(o => 
+    `${o.item_description} (locked at Priority ${o.prio})`
+  ).join(', ');
+  
+  return `
+Analyze this production sequence. 
+
+CONTEXT:
+- Orders excluded from sequencing (already in progress or completed): ${excludedSummary || 'None'}
+- Planned orders (locked at their positions): ${plannedSummary || 'None'}
+- Remaining orders were sorted chronologically by their availability dates.
+
+RULES:
+- Explain why excluded orders are not part of the sequence.
+- Mention that Planned orders are locked at their positions by the planner's decision.
+- Explain the chronological sorting for the movable orders.
+- Mention any date conflicts or tight timelines.
+- Use full month names.
+- Be concise — 2-4 sentences.
+
+ORDERS IN PREVIEW:
+${previewOrders.map(o => `
+Priority ${o.prio}: ${o.item_description}
+Status: ${o.status}
+Avail Date: ${o._displayAvailDate || o.avail_date || 'N/A'}
+Volume: ${o.volume} MT
+${o.status === 'Planned' ? '(LOCKED — not sortable)' : '(SORTED by date)'}
+`).join('\n')}
+  `;
+}
+```
+
+---
+
+## FIX 3: PLANNED ORDER — REMEMBER DRAGGED POSITION
+
+When a Planned order is dragged to a new position, that NEW position must be remembered and used in subsequent auto-sequences.
+
+```javascript
+// When user drags a Planned order to a new position
+function handlePlannedOrderDrag(order, newPrio) {
+  order.prio = newPrio;
+  order._plannedPrio = newPrio; // Store the planner's chosen position
+}
+
+// In auto-sequence, use _plannedPrio if it exists
+function runAutoSequence(allOrders, n10dData, dailyColumns, today) {
+  // ...
+  
+  allOrders.forEach((order, index) => {
+    if (order.status === 'Planned') {
+      // Use the planner's chosen position, not the original
+      const lockedPrio = order._plannedPrio || (index + 1);
+      plannedOrders.push({ ...order, _originalPrio: lockedPrio });
+    }
+    // ...
+  });
+  
+  // ...
+}
+```
+
+### EXAMPLE
+
+1. Order B is at Prio 2, set to Planned
+2. User drags Order B to Prio 3 → `order._plannedPrio = 3`
+3. User runs auto-sequence → Order B stays at Prio 3 (not Prio 2)
+
+---
+
+## FIX 4: PREVIEW PRIO NUMBERS — MATCH ORDER TABLE
+
+The preview must show the ACTUAL prio numbers from the full order table, not renumbered from 1.
+
+### THE PROBLEM
+
+Order table:
+```
+Prio 1: Order A → In Production (excluded)
+Prio 2: Order B → Planned
+Prio 3: Order C → Plotted
+Prio 4: Order D → Plotted
+```
+
+Preview currently shows (WRONG):
+```
+Prio 1: Order B → Planned    ← WRONG, should be Prio 2
+Prio 2: Order C → Plotted    ← WRONG, should be Prio 3
+Prio 3: Order D → Plotted    ← WRONG, should be Prio 4
+```
+
+### THE FIX
+
+Preview must show the REAL prio numbers:
+
+```
+Prio 2: Order B → Planned    ← CORRECT
+Prio 3: Order C → Plotted    ← CORRECT
+Prio 4: Order D → Plotted    ← CORRECT
+```
+
+### CODE
+
+```javascript
+function runAutoSequence(allOrders, n10dData, dailyColumns, today) {
+  const excludedOrders = [];
+  const plannedOrders = [];
+  const movableOrders = [];
+  
+  allOrders.forEach((order, index) => {
+    const prio = index + 1; // REAL prio from order table
+    
+    if (['Done', 'Cancel PO', 'In Production',
+         'On-going batching', 'On-going pelleting', 'On-going bagging'
+        ].includes(order.status)) {
+      excludedOrders.push({ ...order, _originalPrio: prio });
+    } else if (order.status === 'Planned') {
+      const lockedPrio = order._plannedPrio || prio;
+      plannedOrders.push({ ...order, _originalPrio: lockedPrio });
+    } else {
+      movableOrders.push({ ...order, _originalPrio: prio });
+    }
+  });
+  
+  // Get excluded prio slots
+  const excludedPrios = excludedOrders.map(o => o._originalPrio);
+  
+  // Build planned prio map
+  const plannedPrioMap = {};
+  plannedOrders.forEach(o => {
+    plannedPrioMap[o._originalPrio] = o;
+  });
+  
+  // Available slots = all prios NOT excluded
+  const totalOrders = allOrders.length;
+  const availableSlots = [];
+  for (let i = 1; i <= totalOrders; i++) {
+    if (!excludedPrios.includes(i)) {
+      availableSlots.push(i);
+    }
+  }
+  
+  // Sort movable orders
+  const movableWithDates = assignAvailDates(movableOrders, n10dData, dailyColumns, today);
+  movableWithDates.sort((a, b) => {
+    const dateA = a._sortDate;
+    const dateB = b._sortDate;
+    if (dateA && !dateB) return -1;
+    if (!dateA && dateB) return 1;
+    if (!dateA && !dateB) return 0;
+    const dateDiff = dateA.getTime() - dateB.getTime();
+    if (dateDiff !== 0) return dateDiff;
+    const statusOrder = { 'Critical': 0, 'Urgent': 1, 'Monitor': 2, 'Sufficient': 3 };
+    return (statusOrder[a._n10dStatus] ?? 2) - (statusOrder[b._n10dStatus] ?? 2);
+  });
+  
+  // Build preview with REAL prio numbers
+  const previewResult = [];
+  let movableIndex = 0;
+  
+  availableSlots.forEach(slot => {
+    if (plannedPrioMap[slot]) {
+      previewResult.push({
+        ...plannedPrioMap[slot],
+        prio: slot, // REAL prio number
+        _isLocked: true
+      });
+    } else {
+      if (movableIndex < movableWithDates.length) {
+        previewResult.push({
+          ...movableWithDates[movableIndex],
+          prio: slot, // REAL prio number (skipping excluded slots)
+          _isLocked: false
+        });
+        movableIndex++;
+      }
+    }
+  });
+  
+  return { previewResult, excludedOrders };
+}
+```
+
+### PREVIEW DISPLAY
+
+```jsx
+function AutoSequencePreview({ previewOrders, excludedOrders }) {
+  return (
+    <div>
+      {/* Optional: show excluded count */}
+      <div className="excluded-note">
+        {excludedOrders.length > 0 && (
+          <span style={{ fontSize: '11px', color: '#6b7280' }}>
+            {excludedOrders.length} order(s) excluded 
+            (Done, In Production, On-going, Cancelled)
+          </span>
+        )}
+      </div>
+      
+      <table>
+        <thead>
+          <tr>
+            <th>Prio</th>
+            <th>FPR</th>
+            <th>Item Description</th>
+            {/* ... other columns */}
+          </tr>
+        </thead>
+        <tbody>
+          {previewOrders.map(order => (
+            <tr 
+              key={order.id}
+              className={order._isLocked ? 'preview-row-planned' : ''}
+            >
+              <td>
+                {order.prio}
+                {order._isLocked && <span className="lock-icon">🔒</span>}
+              </td>
+              <td>{order.fpr}</td>
+              <td>
+                {order.item_description}
+                {order._isLocked && (
+                  <div className="planned-label">Planned — locked in place</div>
+                )}
+              </td>
+              {/* ... other columns */}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+```
+
+### VISUAL EXAMPLE
+
+Order table:
+```
+Prio 1: Order A → In Production
+Prio 2: Order B → Planned
+Prio 3: Order C → Plotted
+Prio 4: Order D → Plotted
+```
+
+Preview shows:
+```
+┌──────────────────────────────────────────────────────┐
+│ 1 order excluded (In Production)                     │
+├──────┬────────────────────────┬──────────────────────┤
+│ Prio │ Item Description       │ Avail Date           │
+├──────┼────────────────────────┼──────────────────────┤
+│ 2 🔒 │ Order B                │ Apr 9, 2026          │
+│      │ Planned — locked       │                      │
+├──────┼────────────────────────┼──────────────────────┤
+│ 3    │ Order D                │ Apr 5, 2026 (sorted) │
+├──────┼────────────────────────┼──────────────────────┤
+│ 4    │ Order C                │ Apr 9, 2026 (sorted) │
+└──────┴────────────────────────┴──────────────────────┘
+```
+
+Prio numbers match the order table: 2, 3, 4 — NOT renumbered as 1, 2, 3.
+
+---
+
+## VERIFICATION
+
+1. Warning dialog
+   - ✅ Orange OK button
+   - ✅ Reframed text: "orders at earlier priorities not produced yet"
+   - ✅ Lists problem orders with prio and status
+   - ✅ Same message style for On-going
+
+2. Sequence Analysis
+   - ✅ Mentions excluded orders and why
+   - ✅ Mentions Planned orders and their locked positions
+   - ✅ Explains chronological sorting for movable orders
+
+3. Planned order drag
+   - ✅ Drag to Prio 3 → auto-sequence keeps it at Prio 3
+   - ✅ _plannedPrio updated on drag
+
+4. Preview prio numbers
+   - ✅ Match order table prio numbers
+   - ✅ Excluded orders skip their prio slots
+   - ✅ Planned orders show at their real prio
+   - ✅ Movable orders fill remaining real prio slots
+```

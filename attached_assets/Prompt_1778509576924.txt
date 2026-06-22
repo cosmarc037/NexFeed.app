@@ -1,0 +1,255 @@
+```
+Please fix the AI’s date suggestion logic so that it only suggests a date when the order can actually be produced and completed within that same calendar day, based on production hours, changeovers, and the orders already assigned before it.
+
+---
+
+## IMPORTANT SCOPE
+
+Do **not** rewrite the entire AI logic.
+
+This is not a request to replace:
+- the current AI strategy generation
+- the 3-Dimension Analysis
+- the overall sequencing logic
+- the recommendation system
+
+This is only an enhancement to the AI’s **date suggestion / date assignment** behavior.
+
+The current AI can remain as-is, but its suggested dates must become schedule-feasibility-aware.
+
+---
+
+## OBJECTIVE
+
+Right now, the AI can suggest dates like:
+- `May 11`
+
+without fully checking whether the order can actually be produced and completed on `May 11`, given:
+- orders already ahead of it
+- production hours
+- changeovers
+- remaining available time in the day
+
+This causes invalid date suggestions.
+
+We want the AI to stop assigning dates based only on target/avail logic, and instead suggest dates based on actual feasible completion within the day.
+
+---
+
+## REQUIRED RULE
+
+A suggested date is only valid if the order can **actually finish by the end of that same calendar day**.
+
+### Day-end cutoff
+Use:
+- **11:59 PM of that date**
+
+If the order would complete on the next day, then that suggested date is invalid.
+
+The AI must then suggest the next feasible day instead.
+
+---
+
+## 1. GIVE THE AI FULL CONTEXT ON PRODUCTION HOURS + CHANGEOVERS
+
+The AI must use:
+- production hours
+- changeover hours
+- the order’s position relative to earlier orders on that date
+- cumulative used time for the day
+
+when deciding whether a date is valid.
+
+Do not let the AI suggest dates based only on:
+- Future Dispatch date
+- Avail Date
+- urgency category
+- or broad MTS movement logic
+
+It must also evaluate actual production feasibility.
+
+---
+
+## 2. VALIDATE EVERY SUGGESTED DATE AGAINST DAY CAPACITY
+
+For any date the AI wants to assign to an order, it must check:
+
+### A. What orders are already scheduled before it on that date?
+### B. How many total used hours already exist on that date?
+This must include:
+- production hours
+- changeover hours
+
+### C. How much time would this new order add?
+Again include:
+- its production hours
+- its relevant changeover contribution
+
+### D. Would the order still complete by 11:59 PM of that same date?
+
+If yes:
+- date is valid
+
+If no:
+- date is invalid
+- move the order to the next feasible day
+
+---
+
+## 3. DO NOT SUGGEST A DATE JUST BECAUSE IT IS THE TARGET / AVAIL DATE
+
+An order having:
+- target date = May 11
+or
+- avail date = May 11
+
+does not automatically mean the AI should suggest May 11.
+
+The AI must first verify whether the order can actually fit on May 11 based on the existing load and estimated completion.
+
+If the day is already effectively full, then the AI must suggest another date.
+
+---
+
+## 4. EXAMPLE OF THE CURRENT PROBLEM TO FIX
+
+Example from the app:
+
+### First order
+- Production time = `3.66 hrs`
+- Changeover = `0.66`
+- Starts at `May 11, 08:00 AM`
+- Expected completion is around late morning
+
+### Following order
+- Production time = `14.66 hrs`
+- Changeover = `1.33`
+- AI still suggests `May 11`
+
+This is not sufficient.
+
+Before suggesting `May 11` for the second order, the AI must check:
+- first order’s actual completion
+- cumulative time consumed in May 11
+- whether the second order still finishes before 11:59 PM of May 11
+
+If not, then `May 11` is not a valid suggested date.
+
+The AI must suggest the next feasible day instead.
+
+---
+
+## 5. APPLY THIS TO ALL AI DATE SUGGESTIONS
+
+This feasibility check should apply whenever the AI suggests dates, especially in:
+- MTS advancement logic
+- early-slot filling logic
+- flexible load balancing logic
+- day-packing logic
+- mixed changeover/date strategies
+
+The AI should no longer suggest dates that are impossible under actual daily time usage.
+
+---
+
+## 6. KEEP THE 24-HOUR DAILY LIMIT
+
+Continue using:
+- **24 hours per day**
+
+The AI should treat each date as having a maximum of 24 schedulable hours.
+
+Used hours include:
+- production
+- changeover
+
+If a day is effectively full, the AI should continue to the next feasible day.
+
+---
+
+## 7. USE ESTIMATED COMPLETION, NOT JUST DATE LABELS
+
+The AI should reason in terms of:
+- actual start
+- actual cumulative day usage
+- actual estimated completion
+
+not just:
+- “this order belongs to May 11”
+
+If completion spills into May 12, then:
+- it is not a valid May 11 assignment
+
+This is critical.
+
+---
+
+## 8. IMPROVE ORDERS-AT-RISK LOGIC USING THE SAME FEASIBILITY MODEL
+
+This same schedule-feasibility logic should help improve risk detection too.
+
+If an order is assigned to a date but cannot actually finish by that day’s end because the date is overbooked, then that order should be considered at risk.
+
+So:
+- better date suggestion
+- and better risk detection
+
+should use the same completion-aware logic.
+
+---
+
+## 9. KEEP THE REST OF THE AI LOGIC INTACT
+
+Do not replace:
+- AI strategy generation
+- 3-Dimension Analysis
+- current card logic
+- recommendation framework
+
+Just improve the AI’s date suggestion layer so that the dates it suggests are actually feasible.
+
+---
+
+## 10. ADD DEBUG LOGGING FOR DATE FEASIBILITY CHECK
+
+Temporarily log:
+
+```javascript
+console.debug('[AI Suggested Date Feasibility]', {
+  orderId,
+  item: order.item_description,
+  candidateDate,
+  ordersBeforeOnDate: priorOrders.map(o => ({
+    orderId: o.id,
+    productionHours: o.production_hours,
+    changeoverHours: o.changeover_hours,
+  })),
+  cumulativeHoursBefore,
+  orderProductionHours: order.production_hours,
+  orderChangeoverHours: order.changeover_hours,
+  projectedCompletion,
+  dayEnd: `${candidateDate} 23:59:59`,
+  suggestedDateAccepted: projectedCompletion <= dayEnd,
+  fallbackNextFeasibleDate,
+});
+```
+
+This will help verify:
+- the AI is checking actual completion feasibility
+- invalid same-day suggestions are rejected
+- the next feasible day is used when necessary
+
+---
+
+## VERIFICATION
+
+1. ✅ The AI now uses production hours and changeovers when suggesting dates
+2. ✅ A suggested date is only accepted if the order can finish by 11:59 PM of that same date
+3. ✅ If an order would spill into the next day, that suggested date is rejected
+4. ✅ The AI moves the order to the next feasible day instead of keeping an invalid date
+5. ✅ The AI no longer suggests dates based only on target/avail labels without checking actual day capacity
+6. ✅ The 24-hour daily limit remains enforced
+7. ✅ Estimated completion is now part of the date suggestion decision
+8. ✅ Orders-at-risk logic can now align better with actual schedule feasibility
+9. ✅ The rest of the AI sequencing logic remains unchanged
+```

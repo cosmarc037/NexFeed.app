@@ -1,0 +1,187 @@
+Please update the **Fulfillment (Demo)** generated-order behavior so that approved generated orders can be cancelled from the order table, and rename **Pre-order** to **Re-order** throughout the relevant demo workflow.
+
+---
+
+## 1. RENAME `PRE-ORDER` TO `RE-ORDER`
+
+Please rename the current label/text:
+
+- `Pre-order`
+
+to:
+
+- `Re-order`
+
+### Apply this consistently where relevant, including:
+- badge shown in the order table
+- badge or label in the suggested orders/re-order section
+- helper text or container text if applicable
+- any generated-order wording in the demo flow
+- context-menu option text
+
+### Goal
+Reflect the actual business meaning more accurately:
+these generated orders are replenishment/re-order orders, not just pre-orders.
+
+### Expected result
+The demo fulfillment workflow consistently uses the term:
+- `Re-order`
+
+instead of:
+- `Pre-order`
+
+---
+
+## 2. ADD A RIGHT-CLICK CONTEXT MENU OPTION TO CANCEL AN APPROVED RE-ORDER
+
+When a suggested re-order has already been approved and added into the demo order table, please allow the user to cancel it later if they change their mind.
+
+### Current context
+The app already has a right-click interaction that opens a contextual modal/menu for an order row.
+
+### New behavior
+If the row is an approved generated re-order, add an option such as:
+
+- `Cancel Re-order`
+or
+- `Remove Re-order`
+
+### Expected result
+Users should be able to right-click an approved generated re-order and cancel/remove it from the demo sequence.
+
+---
+
+## 3. APPLY THE CANCEL/REMOVE OPTION ONLY TO APPROVED GENERATED RE-ORDERS
+
+Please do not show this option generically for every order unless intended.
+
+### Scope
+This new menu action should apply specifically to:
+- approved generated re-orders created by the demo fulfillment flow
+
+### Expected result
+The right-click menu should detect when the selected row is a generated re-order and show the cancel/remove option only when relevant.
+
+---
+
+## 4. WHEN A RE-ORDER IS CANCELLED, REMOVE IT FROM THE DEMO SEQUENCE
+
+If the user selects the cancel/remove option for an approved generated re-order, please remove that generated re-order from the active demo order table/sequence.
+
+### Expected result
+The generated re-order should no longer remain in the active demo sequence after cancellation.
+
+---
+
+## 5. REVERSE THE APPROVAL EFFECT IF THE USER CANCELS THE APPROVED RE-ORDER
+
+Because approving the generated re-order is currently treated as the signal that the source order is being fulfilled using inventory, cancelling that approved re-order should also reverse that approval effect.
+
+### Expected behavior
+If the user cancels the approved re-order:
+- undo the approved re-order decision
+- reverse the related inventory-usage assumption if applicable
+- update/recompute the demo fulfillment state accordingly
+- allow the suggestion state to be recalculated again if appropriate
+
+### Goal
+Keep the demo fulfillment logic internally consistent.
+
+### Expected result
+Cancelling an approved re-order should not leave the system in a partially approved/inventory-deducted state.
+
+---
+
+## 6. RECALCULATE ADJUSTED INVENTORY AFTER RE-ORDER CANCELLATION
+
+If cancelling the approved re-order reverses the approval assumption, please also recalculate the product’s:
+
+- `Adjusted Inventory`
+
+### Expected result
+The demo Future Dispatches adjusted inventory should refresh to reflect the cancellation and removal of that re-order approval effect.
+
+---
+
+## 7. REFRESH SUGGESTIONS AFTER A RE-ORDER IS CANCELLED
+
+Please re-evaluate the suggested re-order list after cancellation.
+
+### Expected result
+If cancelling the approved re-order makes that suggestion valid again, the app may re-show it in the suggested re-order section as pending approval, depending on the current inventory/order state.
+
+### Goal
+Keep the suggestion list accurate after users reverse an approval.
+
+---
+
+## 8. PRESERVE THE DEMO-ONLY SCOPE
+
+Please apply this functionality only to the **Fulfillment (Demo)** workspace.
+
+### Important
+This is a demo/sandbox workflow enhancement and should not affect the main application’s live order tables unless explicitly requested later.
+
+### Expected result
+Users can safely test approving and cancelling generated re-orders inside the demo workspace only.
+
+---
+
+## IMPORTANT
+
+Please implement the following for **Fulfillment (Demo)**:
+
+- rename `Pre-order` to `Re-order`
+- for approved generated re-orders already inserted in the table, add a right-click menu option such as:
+  - `Cancel Re-order`
+- when the user cancels the re-order:
+  - remove it from the demo sequence
+  - reverse the approval effect
+  - recalculate adjusted inventory
+  - refresh the suggested re-order state if needed
+
+This should let users undo approved generated re-orders if they change their minds.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log re-order cancellation behavior.
+
+```javascript
+console.debug('[Demo Re-Order Rename Applied]', {
+  oldLabel: 'Pre-order',
+  newLabel: 'Re-order',
+});
+```
+
+```javascript
+console.debug('[Demo Re-Order Context Menu]', {
+  orderId,
+  isGeneratedReorder,
+  cancelReorderOptionVisible: isGeneratedReorder,
+});
+```
+
+```javascript
+console.debug('[Demo Re-Order Cancellation]', {
+  orderId,
+  removedFromSequence: true,
+  approvalReversed: true,
+  adjustedInventoryRecomputed: true,
+  suggestionsRefreshed: true,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ `Pre-order` is renamed to `Re-order` in the demo fulfillment workflow
+2. ✅ Approved generated re-orders show a right-click option to cancel/remove them
+3. ✅ The cancel/remove option appears only for relevant generated re-orders
+4. ✅ Cancelling a generated re-order removes it from the demo sequence
+5. ✅ Cancelling reverses the approval effect
+6. ✅ Adjusted Inventory is recalculated after cancellation
+7. ✅ Suggested re-orders are refreshed after cancellation if needed
+8. ✅ No UI errors or console errors are introduced

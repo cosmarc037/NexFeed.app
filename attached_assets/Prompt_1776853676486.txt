@@ -1,0 +1,149 @@
+```
+Fix: Keep safety stocks with red status at top, only fix the date sorting:
+
+---
+
+## 1. FIX resolveOrderDate — CHECK THE ICON/STATUS COLOR, NOT JUST THE STRING
+
+```javascript
+function resolveOrderDate(order, n10dData, materialCode) {
+  // Source 1: Actual avail date
+  const availDate = order.target_avail_date;
+  if (availDate && isValidISODate(availDate)) {
+    return {
+      date: normalizeToISO(availDate),
+      source: 'avail_date',
+      category: 'dated',
+    };
+  }
+  
+  // Check if availDate is a status string
+  const isStatusString = availDate && !isValidISODate(availDate);
+  
+  // Source 2: N10D lookup
+  if (n10dData && n10dData.length > 0 && materialCode) {
+    const n10dEntry = n10dData.find(n =>
+      String(n.material_code || n.material_code_fg || '').trim() === materialCode
+    );
+    
+    if (n10dEntry) {
+      const inferredDate = n10dEntry.inferred_target_date || n10dEntry.target_date;
+      const n10dStatus = String(n10dEntry.status || n10dEntry.stock_status || '').trim().toLowerCase();
+      
+      if (inferredDate && isValidISODate(inferredDate)) {
+        const isCritical = n10dStatus === 'critical';
+        const isUrgent = n10dStatus === 'urgent';
+        return {
+          date: normalizeToISO(inferredDate),
+          source: 'n10d',
+          category: isCritical ? 'critical' : isUrgent ? 'urgent' : 'n10d_dated',
+        };
+      }
+      
+      // Has N10D entry but no date — use status
+      if (n10dStatus === 'critical') return { date: null, source: 'n10d_status', category: 'critical' };
+      if (n10dStatus === 'urgent') return { date: null, source: 'n10d_status', category: 'urgent' };
+      if (['sufficient', 'safe', 'ok'].includes(n10dStatus)) return { date: null, source: 'n10d_status', category: 'sufficient' };
+    }
+  }
+  
+  // Source 3: Determine from the status string + existing order metadata
+  if (isStatusString) {
+    const lowerAvail = String(availDate).toLowerCase().trim();
+    
+    // Check the ORDER's existing color/category from preSortOrders
+    // These were already categorized earlier in the pipeline
+    const existingColor = order._availDateColor;
+    const existingCategory = order._category;
+    const existingN10dStatus = order._n10dStatus;
+    
+    // Red = Critical, regardless of the text
+    if (existingColor === 'red' || existingN10dStatus === 'Critical') {
+      return { date: null, source: 'status_string', category: 'critical' };
+    }
+    // Orange = Urgent
+    if (existingColor === 'orange' || existingN10dStatus === 'Urgent') {
+      return { date: null, source: 'status_string', category: 'urgent' };
+    }
+    // Green = Sufficient
+    if (existingColor === 'green') {
+      return { date: null, source: 'status_string', category: 'sufficient' };
+    }
+    
+    // Fallback: check the text
+    if (lowerAvail.includes('critical')) return { date: null, source: 'status_string', category: 'critical' };
+    if (lowerAvail.includes('prio') || lowerAvail.includes('replenish')) return { date: null, source: 'status_string', category: 'urgent' };
+    if (lowerAvail.includes('safety') || lowerAvail.includes('sufficient')) {
+      // "safety stocks" can be critical OR sufficient — depends on the N10D color
+      // If we got here, no N10D data found, so check existing category
+      if (existingCategory === 'C') return { date: null, source: 'status_string', category: 'critical' };
+      if (existingCategory === 'D') return { date: null, source: 'status_string', category: 'sufficient' };
+      // Default safety stocks without more info — treat as urgent
+      return { date: null, source: 'status_string', category: 'urgent' };
+    }
+  }
+  
+  // Source 4: Fallback dates
+  const fallbackDate = order._targetDate || order._effectiveDate;
+  if (fallbackDate) {
+    const dateStr = fallbackDate instanceof Date
+      ? fallbackDate.toISOString().split('T')[0]
+      : String(fallbackDate);
+    
+    if (isValidISODate(dateStr)) {
+      return {
+        date: normalizeToISO(dateStr),
+        source: 'fallback',
+        category: 'n10d_dated',
+      };
+    }
+  }
+  
+  // Use existing _category from preSortOrders
+  if (order._category === 'C') return { date: null, source: 'category', category: 'critical' };
+  if (order._category === 'B') return { date: null, source: 'category', category: 'urgent' };
+  if (order._category === 'D') return { date: null, source: 'category', category: 'sufficient' };
+  
+  return { date: null, source: 'none', category: 'no_data' };
+}
+```
+
+---
+
+## EXPECTED RESULT FROM THE SNIP
+
+Correct order:
+  1. safety stocks ⊘ (CRITICAL — red, stays at top) ✅
+  2. 11 May 2026 ● (dated, chronological)
+  3. 12 May 2026 ● (dated, chronological)
+  4. 14 May 2026 ● (dated, chronological)
+  5. 22 May 2026   (dated, chronological)
+
+If multiple orders on May 14 with different margins:
+  1. safety stocks ⊘
+  2. 11 May 2026 ●
+  3. 12 May 2026 ●
+  4. 14 May 2026 ● — 16.4% margin
+  5. 14 May 2026 ● — 16.0% margin
+  6. 22 May 2026
+
+---
+
+## VERIFICATION
+
+### Safety stocks handled correctly
+1. ✅ "safety stocks" with red icon (⊘) → category "critical" → stays at top
+2. ✅ "safety stocks" with green icon (◉) → category "sufficient" → near bottom
+3. ✅ "prio replenish" with orange icon (△) → category "urgent"
+4. ✅ Uses _availDateColor and _n10dStatus from preSortOrders, not just the text
+
+### Date sorting fixed
+5. ✅ May 11 comes before May 12
+6. ✅ May 12 comes before May 14
+7. ✅ May 14 comes before May 22
+8. ✅ All dated orders in chronological ascending order
+
+### Margin tiebreak still works
+9. ✅ Same day: higher margin first
+10. ✅ Different days: chronological order preserved
+```

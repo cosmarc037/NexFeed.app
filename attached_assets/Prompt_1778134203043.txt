@@ -1,0 +1,215 @@
+```
+Improve the Profit Score tooltip in the AI-powered sequence tables so it shows the actual row-specific values used in the calculation, not just the generic formula label.
+
+---
+
+## OBJECTIVE
+
+The current Profit Score tooltip is too generic.
+
+Current tooltip example:
+- `Profit Score: 10.2`
+- `Margin / (production hours + changeover)`
+
+This only shows the formula conceptually, but it does not show the actual values used for that specific order.
+
+We want the tooltip to show the row-specific values:
+- actual margin
+- actual production hours
+- actual changeover
+- actual formula using those values
+
+This will make the Profit Score more transparent and understandable.
+
+---
+
+## REQUIRED BEHAVIOR
+
+For each order row in AI-powered sequences, when hovering the Profit Score, the tooltip should show:
+
+### Preferred format
+```text
+Profit Score: 10.2
+
+Margin: 22.1%
+Prod. Hours: 2.00
+CO: 0.17
+
+Profit Score:
+22.1% / (2.00 + 0.17)
+```
+
+This is only an example — the actual numbers should come from that specific row.
+
+---
+
+## 1. TOOLTIP MUST USE ACTUAL ROW VALUES
+
+For the hovered order, the tooltip should read the actual row-specific values:
+- margin for that product/order
+- production hours displayed for that row
+- changeover displayed for that row
+- profit score displayed for that row
+
+Do not show only the generic formula label anymore.
+
+---
+
+## 2. USE THE SAME VALUES SHOWN IN THE TABLE
+
+The tooltip must use the same values already shown elsewhere in the row:
+- Margin = actual margin shown for that product
+- Prod. Hours = actual row production hours
+- CO = actual row changeover
+- Profit Score = actual displayed score
+
+This must match the visible row data exactly.
+
+Do not use:
+- raw/original hidden values
+- default changeover if the row has a different CO
+- stale margin source if the row already has a resolved value
+
+---
+
+## 3. TOOLTIP CONTENT FORMAT
+
+Use a structure like this:
+
+```text
+Profit Score: {score}
+
+Margin: {margin}%
+Prod. Hours: {productionHours}
+CO: {changeover}
+
+Profit Score:
+{margin}% / ({productionHours} + {changeover})
+```
+
+### Example
+```text
+Profit Score: 10.2
+
+Margin: 22.1%
+Prod. Hours: 2.00
+CO: 0.17
+
+Profit Score:
+22.1% / (2.00 + 0.17)
+```
+
+Formatting notes:
+- margin should show `%`
+- production hours and changeover should be formatted consistently, e.g. `2.00`
+- score should use the displayed row precision, e.g. `10.2`
+
+---
+
+## 4. ENSURE THE FORMULA USES THE ACTUAL VALUES FOR THAT ORDER
+
+The formula shown in the tooltip should be based on:
+
+```javascript
+profitScore = margin / (productionHours + changeover)
+```
+
+Where:
+- `margin` = actual margin for the order
+- `productionHours` = actual row production hours
+- `changeover` = actual row changeover
+
+The tooltip should display those exact values in the formula preview.
+
+---
+
+## 5. OPTIONAL: KEEP THE TOOLTIP CLEAN AND READABLE
+
+Use simple line breaks and spacing.
+
+Recommended structure:
+- first line = Profit Score
+- blank line
+- detail lines
+- blank line
+- formula block
+
+Do not overcrowd it with extra explanation text.
+
+---
+
+## 6. HANDLE MISSING VALUES SAFELY
+
+If any value is missing:
+- show `—`
+- and avoid broken formula rendering
+
+Example:
+```text
+Profit Score: —
+Margin: —
+Prod. Hours: 2.00
+CO: 0.17
+```
+
+But if values are normally always present for AI strategies, then this will mostly be a safeguard only.
+
+---
+
+## 7. UPDATE THE TOOLTIP RENDERER
+
+### Example JSX structure:
+```jsx
+<Tooltip
+  content={
+    <>
+      <div>Profit Score: {formatProfitScore(order._profitScore)}</div>
+      <br />
+      <div>Margin: {formatMargin(order._margin)}</div>
+      <div>Prod. Hours: {formatHours(order._productionHours)}</div>
+      <div>CO: {formatHours(order._displayChangeoverHrs)}</div>
+      <br />
+      <div>Profit Score:</div>
+      <div>
+        {formatMargin(order._margin)} / ({formatHours(order._productionHours)} + {formatHours(order._displayChangeoverHrs)})
+      </div>
+    </>
+  }
+>
+  <span className="profit-score-pill">
+    {formatProfitScore(order._profitScore)}
+  </span>
+</Tooltip>
+```
+
+Use the real field names already present in the app.
+
+---
+
+## 8. ADD DEBUG LOGGING IF NEEDED
+
+Temporarily log:
+
+```javascript
+console.debug('[Profit Score Tooltip]', {
+  orderId: order.id,
+  item: order.item_description,
+  margin: order._margin,
+  productionHours: order._productionHours,
+  changeover: order._displayChangeoverHrs,
+  profitScore: order._profitScore,
+});
+```
+
+This helps confirm the tooltip is using the correct row-specific values.
+
+---
+
+## 9. VERIFICATION
+
+1. ✅ Profit Score tooltip now shows the actual margin for the row
+2. ✅ Profit Score tooltip now shows the actual production hours for the row
+3. ✅ Profit Score tooltip now shows the actual changeover for the row
+4. ✅ Formula preview uses the exact row values
+5. ✅ Tooltip no longer shows only the generic formula label
+6. ✅ Tooltip is clearer and more transparent for users

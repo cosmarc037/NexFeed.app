@@ -1,0 +1,139 @@
+Please fix the auto-sequence behavior for Powermix-generated orders.
+
+There is currently a bug where a generated order is being moved to another line during auto-sequence, including being moved back into Line 5 and even being combined there. This is incorrect and contradicts the Powermix split rules.
+
+---
+
+## CONFIRMED ISSUE
+
+Powermix-generated orders are supposed to stay in the destination line assigned by the Powermix rule.
+
+However, the app is still allowing a generated order to be:
+- moved to another line during auto-sequence
+- including being moved into Line 5
+- and then combined there
+
+This should not happen.
+
+---
+
+## REQUIRED RULE
+
+Powermix-generated orders must be **line-locked**.
+
+### Meaning
+If a generated order is created in:
+- Line 2 → it must stay in Line 2
+- Line 6 → it must stay in Line 6
+
+It must not be moved by auto-sequence to:
+- another destination line
+- Line 5
+- or any other line
+
+---
+
+## IMPORTANT
+
+Generated orders should still be included in sequencing logic **within their assigned line**.
+
+So they can still be:
+- re-ordered within the same line
+- included in in-line sequencing strategy
+- included in changeover and queue analysis for that line
+
+But they must not be included in:
+- cross-line movement
+- cross-line reassignment
+- movement back to Line 5
+- cross-line combine behavior that breaks the original Powermix split logic
+
+---
+
+## ALSO EXCLUDE GENERATED ORDERS FROM CROSS-LINE COMBINE SIDE EFFECTS
+
+If the current auto-sequence / combine logic is causing generated orders to be moved and then combined in another line, this must be blocked.
+
+Generated Powermix orders should not become free-moving combine candidates across lines.
+
+### Required behavior
+- do not move generated orders out of their assigned destination line
+- do not move generated orders into Line 5
+- do not allow auto-sequence to combine them in a way that contradicts the Powermix source/generated relationship
+
+---
+
+## POWERMIX RULE MUST TAKE PRIORITY
+
+The Powermix split assignment is a hard line-assignment rule for generated orders.
+
+Auto-sequence must respect this.
+
+Even if:
+- another line has low queue time
+- another line seems compatible
+- another line has a combine opportunity
+
+the generated order must remain fixed to the line assigned by Powermix Split.
+
+---
+
+## WHAT TO CHECK
+
+Please audit the auto-sequence flow for any logic that still incorrectly includes Powermix-generated orders in:
+1. movable-order candidate pools
+2. cross-line reassignment pools
+3. combine candidate pools across lines
+4. line-optimization logic that does not respect line lock metadata
+
+Likely issue:
+the generated order is still being treated as a normal movable order instead of a line-locked generated order.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log:
+
+```javascript
+console.debug('[AutoSequence Powermix Generated Order Guard]', {
+  orderId,
+  isPowermixGenerated,
+  assignedLine,
+  includedInCrossLineMovePool,
+  includedInCrossLineCombinePool,
+  blockedBecauseLineLocked: true,
+});
+```
+
+```javascript
+console.debug('[AutoSequence Powermix Generated Order Move Attempt]', {
+  orderId,
+  sourceLine,
+  attemptedTargetLine,
+  blocked,
+  reason: 'powermix_generated_line_locked',
+});
+```
+
+```javascript
+console.debug('[AutoSequence Powermix Generated Order Combine Attempt]', {
+  orderId,
+  currentLine,
+  attemptedCombineLine,
+  blocked,
+  reason: 'powermix_generated_not_cross_line_combinable',
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Powermix-generated orders are not moved to another line during auto-sequence
+2. ✅ Powermix-generated orders are not moved back into Line 5
+3. ✅ Powermix-generated orders remain fixed to their assigned destination line
+4. ✅ Powermix-generated orders can still be sequenced within their assigned line
+5. ✅ Powermix-generated orders are excluded from cross-line movement logic
+6. ✅ Powermix-generated orders are excluded from cross-line combine side effects
+7. ✅ Auto-sequence no longer breaks the original Powermix split relationship

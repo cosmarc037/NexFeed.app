@@ -1,0 +1,201 @@
+Please review and fix the sequence insight logic because the current insight text does not appear to align with the actual row-level changeover values shown in the table.
+
+---
+
+## OBJECTIVE
+
+The current row-level sequence insights appear to be using the wrong changeover context or the wrong row’s changeover value.
+
+This is making the explanations inconsistent and confusing.
+
+We need the sequence insights to use the correct changeover interpretation and to align with the visible row data.
+
+---
+
+## ISSUES OBSERVED
+
+### Issue 1 — First row references a “previous product”
+The first visible order in the sequence says something like:
+- `With a 0.83-hour changeover from the previous product...`
+
+But since this is the first visible order in the shown sequence, there should not be a visible previous product unless an explicit upstream predecessor is actually being included.
+
+This makes the insight misleading.
+
+### Issue 2 — Second row mentions 0.83 changeover even though the row shows CO: 0.17
+For the second order:
+- the row displays `CO: 0.17`
+- but the insight text refers to `0.83 hours of changeover time`
+
+This suggests the insight generator is using the wrong changeover value, likely from the neighboring row.
+
+---
+
+## REQUIRED FIX
+
+Please make the sequence insight use the correct changeover source and wording, consistent with the actual row-level CO displayed in the table.
+
+The insight must not:
+- reference a previous product for the first visible order unless such predecessor context is explicitly part of the sequence
+- use the wrong row’s CO value
+- mix previous-transition and next-transition logic inconsistently
+
+---
+
+## 1. CONFIRM THE ACTUAL SEMANTIC MEANING OF ROW-LEVEL CO
+
+First, clarify what the displayed `CO` value on each row represents.
+
+It should be one of these:
+- changeover from the **previous order into the current order**
+or
+- changeover from the **current order into the next order**
+
+The insight generator must use the same interpretation consistently.
+
+Do not let the table display use one meaning while the insight text assumes the other.
+
+---
+
+## 2. ALIGN INSIGHT TEXT WITH THE SAME CO DEFINITION USED IN THE TABLE
+
+Once the CO meaning is confirmed, the insight generator must follow it exactly.
+
+### If row CO means `current -> next`
+Then:
+- the insight should not describe that CO as “from the previous product”
+- it should describe it as the outgoing transition, or avoid saying “previous” entirely
+
+### If row CO means `previous -> current`
+Then:
+- row 2 may refer to the transition from row 1
+- but row 1 should not refer to a previous visible product unless one truly exists
+
+Either way, the current wording is inconsistent and should be corrected.
+
+---
+
+## 3. THE FIRST VISIBLE ORDER MUST NOT REFERENCE A PREVIOUS PRODUCT UNLESS ONE IS EXPLICITLY PROVIDED
+
+For the first visible row in the table:
+- do not say `from the previous product`
+- do not imply a preceding visible row exists
+- unless there is a genuine predecessor outside the table that the UI explicitly intends to include
+
+If there is no explicit predecessor context, then the first row insight should instead focus on:
+- why it starts the run
+- date / urgency / strategy reason
+- or its relationship to the next row if relevant
+
+---
+
+## 4. USE THE ACTUAL DISPLAYED CO VALUE FOR THE CORRECT ROW
+
+If the row displays:
+- `CO: 0.17`
+
+then the insight must not say:
+- `0.83 hours of changeover`
+
+unless there is a clearly explained reason and the system intentionally refers to another transition.
+
+In general:
+- the changeover value mentioned in the insight should match the relevant row context exactly
+- preferably the same CO the user sees on that row
+
+Do not accidentally pull:
+- previous row CO
+- next row CO
+- stale cached CO
+- default/base CO
+
+---
+
+## 5. MAKE INSIGHT WORDING EXPLICIT ABOUT WHICH TRANSITION IT REFERS TO
+
+To avoid ambiguity, use wording that clearly matches the intended relationship.
+
+Examples:
+
+### If referring to previous -> current
+- `Following the previous brown 3.00mm order, this order adds only 0.17 hours of changeover.`
+
+### If referring to current -> next
+- `This order transitions to the next yellow 3.00mm order with only 0.17 hours of changeover.`
+
+Avoid vague wording like:
+- `with 0.83 hours of changeover`
+unless it is absolutely clear which transition is being described.
+
+---
+
+## 6. PREFER NO CHANGEOVER-SPECIFIC WORDING WHEN THE RELATIONSHIP IS AMBIGUOUS
+
+If the system cannot confidently state whether the row-level insight should describe:
+- previous transition
+or
+- next transition
+
+then it is safer to avoid overly specific changeover wording for that row.
+
+Instead, use:
+- strategy rationale
+- date logic
+- clustering explanation
+- generic compatibility wording
+
+This is better than citing the wrong CO value.
+
+---
+
+## 7. REVIEW THIS EXACT SCREENSHOT CASE
+
+Please inspect this specific sequence and verify:
+
+### Row 1
+- why does the insight say `0.83-hour changeover from the previous product`?
+- if this is the first visible order, should it say that at all?
+
+### Row 2
+- why does the insight mention `0.83 hours of changeover time` when the row itself shows `CO: 0.17`?
+- is it mistakenly using row 1’s changeover?
+- if so, fix the mapping
+
+### Row 3
+- ensure the same mismatch is not happening there too
+
+---
+
+## 8. ADD DEBUG LOGGING FOR INSIGHT-TO-CO MAPPING
+
+Temporarily log:
+
+```javascript
+console.debug('[Sequence Insight CO Mapping]', {
+  orderId: order.id,
+  rowPosition: index + 1,
+  displayedCO: order._displayChangeoverHrs,
+  previousOrderId: previousOrder?.id ?? null,
+  nextOrderId: nextOrder?.id ?? null,
+  insightText: order.sequenceInsight,
+  coInterpretationMode: 'previous_to_current_or_current_to_next',
+  coValueUsedInInsight: extractedOrAssignedInsightCO,
+});
+```
+
+This should help verify:
+- which CO value the insight is using
+- whether it matches the row’s displayed CO
+- whether first-row previous-reference is invalid
+
+---
+
+## 9. VERIFICATION
+
+1. ✅ The actual semantic meaning of row-level CO is confirmed and documented
+2. ✅ Sequence insight uses the same CO interpretation as the table
+3. ✅ The first visible order no longer incorrectly refers to a previous product unless explicitly valid
+4. ✅ Each row’s insight uses the correct changeover value for the intended transition
+5. ✅ Row 2 no longer mentions 0.83 if its relevant displayed CO is 0.17
+6. ✅ Insight wording clearly indicates whether it refers to previous→current or current→next transition
+7. ✅ Sequence insight and row-level CO display are now fully aligned and no longer contradictory

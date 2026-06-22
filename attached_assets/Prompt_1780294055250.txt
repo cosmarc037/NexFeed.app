@@ -1,0 +1,161 @@
+Please update the **Fulfillment (Demo) re-order placement logic** so that the **source/original order is always produced before its generated re-order**.
+
+---
+
+## 1. DO NOT ALLOW A GENERATED RE-ORDER TO BE PLACED BEFORE ITS SOURCE ORDER
+
+There is currently a sequencing issue where an approved generated re-order can be inserted ahead of the original/source order that triggered it.
+
+### Current problem
+A generated re-order may be approved and placed at a higher priority (earlier in the sequence), while its linked source order still appears later in the lineup.
+
+### Why this is wrong
+The generated re-order exists only because the source/original order is being fulfilled using inventory.
+That means the source order logically comes first, and the generated re-order is the replenishment that comes after.
+
+### Required rule
+A generated re-order must never be placed before its linked source order.
+
+### Expected result
+The source/original order must always remain earlier in the sequence than its generated re-order.
+
+---
+
+## 2. TREAT SOURCE ORDER → GENERATED RE-ORDER AS A HARD SEQUENCING DEPENDENCY
+
+Please enforce a hard dependency between:
+- the source/original order
+- the generated re-order
+
+### Rule
+The generated re-order may only be inserted:
+- after the source order
+- not before it
+
+### Goal
+Preserve the business meaning of the feature:
+- original order is fulfilled first
+- replenishment/re-order happens later
+
+### Expected result
+The generated re-order is always sequenced after its source order.
+
+---
+
+## 3. MAKE THE AI / RECOMMENDED INSERTION POSITION RESPECT THIS DEPENDENCY
+
+Even if the AI or re-order suggestion engine thinks an earlier slot looks favorable, it must still respect the source-order dependency.
+
+### Required behavior
+The AI/recommendation logic may suggest the best placement **only among valid positions that occur after the source order**.
+
+### Important
+The AI must not recommend or apply a position that would place the re-order ahead of the source order.
+
+### Expected result
+AI placement remains helpful, but is constrained by the business rule that the source order must come first.
+
+---
+
+## 4. USE THE SOURCE ORDER POSITION AS THE EARLIEST ALLOWED INSERTION BOUNDARY
+
+When calculating where the generated re-order can be placed, please treat the source order’s position as the earliest valid boundary.
+
+### Expected behavior
+The re-order may be placed:
+- after the source order
+- potentially later depending on lineup/changeover logic
+but never before the source order
+
+### Expected result
+The re-order’s valid placement range begins only after the linked source order.
+
+---
+
+## 5. APPLY THIS BOTH IN THE SUGGESTION LOGIC AND FINAL APPROVAL INSERTION
+
+Please make sure this rule is enforced consistently in:
+- the suggestion-stage placement logic
+- the AI/recommended avail date / position logic
+- the final inserted placement after the user approves the re-order
+
+### Expected result
+There should be no case where:
+- the suggestion implies one thing
+- but approval still inserts the re-order before the source order
+
+---
+
+## 6. PRESERVE THE REPLENISHMENT MEANING OF THE RE-ORDER FEATURE
+
+The generated re-order is intended to replenish inventory after the source order is fulfilled using inventory.
+
+### Important
+That replenishment meaning is broken if the re-order is produced before the source order.
+
+### Expected result
+The sequence should preserve the intended order of events:
+1. source/original order comes first
+2. generated re-order comes later
+
+---
+
+## IMPORTANT
+
+Please enforce this rule in **Fulfillment (Demo)**:
+
+> A generated re-order must never be placed before its linked source/original order.
+
+This must apply to:
+- AI/recommended placement
+- suggested avail date / insertion logic
+- final insertion after approval
+
+The source order should always be produced first, and the re-order should only appear later in the sequence.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log the source-order dependency check for generated re-orders.
+
+```javascript
+console.debug('[Demo Re-Order Source Dependency Check]', {
+  reorderId,
+  sourceOrderId,
+  sourceOrderPriority,
+  proposedReorderPriority,
+  validPlacement: proposedReorderPriority > sourceOrderPriority,
+});
+```
+
+```javascript
+console.debug('[Demo Re-Order Placement Constraint]', {
+  reorderId,
+  sourceOrderId,
+  earliestAllowedPriorityAfterSource,
+  aiSuggestedPriority,
+  adjustedPriorityAfterConstraint,
+});
+```
+
+```javascript
+console.debug('[Demo Re-Order Final Insert]', {
+  reorderId,
+  sourceOrderId,
+  sourceOrderPriority,
+  finalReorderPriority,
+  insertedAfterSource: finalReorderPriority > sourceOrderPriority,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Generated re-orders are never placed before their source orders
+2. ✅ Source/original orders always remain earlier in the sequence
+3. ✅ AI placement recommendations respect the source-order dependency
+4. ✅ Final approval insertion also respects the dependency
+5. ✅ The re-order feature retains its intended replenishment meaning
+6. ✅ No UI errors or console errors are introduced

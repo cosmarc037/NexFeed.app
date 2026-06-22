@@ -1,0 +1,174 @@
+```
+Implement the following changes to the NexFeed application:
+
+---
+
+## 1. "IN PRODUCTION" WARNING DIALOG — VISUAL AND CONTENT UPDATES
+
+Update the Order Not Ready warning dialog to use the app's orange color palette and fix the content.
+
+### VISUAL CHANGES
+
+**Header:**
+- "⚠ Order Not Ready" — 16px, font-weight 600, dark text (#1a1a1a)
+- ⚠ icon in orange (#fd5108) — NOT amber
+
+**Order details — Item description:**
+
+| Label | Styling |
+|---|---|
+| Line: | 12px, grey (#6b7280) label, dark text (#1a1a1a) value |
+| FPR: | 12px, grey label, bold dark text (#1a1a1a) value |
+| Item: | 12px, grey label, **BLACK text (#1a1a1a), bold** — NOT grey |
+| Volume: | 12px, grey label, dark text (#1a1a1a) value |
+
+**Missing/incomplete section:**
+
+| Property | Value |
+|---|---|
+| Background | Light orange tint (#fff7ed) — NOT amber |
+| Border | 1px solid #fed7aa |
+| Border-radius | 6px |
+| Padding | 10px 12px |
+| "Missing or incomplete:" heading | 12px, font-weight 600, dark orange (#c2410c) |
+| Bullet items | 11px, dark orange (#c2410c) |
+| Icons next to bullets | Orange (#fd5108) |
+
+**Buttons:**
+
+| Button | Styling |
+|---|---|
+| Go Back | Grey outlined. Border: 1px solid #d1d5db. Text: grey (#374151), 12px. Closes dialog, reverts status. |
+| Proceed Anyway | Orange filled (#fd5108). Text: white, 12px, font-weight 600. Hover: darker orange (#e8490b). Proceeds with status change. |
+
+- Renamed from "Cancel Production" to **"Go Back"**
+
+**Bottom text:**
+```
+Do you want to proceed with In production anyway?
+```
+- "In production" in bold
+
+### CONTENT CHANGES — MISSING FIELDS LIST
+
+**Remove from the missing/incomplete checklist:**
+- ❌ Start Date — do NOT include (users can produce without it)
+- ❌ Start Time — do NOT include (users can produce without it)
+
+**Add to the missing/incomplete checklist:**
+- ✅ Completion Date — if missing, show "Completion Date — not set"
+
+**Full list of fields the readiness check evaluates (only show if missing):**
+- Production Order FG1 — not set
+- Production Order SFG1 — not set
+- Production Order SFGPMX — not set
+- HA Info — not confirmed
+- HA Prep — not confirmed
+- SCADA — not set
+- PV — not set
+- Completion Date — not set
+- Material Code (FG) — not set
+- Batch Size — not set
+- Any other field that the readiness check evaluates
+
+**Do NOT show in the list:**
+- ❌ Start Date
+- ❌ Start Time
+
+### UPDATED DIALOG LAYOUT
+
+```
+╔══════════════════════════════════════════════════════╗
+║  ⚠ Order Not Ready                                   ║
+║                                                       ║
+║  This order has not passed its readiness check.       ║
+║  Some details may be missing or incomplete.           ║
+║                                                       ║
+║  Line:        1                                       ║
+║  FPR:         260309                                  ║
+║  Item:        Gallimax Pigeon Pellet, 50kg            ║
+║  Volume:      24 MT                                   ║
+║                                                       ║
+║  ┌────────────────────────────────────────────────┐   ║
+║  │ Missing or incomplete:                         │   ║
+║  │                                                │   ║
+║  │ • Production Order FG1 — not set               │   ║
+║  │ • Production Order SFG1 — not set              │   ║
+║  │ • HA Info — not confirmed                      │   ║
+║  │ • SCADA — not set                              │   ║
+║  │ • PV — not set                                 │   ║
+║  │ • HA Prep — not confirmed                      │   ║
+║  │ • Completion Date — not set                    │   ║
+║  └────────────────────────────────────────────────┘   ║
+║                                                       ║
+║  Do you want to proceed with In production anyway?    ║
+║                                                       ║
+║              [Go Back]    [Proceed Anyway]             ║
+╚══════════════════════════════════════════════════════╝
+```
+
+- Light orange container (#fff7ed) for the missing items
+- Orange text (#c2410c) for the missing items
+- Black bold text for Item description
+- "Go Back" instead of "Cancel Production"
+- Orange "Proceed Anyway" button (#fd5108)
+
+---
+
+## 2. COMBINED ORDERS — "COMBINED WITH OTHER PO" CLICKABLE, NOT DISABLED
+
+The "Combined with other PO" option in the combined order's status dropdown should be clickable and selectable — NOT disabled or greyed out.
+
+**Current (wrong):**
+```
+Uncombine
+Combined with other PO    ← greyed out, disabled, with "Assigned automatically" note
+Hold                      ✓
+In production
+On-going batching
+On-going pelleting
+On-going bagging
+Done
+```
+
+**Updated (correct):**
+```
+Uncombine
+Combined with other PO    ← CLICKABLE, normal text, selectable
+Hold                      ✓
+In production
+On-going batching
+On-going pelleting
+On-going bagging
+Done
+```
+
+**Changes:**
+- ❌ Remove the disabled/greyed out styling on "Combined with other PO"
+- ❌ Remove the "Assigned automatically by Smart Combine" helper text
+- ✅ Make it a normal, clickable option like all other statuses
+- ✅ When clicked, it sets the status to "Combined with other PO" (same as any other status change)
+- ✅ The checkmark (✓) appears next to whichever status is currently active
+
+**Why it should be clickable:**
+- If the user changes a combined order's status to "Hold" or "In production", they should be able to change it BACK to "Combined with other PO" — since the order is still combined.
+- It acts as the "default/home" status for combined orders, similar to how "Plotted" is the default for standalone orders.
+
+**The dropdown for combined orders (final):**
+
+| # | Option | Clickable | Behavior |
+|---|---|---|---|
+| 1 | Uncombine | ✅ Yes | Triggers uncombine dialog |
+| 2 | Combined with other PO | ✅ Yes | Normal status change (default for combined) |
+| 3 | Hold | ✅ Yes | Status change for entire group |
+| 4 | In production | ✅ Yes | Status change for entire group (with readiness check) |
+| 5 | On-going batching | ✅ Yes | Status change for entire group (with readiness check) |
+| 6 | On-going pelleting | ✅ Yes | Status change for entire group (with readiness check) |
+| 7 | On-going bagging | ✅ Yes | Status change for entire group (with readiness check) |
+| 8 | Done | ✅ Yes | Entire group marked Done |
+
+**Still hidden from combined dropdown:**
+- ❌ Plotted (replaced by Uncombine)
+- ❌ Cut
+- ❌ Cancel PO
+```

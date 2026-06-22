@@ -1,0 +1,164 @@
+```
+Please confirm and preserve the intended AI behavior for strategy generation:
+
+The AI should still be allowed to come up with its own sequencing strategies. The 3-Dimension Analysis should act as a guide or reasoning framework, not as a strict hardcoded rule set.
+
+However, while the AI remains flexible and creative in its strategy generation, its output must still be grounded in:
+- the real lineup of orders
+- the actual order details
+- the actual changeover rules
+- actual date / availability / Future Dispatches / MTO constraints
+- the final measured result shown in the table and strategy card
+
+---
+
+## OBJECTIVE
+
+We want to preserve AI flexibility.
+
+The AI should still be able to:
+- invent or choose its own strategy direction
+- decide whether changeover reduction, MTS advancement, or profitability is the better emphasis for that specific case
+- use the 3-Dimension Analysis as a guide, not as a fixed rule engine
+
+But we also want to ensure that:
+- the AI is grounded in real data
+- the strategy can actually be applied
+- the table reflects what the AI said
+- the card metrics support the claimed outcome
+
+---
+
+## REQUIRED BEHAVIOR
+
+### Keep:
+- AI-generated strategy titles
+- AI-generated strategy descriptions
+- AI-generated 3-Dimension Analysis
+- AI freedom to choose tradeoffs case by case
+
+### Do not turn it into:
+- a fully deterministic rule-only engine
+- a rigid template system that always picks the same style of strategy
+
+### But enforce:
+- real lineup awareness
+- changeover-rule awareness
+- date-safety awareness
+- measurable outcome alignment
+- truthful description vs table alignment
+
+---
+
+## 1. 3-DIMENSION ANALYSIS SHOULD BE A GUIDE, NOT A HARD RULE
+
+The three dimensions (such as changeover reduction, MTS advancement, profitability) should remain a reasoning framework.
+
+They should help the AI think about:
+- what matters most in this case
+- what tradeoffs are available
+- what strategy direction is best
+
+But they should not force the AI into a single rigid formula or mandatory pattern.
+
+The AI should still be free to conclude:
+- changeover is primary in one case
+- profitability is primary in another
+- MTS advancement matters more in another
+- or that a hybrid strategy is best
+
+---
+
+## 2. AI SHOULD STILL BE FREE TO CREATE ITS OWN STRATEGY CONCEPT
+
+The AI should be able to generate:
+- its own title
+- its own description
+- its own tradeoff framing
+- its own clustering concept
+- its own explanation of why this sequence is preferable
+
+So long as that strategy is grounded in the actual data and actually reflected in the final result.
+
+---
+
+## 3. GROUND THE AI IN REAL INPUTS
+
+Even though the AI remains flexible, it must receive and use:
+- the current lineup of orders
+- order attributes (category, color, diameter, form, volume, production time, etc.)
+- actual changeover rules
+- movable/flexible constraints
+- date / availability constraints
+- Future Dispatches and MTO protections
+- the evaluated result of candidate sequences
+
+This prevents the AI from producing abstract strategies disconnected from the real sequence.
+
+---
+
+## 4. FINAL STRATEGY MUST STILL BE VALIDATED AGAINST REAL OUTCOMES
+
+The AI can freely propose a strategy, but before showing it as final:
+- evaluate the resulting sequence
+- compute actual changeover
+- verify date safety
+- verify strategy-table alignment
+- compute faithfulness against the applied result
+
+This means:
+- the AI can create
+- but the app must validate
+
+---
+
+## 5. DO NOT OVER-CONSTRAIN THE AI TO ONLY ONE TYPE OF STRATEGY
+
+The app should not force the AI to always:
+- chase red-last logic
+- chase pure changeover
+- chase pure profitability
+- chase pure MTS advancement
+
+Instead, it should let the AI choose what matters most in the case, while validating the result afterward.
+
+---
+
+## 6. KEEP THE AI CREATIVE, BUT MAKE THE OUTPUT TRUTHFUL
+
+The AI may still use nuanced framing like:
+- `late red end placement`
+- `compatibility compression`
+- `early flexible pull-forward`
+- `diameter-color buffering`
+
+That is good.
+
+But whatever it says must be:
+- supported by the actual sequence
+- visible in the final table
+- consistent with card metrics
+- consistent with faithfulness
+
+---
+
+## 7. ENFORCE POST-GENERATION ALIGNMENT, NOT PRE-GENERATION RIGIDITY
+
+The main control should happen after the AI proposes a strategy:
+- check if the strategy is feasible
+- check if it is correctly applied
+- check if the metrics support it
+- check if the wording is accurate
+
+Do not restrict the AI too early into a rigid deterministic mold.
+
+---
+
+## 8. VERIFICATION
+
+1. ✅ The AI still retains freedom to generate its own strategy ideas
+2. ✅ The 3-Dimension Analysis remains a guide/framework, not a strict rule engine
+3. ✅ The AI is still able to choose different tradeoff priorities case by case
+4. ✅ The AI output is grounded in real order data, changeover rules, and sequencing constraints
+5. ✅ Final strategy cards and tables are validated against actual measured outcomes
+6. ✅ The system preserves AI flexibility without allowing misleading or unsupported strategy claims

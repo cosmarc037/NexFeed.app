@@ -1,0 +1,377 @@
+```
+Further improve the per-line AI strategy generation so the strategies feel truly AI-derived from the actual line analysis, not like renamed versions of the old fixed Balanced and Profit options.
+
+---
+
+## PROBLEM TO FIX
+
+The current AI-generated strategies are still falling into generic template categories like:
+- material clustering / material continuity / changeover reduction
+- profit score optimization / profitability-driven scheduling
+
+These are too close to the original fixed AI strategies and do not feel like the AI is inventing strategy ideas based on the specific line lineup.
+
+Examples from current output:
+- "Material Clustering for Efficiency"
+- "Material Continuity Optimization"
+- "Profit Score Optimization"
+- "Profitability-Driven Scheduling"
+
+These feel like generic labels for the old Balanced and Profit approaches, not new line-specific AI-generated strategies.
+
+We need the AI to:
+- analyze the actual lineup first
+- identify the real tradeoffs in that specific line
+- generate strategy options from that analysis
+- avoid defaulting to old template themes unless truly justified by the line context
+
+---
+
+## OBJECTIVE
+
+For each line:
+- keep Standard Sequence as baseline
+- generate 2 AI strategies that are derived from the actual lineup analysis
+- make them feel line-specific and context-specific
+- avoid generic or reusable template strategies
+- ensure the strategy names and descriptions reflect what the AI observed in that line
+- ensure selected AI strategies actually change the preview table when applied
+
+---
+
+## 1. CHANGE THE PROMPT STRUCTURE: ANALYZE FIRST, STRATEGIZE SECOND
+
+The AI should no longer jump directly to naming 2 strategies.
+
+Instead, make the prompt require 2 stages:
+
+### Stage A: Analyze the line
+The AI should first identify:
+- key constraints on the line
+- what the Standard Sequence already does well
+- what opportunities exist beyond Standard
+- what types of tradeoffs are actually present in this lineup
+
+### Stage B: Generate 2 strategies from that analysis
+The strategies must be based on those observations.
+
+### Required prompt instruction:
+```text
+Before proposing strategies, analyze the current line and identify:
+1. what constraints dominate this lineup
+2. what flexibility exists beyond the standard date-driven sequence
+3. what meaningful alternative sequencing goals are possible on this specific line
+
+Then generate exactly 2 AI strategies that are derived from that analysis.
+```
+
+---
+
+## 2. TELL THE AI TO AVOID GENERIC TEMPLATE THEMES
+
+Add a strict instruction:
+
+```text
+Do not default to generic template strategies such as:
+- material clustering
+- profit optimization
+- balanced flow
+- critical first
+unless the actual line analysis strongly justifies them.
+
+If you use one of those ideas, you must explain why it specifically fits this line’s unique order mix, dates, materials, and flexibility profile.
+```
+
+This ensures the AI cannot lazily reuse old concepts without evidence.
+
+---
+
+## 3. REQUIRE LINE-SPECIFIC STRATEGY JUSTIFICATION
+
+For each strategy, require these fields:
+
+- `line_specific_observation`
+- `why_this_strategy_fits_this_line`
+- `difference_from_standard`
+- `distinct_focus`
+
+### Example response shape:
+```json
+{
+  "strategy_name": "Early Slack Recovery",
+  "short_description": "Moves flexible mid-window orders earlier to create more room for late-week risk.",
+  "line_specific_observation": "This line has several flexible orders with similar safe windows but uneven spacing, while later dated orders are tightly packed.",
+  "why_this_strategy_fits_this_line": "By pulling selected flexible orders forward, the line gains more slack later without affecting protected deadlines.",
+  "difference_from_standard": "Standard keeps the original date flow; this strategy intentionally reshapes the middle of the queue to create more downstream room.",
+  "distinct_focus": "Slack creation and queue smoothing"
+}
+```
+
+This is much better than generic “material clustering” naming.
+
+---
+
+## 4. INCLUDE THE STANDARD SEQUENCE AS A BASELINE THE AI MUST DIFFER FROM
+
+Provide the full Standard Sequence for the line and instruct the AI:
+
+```text
+The strategies you generate must be meaningfully different from the Standard Sequence.
+If a strategy does not materially alter the sequencing approach or resulting order arrangement, do not output it.
+```
+
+This should apply both to:
+- order sequence
+- date suggestions
+- sequencing objective
+
+---
+
+## 5. REQUIRE THE AI TO IDENTIFY THE MAIN TENSIONS IN THE LINE
+
+Tell the AI to explicitly reason about line tensions such as:
+- date rigidity vs flexibility
+- changeover burden vs profitability opportunity
+- slack preservation vs batching opportunity
+- sequence continuity vs deadline protection
+- large runs vs small urgent runs
+- limited margin variation vs high material variation
+- high volume concentration vs dispersed deadlines
+
+### Required prompt instruction:
+```text
+Identify the main sequencing tensions present in this line.
+The strategies should emerge from those tensions, not from generic preset themes.
+```
+
+This forces actual analysis.
+
+---
+
+## 6. GIVE THE AI ALL RELEVANT CONTEXT
+
+Ensure the AI prompt includes, per line:
+
+### Orders
+- order_id
+- item description
+- material code
+- category
+- color
+- diameter
+- form
+- volume
+- production hours
+- current standard position
+- avail date
+- original avail date if changed
+- N10D status
+- protected/flexible classification
+- critical / urgent / monitor / sufficient
+
+### Changeover context
+- live changeover rules from Changeover Rules tab
+- previous/current compatibility indicators if available
+
+### Profitability context
+- margin %
+- profit score
+- any useful master-data commercial values already used by the app
+
+### Standard baseline
+- standard order list for that line
+- metrics for standard if available
+
+### Flexibility context
+- how many orders are flexible
+- how many are protected
+- which orders can safely move
+- safe windows if already computed
+
+This helps the AI derive strategies from real scheduling possibilities.
+
+---
+
+## 7. ADD A DISTINCTIVENESS GATE BEFORE ACCEPTING AI STRATEGIES
+
+If the AI returns:
+- generic material clustering
+- generic profit optimization
+- or something too close to Standard
+
+then reject/regenerate the strategy.
+
+### Add a validator that checks:
+1. Strategy title genericity
+2. Similarity to old template labels
+3. Similarity to Standard sequence
+4. Similarity between AI Option 1 and AI Option 2
+
+### Generic title blacklist examples:
+- Material Clustering for Efficiency
+- Material Continuity Optimization
+- Profit Score Optimization
+- Profitability-Driven Scheduling
+- Critical First
+- Critical First, Then Flexible
+- Balanced Flow
+- Efficiency Focus
+
+These can still be accepted only if accompanied by strong line-specific justification and meaningful sequence difference, but otherwise should trigger regeneration.
+
+---
+
+## 8. REQUIRE THE AI TO USE LINE-SPECIFIC STRATEGY NAMES
+
+Strategy names should sound like they were derived from the line analysis.
+
+Good examples:
+- "Early Slack Recovery"
+- "Mid-Queue Compression"
+- "Late-Window Protection"
+- "Large-Run Containment"
+- "Flexible Gap Filling"
+- "Protected Front, Smoothed Middle"
+- "Batch Window Consolidation"
+
+These feel more like AI-derived strategy names than:
+- "Profit Score Optimization"
+- "Material Clustering for Efficiency"
+
+Do not hardcode these names; just use them as examples in the prompt.
+
+### Add prompt instruction:
+```text
+Generate strategy names that reflect the actual sequencing idea discovered in the line analysis.
+Avoid generic reusable names unless they are strongly justified by the line.
+```
+
+---
+
+## 9. REQUIRE THE STRATEGIES TO BE DIFFERENT IN FOCUS
+
+The 2 AI strategies should differ in their primary objective.
+
+Examples of acceptable different focuses:
+- one creates downstream slack
+- one compresses compatible flexible orders
+- one protects large runs from fragmentation
+- one advances stronger-value flexible orders
+- one smooths the middle queue
+- one preserves late-window capacity
+
+Do not let both strategies just be:
+- one changeover strategy
+- one profit strategy
+
+unless the line analysis genuinely supports that as the two strongest alternatives.
+
+---
+
+## 10. ENSURE THE STRATEGY OUTPUT DRIVES THE PREVIEW TABLE
+
+If AI Strategy 1 says:
+- move flexible order A ahead of order B
+- assign order C to a different safe date
+- compress similar orders into a narrower window
+
+then the preview table for that strategy must reflect:
+- the actual reordered rows
+- the validated suggested dates
+- recalculated changeovers
+- recalculated production / completion values
+- updated insights based on that exact strategy
+
+Do not let the strategy card be AI-generated while the table remains mostly unchanged.
+
+---
+
+## 11. ADD A STRATEGY DISTINCTION SCORE
+
+Continue computing a distinction score, but improve it.
+
+The distinction score should consider:
+- sequence difference vs Standard
+- date difference vs Standard
+- objective uniqueness
+- difference between AI Option 1 and AI Option 2
+- whether the title/description looks generic
+
+If distinction is too low:
+- regenerate the strategy
+- or mark it as too weak to show
+
+Do not recommend a low-distinction strategy if it is basically a renamed old template.
+
+---
+
+## 12. UPDATE THE PROMPT OUTPUT FORMAT
+
+Require the AI to return this structure per strategy:
+
+```json
+{
+  "strategy_name": "...",
+  "subtitle": "AI-generated strategy",
+  "short_description": "...",
+  "line_specific_observation": "...",
+  "why_this_strategy_fits_this_line": "...",
+  "difference_from_standard": "...",
+  "distinct_focus": "...",
+  "reasoning_summary": "...",
+  "orders": [
+    { "order_id": "...", "suggested_date": "..." }
+  ]
+}
+```
+
+This gives the app more data for:
+- card content
+- strategy validation
+- reasoning modal
+- insight generation
+
+---
+
+## 13. OPTIONAL: SHOW MORE CONTEXTUAL AI CARD TEXT
+
+If possible, update the AI card subtitle/description to use:
+- `short_description`
+- and optionally surface `difference_from_standard`
+
+For example:
+- title: “Early Slack Recovery”
+- subtitle: “AI-generated strategy”
+- description: “Pulls flexible mid-window orders earlier to create more room later in the queue.”
+
+This will feel much more AI-specific than:
+- “Prioritize orders with higher profit scores”
+
+---
+
+## 14. VERIFICATION
+
+### AI strategy quality
+1. ✅ AI strategies are no longer defaulting to old Balanced/Profit themes
+2. ✅ AI strategy names feel line-specific and analysis-driven
+3. ✅ Strategies are based on actual line observations
+4. ✅ Each strategy contains a clear difference_from_standard
+5. ✅ Each strategy explains why it fits that specific line
+
+### Distinction
+6. ✅ AI Option 1 and AI Option 2 are meaningfully different
+7. ✅ AI strategies are materially different from Standard
+8. ✅ Generic or templated strategies are rejected/regenerated
+9. ✅ Low-distinction generic strategies are no longer recommended
+
+### Context completeness
+10. ✅ AI has access to changeover rules
+11. ✅ AI has access to master data profitability context
+12. ✅ AI has access to N10D/future dispatch context
+13. ✅ AI has access to current orders and the standard baseline
+
+### Preview correctness
+14. ✅ The preview table reflects the AI strategy output
+15. ✅ Reordered rows and suggested dates actually change per selected strategy
+16. ✅ Metrics are recalculated from the applied AI strategy
+17. ✅ Sequence insight matches the selected AI-generated strategy

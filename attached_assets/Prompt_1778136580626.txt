@@ -1,0 +1,292 @@
+```
+Revisit and fix the AI strategy execution so the After table truly reflects the selected AI strategy, especially when the strategy explicitly says it will cluster poultry orders together.
+
+---
+
+## OBJECTIVE
+
+There are still cases where the selected AI strategy description does not match the actual order sequence shown in the After table.
+
+Example:
+Selected AI strategy:
+- **Poultry Run Consolidation**
+- description says:
+  - `Clusters poultry orders tightly to minimize category and color changeovers despite flexible order constraints.`
+
+But in the After table:
+- a **Swine** order is placed in between **Poultry** orders
+- so the sequence does not actually reflect the strategy
+- meaning the strategy says one thing, but the output shows another
+
+This must be fixed.
+
+---
+
+## PROBLEM TO FIX
+
+The AI strategy text says poultry orders will be clustered tightly, but the After table sequence still has:
+- Poultry
+- Swine
+- Poultry
+
+This breaks the intended grouping.
+
+So the issue is one of the following:
+1. the AI strategy suggestion is not being translated into the actual row ordering correctly
+2. the execution layer is partially applying the strategy but allowing conflicting orders to stay in between
+3. the strategy card text is overstating what the resulting sequence actually achieves
+4. order constraints are not being respected consistently during the clustering step
+5. the faithfulness score is already hinting at this mismatch, but the sequence should still be improved further
+
+---
+
+## REQUIRED BEHAVIOR
+
+If the selected AI strategy says:
+- cluster poultry orders tightly
+- minimize category/color changeovers
+
+then the After table should reflect that as much as the constraints allow.
+
+In practical terms:
+- poultry orders should be grouped together in contiguous blocks whenever possible
+- non-poultry orders should not sit between poultry orders unless a real hard constraint prevents grouping
+
+If a hard constraint prevents full clustering, the strategy output should either:
+- respect the constraint and explain it clearly
+- or avoid overstating the strategy promise
+
+---
+
+## 1. TREAT THE AI STRATEGY AS AN EXECUTION PLAN, NOT JUST A DESCRIPTION
+
+The selected AI strategy card must not remain just a narrative suggestion.
+
+The execution layer must actually apply the strategy intent to the order sequence.
+
+For a strategy like:
+- `Poultry Run Consolidation`
+
+the sequence builder should explicitly attempt to:
+- identify all poultry orders eligible for grouping
+- move them into the same cluster/block
+- avoid inserting swine or other categories in the middle unless blocked by hard constraints
+
+The After table should be the execution result of that plan.
+
+---
+
+## 2. ADD A STRATEGY-TO-SEQUENCE ENFORCEMENT STEP
+
+When an AI strategy is selected, convert its core intent into concrete sequencing rules before finalizing the After order list.
+
+For this strategy:
+- detect the target group = `Poultry`
+- attempt to create a contiguous poultry block
+- preserve hard constraints only where necessary
+
+### Example conceptual enforcement:
+```javascript
+function applyPoultryRunConsolidation(orders, constraints) {
+  const poultryOrders = [];
+  const nonPoultryOrders = [];
+
+  for (const order of orders) {
+    if (isPoultry(order)) poultryOrders.push(order);
+    else nonPoultryOrders.push(order);
+  }
+
+  // then rebuild sequence according to allowed movement rules
+}
+```
+
+This is just conceptual — use the app’s existing sequencing engine, but the key is:
+- strategy execution must actually enforce the grouping intent
+
+---
+
+## 3. DO NOT ALLOW A NON-TARGET CATEGORY TO SPLIT THE CLUSTER UNLESS A HARD CONSTRAINT EXISTS
+
+If poultry orders are supposed to be clustered:
+- a Swine order should not remain in the middle of Poultry orders unless there is a real blocking reason, such as:
+  - strict avail date protection
+  - non-movable MTO protection
+  - locked/manual order
+  - line eligibility restriction
+  - required sequence preservation due to operational rules
+
+If none of those hard constraints apply, then the Swine order should be moved outside the Poultry cluster.
+
+---
+
+## 4. DISTINGUISH HARD CONSTRAINTS VS SOFT PREFERENCES
+
+When applying AI strategies, classify ordering conditions into:
+
+### Hard constraints
+These cannot be broken:
+- locked/manual placements
+- strict avail-date boundary if protected
+- non-movable MTO constraints
+- line eligibility / valid production rules
+- status constraints (done, on-going, cancelled, etc.)
+
+### Soft preferences
+These may be optimized:
+- category grouping
+- color grouping
+- changeover reduction
+- profit ordering inside allowed group
+- run consolidation
+
+The AI strategy should optimize soft preferences without violating hard constraints.
+
+If clustering is possible within the hard constraints, it must be done.
+
+---
+
+## 5. IF FULL CLUSTERING IS NOT POSSIBLE, EXPLAIN WHY
+
+If the execution engine genuinely cannot fully group poultry orders because of a hard constraint, then:
+- the strategy description and/or AI reasoning should say so
+- do not leave the card sounding like full clustering happened when it did not
+
+### Example:
+Instead of:
+- `Clusters poultry orders tightly to minimize category and color changeovers`
+
+Use something like:
+- `Attempts to cluster poultry orders where possible while preserving protected date and sequence constraints.`
+
+Or keep the existing short title, but in the reasoning explicitly say:
+- one swine order remained between poultry orders due to [constraint]
+
+This improves honesty and alignment.
+
+---
+
+## 6. IMPROVE STRATEGY EXECUTION FAITHFULNESS
+
+The current Faithfulness score is already showing low alignment (e.g. 55.0%).
+
+We should improve execution so the After table better reflects the strategy.
+
+For this specific strategy type:
+- increase priority of keeping same-category orders contiguous
+- reduce breaks in the cluster
+- verify final order list against strategy intent before rendering
+
+If the final sequence still violates the intended cluster unnecessarily, re-run or adjust the sequence builder before finalizing.
+
+---
+
+## 7. ADD A POST-EXECUTION VALIDATION STEP
+
+After building the After sequence for a selected AI strategy, validate whether the result matches the strategy intent.
+
+For a category clustering strategy:
+- count how many disjoint poultry segments exist
+- count interruptions by other categories
+- compare against expected clustered result
+
+### Example:
+```javascript
+function countCategorySegments(orders, categoryName) {
+  let segments = 0;
+  let inSegment = false;
+
+  for (const order of orders) {
+    const isTarget = order.category === categoryName;
+
+    if (isTarget && !inSegment) {
+      segments += 1;
+      inSegment = true;
+    } else if (!isTarget) {
+      inSegment = false;
+    }
+  }
+
+  return segments;
+}
+```
+
+For a proper clustered poultry run:
+- poultry segment count should ideally be 1
+- not split into 2+ segments by swine in the middle
+
+If validation fails without a hard constraint reason, adjust the sequence.
+
+---
+
+## 8. MAKE THE AFTER TABLE THE SOURCE OF TRUTH FOR STRATEGY QUALITY
+
+The strategy card text must not be considered sufficient on its own.
+
+The actual measure of whether the strategy succeeded is:
+- the final After table order arrangement
+
+So the execution logic should prioritize making the After table visually and operationally reflect the selected strategy.
+
+---
+
+## 9. UPDATE AI REASONING / EXPANDED INSIGHT TO MATCH THE REAL EXECUTION
+
+If the final sequence still contains an interruption (e.g. swine between poultry orders), then the reasoning should explain why.
+
+For example:
+- `One swine order remained between poultry runs because it was protected by avail date and could not be safely moved.`
+
+Do not leave the reasoning text claiming simple consolidation if the actual result is more constrained.
+
+---
+
+## 10. ADD DEBUG LOGGING FOR STRATEGY EXECUTION
+
+Temporarily log:
+
+```javascript
+console.debug('[AI Strategy Execution Check]', {
+  lineId,
+  strategyId,
+  strategyName,
+  targetCategory: 'Poultry',
+  finalSequence: orders.map(o => ({
+    id: o.id,
+    item: o.item_description,
+    category: o.category,
+    availDate: o.avail_date,
+    locked: o.locked,
+    mto: o.isMTO,
+  })),
+  poultrySegments: countCategorySegments(orders, 'Poultry'),
+});
+```
+
+If available, also log why interruptions were kept:
+```javascript
+console.debug('[Cluster Break Reason]', {
+  blockingOrderId,
+  blockingCategory,
+  reason: 'avail_date_protection' // or mto/locked/etc
+});
+```
+
+This will help identify whether the interruption is justified or just poor execution.
+
+---
+
+## 11. VERIFICATION
+
+### Execution quality
+1. ✅ If a strategy says it clusters poultry orders, the After table groups poultry orders together whenever possible
+2. ✅ Non-poultry orders no longer split the poultry cluster unless a real hard constraint exists
+3. ✅ The selected AI strategy is actually reflected in the final sequence, not just in the card text
+
+### Transparency
+4. ✅ If clustering cannot be fully achieved, the reasoning explains why
+5. ✅ The strategy description no longer overpromises if constraints limit execution
+
+### Faithfulness
+6. ✅ Strategy execution better aligns with the selected strategy intent
+7. ✅ Faithfulness improves because the After table now better reflects what the AI suggested
+```

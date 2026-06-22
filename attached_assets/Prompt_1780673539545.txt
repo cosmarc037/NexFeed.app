@@ -1,0 +1,251 @@
+Please change the prompt flow so the AI is not allowed to write the strategy title, summary, or 3D analysis first.
+
+### Current concern
+The AI may currently be deciding on a strategic narrative too early, then forcing the rest of the card to fit it.
+
+### Goal
+Require the AI to first determine:
+- the proposed order sequence
+- proposed dates
+- actual advancement moves
+- actual clustering or regrouping decisions
+
+### Expected result
+The explanation should describe the final chosen sequence, not lead it.
+
+---
+
+## 2. REQUIRE THE AI TO EXPLICITLY CALCULATE BASELINE VS PROPOSED IMPACT BEFORE LABELING THE 3D ANALYSIS
+
+Please make the AI explicitly compute and compare:
+- baseline changeover time
+- proposed changeover time
+- time saved
+- baseline order risk
+- proposed order risk
+- actual MTS advancement
+- utilization change
+- actual profit-related ordering effects
+
+### Current concern
+The AI may still be assigning PRIMARY labels from perceived opportunity instead of from actual calculated sequence impact.
+
+### Goal
+Make the AI derive the 3D labels only after computing the effects of its own proposed sequence.
+
+### Expected result
+The 3D analysis should reflect the AI’s own final computed outcome, not its initial intent.
+
+---
+
+## 3. GIVE THE AI FULL FACT CONTEXT SO IT CAN REASON PROPERLY
+
+Please make sure the AI receives all relevant sequencing facts, including where available:
+- current line schedule
+- baseline sequence
+- order attributes
+- product family
+- pellet diameter
+- color
+- changeover rules and changeover time logic
+- estimated completion dates
+- production hours
+- future dispatch target dates
+- MTO dates
+- okay-to-advance flags
+- monitor / flexible / MTS status
+- capacity by date
+- risk thresholds
+- margin / profitability signals
+- allowable sequencing windows
+- chronological constraints
+
+### Goal
+Let the AI reason from the same operational reality that the card is supposed to represent.
+
+### Expected result
+The AI should have enough context to compute a realistic sequence and explain it accurately.
+
+---
+
+## 4. REQUIRE THE AI TO SHOW ITS INTERNAL FACT BASIS BEFORE WRITING USER-FACING TEXT
+
+Please require the AI to internally determine, for each strategy:
+- which specific orders moved
+- which specific dates changed
+- which specific transitions were removed or created
+- which specific constraints prevented better optimization
+- whether the realized outcome actually supports the claimed strategy emphasis
+
+### Current concern
+The AI may currently be speaking in high-level generalizations without anchoring those claims in actual order-level changes.
+
+### Goal
+Make the AI ground its summary in actual sequence evidence.
+
+### Expected result
+If the AI claims changeover reduction is primary, it should be because the final sequence actually grouped orders and materially reduced changeover in its own calculation.
+
+---
+
+## 5. ADD A MANDATORY AI SELF-CONSISTENCY CHECK BEFORE FINAL OUTPUT
+
+Please add an explicit final step where the AI must review its own output for contradictions.
+
+### The AI must check:
+- Does the title match the final sequence outcome?
+- Does the summary match the measured metrics?
+- Does the 3D analysis match the actual sequence moves?
+- Do any numerical claims conflict with the displayed metrics?
+- Is any dimension labeled PRIMARY without sufficient actual support?
+- Does any sentence say “reduced”, “eliminated”, “saved”, or “lowered” when the calculated result is zero or unchanged?
+
+### Goal
+Make the AI catch and fix its own contradictions before returning the strategy card.
+
+### Expected result
+The final output should be internally aligned without needing deterministic cleanup.
+
+---
+
+## 6. REQUIRE THE AI TO DOWNGRADE UNREALIZED OPPORTUNITIES
+
+Please make the AI distinguish between:
+- identified opportunity
+- attempted strategy
+- realized benefit
+
+### Current concern
+The AI may identify a good theoretical opportunity but then present it as if it were fully achieved even when its own final sequence did not realize it.
+
+### Goal
+If a benefit was not realized, the AI must explicitly downgrade the claim.
+
+### Expected result
+If the AI computes:
+- no net changeover savings
+- no meaningful advancement
+- no actual utilization improvement
+then the narrative must not present that area as a successful primary result.
+
+---
+
+## 7. DO NOT LET THE AI WRITE NUMERICAL CLAIMS UNLESS THEY MATCH ITS OWN FINAL METRIC BLOCK EXACTLY
+
+Please force the AI to treat its own final metric block as authoritative for the same response.
+
+### Current concern
+The AI may generate one number in the card header and another number in the 3D explanation.
+
+### Goal
+Within a single response, all numeric claims must exactly match the AI’s own final computed figures.
+
+### Expected result
+If the AI says:
+- Changeover time = 2.68 hr
+- Time-saved = 0.00 hr
+
+then it must not also say:
+- total changeover drops to 1.18 hr
+unless it updates the metric block accordingly.
+
+---
+
+## 8. REQUIRE THE AI TO REVISE THE TITLE AND 3D LABELS IF THE FINAL IMPACT IS WEAK OR MIXED
+
+Please stop the AI from locking in strong strategy labels too early.
+
+### Goal
+If the final sequence produces:
+- mixed results
+- weak improvement
+- zero realized improvement
+- or conflicting tradeoffs
+
+then the AI should revise:
+- title
+- strategy summary
+- PRIMARY / SECONDARY labels
+- explanatory tone
+
+to reflect the actual strength of the outcome.
+
+### Expected result
+The strategy card should read honestly as:
+- strong
+- mixed
+- constrained
+- limited-impact
+depending on what the AI itself actually computed.
+
+---
+
+## IMPORTANT
+
+We want this to remain **AI-driven**, including the sequencing logic itself.
+
+However, the AI must generate the strategy in this order:
+
+1. understand all relevant constraints and sequencing facts
+2. construct the proposed sequence
+3. compute the actual impact of that sequence
+4. assign 3D priorities from that computed impact
+5. run a contradiction audit
+6. only then produce the final card text
+
+The AI should not:
+- choose a strategy theme first and force the output around it
+- narrate hypothetical savings that are not reflected in its own final metrics
+- label a dimension PRIMARY based only on opportunity rather than realized sequence outcome
+
+The title, summary, metrics, and THREE-DIMENSION ANALYSIS must all describe the same final AI-generated sequence.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log whether the AI output is internally self-consistent.
+
+```javascript
+console.debug('[AI Self-Verified Strategy Generation]', {
+  line,
+  strategyTitle,
+  aiConstructedSequenceFirst: true,
+  aiComputedMetricsBefore3DLabels: true,
+  aiRanFinalContradictionAudit: true,
+});
+```
+
+```javascript
+console.debug('[AI Internal Alignment Check]', {
+  line,
+  strategyTitle,
+  titleMatchesFinalOutcome: true,
+  summaryMatchesMetrics: true,
+  threeDMatchesSequence: true,
+  numericClaimsMatchMetricBlock: true,
+});
+```
+
+```javascript
+console.debug('[AI Unrealized Benefit Downgrade Check]', {
+  line,
+  strategyTitle,
+  identifiedOpportunity,
+  realizedOutcome,
+  strongClaimDowngradedWhenBenefitNotRealized: true,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ The AI constructs the final sequence before writing the card narrative
+2. ✅ The AI computes baseline vs proposed impact before assigning 3D labels
+3. ✅ The AI receives sufficient operational context to reason accurately
+4. ✅ The AI grounds its explanation in actual order-level and transition-level changes
+5. ✅ The AI performs a self-consistency audit before final output
+6. ✅ Unrealized opportunities are downgraded instead of overstated
+7. ✅ Numerical claims match the AI’s own final metric block exactly
+8. ✅ No deterministic or rule-based refinement layer is introduced

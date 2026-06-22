@@ -1,0 +1,162 @@
+Please update the **Suggested Pre-orders** table layout in the **Fulfillment (Demo)** workspace so that the columns are **distributed properly**, and ensure that top-aligned content still remains **visually aligned consistently across the row**.
+
+---
+
+## 1. DISTRIBUTE THE COLUMNS PROPERLY ACROSS THE CONTAINER
+
+The current Suggested Pre-orders table appears unevenly distributed, causing some columns to feel cramped while others do not use space efficiently.
+
+Please adjust the table layout so the columns are distributed more properly across the available width of the container.
+
+### Goal
+Make the table easier to read and more visually balanced.
+
+### Expected result
+Columns should be spaced and sized more appropriately so the table feels cleaner and less crowded.
+
+---
+
+## 2. IMPROVE COLUMN WIDTH BALANCING
+
+Please review the width allocation of each visible column and balance them based on the type of content they hold.
+
+### Examples
+Columns with longer content may need more room, such as:
+- `Planned Order FG | SFG`
+- `Material Code (SFG)`
+- `Material Code (FG)`
+- `Item Description`
+- `AI-Suggested Avail Date`
+
+Columns with shorter content may need less room, such as:
+- `FPR`
+- `Batch Size`
+- `Inventory`
+- `Actions`
+
+### Expected result
+Long-value columns should no longer feel compressed, and short-value columns should not consume unnecessary space.
+
+---
+
+## 3. KEEP HEADER AND ROW ALIGNMENT CONSISTENT
+
+Please make sure the header columns line up properly with the row values beneath them.
+
+### Goal
+Avoid visual misalignment between:
+- header titles
+- row content
+- action buttons
+- numeric/value fields
+
+### Expected result
+The table should look properly structured, with each column clearly aligned from header to data row.
+
+---
+
+## 4. KEEP THE TABLE TOP-ALIGNED, BUT ENSURE THE TEXTS ARE STILL ALIGNED CONSISTENTLY
+
+We still want the row contents to be **top-aligned**, but please make sure the actual text/value positioning remains visually aligned across the row.
+
+### Current issue
+Some values are top-aligned, but they do not line up properly with each other because they appear to have different:
+- margins
+- paddings
+- vertical offsets
+- internal spacing
+
+### Goal
+Top alignment should not create inconsistent text baselines or uneven spacing between neighboring columns.
+
+### Expected result
+Even when the cells are top-aligned:
+- values across the same row should still appear aligned cleanly
+- text blocks should start at a consistent vertical position
+- the row should not look uneven because one value sits slightly higher/lower than another
+
+---
+
+## 5. STANDARDIZE CELL PADDING / MARGINS FOR VALUE CONTENT
+
+Please normalize the spacing rules used inside the table cells so similar values align consistently.
+
+### Important
+Review and standardize:
+- top padding
+- bottom padding
+- left/right padding
+- margin spacing between primary values and secondary helper text
+
+### Expected result
+The table should no longer show subtle misalignment caused by inconsistent internal spacing from one column to another.
+
+---
+
+## 6. MAINTAIN READABILITY WITHOUT UNNECESSARY WRAPPING
+
+As part of the column distribution improvement, please preserve the previously requested behavior where possible:
+- header titles remain one-line
+- values like volume remain one-line
+- table stays compact and readable
+
+### Expected result
+The improved distribution should make the table cleaner without causing unnecessary wrapping or awkward spacing.
+
+---
+
+## 7. KEEP THE ACTIONS COLUMN ACCESSIBLE AND VISUALLY STABLE
+
+Please ensure the `Approve` / `Dismiss` actions column remains properly positioned and does not squeeze the important data columns too tightly.
+
+### Expected result
+The actions remain easy to access, but the content columns also have enough room to display their values clearly.
+
+---
+
+## IMPORTANT
+
+Please update the **Suggested Pre-orders** table so that:
+
+- columns are distributed properly across the container width
+- the layout feels balanced
+- row contents remain top-aligned
+- but the text/value blocks are still visually aligned consistently across the row
+- inconsistent margins/paddings causing uneven alignment are corrected
+
+---
+
+## DEBUG LOGGING
+
+```javascript
+console.debug('[Demo Suggested Pre-Orders Column Layout]', {
+  columnDistributionAdjusted: true,
+  balancedWidths: true,
+  headerAlignmentFixed: true,
+  topAligned: true,
+  textAlignmentNormalized: true,
+});
+```
+
+```javascript
+console.debug('[Demo Suggested Pre-Orders Cell Spacing]', {
+  standardizedCellPadding: true,
+  standardizedMargins: true,
+  unevenVerticalOffsetsRemoved: true,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Columns are distributed more evenly across the container
+2. ✅ Longer text columns have enough space
+3. ✅ Shorter value columns do not consume unnecessary width
+4. ✅ Header titles align properly with row values
+5. ✅ Row contents remain top-aligned
+6. ✅ Text/value blocks across the same row are still visually aligned consistently
+7. ✅ Inconsistent margins/paddings causing uneven text positioning are corrected
+8. ✅ The table looks cleaner and easier to read
+9. ✅ Action buttons remain accessible
+10. ✅ No UI errors or layout regressions are introduced

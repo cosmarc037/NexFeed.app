@@ -1,0 +1,176 @@
+Please update the **Auto-Sequence / date-window logic** so that **Sufficient orders are no longer allowed to be produced up to +14 days later**, and instead the scheduling behavior aligns with the **10-day Future Dispatches planning window**.
+
+---
+
+## 1. REMOVE THE `+14 DAYS` LATE FLEXIBILITY FOR SUFFICIENT ORDERS
+
+Right now, Sufficient orders can still be scheduled later, up to `+14 days`.
+
+Please remove that behavior.
+
+### Required change
+Do not allow Sufficient orders to be pushed beyond their target/avail-date logic using the current `+14 day` flexibility.
+
+### Goal
+Make the schedule align with the actual Future Dispatches planning horizon instead of extending beyond it.
+
+### Expected result
+Sufficient orders should no longer be scheduled using the old +14-day late-production window.
+
+---
+
+## 2. ALIGN SUFFICIENT-ORDER SCHEDULING WITH THE 10-DAY FUTURE DISPATCHES WINDOW
+
+The client’s planning basis is the **Future Dispatches** data, which is:
+- updated daily
+- based on the next 10 days of demand
+- and used to determine whether a material is:
+  - Critical
+  - Urgent
+  - Monitor
+  - Sufficient
+
+Please make the scheduling logic align to that same 10-day planning window.
+
+### Goal
+Keep the sequencing and date behavior consistent with the same rolling demand horizon used to compute order status.
+
+### Expected result
+Scheduling decisions for Sufficient orders should no longer rely on a horizon that is longer than the Future Dispatches planning window.
+
+---
+
+## 3. KEEP FUTURE DISPATCHES AS THE BASIS FOR ORDER STATUS
+
+Please preserve the current behavior where order/product status is derived from **Future Dispatches**, including:
+- DFL
+- Inventory
+- daily forecast columns
+
+and statuses such as:
+- Critical
+- Urgent
+- Monitor
+- Sufficient
+
+### Goal
+The app should continue using this daily-updated status logic as the operational basis for prioritization.
+
+### Expected result
+Order urgency continues to update correctly as Future Dispatches data changes.
+
+---
+
+## 4. ALLOW THE AI TO ADVANCE ORDERS EARLIER IF THAT MAKES SENSE, BUT NOT PUSH SUFFICIENT ORDERS LATER BEYOND THE TARGET WINDOW
+
+This change is specifically about removing the late-production flexibility.
+
+### Required behavior
+The AI may still:
+- advance Sufficient orders earlier if that makes operational sense
+
+But it should **not**:
+- delay / produce Sufficient orders later using the previous +14-day allowance
+
+### Goal
+Keep early flexibility when useful, but remove the excessive late drift.
+
+### Expected result
+The AI can still optimize early production, but not by extending Sufficient orders beyond the intended planning horizon.
+
+---
+
+## 5. KEEP THE DAILY STATUS UPDATES RESPONSIVE
+
+You already have behavior where an order that was previously Sufficient can become Critical/Urgent/Monitor when the Future Dispatches file changes.
+
+Please preserve that responsiveness.
+
+### Goal
+The app should continue adapting as the daily inventory and forecast situation changes.
+
+### Expected result
+When the uploaded Future Dispatches data changes, the AI should continue re-evaluating order timing accordingly.
+
+---
+
+## 6. MAKE THE DATE LOGIC MATCH THE CLIENT’S REAL OPERATING MODEL
+
+The client uses Future Dispatches as the basis to understand:
+- how many MT should be produced per day
+- which materials are Critical vs Sufficient
+- and what needs attention over the current 10-day horizon
+
+Please make the sequencing/date-window logic reflect that same operational model.
+
+### Goal
+Avoid mismatch between:
+- status logic based on 10 days
+and
+- scheduling flexibility based on +14 days
+
+### Expected result
+The app’s scheduling behavior becomes more consistent with how the client actually plans production.
+
+---
+
+## IMPORTANT
+
+Please remove the `+14 days` late-production flexibility for **Sufficient orders**.
+
+Instead:
+- align the scheduling behavior to the same **10-day Future Dispatches window** used to compute status
+- continue using Future Dispatches as the basis for Critical / Urgent / Monitor / Sufficient
+- allow the AI to advance orders earlier if helpful
+- but do not allow Sufficient orders to be pushed later beyond the intended target-window logic
+
+This is needed so the sequencing behavior stays aligned with the client’s real daily planning basis.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log Sufficient-order window handling after this change.
+
+```javascript
+console.debug('[Sufficient Order Window Handling]', {
+  orderId,
+  status,
+  rawAvailDate,
+  suggestedDate,
+  oldPlus14WindowRemoved: true,
+  alignedToFutureDispatch10DayWindow: true,
+});
+```
+
+```javascript
+console.debug('[Future Dispatch Status Basis]', {
+  materialCode,
+  dfl,
+  inventory,
+  dailyValues,
+  computedStatus,
+});
+```
+
+```javascript
+console.debug('[AI Early Advancement Without Late Drift]', {
+  orderId,
+  status,
+  suggestedDate,
+  advancedEarlier: suggestedDate && rawAvailDate && new Date(suggestedDate) < new Date(rawAvailDate),
+  pushedLaterBeyondTargetWindow: false,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Sufficient orders no longer use the old +14-day late-production window
+2. ✅ Scheduling aligns with the 10-day Future Dispatches planning horizon
+3. ✅ Future Dispatches remains the basis for Critical / Urgent / Monitor / Sufficient
+4. ✅ AI may still advance orders earlier when useful
+5. ✅ Sufficient orders are no longer pushed later beyond the intended target window
+6. ✅ Daily status updates from Future Dispatches still work
+7. ✅ No UI errors or console errors are introduced

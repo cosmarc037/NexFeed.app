@@ -1,0 +1,571 @@
+```
+Add a phased loading screen when auto-sequence (all) is processing:
+
+---
+
+## 1. PROCESSING PHASES STATE
+
+```javascript
+const PHASES = [
+  { key: 'scanning', label: 'Scanning orders across all lines', icon: '🔍' },
+  { key: 'combining', label: 'Finding and combining matching orders', icon: '🔗' },
+  { key: 'calculating', label: 'Calculating queue times per line', icon: '⏱️' },
+  { key: 'placing', label: 'Placing orders on optimal lines', icon: '📍' },
+  { key: 'n10d', label: 'Applying N10D target dates', icon: '📅' },
+  { key: 'sequencing', label: 'Sequencing orders per line', icon: '📊' },
+  { key: 'changeovers', label: 'Calculating changeovers', icon: '⚙️' },
+  { key: 'insights', label: 'Generating AI insights', icon: '✨' },
+  { key: 'done', label: 'Complete', icon: '✅' },
+];
+```
+
+---
+
+## 2. PROCESSING OVERLAY COMPONENT
+
+```jsx
+function AutoSequenceProcessingOverlay({ currentPhase, processedCount, totalCount, combinedCount, movedCount }) {
+  const currentPhaseIndex = PHASES.findIndex(p => p.key === currentPhase);
+  
+  return (
+    <div className="as-processing-overlay">
+      <div className="as-processing-card">
+        {/* Header */}
+        <div className="as-processing-header">
+          <h2 className="as-processing-title">✨ Plant-Level Auto-Sequence</h2>
+          <p className="as-processing-subtitle">Analyzing and optimizing orders across all lines</p>
+        </div>
+        
+        {/* Progress bar */}
+        <div className="as-processing-progress-bar">
+          <div 
+            className="as-processing-progress-fill"
+            style={{ width: `${((currentPhaseIndex + 1) / PHASES.length) * 100}%` }}
+          ></div>
+        </div>
+        
+        {/* Phases list */}
+        <div className="as-processing-phases">
+          {PHASES.map((phase, index) => {
+            const isComplete = index < currentPhaseIndex;
+            const isCurrent = index === currentPhaseIndex;
+            const isPending = index > currentPhaseIndex;
+            
+            return (
+              <div 
+                key={phase.key} 
+                className={`as-processing-phase ${isComplete ? 'complete' : ''} ${isCurrent ? 'current' : ''} ${isPending ? 'pending' : ''}`}
+              >
+                <span className="as-processing-phase-icon">
+                  {isComplete ? '✅' : isCurrent ? phase.icon : '○'}
+                </span>
+                <span className="as-processing-phase-label">
+                  {phase.label}
+                </span>
+                {isCurrent && (
+                  <span className="as-processing-phase-spinner"></span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+        
+        {/* Live stats */}
+        <div className="as-processing-stats">
+          {processedCount > 0 && (
+            <div className="as-processing-stat">
+              <span className="as-processing-stat-value">{processedCount}</span>
+              <span className="as-processing-stat-label">of {totalCount} orders processed</span>
+            </div>
+          )}
+          {combinedCount > 0 && (
+            <div className="as-processing-stat">
+              <span className="as-processing-stat-value">{combinedCount}</span>
+              <span className="as-processing-stat-label">combined groups</span>
+            </div>
+          )}
+          {movedCount > 0 && (
+            <div className="as-processing-stat">
+              <span className="as-processing-stat-value">{movedCount}</span>
+              <span className="as-processing-stat-label">orders moved</span>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+## 3. UPDATE THE MAIN HANDLER — REPORT PHASES
+
+```javascript
+async function handlePlantLevelAutoSequence() {
+  setProcessingPhase('scanning');
+  setProcessingStats({ processed: 0, total: 0, combined: 0, moved: 0 });
+  setShowProcessingOverlay(true);
+  
+  // Small delay to let UI render
+  await new Promise(r => setTimeout(r, 100));
+  
+  try {
+    const allActiveOrders = enrichedOrders.filter(
+      o => o.status !== 'Done' && o.status !== 'Cancel PO' &&
+           o.status !== 'In Production' && o.status !== 'On-going'
+    );
+    
+    setProcessingStats(prev => ({ ...prev, total: allActiveOrders.length }));
+    
+    // Phase 1: Scanning
+    setProcessingPhase('scanning');
+    await new Promise(r => setTimeout(r, 300));
+    
+    // Save original snapshot
+    const snapshot = {};
+    const allLines = ALL_LINES_ORDERED.map(l => normalizeLine(l.line));
+    allLines.forEach(line => {
+      snapshot[line] = allActiveOrders
+        .filter(o => normalizeLine(o.feedmill_line) === line)
+        .sort((a, b) => (a.priority_seq || 0) - (b.priority_seq || 0))
+        .map(o => ({ ...JSON.parse(JSON.stringify(o)) }));
+    });
+    
+    // Phase 2: Combining
+    setProcessingPhase('combining');
+    await new Promise(r => setTimeout(r, 200));
+    
+    // Phase 3: Calculating queue times
+    // Phase 4: Placing
+    // These happen inside plantLevelAutoSequence — use callbacks to report progress
+    
+    const onProgress = (stats) => {
+      setProcessingStats(prev => ({ ...prev, ...stats }));
+    };
+    
+    const onPhaseChange = (phase) => {
+      setProcessingPhase(phase);
+    };
+    
+    const { lineOrdersMap, combinedOrders, placementLog } = await runAutoSequenceWithProgress(
+      allActiveOrders, masterData, n10dData, allLines, changeoverRules,
+      onProgress, onPhaseChange
+    );
+    
+    // Phase 5: N10D
+    setProcessingPhase('n10d');
+    await new Promise(r => setTimeout(r, 200));
+    
+    // Phase 6: Sequencing
+    setProcessingPhase('sequencing');
+    await new Promise(r => setTimeout(r, 200));
+    
+    // Phase 7: Changeovers
+    setProcessingPhase('changeovers');
+    await new Promise(r => setTimeout(r, 200));
+    
+    // Build results with movement indicators
+    const results = {};
+    allLines.forEach(line => {
+      const lineOrders = lineOrdersMap[line] || [];
+      if (lineOrders.length === 0) {
+        results[line] = [];
+        return;
+      }
+      
+      const originalLineOrders = snapshot[line] || [];
+      const withMovement = lineOrders.map((order, newIndex) => {
+        const newPrio = newIndex + 1;
+        const originalIndex = originalLineOrders.findIndex(o => o.id === order.id);
+        let movement = 'same';
+        let movementDelta = 0;
+        
+        if (originalIndex >= 0) {
+          const originalPrio = originalIndex + 1;
+          movementDelta = originalPrio - newPrio;
+          if (movementDelta > 0) movement = 'up';
+          else if (movementDelta < 0) movement = 'down';
+        } else {
+          movement = 'new_to_line';
+        }
+        
+        return {
+          ...order,
+          prio: newPrio,
+          _originalPrio: originalIndex >= 0 ? originalIndex + 1 : -1,
+          _movement: movement,
+          _movementDelta: Math.abs(movementDelta),
+        };
+      });
+      
+      results[line] = withMovement;
+    });
+    
+    // Phase 8: AI insights
+    setProcessingPhase('insights');
+    await new Promise(r => setTimeout(r, 200));
+    
+    // Phase 9: Done
+    setProcessingPhase('done');
+    await new Promise(r => setTimeout(r, 500));
+    
+    // Store results and open preview
+    setOriginalPlantSnapshot(snapshot);
+    setPlantSequenceResults(results);
+    setPlantPlacementLog(placementLog);
+    
+    const stats = calculatePlantSummary(snapshot, results, combinedOrders, placementLog, allLines);
+    setPlantSummaryStats(stats);
+    
+    setShowProcessingOverlay(false);
+    setShowPlantAutoSequencePreview(true);
+    
+  } catch (error) {
+    console.error('Auto-sequence error:', error);
+    setShowProcessingOverlay(false);
+    toast.error(`Auto-sequence failed: ${error.message}`);
+  }
+}
+```
+
+---
+
+## 4. WRAP ALGORITHM WITH PROGRESS CALLBACKS
+
+```javascript
+async function runAutoSequenceWithProgress(allOrders, masterData, n10dData, allLines, changeoverRules, onProgress, onPhaseChange) {
+  // Deep copy
+  const activeOrders = allOrders.map(o => ({ ...JSON.parse(JSON.stringify(o)) }));
+  
+  const lineOrdersMap = {};
+  allLines.forEach(line => {
+    lineOrdersMap[line] = activeOrders
+      .filter(o => normalizeLine(o.feedmill_line) === line)
+      .sort((a, b) => (a.priority_seq || 0) - (b.priority_seq || 0))
+      .map(o => ({
+        ...o,
+        _originalLine: normalizeLine(o.feedmill_line),
+        _isPlanned: o.status === 'Planned',
+        _processed: false,
+      }));
+  });
+  
+  const lineTotalMT = {};
+  allLines.forEach(line => {
+    lineTotalMT[line] = (lineOrdersMap[line] || [])
+      .reduce((sum, o) => sum + (parseFloat(o.volume) || parseFloat(o.total_volume_mt) || 0), 0);
+  });
+  
+  const placementLog = [];
+  const combinedOrders = [];
+  const processedIds = new Set();
+  let processedCount = 0;
+  let combinedCount = 0;
+  let movedCount = 0;
+  
+  onPhaseChange('combining');
+  
+  // Process order by order
+  for (const line of allLines) {
+    const lineOrders = [...(lineOrdersMap[line] || [])];
+    
+    for (const order of lineOrders) {
+      if (order._processed || processedIds.has(order.id)) continue;
+      
+      const orderVolume = parseFloat(order.volume) || parseFloat(order.total_volume_mt) || 0;
+      const orderMaterialCode = String(order.material_code_fg || '').trim();
+      const orderFormulaVersion = order.formula_version || '—';
+      
+      if (!orderMaterialCode) {
+        order._processed = true;
+        processedIds.add(order.id);
+        processedCount++;
+        continue;
+      }
+      
+      // Find matches
+      const matches = findMatchableOrders(
+        order, orderMaterialCode, orderFormulaVersion,
+        allLines, lineOrdersMap, processedIds, masterData
+      );
+      
+      if (matches.length > 0) {
+        const combineResult = combineOrdersGreedy(order, orderVolume, matches, MAX_COMBINE_MT);
+        
+        if (combineResult.combinedOrders.length > 0) {
+          onPhaseChange('calculating');
+          
+          const placement = placeCombiledOrder(
+            order, combineResult, allLines, lineOrdersMap,
+            lineTotalMT, masterData, processedIds
+          );
+          
+          combinedOrders.push(placement.combinedOrder);
+          if (placement.logEntry) placementLog.push(placement.logEntry);
+          
+          combinedCount++;
+          processedCount += 1 + combineResult.combinedOrders.length;
+          if (placement.combinedOrder._movedFromLine) movedCount++;
+          
+          onPhaseChange('placing');
+          onProgress({ processed: processedCount, combined: combinedCount, moved: movedCount });
+          
+          // Yield to UI every 5 orders
+          if (processedCount % 5 === 0) {
+            await new Promise(r => setTimeout(r, 0));
+          }
+          
+          continue;
+        }
+      }
+      
+      // No match — evaluate queue time
+      const movePlacement = evaluateAndMoveOrder(
+        order, orderVolume, line, allLines, lineOrdersMap,
+        lineTotalMT, masterData, processedIds
+      );
+      
+      if (movePlacement.logEntry) {
+        placementLog.push(movePlacement.logEntry);
+        movedCount++;
+      }
+      
+      processedCount++;
+      onProgress({ processed: processedCount, combined: combinedCount, moved: movedCount });
+      
+      if (processedCount % 5 === 0) {
+        await new Promise(r => setTimeout(r, 0));
+      }
+    }
+  }
+  
+  // N10D phase
+  onPhaseChange('n10d');
+  await new Promise(r => setTimeout(r, 100));
+  
+  const finalLineOrders = {};
+  allLines.forEach(line => {
+    const orders = lineOrdersMap[line] || [];
+    if (orders.length === 0) {
+      finalLineOrders[line] = [];
+      return;
+    }
+    const categorized = preSortOrders(orders, n10dData, masterData);
+    finalLineOrders[line] = sortOrdersByCategory(categorized);
+  });
+  
+  // Changeovers phase
+  onPhaseChange('changeovers');
+  await new Promise(r => setTimeout(r, 100));
+  
+  allLines.forEach(line => {
+    const orders = finalLineOrders[line] || [];
+    if (orders.length > 0) {
+      calculatePreviewChangeovers(orders, changeoverRules);
+    }
+  });
+  
+  return { lineOrdersMap: finalLineOrders, combinedOrders, placementLog };
+}
+```
+
+---
+
+## 5. PARENT STATE AND JSX
+
+```jsx
+const [showProcessingOverlay, setShowProcessingOverlay] = useState(false);
+const [processingPhase, setProcessingPhase] = useState(null);
+const [processingStats, setProcessingStats] = useState({ processed: 0, total: 0, combined: 0, moved: 0 });
+
+{showProcessingOverlay && (
+  <AutoSequenceProcessingOverlay
+    currentPhase={processingPhase}
+    processedCount={processingStats.processed}
+    totalCount={processingStats.total}
+    combinedCount={processingStats.combined}
+    movedCount={processingStats.moved}
+  />
+)}
+```
+
+---
+
+## 6. STYLING
+
+```css
+.as-processing-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.as-processing-card {
+  background: #ffffff;
+  border-radius: 12px;
+  padding: 32px 36px;
+  width: 480px;
+  max-width: 90vw;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
+}
+
+.as-processing-header {
+  text-align: center;
+  margin-bottom: 24px;
+}
+
+.as-processing-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: #1a1a1a;
+  margin: 0 0 4px 0;
+}
+
+.as-processing-subtitle {
+  font-size: 12px;
+  color: #6b7280;
+  margin: 0;
+}
+
+/* Progress bar */
+.as-processing-progress-bar {
+  height: 4px;
+  background: #f3f4f6;
+  border-radius: 2px;
+  overflow: hidden;
+  margin-bottom: 24px;
+}
+
+.as-processing-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #ea580c, #dc2626);
+  border-radius: 2px;
+  transition: width 0.4s ease;
+}
+
+/* Phases */
+.as-processing-phases {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 24px;
+}
+
+.as-processing-phase {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+  font-size: 13px;
+  transition: opacity 0.3s;
+}
+
+.as-processing-phase.pending {
+  opacity: 0.35;
+  color: #9ca3af;
+}
+
+.as-processing-phase.current {
+  opacity: 1;
+  color: #1a1a1a;
+  font-weight: 600;
+}
+
+.as-processing-phase.complete {
+  opacity: 0.7;
+  color: #16a34a;
+}
+
+.as-processing-phase-icon {
+  width: 20px;
+  text-align: center;
+  font-size: 14px;
+}
+
+.as-processing-phase-label {
+  flex: 1;
+}
+
+.as-processing-phase-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid #e5e7eb;
+  border-top-color: #ea580c;
+  border-radius: 50%;
+  animation: phase-spin 0.6s linear infinite;
+}
+
+@keyframes phase-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Live stats */
+.as-processing-stats {
+  display: flex;
+  justify-content: center;
+  gap: 24px;
+  padding-top: 16px;
+  border-top: 1px solid #f3f4f6;
+}
+
+.as-processing-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.as-processing-stat-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: #dc2626;
+}
+
+.as-processing-stat-label {
+  font-size: 10px;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+```
+
+---
+
+## VERIFICATION
+
+### Loading phases displayed
+1. ✅ Scanning orders across all lines
+2. ✅ Finding and combining matching orders
+3. ✅ Calculating queue times per line
+4. ✅ Placing orders on optimal lines
+5. ✅ Applying N10D target dates
+6. ✅ Sequencing orders per line
+7. ✅ Calculating changeovers
+8. ✅ Generating AI insights
+9. ✅ Complete
+
+### Visual feedback
+10. ✅ Progress bar fills as phases complete
+11. ✅ Current phase highlighted with spinner
+12. ✅ Completed phases show ✅
+13. ✅ Pending phases greyed out
+14. ✅ Live stats: orders processed, combined groups, moved orders
+
+### Non-blocking
+15. ✅ Yields to UI every 5 orders (setTimeout(0))
+16. ✅ Stats update in real-time as orders are processed
+17. ✅ Phase changes reflected immediately
+
+### Overlay
+18. ✅ Full screen overlay prevents interaction
+19. ✅ Centered card with clean design
+20. ✅ Disappears when processing complete → preview opens
+```

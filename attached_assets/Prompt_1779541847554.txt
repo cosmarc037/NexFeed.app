@@ -1,0 +1,237 @@
+Please fix the **downstream Start Time-only scheduling behavior** so the app automatically resolves and updates the Start Date instead of clearing the field to blank when the entered time conflicts with the previous order’s completion time.
+
+---
+
+## 1. DO NOT CLEAR START DATE / START TIME TO BLANK WHEN THE ENTERED TIME DOES NOT ALIGN
+
+There is a bug in the downstream scheduling behavior.
+
+Right now, when a user enters a **Start Time** for an order and the time does not align with the previous order’s completion datetime, the app appears to clear the Start Date and/or Start Time back to blank.
+
+This is not the intended behavior.
+
+### Expected behavior
+The app should **automatically resolve and update** the Start Date based on the entered Start Time and the previous order’s completion datetime.
+
+It should **not**:
+- blank out the Start Date
+- blank out the Start Time
+- remove the user’s entered time just because the time falls earlier than the previous completion time
+
+### Goal
+Preserve the user-entered Start Time and automatically compute the correct Start Date.
+
+---
+
+## 2. IF USER ENTERS ONLY START TIME, AUTO-RESOLVE THE START DATE BASED ON THE PREVIOUS ORDER’S COMPLETION DATETIME
+
+For downstream orders only, when the user enters a **Start Time** but leaves **Start Date** blank:
+
+- use the **previous order’s completion datetime** as the reference
+- compare the entered Start Time against the **previous completion time**
+- automatically assign the correct Start Date
+
+### Resolution rule
+
+#### If entered Start Time is earlier than the previous completion time
+Use the **next calendar date** after the previous order’s completion date.
+
+#### If entered Start Time is later than or equal to the previous completion time
+Use the **same calendar date** as the previous order’s completion date.
+
+### Important
+Do not clear the fields to blank when this happens.
+
+The app must actively resolve and populate the correct date.
+
+---
+
+## 3. REQUIRED EXAMPLES
+
+Please implement the behavior exactly like this:
+
+### Example reference
+Previous order completion:
+- `May 23, 2026, 12:00 PM`
+
+### Example A — Entered time is earlier than previous completion time
+If the user sets:
+- `Start Time = 10:00 AM`
+- `Start Date = blank`
+
+Then the app should automatically resolve to:
+- `Start Date = May 24, 2026`
+- `Start Time = 10:00 AM`
+
+### Example B — Entered time is later than previous completion time
+If the user sets:
+- `Start Time = 1:00 PM`
+- `Start Date = blank`
+
+Then the app should automatically resolve to:
+- `Start Date = May 23, 2026`
+- `Start Time = 1:00 PM`
+
+### Expected result
+The app should automatically update the Start Date based on the user-entered Start Time. It should not leave the result blank.
+
+---
+
+## 4. PRESERVE THE USER-ENTERED START TIME
+
+When the user manually enters a Start Time:
+
+- keep that exact Start Time value
+- only resolve or adjust the Start Date as needed
+
+### Important
+Do not erase or reset the user-entered time just because the app needs to move the date to the following day.
+
+### Expected result
+The user’s Start Time remains intact, while the Start Date is automatically calculated.
+
+---
+
+## 5. UPDATE THE DISPLAYED START DATE IMMEDIATELY AFTER RESOLUTION
+
+Once the app determines whether to use:
+- the same date
+- or the next date
+
+the displayed Start Date field in the UI should update immediately to reflect the resolved value.
+
+### Example
+If previous completion is:
+- `May 23, 2026, 12:00 PM`
+
+and the user enters:
+- `10:00 AM`
+
+the UI should immediately show:
+- `May 24, 2026`
+- `10:00 AM`
+
+It should not:
+- remain blank
+- keep an invalid date
+- show stale values
+
+---
+
+## 6. APPLY THIS ONLY TO DOWNSTREAM ORDERS
+
+This rule applies only to:
+- the **2nd order onward**
+- or any order that has a **previous order** in the schedule
+
+Do not change the existing first-order fallback/default behavior.
+
+---
+
+## 7. KEEP MANUAL START DATE VALIDATION SEPARATE
+
+Please keep this separate from the manual Start Date rules.
+
+This request is specifically for the workflow where:
+- the user enters **Start Time**
+- and **Start Date is blank**
+
+Do not merge this with the rule for manual Start Date selection.
+
+### Existing manual Start Date rule to preserve
+For downstream orders:
+- user cannot manually choose the same date as the previous order’s completion date
+- user cannot choose past dates
+- valid date + blank time → default `8:00 AM`
+
+### This request is different
+For **Start Time-only entry**:
+- the app must auto-resolve the correct Start Date
+- and must not blank the fields
+
+---
+
+## 8. DO NOT TREAT THIS AS AN ERROR STATE THAT CLEARS USER INPUT
+
+If the entered Start Time is earlier than the previous completion time, that is **not** an invalid entry that should be cleared.
+
+It is simply a case that requires:
+- date rollover to the next day
+
+### Expected result
+This should be handled as a normal scheduling resolution case, not an error that resets the UI.
+
+---
+
+## IMPORTANT
+
+Please preserve this exact behavior:
+
+Given:
+- previous order completion = `May 23, 2026, 12:00 PM`
+
+Then:
+- entered `Start Time = 10:00 AM` → resolve to `May 24, 2026, 10:00 AM`
+- entered `Start Time = 1:00 PM` → resolve to `May 23, 2026, 1:00 PM`
+
+Do not clear the fields to blank in either case.
+
+The app should automatically update the downstream order’s resolved Start Date and keep the user-entered time.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log downstream Start Time-only resolution and detect any cases where the UI is incorrectly cleared.
+
+```javascript
+console.debug('[Downstream Start Time Only Resolution]', {
+  orderId,
+  previousCompletionDatetime,
+  previousCompletionDate,
+  previousCompletionTime,
+  enteredStartTime,
+  resolvedStartDate,
+  resolvedStartTime: enteredStartTime,
+  resolutionRule:
+    enteredStartTime < previousCompletionTime
+      ? 'next_date'
+      : 'same_date',
+});
+```
+
+```javascript
+console.debug('[Downstream Start Time UI Update]', {
+  orderId,
+  enteredStartTime,
+  displayedStartDate,
+  displayedStartTime,
+  shouldNotBeBlank: true,
+});
+```
+
+```javascript
+console.debug('[Downstream Start Time Unexpected Blank]', {
+  orderId,
+  previousCompletionDatetime,
+  enteredStartTime,
+  displayedStartDate,
+  displayedStartTime,
+  bug: !displayedStartDate || !displayedStartTime,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ This behavior applies only to downstream orders with a previous order
+2. ✅ If the previous order is `May 23, 2026, 12:00 PM` and the user enters `10:00 AM`, the app resolves to `May 24, 2026, 10:00 AM`
+3. ✅ If the previous order is `May 23, 2026, 12:00 PM` and the user enters `1:00 PM`, the app resolves to `May 23, 2026, 1:00 PM`
+4. ✅ The app preserves the user-entered Start Time during resolution
+5. ✅ The app automatically updates the Start Date instead of clearing it
+6. ✅ The UI does not revert the Start Date or Start Time to blank during this workflow
+7. ✅ Manual Start Date validation behavior remains separate and intact
+8. ✅ Existing first-order default logic remains unchanged
+9. ✅ Existing completion-date cascade logic still works
+10. ✅ No UI errors or console errors are introduced

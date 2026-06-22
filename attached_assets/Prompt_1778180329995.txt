@@ -1,0 +1,283 @@
+```
+Improve how the app determines which AI strategy gets the "Recommended" badge, and update the default selection behavior so the recommended AI strategy is automatically selected when one exists.
+
+---
+
+## OBJECTIVE
+
+Right now, the app determines the orange "Recommended" badge using an internal scoring system that includes metrics not currently visible in the strategy cards, such as:
+- Min. Slack
+- Violations / deadline violations
+
+However, those fields are currently hidden from the UI, so the recommendation can feel opaque or hard to explain.
+
+Also, even when an AI strategy gets the "Recommended" badge, the app still automatically selects the Standard Sequence by default. This is not the desired behavior.
+
+We want to improve:
+1. how recommendation is determined so it aligns better with what is actually visible and explainable
+2. the default selection behavior so the recommended AI strategy is auto-selected when one exists
+
+---
+
+## CURRENT LOGIC FROM REPLIT
+
+Current recommendation behavior has two stages:
+
+### Stage 1 — Eligibility gates
+A strategy is disqualified if:
+- it has any deadline violations
+- Min. Slack < 1.5 hours
+- Faithfulness < 60
+- Standard Sequence is always excluded by design
+
+### Stage 2 — Weighted score
+Among eligible AI strategies, score using:
+- Min. Slack = 30%
+- Risk level = 20%
+- Faithfulness = 25%
+- MTS adjusted = 15%
+- Total margin / profitability = 10%
+
+Then the higher-scoring AI strategy gets the "Recommended" badge.
+
+---
+
+## PROBLEM TO FIX
+
+### 1. The recommendation may rely too much on hidden metrics
+Since the UI currently hides:
+- Min. Slack
+- Violations
+
+the recommendation can feel disconnected from what the user sees on the card.
+
+If the recommendation is based heavily on hidden fields, it becomes harder to explain to clients and harder for users to trust.
+
+### 2. Recommended strategy is not auto-selected
+Even when an AI strategy has the orange "Recommended" badge, the app still auto-selects the Standard Sequence.
+
+This is not the expected behavior.
+
+Expected:
+- if an AI strategy is recommended, it should be auto-selected
+- Standard Sequence should only be auto-selected when no AI strategy is recommended
+
+---
+
+## REQUIRED CHANGES
+
+### A. Improve recommendation logic
+Recommendation should be determined in a way that is more aligned with the metrics shown in the card and easier to justify.
+
+### B. Auto-select the recommended AI strategy
+If an AI strategy gets the "Recommended" badge, that strategy should automatically become selected.
+
+### C. Fall back to Standard only if no AI strategy is recommended
+If neither AI strategy qualifies, then Standard Sequence should remain the default selected strategy.
+
+---
+
+## 1. REWORK THE RECOMMENDATION LOGIC TO PRIORITIZE VISIBLE / EXPLAINABLE METRICS
+
+Since Min. Slack and Violations are currently hidden, reduce reliance on hidden metrics for the visible recommendation badge.
+
+Prefer recommendation logic that is grounded more strongly in the metrics already shown on the card, such as:
+- Faithfulness
+- MTS adjusted
+- Changeover time
+- Time-saved
+- possibly profitability / total margin if already available internally
+
+If hidden metrics must still be used internally, they should not dominate the recommendation so heavily that the badge becomes impossible to explain.
+
+---
+
+## 2. USE HIDDEN METRICS ONLY AS SAFETY GATES, NOT AS THE MAIN WINNER-SCORING DRIVER
+
+If Min. Slack and Violations are still important for safety, that is okay — but use them mainly as:
+- disqualifiers / safety gates
+
+Then once a strategy passes those gates, choose the winner primarily using visible and explainable metrics.
+
+### Recommended structure
+
+#### Eligibility / hard gates
+Still okay to disqualify a strategy if:
+- it has deadline violations
+- faithfulness is too low
+- another critical safety constraint is breached
+
+If Min. Slack remains important, keep it only as a hidden safety gate if absolutely necessary.
+
+But after gating, the visible recommendation should be driven more by explainable metrics.
+
+---
+
+## 3. RECOMMENDATION SCORING SHOULD FAVOR METRICS THE USER CAN ACTUALLY SEE
+
+After eligibility, score AI strategies primarily using:
+- Faithfulness
+- Changeover improvement / lower changeover
+- Time-saved improvement
+- MTS adjusted
+- optionally profitability / margin if appropriate
+
+### Suggested scoring emphasis
+Example weighting direction:
+- Faithfulness: high importance
+- Changeover / time-saved: high importance
+- MTS adjusted: medium importance
+- Profitability: medium/low importance
+- Hidden metrics: low or only gating
+
+You do not have to use these exact weights, but the winner should make sense from what the card visibly shows.
+
+---
+
+## 4. AVOID RECOMMENDING A STRATEGY WHOSE CARD LOOKS CLEARLY WORSE THAN ITS PEER
+
+The app should not mark a strategy as Recommended if, based on the visible card metrics, it looks clearly less attractive than the other AI strategy.
+
+For example, if a strategy has:
+- worse changeover
+- worse time-saved
+- lower faithfulness
+
+then it should be very hard for hidden metrics to override that unless there is a strong safety reason.
+
+This helps the recommendation feel trustworthy and intuitive.
+
+---
+
+## 5. ADD AN OPTIONAL "WHY RECOMMENDED" EXPLANATION IF HELPFUL
+
+Optional but helpful:
+Add a small explanation or tooltip on the Recommended badge like:
+- `Recommended based on best overall balance of faithfulness, changeover improvement, and safe reorder impact.`
+
+This would make the badge easier to explain without exposing hidden metrics like Min. Slack directly.
+
+This is optional, but recommended for clarity.
+
+---
+
+## 6. AUTO-SELECT THE RECOMMENDED AI STRATEGY WHEN ONE EXISTS
+
+This is required.
+
+Current problem:
+- regardless of which AI strategy is recommended, Standard Sequence is still automatically selected
+
+Expected behavior:
+- if an AI strategy has the Recommended badge, auto-select that AI strategy
+- if no AI strategy is recommended, auto-select Standard Sequence
+
+### Required logic
+```javascript
+if (recommendedStrategyId) {
+  selectedStrategyId = recommendedStrategyId;
+} else {
+  selectedStrategyId = 'standard';
+}
+```
+
+This should happen:
+- when the strategy cards are first shown after auto-sequence finishes
+- when recommendations are recalculated
+- when the preview is freshly built
+
+---
+
+## 7. ENSURE ONLY ONE AI STRATEGY CAN BE RECOMMENDED
+
+At most one AI strategy should receive the orange "Recommended" badge.
+
+If both are eligible:
+- choose the stronger one via the revised scoring logic
+
+If neither is eligible:
+- no badge is shown
+- Standard Sequence remains selected
+
+---
+
+## 8. DO NOT RECOMMEND STANDARD SEQUENCE
+
+Keep the existing rule:
+- Standard Sequence should not receive the "Recommended" badge
+
+That part is fine.
+
+But Standard should be selected only as the fallback when no AI strategy qualifies.
+
+---
+
+## 9. MAKE SELECTION AND BADGE CONSISTENT
+
+If the user opens the preview and sees:
+- one AI strategy marked Recommended
+
+then that same strategy should also already be:
+- selected
+- highlighted
+- driving the After table below
+
+The UI should not show:
+- Recommended on one card
+- Selected on Standard
+
+That is inconsistent and confusing.
+
+---
+
+## 10. REVIEW THE CURRENT CARD EXAMPLE FOR CONSISTENCY
+
+In the screenshot:
+- `Red-Last Diameter Grouping` has the Recommended badge
+- but `Standard Sequence` is still selected
+
+This is exactly the behavior that should be fixed.
+
+Expected:
+- `Red-Last Diameter Grouping` should be automatically selected
+- the After table should reflect that strategy immediately
+
+---
+
+## 11. ADD DEBUG LOGGING FOR BADGE + AUTO-SELECTION
+
+Temporarily log:
+
+```javascript
+console.debug('[AI Strategy Recommendation]', {
+  lineId,
+  strategies: strategies.map(s => ({
+    id: s.id,
+    eligible: s.eligible,
+    faithfulness: s.faithfulness,
+    mtsAdjusted: s.mtsAdjusted,
+    changeover: s.changeover,
+    timeSaved: s.timeSaved,
+    recommended: s.id === recommendedStrategyId,
+  })),
+  selectedStrategyId,
+});
+```
+
+This helps verify:
+- recommendation logic is using the intended inputs
+- the recommended strategy is actually auto-selected
+- Standard is only selected when no recommendation exists
+
+---
+
+## 12. VERIFICATION
+
+1. ✅ Recommendation logic is revised to rely more on visible/explainable card metrics
+2. ✅ Hidden metrics like Min. Slack / violations are no longer overly dominating the visible recommendation decision
+3. ✅ At most one AI strategy gets the "Recommended" badge
+4. ✅ If an AI strategy is recommended, it is automatically selected
+5. ✅ Standard Sequence is only auto-selected when no AI strategy is recommended
+6. ✅ The selected card and the Recommended badge now align consistently
+7. ✅ The After table immediately reflects the recommended AI strategy when one exists
+8. ✅ The recommendation is easier to explain based on what the user actually sees in the card

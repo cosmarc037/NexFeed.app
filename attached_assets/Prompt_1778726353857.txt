@@ -1,0 +1,195 @@
+Please update the Powermix-generated order logic and related Line 5 display behavior with the following corrections.
+
+These updates are specifically about:
+1. where the split percentage/original text should appear
+2. what quantity basis must be used in the split calculation
+3. which source of truth should be used for batch size in Line 5 Powermix scenarios
+
+---
+
+## 1. MOVE SPLIT / ORIGINAL TEXT UNDER THE VOLUME COLUMN
+
+Problem:
+The percentage split text is currently being shown under the Item Description area.
+
+This should be moved under the **Volume (MT)** column instead.
+
+### Required behavior
+For orders created from Line 5, the helper text should appear below the displayed MT value in the Volume column.
+
+### Display format rules
+
+#### A. If MT is okay as-is (no app adjustment after split)
+Example:
+```text
+60 MT
+81% of 72 MT
+```
+
+#### B. If MT is app-adjusted after split to comply with batch size
+Example:
+```text
+60 MT
+Original: 58 MT (81% of 72 MT)
+```
+
+This means:
+- the top bold value is the final displayed/usable MT
+- the helper text explains the original percentage-derived quantity basis
+
+### Important
+Do not render this split helper text under the Item Description column anymore.
+It belongs under Volume (MT), similar to how the app already shows `Original: xx MT` for adjusted quantities.
+
+---
+
+## 2. USE THE EXACT ACTUAL QUANTITY BASIS USED BY THE APP FOR SPLITTING
+
+Problem:
+It appears the app may still be using the raw quantity instead of the actual displayed/app-used quantity basis when calculating the Powermix split.
+
+Example issue:
+- Line 5 row shows `72 MT`
+- helper shows `Original: 70 MT`
+- app may still be using `70` for the 81% split
+- 81% of 70 = 56.7
+- which then becomes 56 or 57
+- but expected result should be based on the actual quantity basis the app is intended to use
+
+### Required behavior
+The split calculation must use the **exact quantity basis actually chosen by the app for the split**.
+
+This same exact quantity basis must also be used consistently for:
+- split math
+- helper text display
+- generated order volume result
+
+### Important consistency rule
+Do not allow this mismatch:
+- helper text says `81% of 72 MT`
+- but math uses `70 MT`
+
+Or vice versa.
+
+Whatever value is truly used for the split calculation must be the same value shown in the helper text.
+
+### Required outcome
+If the actual split basis is `72 MT`, then:
+- helper text must say `81% of 72 MT`
+- generated split math must use 72
+
+If the actual split basis is `70 MT`, then:
+- helper text must say `81% of 70 MT`
+- generated split math must use 70
+
+The quantity basis used in calculation and display must match exactly.
+
+Please audit the current split calculation path because it appears the app may still be using the wrong source quantity.
+
+---
+
+## 3. FOR LINE 5 BATCH SIZE, USE POWERMIX SPLIT AS SOURCE OF TRUTH
+
+Problem:
+There is confusion between Master Data and Powermix Split for batch size.
+
+Example:
+- in Master Data, a product may have batch size = 1
+- in Powermix Split, the same applicable Powermix product may have batch size = 2
+
+For Powermix-controlled orders, this is causing inconsistency.
+
+### Required behavior
+For orders relevant to the Powermix Split feature:
+
+#### A. On Line 5
+If the order is one of the configured Powermix Split FG materials, use the **Batch Size from Powermix Split** for Line 5 display/calculation purposes.
+
+#### B. On generated destination-line orders
+Also use the **Batch Size from Powermix Split**.
+
+### Clarification
+Only override **Batch Size** using Powermix Split.
+Other product attributes can still remain sourced from Master Data unless otherwise specified.
+
+### Goal
+This ensures the batch logic is aligned between:
+- the source Line 5 order
+- the generated split order
+- the Powermix Split business rule
+
+and avoids incorrect fallback to Master Data batch size where the Powermix rule explicitly defines a different batch.
+
+---
+
+## 4. KEEP PREVIOUS POWERMIX BEHAVIOR INTACT
+
+Please preserve the previously required behaviors:
+- Material Code (FG) must remain the original FG from the Line 5 source order
+- Material Code (SFG) must use the mapped SFG from Powermix Split
+- generated orders should remain visually identifiable
+- generated orders should remain linked to the source Line 5 order
+- status should remain `Plotted`
+- source avail date should still be inherited properly
+- planned order FG/SFG should still be copied from the exact source Line 5 order
+- run-rate fallback to Line 5 should still apply when target-line run-rate is missing
+
+These should remain intact while applying the new updates above.
+
+---
+
+## 5. DEBUG LOGGING
+
+Temporarily log the following:
+
+### Quantity basis for split
+```javascript
+console.debug('[Powermix Split Quantity Basis]', {
+  sourceOrderId,
+  displayedVolumeMt,
+  originalVolumeMt,
+  exactQtyBasisUsedForSplit,
+  percentage,
+  generatedQtyBeforeAdjustment,
+  generatedQtyAfterAdjustment,
+});
+```
+
+### Volume helper text rendering
+```javascript
+console.debug('[Powermix Volume Helper Text]', {
+  generatedOrderId,
+  finalDisplayedMt,
+  originalSplitMt,
+  exactQtyBasisUsedForSplit,
+  percentage,
+  renderedHelperText,
+  renderedUnderColumn: 'volume_mt',
+});
+```
+
+### Batch source resolution
+```javascript
+console.debug('[Powermix Batch Source Resolution]', {
+  sourceOrderId,
+  fgCode,
+  masterDataBatchSize,
+  powermixSplitBatchSize,
+  appliedBatchSize,
+  batchSourceUsed, // 'powermix_split' | 'master_data'
+});
+```
+
+---
+
+## 6. VERIFICATION
+
+1. ✅ Split helper text is rendered under the Volume (MT) column, not under Item Description
+2. ✅ Orders created from Line 5 show helper text in one of these forms:
+   - `81% of 72 MT`
+   - `Original: 58 MT (81% of 72 MT)`
+3. ✅ The exact same quantity basis is used both for split math and helper text
+4. ✅ The app no longer calculates split quantity from one number while displaying another number in the text
+5. ✅ For Powermix-applicable orders on Line 5, Batch Size is sourced from Powermix Split, not Master Data
+6. ✅ Generated split orders also use Batch Size from Powermix Split
+7. ✅ Existing FG/SFG mapping, planned-order copy, run-rate fallback, and plotted status remain correct

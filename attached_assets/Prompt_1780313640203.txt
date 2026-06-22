@@ -1,0 +1,182 @@
+Please enhance the **Approve Re-order** flow in the **Fulfillment (Demo)** workspace so it works more like the **Divert** feature, where the user can evaluate which line is best to produce the re-order on.
+
+---
+
+## 1. ADD LINE SELECTION / LINE RECOMMENDATION TO THE APPROVE RE-ORDER MODAL
+
+Please enhance the **Approve Re-order** modal so that it can evaluate and present which lines are best suited to produce the re-order.
+
+### Goal
+Allow the user to choose the best production line for the re-order instead of assuming one fixed line ahead of time.
+
+### Expected result
+The modal should show eligible/recommended lines for producing the re-order, similar in spirit to the existing **Divert** workflow.
+
+---
+
+## 2. USE HISTORICAL RUN RATE FROM MASTER DATA TO EVALUATE BEST LINES
+
+Please use the product’s historical run rate data from **Master Data** as part of the line recommendation logic.
+
+### Goal
+The app should help identify which line is best suited to produce the re-order based on where the product historically runs well.
+
+### Expected result
+Line recommendations in the modal should consider the product’s historical run-rate suitability by line.
+
+---
+
+## 3. HIGHLIGHT THE BEST / ELIGIBLE LINES IN THE MODAL
+
+Please visually highlight or indicate which lines are:
+- best recommended
+- eligible
+- or suitable
+
+for the re-order.
+
+### Goal
+Make it easy for users to compare where the re-order can be produced.
+
+### Expected result
+The modal should clearly show the recommended line options, similar to how the divert feature indicates possible destination lines.
+
+---
+
+## 4. REMOVE `AI AVAIL DATE` FROM THE SUGGESTED RE-ORDER TABLE
+
+Because the recommended avail date will now depend on the selected line, please remove the `AI Avail Date` column from the **Suggested Re-orders** table.
+
+### Reason
+A single fixed date in the table is no longer accurate if the date changes depending on which line the user chooses in the modal.
+
+### Expected result
+The Suggested Re-orders table should no longer show a fixed `AI Avail Date` column.
+
+---
+
+## 5. MOVE THE AI / RECOMMENDED DATE INTO THE APPROVE RE-ORDER MODAL
+
+Please move the date recommendation into the **Approve Re-order** modal instead.
+
+### Goal
+Once the user is evaluating different lines, the app should generate/show the recommended date for the selected line there in the modal.
+
+### Expected result
+The recommended avail date is shown in the modal and updates depending on the chosen line.
+
+---
+
+## 6. MAKE THE RECOMMENDED DATE DEPEND ON THE SELECTED LINE
+
+Please make sure the date recommendation is line-specific.
+
+### Required behavior
+When the user changes/selects a different candidate line in the modal, the app should update:
+- the recommended avail date
+- insertion position
+- impact analysis
+- and other line-dependent scheduling details
+
+### Expected result
+The modal should not assume one universal date for all lines.
+The recommendation should adapt to the selected line.
+
+---
+
+## 7. KEEP INSERTION POSITION / IMPACT ANALYSIS LINE-SPECIFIC
+
+Because the selected production line affects scheduling, please ensure the modal updates line-specific details such as:
+- proposed insertion position
+- downstream delay risk
+- changeover impact
+- production time if line-specific rate differs
+- recommended avail date
+
+### Expected result
+Each candidate line should show or drive its own corresponding scheduling recommendation.
+
+---
+
+## 8. KEEP THE FINAL INSERTION CONSISTENT WITH THE SELECTED LINE OPTION
+
+Once the user selects a line and confirms approval, the re-order should be inserted according to the recommendation for that selected line.
+
+### Expected result
+The final inserted re-order should follow:
+- the chosen line
+- the chosen insertion logic
+- the chosen recommended date/placement
+shown in the modal
+
+---
+
+## 9. APPLY THIS TO THE FULFILLMENT (DEMO) RE-ORDER APPROVAL FLOW
+
+This change should apply specifically to the **Fulfillment (Demo)** workflow for Suggested Re-orders / Approve Re-order.
+
+### Expected result
+The demo re-order approval flow becomes more intelligent and flexible, allowing line-based production decisions.
+
+---
+
+## IMPORTANT
+
+Please update the **Approve Re-order** flow so that it behaves more like the **Divert** feature:
+
+- show which lines are best / eligible for producing the re-order
+- use historical run rate from **Master Data**
+- let the user evaluate/select the line in the modal
+- remove `AI Avail Date` from the Suggested Re-orders table
+- show the recommended date in the modal instead
+- make the recommended date, insertion position, and impact analysis depend on the selected line
+
+This is needed because the re-order’s recommended date is no longer a single universal value — it changes depending on which line is selected for production.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log line recommendation and line-specific date generation for re-orders.
+
+```javascript
+console.debug('[Approve Re-Order Line Recommendations]', {
+  suggestionId,
+  product,
+  evaluatedLines,
+  recommendedLines,
+  basedOnMasterDataRunRate: true,
+});
+```
+
+```javascript
+console.debug('[Approve Re-Order Selected Line Impact]', {
+  suggestionId,
+  selectedLine,
+  recommendedAvailDate,
+  insertionPosition,
+  downstreamDelayRisk,
+  changeoverImpact,
+});
+```
+
+```javascript
+console.debug('[Suggested Re-Orders Table Columns]', {
+  aiAvailDateRemovedFromTable: true,
+  dateNowShownInModal: true,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Approve Re-order modal shows eligible/recommended lines
+2. ✅ Line recommendations consider historical run rate from Master Data
+3. ✅ Best/suitable lines are visually indicated
+4. ✅ `AI Avail Date` is removed from the Suggested Re-orders table
+5. ✅ Recommended date is shown in the modal instead
+6. ✅ Recommended date changes depending on the selected line
+7. ✅ Insertion position and impact analysis also update per selected line
+8. ✅ Final insertion follows the chosen line’s recommendation
+9. ✅ No UI errors or console errors are introduced

@@ -1,0 +1,31 @@
+I need your help to **export the complete and comprehensive context** of the application we've been building together. The reason for this request is that the external AI assistant I've been using to help craft prompts for you has become corrupted, and I need to onboard a new AI prompt-helper. To ensure the new assistant has full knowledge of our project and can continue assisting me effectively, I need you to provide a **detailed, exhaustive breakdown** of everything we've built so far.
+
+Please document the application in full, covering every page, tab, sub-tab, feature, and functionality. Specifically, I need complete context on the following structure:
+
+### 1. **Dashboard**
+- **Overview** – What it displays, key metrics, layout, and purpose
+- **Analytics** – Charts, data sources, filters, and insights provided
+- **Monitoring** – Real-time data, alerts, tracked entities, and status indicators
+
+### 2. **Orders**
+- **All Feedmills** – Consolidated view, features, and how it aggregates data
+- **Feedmill 1** – Specific functionality, data displayed, and workflows
+- **Feedmill 2** – Specific functionality, data displayed, and workflows
+- **Feedmill 3** – Specific functionality, data displayed, and workflows
+- **Powermix** – Purpose, features, and how it differs from the feedmills
+
+### 3. **Configurations**
+- **Order History** – Logs, filters, archived data, and search capabilities
+- **Changeover Split** – Logic, rules, parameters, and use cases
+- **Master Data** – Reference data, entities managed, and editing capabilities
+- **Future Dispatches** – Scheduling logic, planning features, and forecasting
+
+For each section and sub-section, please include:
+- **Purpose** (what the tab/page does)
+- **Features and capabilities**
+- **Contents and data displayed**
+- **User interactions and workflows**
+- **Dependencies or integrations with other parts of the app**
+- **Any business logic, rules, or configurations tied to it**
+
+The output should be **100% complete** — covering every detail, no matter how small — so the new AI prompt-helper can fully understand the application's current state and help me continue building without any loss of context or progress. Please place it in an MD file.

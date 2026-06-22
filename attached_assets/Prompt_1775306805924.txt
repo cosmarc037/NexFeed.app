@@ -1,0 +1,306 @@
+```
+Implement the following fix to the search functionality:
+
+---
+
+## FIX: SEARCH BAR IN "ALL" TAB — APPLY TO ALL LINES, NOT JUST LINE 1
+
+Currently, the search bar in the "All" tab only filters orders on the first line table (Line 1). It should filter across ALL line tables displayed on the page.
+
+---
+
+### THE PROBLEM
+
+The "All" tab shows multiple line tables (Line 1, Line 2, Line 3, etc.). When a user types in the search bar, only Line 1's orders are filtered. Orders in Line 2, Line 3, and other lines remain unfiltered.
+
+This likely happens because:
+- The search filter is only applied to the first line's data array
+- Each line table manages its own filtered data independently
+- The search term is not being passed down to all line table components
+
+---
+
+### THE FIX
+
+The search term must be passed to ALL line tables, and each table must independently filter its own orders based on the search term.
+
+### STEP 1: PASS SEARCH TERM TO ALL LINE TABLES
+
+```jsx
+function AllOrdersTab() {
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filters, setFilters] = useState({});
+  
+  // Get all lines for the current feedmill
+  const lines = getCurrentFeedmillLines(); // e.g., ['Line 1', 'Line 2']
+  
+  return (
+    <div>
+      {/* Search bar — shared across all lines */}
+      <div className="search-bar-container">
+        <input
+          type="text"
+          className="search-input"
+          placeholder="Search by item, material code, FPR..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+        />
+        <button className="filter-btn" onClick={() => setShowFilters(true)}>
+          🔽 Filters
+        </button>
+      </div>
+      
+      {/* Metrics cards */}
+      <MetricsCards orders={getAllFilteredOrders(searchTerm, filters)} />
+      
+      {/* All line tables — each receives the search term */}
+      {lines.map(line => (
+        <LineTable
+          key={line}
+          line={line}
+          searchTerm={searchTerm}    // Pass search term to EVERY line table
+          filters={filters}           // Pass filters to EVERY line table
+        />
+      ))}
+    </div>
+  );
+}
+```
+
+### STEP 2: EACH LINE TABLE FILTERS ITS OWN DATA
+
+```jsx
+function LineTable({ line, searchTerm, filters }) {
+  const allLineOrders = getOrdersForLine(line);
+  
+  // Filter orders based on search term
+  const filteredOrders = useMemo(() => {
+    if (!searchTerm || !searchTerm.trim()) return allLineOrders;
+    
+    const term = searchTerm.toLowerCase().trim();
+    
+    return allLineOrders.filter(order => {
+      // Search across all relevant fields
+      const searchableFields = [
+        order.fpr,
+        order.planned_order_fg,
+        order.planned_order_sfg,
+        order.production_order_fg1,
+        order.production_order_sfg1,
+        order.material_code_sfg,
+        order.material_code_fg,
+        order.item_description,
+        order.category,
+        order.form,
+        order.status,
+        order.avail_date,
+        String(order.volume),
+        String(order.prio),
+      ];
+      
+      return searchableFields.some(field => {
+        if (!field) return false;
+        return String(field).toLowerCase().includes(term);
+      });
+    });
+  }, [allLineOrders, searchTerm]);
+  
+  // Apply additional filters if any
+  const finalOrders = useMemo(() => {
+    if (!filters || Object.keys(filters).length === 0) return filteredOrders;
+    return applyFilters(filteredOrders, filters);
+  }, [filteredOrders, filters]);
+  
+  // If no orders match search on this line, show a message or hide
+  if (finalOrders.length === 0 && searchTerm.trim()) {
+    return (
+      <div className="line-table-container">
+        <div className="line-table-header">
+          <span className="line-label">📋 {line}</span>
+          <span className="line-order-count">0 orders matching</span>
+        </div>
+        <div className="line-no-results">
+          No orders matching "{searchTerm}" on {line}
+        </div>
+      </div>
+    );
+  }
+  
+  // If no orders at all on this line (regardless of search)
+  if (allLineOrders.length === 0) {
+    return (
+      <div className="line-table-container">
+        <div className="line-table-header">
+          <span className="line-label">📋 {line}</span>
+        </div>
+        <div className="line-no-orders">No orders.</div>
+      </div>
+    );
+  }
+  
+  return (
+    <div className="line-table-container">
+      <div className="line-table-header">
+        <span className="line-label">📋 {line}</span>
+        <span className="line-order-count">
+          {searchTerm.trim() 
+            ? `${finalOrders.length} of ${allLineOrders.length} orders`
+            : `${allLineOrders.length} orders`
+          }
+        </span>
+      </div>
+      
+      <table className="order-table">
+        {/* ... table header ... */}
+        <tbody>
+          {finalOrders.map(order => (
+            <OrderRow key={order.id} order={order} />
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+```
+
+### STEP 3: METRICS CARDS — COUNT ACROSS ALL FILTERED LINES
+
+The metrics cards (Total Orders, Active Orders, Urgent Orders, etc.) should also reflect the filtered results across ALL lines:
+
+```javascript
+function getAllFilteredOrders(searchTerm, filters) {
+  const allOrders = getAllOrders(); // All orders across all lines
+  
+  if (!searchTerm || !searchTerm.trim()) return allOrders;
+  
+  const term = searchTerm.toLowerCase().trim();
+  
+  return allOrders.filter(order => {
+    const searchableFields = [
+      order.fpr,
+      order.planned_order_fg,
+      order.planned_order_sfg,
+      order.production_order_fg1,
+      order.production_order_sfg1,
+      order.material_code_sfg,
+      order.material_code_fg,
+      order.item_description,
+      order.category,
+      order.form,
+      order.status,
+      order.avail_date,
+      String(order.volume),
+      String(order.prio),
+    ];
+    
+    return searchableFields.some(field => {
+      if (!field) return false;
+      return String(field).toLowerCase().includes(term);
+    });
+  });
+}
+```
+
+### STEP 4: ALSO APPLY TO LINE-SPECIFIC TABS
+
+When user is on a specific line tab (e.g., "Line 1" tab), the search bar should only filter that line's orders. The fix above should only change the "All" tab behavior. Individual line tabs already filter correctly since they only show one line.
+
+```jsx
+function OrdersPage() {
+  const [activeTab, setActiveTab] = useState('all');
+  const [searchTerm, setSearchTerm] = useState('');
+  
+  return (
+    <div>
+      {/* Tabs */}
+      <div className="tab-bar">
+        <button onClick={() => setActiveTab('all')}>All {totalCount}</button>
+        <button onClick={() => setActiveTab('line1')}>Line 1 {line1Count}</button>
+        <button onClick={() => setActiveTab('line2')}>Line 2 {line2Count}</button>
+        {/* ... other line tabs ... */}
+      </div>
+      
+      {/* Search bar — shared, always visible */}
+      <div className="search-bar-container">
+        <input
+          type="text"
+          placeholder="Search by item, material code, FPR..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+        />
+      </div>
+      
+      {/* Tab content */}
+      {activeTab === 'all' && (
+        <AllOrdersTab searchTerm={searchTerm} />
+      )}
+      {activeTab === 'line1' && (
+        <LineTable line="Line 1" searchTerm={searchTerm} />
+      )}
+      {activeTab === 'line2' && (
+        <LineTable line="Line 2" searchTerm={searchTerm} />
+      )}
+      {/* ... other line tabs ... */}
+    </div>
+  );
+}
+```
+
+### STEP 5: NO-RESULTS STYLING
+
+```css
+.line-no-results {
+  padding: 20px;
+  text-align: center;
+  font-size: 12px;
+  color: #9ca3af;
+  font-style: italic;
+  background: #fafafa;
+  border-radius: 6px;
+  margin: 8px 0;
+}
+
+.line-no-orders {
+  padding: 20px;
+  text-align: center;
+  font-size: 12px;
+  color: #d1d5db;
+  font-style: italic;
+}
+
+.line-order-count {
+  font-size: 11px;
+  color: #6b7280;
+  font-weight: 400;
+}
+```
+
+---
+
+### VERIFICATION
+
+1. Search in "All" tab
+   - ✅ Typing in search bar filters orders on ALL line tables (Line 1, Line 2, etc.)
+   - ✅ Each line table shows only matching orders
+   - ✅ Lines with no matching orders show "No orders matching [term] on Line X"
+   - ✅ Metrics cards update to reflect filtered totals across all lines
+
+2. Search across fields
+   - ✅ Search by item description (e.g., "Elite XP") → filters across all lines
+   - ✅ Search by material code (e.g., "1000000000241") → filters across all lines
+   - ✅ Search by FPR (e.g., "260330") → shows all matching on all lines
+   - ✅ Search by category (e.g., "Hogs") → filters across all lines
+   - ✅ Search by status (e.g., "Plotted") → filters across all lines
+
+3. Clear search
+   - ✅ Clearing search term shows all orders on all lines again
+   - ✅ Metrics cards revert to full totals
+
+4. Line-specific tabs
+   - ✅ Search on Line 1 tab only filters Line 1 orders (existing behavior, unchanged)
+   - ✅ Search on Line 2 tab only filters Line 2 orders
+
+5. Performance
+   - ✅ Search filtering is responsive (no lag on typing)
+   - ✅ Uses useMemo to prevent unnecessary recalculations
+```

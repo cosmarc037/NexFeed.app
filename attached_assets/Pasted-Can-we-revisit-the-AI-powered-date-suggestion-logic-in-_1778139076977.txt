@@ -1,0 +1,62 @@
+Can we revisit the AI-powered date suggestion logic in the sequencing? I’m noticing that the AI sequence is not yet meaningfully changing the dates, even though the strategy is supposed to advance or defer orders based on their Future Dispatches status.
+
+For context, these are the intended rules we already agreed on:
+
+- If an order is **Critical**, it should be scheduled for **TODAY** if feasible
+- If an order is **Urgent** or **Monitor**, it can be **advanced earlier**, but it should **not go beyond its target date**
+- If an order is **Sufficient**, it can either be:
+  - **advanced earlier**, or
+  - **moved later beyond the target date up to 14 days**
+
+### Current issue observed
+From the preview, it looks like:
+- some rows only change color/status styling
+- but the **actual scheduled date often stays the same**
+- and the AI is not strongly using empty or lightly loaded days as candidate dates
+- also, I’m barely seeing any **Sufficient** orders being moved beyond their target date, even though that should be allowed
+
+So the output does not yet feel aligned with what the AI strategy is supposed to do.
+
+### What needs improvement
+Please improve the AI date-placement behavior so it actually evaluates better dates and applies them, instead of mostly keeping the original date.
+
+Specifically:
+
+1. **Do not treat a color/status change as a date optimization**
+   - A date should only count as changed if the actual scheduled date changed
+   - If the strategy says an order was advanced/deferred, the row should reflect a real date movement
+
+2. **Actively evaluate candidate dates**
+   - Look for dates with no lineup or low existing load
+   - Use those dates as strong candidates when moving flexible orders
+   - The AI should not default to keeping the current date unless it is truly the best valid option
+
+3. **Apply the Future Dispatches rules more strongly**
+   - Critical → should be moved to TODAY where feasible
+   - Urgent / Monitor → can move earlier, but not later than target date
+   - Sufficient → can move earlier or later up to +14 days beyond target date
+
+4. **Make better use of Sufficient orders**
+   - These should be used as flexible load-shifters
+   - If later dates are open, the AI should sometimes move Sufficient orders beyond their target date when that helps free earlier capacity for higher-priority orders
+
+5. **If the AI keeps the same date, make sure it’s for a reason**
+   - for example:
+     - no earlier valid slot exists
+     - target date boundary prevents movement
+     - moving it would worsen line load or changeovers
+   - but right now it feels like many dates stay unchanged too easily
+
+6. **The After table should show actual schedule improvement**
+   - If the selected AI strategy says it is advancing or optimizing dates, then the final dates in the table should visibly reflect that
+   - not just different colors with mostly the same dates
+
+### Expected behavior
+- More actual date changes when the AI strategy is date-optimization focused
+- Critical orders visibly pulled to TODAY where possible
+- Urgent/Monitor orders visibly advanced earlier within allowed limits
+- Sufficient orders sometimes deferred beyond target date when beneficial and within the +14 day rule
+- Empty or low-load dates used more intentionally
+- AI reasoning should match the actual date movement (or explain why a date could not move)
+
+Please review the current date candidate selection logic and improve it so the AI is truly suggesting and applying better dates, not just updating the visual status.

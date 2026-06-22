@@ -1,0 +1,155 @@
+```
+Implement the following fix to the NexFeed application:
+
+---
+
+## FIX: FPR NOTES AND SPECIAL REMARKS — RESTORE EDITABILITY
+
+The FPR Notes and Special Remarks columns are no longer editable. Users cannot click to add or edit notes. This must be fixed immediately.
+
+---
+
+### THE PROBLEM
+
+The recent changes (click-to-expand popup, ellipsis truncation, column resizing) likely broke the edit functionality. The click handler is now opening the read-only expanded popup instead of entering edit mode, or the cell is no longer registering as editable.
+
+---
+
+### THE FIX — TWO DISTINCT INTERACTIONS
+
+FPR Notes and Special Remarks need TWO click behaviors:
+
+**1. Single click on truncated text (with ellipsis) → Opens read-only expanded popup**
+**2. Double click on the cell → Enters edit mode**
+
+OR alternatively (simpler):
+
+**1. Single click on the cell → Enters edit mode directly (like before)**
+**2. The expanded popup is triggered by a small expand icon instead of clicking the text**
+
+### RECOMMENDED APPROACH — SINGLE CLICK TO EDIT, ICON TO EXPAND
+
+**Default state (text visible, no truncation):**
+```
+┌──────────────────────────────────────────┐
+│ This is a note about the order           │
+└──────────────────────────────────────────┘
+```
+- Single click → enters edit mode (textarea appears).
+- Normal behavior, same as before.
+
+**Default state (text truncated with ellipsis):**
+```
+┌──────────────────────────────────────────┐
+│ This is a long note about the or...  ⤢  │
+└──────────────────────────────────────────┘
+```
+- Single click on the TEXT → enters edit mode (textarea appears).
+- Click on the ⤢ expand icon → opens the read-only expanded popup.
+
+**Default state (empty — no notes):**
+```
+┌──────────────────────────────────────────┐
+│ Add note...                              │
+└──────────────────────────────────────────┘
+```
+- Single click → enters edit mode (textarea appears).
+- Placeholder "Add note..." in grey italic.
+
+---
+
+### EXPAND ICON (⤢)
+
+A small expand icon appears in the top-right corner of the cell ONLY when text is truncated.
+
+| Property | Value |
+|---|---|
+| Icon | ⤢ (expand) or ↗ (external) or a small square-with-arrow icon |
+| Size | 12px |
+| Color | Grey (#9ca3af) |
+| Hover color | Orange (#fd5108) |
+| Position | Top-right corner of the cell |
+| Cursor | Pointer |
+| Visibility | Only shown when text is truncated (ellipsis is active) |
+| Tooltip | "View full text" |
+
+**On click of expand icon:**
+- Opens the read-only expanded popup (as previously defined).
+- The popup includes [Edit] and [Close] buttons.
+- Clicking [Edit] in the popup closes the popup and enters edit mode on the cell.
+
+---
+
+### EDIT MODE — SAME AS BEFORE
+
+When the user clicks on the cell text (not the expand icon):
+
+```
+┌──────────────────────────────────────────┐
+│ This is a note about the order           │
+│ that I am editing right now with more    │
+│ details about production requirements    │
+│                                          │
+│                      [Cancel]  [Save]    │
+└──────────────────────────────────────────┘
+```
+
+| Property | Value |
+|---|---|
+| Input type | Textarea (multi-line) |
+| Width | 100% of cell width |
+| Min height | 60px |
+| Max height | 150px |
+| Font size | 13px (same as display) |
+| Border | 1px solid #fd5108 (orange focus border) |
+| Border radius | 4px |
+| Padding | 8px |
+| Resize | Vertical only |
+
+**[Save] button:**
+- Orange filled (#fd5108), white text, 11px.
+- Saves the note and exits edit mode.
+- Keyboard shortcut: Ctrl+Enter.
+
+**[Cancel] button:**
+- Grey outlined, grey text, 11px.
+- Discards changes and exits edit mode.
+- Keyboard shortcut: Escape.
+
+---
+
+### APPLY TO BOTH COLUMNS
+
+| Column | Editable? | Click to expand? |
+|---|---|---|
+| FPR Notes | ✅ Yes — single click to edit | ✅ Yes — via ⤢ icon when truncated |
+| Special Remarks | ✅ Yes — single click to edit | ✅ Yes — via ⤢ icon when truncated |
+| Sacks | ❌ Read-only | ✅ Yes — single click opens popup (no edit) |
+| Tags | ❌ Read-only | ✅ Yes — single click opens popup (no edit) |
+
+---
+
+### PRIORITY OF INTERACTIONS
+
+| Action | FPR Notes / Special Remarks | Sacks / Tags |
+|---|---|---|
+| Single click on text | Enter edit mode | Open expanded popup |
+| Click on ⤢ icon | Open expanded popup | Open expanded popup |
+| Double click | Enter edit mode | Open expanded popup |
+| Hover | Pointer cursor | Pointer cursor (if truncated) |
+
+---
+
+### VERIFICATION
+
+After fixing:
+
+1. Click on an empty FPR Notes cell → should enter edit mode with textarea.
+2. Type a note, click Save → note is saved and displayed.
+3. Click on an existing note → should enter edit mode with existing text.
+4. For a long note with ellipsis, click the ⤢ icon → should open expanded popup.
+5. In the expanded popup, click [Edit] → should close popup and enter edit mode.
+6. Repeat all steps for Special Remarks column.
+7. Click on truncated Sacks text → should open expanded popup (read-only, no edit).
+8. Click on truncated Tags text → should open expanded popup (read-only, no edit).
+```

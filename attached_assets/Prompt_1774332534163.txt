@@ -1,0 +1,80 @@
+```
+Implement the following change to the NexFeed application:
+
+---
+
+## ADD ORDER BUTTON — PLACEMENT IN TABLE HEADER CONTAINER
+
+Place the "+ Add Order" button inside the order table's header container bar, on the left side.
+
+---
+
+### LAYOUT
+
+The order table already has a header container bar above the table (the bar that contains "📋 Line 1" and "10 orders"). Add the "+ Add Order" button inside this container.
+
+**Updated header container:**
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  + Add Order                                             │
+├─────────────────────────────────────────────────────────┤
+│          ORDER DETAILS          │  PRODUCTION PARAMETERS │
+├─────────────────────────────────┤────────────────────────┤
+│ Prio │ FPR │ Planned Order │ ...│ Form │ Volume │ ...    │
+```
+
+- "+ Add Order" sits on the LEFT side of the header container
+- Nothing else in the header container — no line label, no order count (those are handled elsewhere)
+- Clean, single-purpose header bar
+
+---
+
+### BUTTON STYLING
+
+| Property | Value |
+|---|---|
+| Text | "+ Add Order" |
+| Font size | 12px |
+| Font weight | 500 |
+| Color | Orange (#fd5108) |
+| Background | Transparent |
+| Border | 1px solid #fd5108 |
+| Border radius | 6px |
+| Padding | 6px 14px |
+| Cursor | Pointer |
+| Hover background | Light orange (#fff7ed) |
+| Hover border | 1px solid #e8490b |
+| Icon | + (plus) before the text |
+
+---
+
+### HEADER CONTAINER STYLING
+
+| Property | Value |
+|---|---|
+| Background | White (#ffffff) or very light grey (#f9fafb) — match existing |
+| Height | Same as current header container |
+| Padding | 8px 16px |
+| Border-bottom | 1px solid #e5e7eb |
+| Display | Flex, align-items: center |
+
+---
+
+### APPEARS ON EVERY LINE AND ALL TAB
+
+The "+ Add Order" button appears in the header container of:
+
+| Tab | Shows button? |
+|---|---|
+| All tab | ✅ Yes (dialog includes line selector) |
+| Line 1 | ✅ Yes (line pre-selected to Line 1) |
+| Line 2 | ✅ Yes (line pre-selected to Line 2) |
+| Line 3 | ✅ Yes |
+| Line 4 | ✅ Yes |
+| Line 5 | ✅ Yes |
+| Line 6 | ✅ Yes |
+| Line 7 | ✅ Yes |
+
+Each line's table has its own header container with its own "+ Add Order" button.
+```

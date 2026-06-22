@@ -1,0 +1,164 @@
+```
+Update the AI prompt for Insertion Position to fix the output format:
+
+---
+
+## FIX: INSERTION POSITION OUTPUT FORMAT
+
+### ISSUE 1: Output starts with just a number instead of "Priority X"
+### ISSUE 2: AI says the position is "correct" which sounds like it's validating itself
+
+### UPDATED PROMPT — RESPONSE FORMAT SECTION
+
+Replace the response format instruction at the bottom of buildCombineAnalysisPrompt:
+
+```javascript
+// Replace this:
+`RESPOND IN THIS FORMAT:
+
+Insertion Position:
+${insertion.prio}. [Your 2-3 sentence explanation of why Priority ${insertion.prio} is the correct position.]`
+
+// With this:
+`RESPOND IN THIS FORMAT:
+
+Insertion Position:
+Priority ${insertion.prio}. [Your 2-3 sentence explanation.]
+
+RULES FOR YOUR RESPONSE:
+- You MUST start with "Priority ${insertion.prio}." — not just the number.
+- Do NOT say the position is "correct" or "is correct because". You are recommending, not validating.
+- Use natural phrasing like:
+  - "Priority ${insertion.prio}. The combined order takes this position because..."
+  - "Priority ${insertion.prio}. This is the position of the order with the earliest avail date..."
+  - "Priority ${insertion.prio}. Since both orders are non-dated, the combined order takes the lowest priority number..."
+- Keep to 2-3 sentences.
+- Do not use markdown.
+- Do not repeat the word "correct".`
+```
+
+### ALSO UPDATE THE INSERTION INSTRUCTION SECTIONS
+
+For dated orders:
+
+```javascript
+insertionInstruction = `
+INSERTION POSITION — YOU MUST STATE PRIORITY ${insertion.prio}:
+The combined order will be inserted at Priority ${insertion.prio}.
+This is because the order with the earliest avail date (${formattedDate}) is "${insertion.orderName}", currently at Priority ${insertion.prio}.
+Rule: For dated orders, the combined order always takes the position of the order with the earliest avail date.
+
+You MUST start your response with "Priority ${insertion.prio}." — not just the number "${insertion.prio}".
+Do NOT say the position is "correct". Use phrases like "takes this position because" or "is placed here since".
+Explain naturally — mention the avail date, the product name, and why this position makes sense in the schedule.`;
+```
+
+For non-dated orders:
+
+```javascript
+insertionInstruction = `
+INSERTION POSITION — YOU MUST STATE PRIORITY ${insertion.prio}:
+The combined order will be inserted at Priority ${insertion.prio}.
+This is because "${insertion.orderName}" has the lowest priority number (${insertion.prio}) among the orders being combined.
+Rule: For non-dated orders, the combined order always takes the position of the lowest priority number.
+
+You MUST start your response with "Priority ${insertion.prio}." — not just the number "${insertion.prio}".
+Do NOT say the position is "correct". Use phrases like "takes this position because" or "is placed here since".
+Explain naturally — mention the current sequence context and why this position is appropriate.`;
+```
+
+### EXPECTED OUTPUT EXAMPLES
+
+For dated:
+```
+Priority 1. The combined order takes this position because 
+Salto Conditioner P 1kg (Bundle) has the earliest avail date 
+(March 19, 2026) among the orders being combined. This ensures 
+the combined order meets the earliest delivery deadline.
+```
+
+For non-dated:
+```
+Priority 3. The combined order takes this position since both 
+orders are non-dated and Priority 3 is the lowest priority 
+number among the orders being combined. This maintains the 
+existing scheduling flow without disrupting higher-priority orders.
+```
+
+### SAFETY — CLEAN RESPONSE IF AI STILL STARTS WITH JUST A NUMBER
+
+```javascript
+function cleanInsertionResponse(response, expectedPrio) {
+  let cleaned = response.trim();
+  
+  // Remove markdown
+  cleaned = cleaned.replace(/\*\*/g, '');
+  cleaned = cleaned.replace(/#{1,6}\s*/g, '');
+  
+  // Remove "Insertion Position:" label if AI includes it
+  cleaned = cleaned.replace(/^Insertion Position:\s*/i, '');
+  
+  // If starts with just a number like "11." or "2.", prepend "Priority"
+  const startsWithNumber = /^\d+\.\s/.test(cleaned);
+  if (startsWithNumber && !cleaned.toLowerCase().startsWith('priority')) {
+    cleaned = 'Priority ' + cleaned;
+  }
+  
+  // Remove "correct" phrasing
+  cleaned = cleaned.replace(/is correct because/gi, 'takes this position because');
+  cleaned = cleaned.replace(/is correct since/gi, 'is placed here since');
+  cleaned = cleaned.replace(/is correct as/gi, 'is placed here as');
+  cleaned = cleaned.replace(/correct position/gi, 'position');
+  
+  return cleaned;
+}
+```
+
+### USE IN THE COMPONENT
+
+```javascript
+async function generateAllAnalyses() {
+  setIsAnalyzing(true);
+  try {
+    const context = buildCombineAnalysisContext(group, lineOrders, masterData, n10dData, changeoverRules);
+    const prompt = buildCombineAnalysisPrompt(context);
+    const response = await callAI(prompt);
+    const parsed = parseCombineAnalysisResponse(response);
+    
+    // Clean insertion response
+    const cleanedInsertion = cleanInsertionResponse(
+      parsed.insertionPosition, 
+      context.insertionResult.prio
+    );
+    
+    setInsertionAnalysis(cleanedInsertion);
+    setSchedulingAnalysis(parsed.schedulingImpact);
+    setAlertsAnalysis(parsed.alerts);
+  } catch (error) {
+    // ... error handling
+  } finally {
+    setIsAnalyzing(false);
+  }
+}
+```
+
+---
+
+## VERIFICATION
+
+### Format
+1. ✅ Always starts with "Priority X." — never just a number
+2. ✅ "11. Priority 11..." → cleaned to "Priority 11..."
+3. ✅ "2. This position..." → cleaned to "Priority 2. This position..."
+
+### Language
+4. ✅ Never says "is correct because"
+5. ✅ Uses "takes this position because" or "is placed here since"
+6. ✅ Natural explanation without self-validation tone
+
+### Safety
+7. ✅ cleanInsertionResponse handles edge cases
+8. ✅ Strips markdown and labels
+9. ✅ Prepends "Priority" if missing
+10. ✅ Replaces "correct" phrasing automatically
+```

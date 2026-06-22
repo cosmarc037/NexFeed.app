@@ -1,0 +1,371 @@
+```
+Implement the following fix:
+
+---
+
+## FIX: COMPLETION DATE CASCADE — INCLUDE PREVIOUS ORDER'S CHANGEOVER
+
+The estimated completion date calculation is incorrect. The app is not properly adding the previous order's changeover time between consecutive orders.
+
+---
+
+### THE CORRECT FORMULA
+
+```
+Order N start time = Order (N-1) completion time + Order (N-1) changeover
+Order N completion time = Order N start time + Order N production hours
+Order N production hours = Order N volume / Order N run rate
+```
+
+Changeover is the PREVIOUS order's changeover (total, including any additional rules), and it represents the gap between one order finishing and the next order starting.
+
+### EXAMPLE — CORRECT CALCULATION
+
+```
+Order 1: 24 MT, Rate 19.40, CO 0.83
+  Start: 08:00 AM
+  Production: 24 / 19.40 = 1.237 hrs
+  Completion: 08:00 + 1.237 hrs = 09:14 AM
+
+Order 2: 80 MT, Rate 19.10, CO 0.83
+  Start: 09:14 AM + 0.83 hrs (Order 1's CO) = 10:04 AM
+  Production: 80 / 19.10 = 4.188 hrs
+  Completion: 10:04 AM + 4.188 hrs = 02:15 PM
+
+Order 3: 3 MT, Rate 19.31, CO 0.17
+  Start: 02:15 PM + 0.83 hrs (Order 2's CO) = 03:05 PM
+  Production: 3 / 19.31 = 0.155 hrs
+  Completion: 03:05 PM + 0.155 hrs = 03:14 PM
+
+Order 4: 39 MT, Rate 19.51, CO 0.17
+  Start: 03:14 PM + 0.17 hrs (Order 3's CO) = 03:24 PM
+  Production: 39 / 19.51 = 1.999 hrs
+  Completion: 03:24 PM + 1.999 hrs = 05:24 PM
+
+Order 5: 80 MT, Rate 19.14, CO 0.83
+  Start: 05:24 PM + 0.17 hrs (Order 4's CO) = 05:34 PM
+  Production: 80 / 19.14 = 4.179 hrs
+  Completion: 05:34 PM + 4.179 hrs = 09:45 PM
+```
+
+---
+
+### THE FIX
+
+```javascript
+function recalculateCompletionDates(allOrders) {
+  // Group orders by line
+  const ordersByLine = {};
+  allOrders.forEach(order => {
+    if (!ordersByLine[order.line]) {
+      ordersByLine[order.line] = [];
+    }
+    ordersByLine[order.line].push(order);
+  });
+  
+  Object.keys(ordersByLine).forEach(line => {
+    const lineOrders = ordersByLine[line].sort((a, b) => a.prio - b.prio);
+    
+    let previousCompletionTime = null;
+    let previousChangeover = 0;
+    
+    lineOrders.forEach((order, index) => {
+      // Skip Done and Cancelled — they already have fixed dates
+      if (order.status === 'Done' || order.status === 'Cancel PO') {
+        // But still track their completion for the next order
+        if (order.completion_date) {
+          previousCompletionTime = parseDateTime(order.completion_date);
+          previousChangeover = order._changeoverTotal ?? parseFloat(order.changeover) ?? 0;
+        }
+        return;
+      }
+      
+      // Calculate production hours
+      const volume = parseFloat(order.volume) || 0;
+      const runRate = parseFloat(order.run_rate) || 0;
+      const productionHours = runRate > 0 ? volume / runRate : 0;
+      
+      // Determine start time
+      let startTime;
+      
+      if (index === 0 || !previousCompletionTime) {
+        // First order on the line — use manually set start date/time
+        if (order.start_date && order.start_time) {
+          startTime = parseDateTime(`${order.start_date} ${order.start_time}`);
+        } else if (order.start_date) {
+          startTime = parseDateTime(`${order.start_date} 08:00 AM`);
+        } else {
+          // No start date set — cannot calculate
+          previousCompletionTime = null;
+          previousChangeover = order._changeoverTotal ?? parseFloat(order.changeover) ?? 0;
+          return;
+        }
+      } else {
+        // Subsequent orders: start = previous completion + PREVIOUS order's changeover
+        startTime = new Date(previousCompletionTime.getTime() + (previousChangeover * 60 * 60 * 1000));
+      }
+      
+      // Calculate completion time
+      const completionTime = new Date(startTime.getTime() + (productionHours * 60 * 60 * 1000));
+      
+      // Store calculated times on the order
+      order._calculatedStartTime = startTime;
+      order._calculatedCompletionTime = completionTime;
+      order.completion_date = formatDateTime(completionTime);
+      
+      // Update display values
+      if (index > 0 && previousCompletionTime) {
+        order._inferredStartDate = formatDate(startTime);
+        order._inferredStartTime = formatTime(startTime);
+      }
+      
+      // Track for next order
+      previousCompletionTime = completionTime;
+      previousChangeover = order._changeoverTotal ?? parseFloat(order.changeover) ?? 0;
+    });
+  });
+}
+```
+
+### HELPER FUNCTIONS
+
+```javascript
+function parseDateTime(dateTimeStr) {
+  if (!dateTimeStr) return null;
+  
+  // Handle various formats
+  const date = new Date(dateTimeStr);
+  if (!isNaN(date.getTime())) return date;
+  
+  // Try manual parsing for "April 08, 2026 08:00 AM" format
+  // Or "04/08/2026 08:00 AM"
+  // Add more format handling as needed
+  
+  return null;
+}
+
+function formatDateTime(date) {
+  if (!date) return '';
+  
+  const options = {
+    year: 'numeric',
+    month: 'long',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true
+  };
+  
+  return date.toLocaleString('en-US', options);
+}
+
+function formatDate(date) {
+  if (!date) return '';
+  return date.toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'long',
+    day: '2-digit'
+  });
+}
+
+function formatTime(date) {
+  if (!date) return '';
+  return date.toLocaleTimeString('en-US', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true
+  });
+}
+```
+
+### DISPLAY FORMAT IN ORDER TABLE
+
+The completion date column should show:
+
+```
+April 08, 2026
+02:15 PM
+```
+
+```jsx
+function CompletionDateCell({ order }) {
+  if (!order.completion_date && !order._calculatedCompletionTime) {
+    return <td className="completion-date-cell">Set completion</td>;
+  }
+  
+  const completionTime = order._calculatedCompletionTime 
+    ? order._calculatedCompletionTime 
+    : parseDateTime(order.completion_date);
+  
+  if (!completionTime) {
+    return <td className="completion-date-cell">Set completion</td>;
+  }
+  
+  return (
+    <td className="completion-date-cell">
+      <div className="completion-date">{formatDate(completionTime)}</div>
+      <div className="completion-time">{formatTime(completionTime)}</div>
+    </td>
+  );
+}
+```
+
+---
+
+### CALL RECALCULATE ON ALL RELEVANT EVENTS
+
+```javascript
+// After any of these events, recalculate completion dates:
+
+// 1. Drag and drop reorder
+function handleDragEnd() {
+  // ... reorder logic ...
+  recalculateAllChangeovers(allOrders, changeoverRules);
+  recalculateCompletionDates(allOrders);
+}
+
+// 2. Auto-sequence apply
+function applyAutoSequence() {
+  // ... sequence logic ...
+  recalculateAllChangeovers(allOrders, changeoverRules);
+  recalculateCompletionDates(allOrders);
+}
+
+// 3. Add new order
+function handleAddOrder() {
+  // ... add logic ...
+  recalculateAllChangeovers(allOrders, changeoverRules);
+  recalculateCompletionDates(allOrders);
+}
+
+// 4. Volume change
+function handleVolumeChange() {
+  // ... volume logic ...
+  recalculateCompletionDates(allOrders);
+}
+
+// 5. Status change
+function handleStatusChange() {
+  // ... status logic ...
+  recalculateAllChangeovers(allOrders, changeoverRules);
+  recalculateCompletionDates(allOrders);
+}
+
+// 6. Start date/time change
+function handleStartDateTimeChange() {
+  // ... date logic ...
+  recalculateCompletionDates(allOrders);
+}
+
+// 7. Master data re-apply (changeover may change)
+function handleReapplyMasterData() {
+  // ... reapply logic ...
+  recalculateAllChangeovers(allOrders, changeoverRules);
+  recalculateCompletionDates(allOrders);
+}
+
+// 8. Changeover rules save
+function handleSaveChangeoverRules() {
+  // ... save logic ...
+  recalculateAllChangeovers(allOrders, changeoverRules);
+  recalculateCompletionDates(allOrders);
+}
+
+// 9. Divert order
+function handleDivertOrder() {
+  // ... divert logic ...
+  recalculateAllChangeovers(allOrders, changeoverRules);
+  recalculateCompletionDates(allOrders);
+}
+
+// 10. Combine orders
+function handleCombineOrders() {
+  // ... combine logic ...
+  recalculateAllChangeovers(allOrders, changeoverRules);
+  recalculateCompletionDates(allOrders);
+}
+
+// 11. Initial page load
+useEffect(() => {
+  recalculateAllChangeovers(allOrders, changeoverRules);
+  recalculateCompletionDates(allOrders);
+}, []);
+```
+
+---
+
+### IMPORTANT — PRODUCTION TIME DISPLAY DOES NOT INCLUDE CHANGEOVER
+
+The "Production Time" column shows ONLY volume / rate:
+
+```javascript
+function getDisplayProductionTime(order) {
+  const volume = parseFloat(order.volume) || 0;
+  const runRate = parseFloat(order.run_rate) || 0;
+  
+  if (runRate <= 0) return '0.00';
+  
+  const hours = volume / runRate;
+  return hours.toFixed(2);
+}
+```
+
+The changeover is displayed SEPARATELY in its own cell with tooltip breakdown. It is NOT added to the production time display. But it IS used in the cascade calculation for completion dates.
+
+---
+
+## VERIFICATION
+
+### Cascade calculation with the sample data
+
+```
+Order 1: 24 MT, Rate 19.40, CO 0.83, Start 08:00 AM
+  Production: 24 / 19.40 = 1.237 hrs
+  Completion: 08:00 + 1.237 = 09:14 AM ✅
+
+Order 2: 80 MT, Rate 19.10, CO 0.83
+  Start: 09:14 + 0.83 (Order 1 CO) = 10:04 AM
+  Production: 80 / 19.10 = 4.188 hrs
+  Completion: 10:04 + 4.188 = 02:15 PM ✅
+
+Order 3: 3 MT, Rate 19.31, CO 0.17
+  Start: 02:15 + 0.83 (Order 2 CO) = 03:05 PM
+  Production: 3 / 19.31 = 0.155 hrs
+  Completion: 03:05 + 0.155 = 03:14 PM ✅
+
+Order 4: 39 MT, Rate 19.51, CO 0.17
+  Start: 03:14 + 0.17 (Order 3 CO) = 03:24 PM
+  Production: 39 / 19.51 = 1.999 hrs
+  Completion: 03:24 + 1.999 = 05:24 PM ✅
+
+Order 5: 80 MT, Rate 19.14, CO 0.83
+  Start: 05:24 + 0.17 (Order 4 CO) = 05:34 PM
+  Production: 80 / 19.14 = 4.179 hrs
+  Completion: 05:34 + 4.179 = 09:45 PM ✅
+```
+
+### Formula verification
+1. ✅ Production hours = Volume / Run Rate (no changeover included)
+2. ✅ Order N start = Order (N-1) completion + Order (N-1) changeover
+3. ✅ Order N completion = Order N start + Order N production hours
+4. ✅ First order uses manually set start date/time
+5. ✅ Changeover used is the PREVIOUS order's total changeover (base + additional rules)
+
+### Auto-recalculate triggers
+6. ✅ Drag and drop → completion dates recalculate
+7. ✅ Auto-sequence → completion dates recalculate
+8. ✅ Add order → completion dates recalculate
+9. ✅ Volume change → completion dates recalculate
+10. ✅ Status change → completion dates recalculate
+11. ✅ Start date/time change → completion dates recalculate
+12. ✅ Master data re-apply → completion dates recalculate
+13. ✅ Changeover rules save → completion dates recalculate
+14. ✅ Divert → completion dates recalculate
+15. ✅ Combine → completion dates recalculate
+
+### Display
+16. ✅ Production Time column shows volume/rate only (no CO)
+17. ✅ Changeover shown separately with tooltip breakdown
+18. ✅ Completion date shows full date + time
+19. ✅ If no start date set, completion shows "Set completion"
+```

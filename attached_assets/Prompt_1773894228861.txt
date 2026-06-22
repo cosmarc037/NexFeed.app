@@ -1,0 +1,477 @@
+```
+Implement the following changes to the NexFeed application:
+
+---
+
+## 1. NAVIGATION — ADD "NEXT 10 DAYS" UNDER CONFIGURATIONS
+
+Add "Next 10 Days" as a new sub-item under the Configurations tab.
+
+**Updated navigation structure:**
+
+```
+├── Overview
+├── Orders                          ▼
+│   ├── Feedmill 1
+│   ├── Feedmill 2
+│   ├── Feedmill 3
+│   └── Powermix
+├── Analytics
+├── Configurations                  ▼
+│   ├── Order History
+│   ├── Knowledge Base
+│   └── Next 10 Days               ← NEW
+└── AI Chat (floating)
+```
+
+**"Next 10 Days" nav item:**
+- Icon: 📊 or a chart/inventory icon matching the app's icon style
+- Label: "Next 10 Days"
+- Position: Third item under Configurations, below Knowledge Base
+- Same indentation, font size, and styling as "Order History" and "Knowledge Base"
+
+---
+
+## 2. NEXT 10 DAYS — UPLOAD INTERFACE
+
+When the user clicks "Next 10 Days" in the navigation, a page opens with an upload section and a preview table.
+
+**Page title:** "Next 10 Days Stock Levels"
+
+**Description text:**
+```
+Upload the Next 10 Days stock level file to help the AI 
+prioritize prio replenish and safety stock orders based 
+on inventory demand forecasts. This file should be 
+uploaded daily.
+```
+
+**Upload area:**
+- Drag-and-drop zone or file picker button.
+- Accepts Excel files (.xlsx, .xls, .csv).
+- Label: "Upload Next 10 Days File"
+- Style: Same as the existing Knowledge Base upload area — matching the app's minimalist design.
+
+**After upload — display:**
+- Show the uploaded file name, upload date/time.
+- Show a parsed preview table (read-only, scrollable) — see Section 7.
+- Show "Last uploaded: [date, time]" indicator.
+- Show a "Replace" button to upload a new file (replaces previous data entirely).
+
+**Upload frequency indicator:**
+- Below the upload area, always show:
+  ```
+  📅 This file should be uploaded daily.
+  Last upload: [date, time]
+  ```
+- If the file hasn't been uploaded today, show an amber warning:
+  ```
+  ⚠ Stock level data may be outdated. Last upload was [X] day(s) ago ([date]).
+  Please upload today's file.
+  ```
+
+---
+
+## 3. FILE PARSING
+
+**Expected columns:**
+
+| Column | Type | Description |
+|---|---|---|
+| Material Code | Text | Product material code (matches SAP orders) |
+| Category | Text | Product category (Gamefowl, Hogs, Poultry, etc.) |
+| Item Description | Text | Product name |
+| Due for loading | Number | Current warehouse stock available for loading (MT) |
+| [Date columns — rolling] | Number | Daily loading/demand volumes for the next 10-11 days |
+| Inventory | Number | Target inventory level (MT) |
+| Bal. to produce | Number | Balance remaining to produce (can be negative or blank) |
+
+**Date column handling:**
+- The date columns are ROLLING — they change with each upload.
+- Column headers will be in formats like "Mar-18", "Mar-19", "26-Feb", "1-Mar", etc.
+- The parser must detect date-formatted column headers dynamically.
+- Parse each date header into a proper date object.
+- The number of date columns may vary (typically 10-11 days).
+- Empty cells in date columns = 0 (no demand on that day).
+
+**Parsing rules:**
+- Case-insensitive column matching for fixed columns (Material Code, Category, etc.).
+- Date columns detected by attempting to parse each column header as a date.
+- Negative "Bal. to produce" values are stored but treated as zero for prioritization purposes.
+- Match "Material Code" in this file to material_code_fg in SAP orders.
+
+---
+
+## 4. TARGET DATE CALCULATION
+
+For each product in the Next 10 Days file, calculate a "target date" — the date by which the product should be produced to meet inventory without overstocking.
+
+### ALGORITHM
+
+```
+function calculateTargetDate(product) {
+  const dueForLoading = product.due_for_loading;
+  const inventory = product.inventory;
+  const dailyValues = product.daily_values; // [{date, value}, ...]
+  
+  // If due for loading already meets or exceeds inventory, 
+  // no production needed
+  if (dueForLoading >= inventory) {
+    return { targetDate: null, status: 'stock_sufficient' };
+  }
+  
+  // If inventory is 0 or negative, no target
+  if (inventory <= 0) {
+    return { targetDate: null, status: 'stock_sufficient' };
+  }
+  
+  let cumulative = dueForLoading;
+  let previousDate = null;
+  
+  for (const day of dailyValues) {
+    if (day.value === 0 || day.value === null) {
+      previousDate = day.date;
+      continue;
+    }
+    
+    const newCumulative = cumulative + day.value;
+    
+    if (newCumulative > inventory) {
+      // Would overshoot — target date is the PREVIOUS day
+      // (last day before overstocking)
+      if (previousDate) {
+        return { targetDate: previousDate, status: 'needs_production' };
+      } else {
+        // First day already overshoots — target date is before first day
+        // Use the day before the first date column
+        const dayBefore = subtractOneDay(day.date);
+        return { targetDate: dayBefore, status: 'needs_production' };
+      }
+    }
+    
+    if (newCumulative === inventory) {
+      // Exact match — this day is the target
+      return { targetDate: day.date, status: 'needs_production' };
+    }
+    
+    cumulative = newCumulative;
+    previousDate = day.date;
+  }
+  
+  // Went through all days, never reached inventory
+  // Target = last date in the range (produce needed but demand is spread)
+  return { 
+    targetDate: dailyValues[dailyValues.length - 1].date, 
+    status: 'needs_production' 
+  };
+}
+```
+
+### EXAMPLES
+
+**Gallimax 2 Plus Ready Mix:**
+```
+Due for loading: 455.3
+Inventory: 759.3
+
+455.3 + 10.0 (Mar 18) = 465.3
++ 29.0 (Mar 19) = 494.3
++ 51.7 (Mar 20) = 546.0
++ 110.5 (Mar 21) = 656.5
++ 29.0 (Mar 22) = 685.5
++ 10.0 (Mar 23) = 695.5
++ 150.0 (Mar 24) = 845.5 ← EXCEEDS 759.3
+
+Target date = March 23 (last day before overstocking)
+```
+
+**Salto Stag Developer:**
+```
+Due for loading: 1.4
+Inventory: 23.9
+
+1.4 + 0.5 (Mar 19) = 1.9
++ 0.3 (Mar 20) = 2.2
++ 0.5 (Mar 21) = 2.7
++ 2.5 (Mar 24) = 5.2
++ 0.3 (Mar 25) = 5.5
++ 0.5 (Mar 27) = 6.0
+
+Never reaches 23.9. Target date = March 28 (last date in range)
+```
+
+**Exact match example:**
+```
+Due for loading: 100
+Inventory: 200
+
+100 + 20 (Mar 18) = 120
++ 30 (Mar 19) = 150
++ 50 (Mar 20) = 200 ← exact match
+
+Target date = March 20
+```
+
+---
+
+## 5. APPLY TARGET DATES TO SAP ORDERS
+
+When both SAP orders and the Next 10 Days file are uploaded, the app matches them and applies inferred target dates to non-dated orders.
+
+### MATCHING RULES
+
+**Match by:** Material Code (material_code_fg in SAP = Material Code in Next 10 Days)
+
+**Apply ONLY when:**
+- The order's avail date is a NON-DATE value: "prio replenish", "safety stocks", "for sched", or any other non-date text.
+- If the order has an ACTUAL avail date (e.g., "March 22, 2026"), IGNORE the Next 10 Days data — use the existing avail date for sequencing.
+
+**What happens when matched:**
+- The order receives an INFERRED target date internally.
+- The displayed avail date in the table REMAINS as "prio replenish" or "safety stocks" — the original value is NOT overwritten.
+- The inferred target date is shown as a SECONDARY reference line below the avail date.
+
+### AVAIL DATE CELL DISPLAY
+
+**Order matched with target date:**
+```
+┌─────────────────────────────────┐
+│ prio replenish                  │   ← orange text, original value
+│ 📊 Target: Mar 23              │   ← small blue text, inferred
+└─────────────────────────────────┘
+```
+
+**Order matched but stock sufficient:**
+```
+┌─────────────────────────────────┐
+│ safety stocks                   │   ← orange text
+│ 📊 Stock sufficient             │   ← small grey italic text
+└─────────────────────────────────┘
+```
+
+**Order not matched (material code not in Next 10 Days):**
+```
+┌─────────────────────────────────┐
+│ prio replenish                  │   ← orange text, no secondary line
+└─────────────────────────────────┘
+```
+
+**Target date line styling:**
+- "📊 Target:" label: grey (#9ca3af), 10px
+- Date value: blue (#3b82f6), 10px, semi-bold
+- "📊 Stock sufficient": grey (#9ca3af), 10px, italic
+
+### STORAGE
+
+Store per product:
+```
+{
+  material_code: "1000000000039",
+  category: "Gamefowl",
+  item_description: "Gallimax 2 Plus Ready Mix (Natural) 50kg",
+  due_for_loading: 455.3,
+  inventory: 759.3,
+  daily_values: [
+    { date: "2026-03-18", value: 10.0 },
+    { date: "2026-03-19", value: 29.0 },
+    ...
+  ],
+  bal_to_produce: -166.2,
+  target_date: "2026-03-23",
+  needs_production: true
+}
+```
+
+---
+
+## 6. AUTO-SEQUENCE — USE TARGET DATES FOR PRIORITIZATION
+
+Update auto-sequence and auto-sort logic to use inferred target dates for non-dated orders.
+
+### PRIORITY HIERARCHY FOR SEQUENCING
+
+```
+1. Orders with actual avail dates (from SAP) — sorted chronologically
+2. Orders with inferred target dates (from Next 10 Days) — sorted 
+   chronologically, INTERLEAVED with actual dated orders based on date
+3. Non-dated orders WITHOUT an inferred target date — placed after 
+   all dated/targeted orders
+4. Orders with "Stock sufficient" flag — placed at the very bottom
+```
+
+### INTERLEAVING EXAMPLE
+
+```
+Orders:
+- Order 1: Avail = March 22 (actual)
+- Order 2: Avail = prio replenish, Target = March 19 (inferred)
+- Order 3: Avail = safety stocks, Target = March 25 (inferred)
+- Order 4: Avail = March 23 (actual)
+- Order 5: Avail = March 24 (actual)
+- Order 6: Avail = prio replenish, No target (no match)
+- Order 7: Avail = safety stocks, Stock sufficient
+
+Sorted sequence:
+Prio 1: Order 2 — prio replenish (Target: Mar 19) ← earliest
+Prio 2: Order 1 — March 22 (actual)
+Prio 3: Order 4 — March 23 (actual)
+Prio 4: Order 5 — March 24 (actual)
+Prio 5: Order 3 — safety stocks (Target: Mar 25)
+Prio 6: Order 6 — prio replenish (no target, no priority)
+Prio 7: Order 7 — safety stocks (stock sufficient, lowest)
+```
+
+### DRAG-AND-DROP ENFORCEMENT
+
+Orders with inferred target dates follow the SAME chronological drag-and-drop rules as actual dated orders:
+
+- Target: March 19 CANNOT be placed after Avail/Target: March 22.
+- Target: March 25 CANNOT be placed before Avail/Target: March 23.
+- Both actual avail dates and inferred target dates are considered together in the chronological sequence.
+- Non-dated orders WITHOUT target dates remain freely movable.
+
+**Drop rejection toast:**
+```
+┌─────────────────────────────────────────────────────┐
+│ ⚠ Cannot place order here                           │
+│                                                      │
+│ FPR: 260309 (Target: Mar 19) cannot be placed        │
+│ after FPR: 260310 (Avail: Mar 22). Orders must       │
+│ maintain chronological sequence.                     │
+└─────────────────────────────────────────────────────┘
+```
+
+### AUTO-SORT ON NEXT 10 DAYS UPLOAD
+
+When the Next 10 Days file is uploaded:
+
+1. Calculate target dates for all products.
+2. Match target dates to existing SAP orders by material code.
+3. Re-sort the entire table per line:
+   - Actual dated orders maintain their chronological positions.
+   - Non-dated orders with new target dates are inserted into correct chronological positions.
+   - Non-dated orders without target dates stay at the bottom.
+   - "Stock sufficient" orders go to the very bottom.
+4. Prio numbers re-sequence.
+5. Show notification:
+   ```
+   ✅ Next 10 Days Applied
+   
+   15 orders matched with stock level data.
+   • 12 orders received target dates
+   • 3 orders flagged as "Stock sufficient"
+   
+   Orders have been re-sorted based on updated priorities.
+   ```
+
+---
+
+## 7. PREVIEW TABLE IN CONFIGURATIONS
+
+After uploading the Next 10 Days file, show a parsed preview table on the Next 10 Days page.
+
+**Table columns:**
+- Material Code
+- Category
+- Item Description
+- Due for Loading
+- [Rolling date columns — dynamically generated from the file]
+- Inventory
+- Bal. to Produce
+- **Calculated Target Date** (NEW — added by the app)
+- **Status** (NEW — added by the app)
+
+**Target Date column:**
+- Shows the calculated target date (e.g., "Mar 23").
+- Blue text (#3b82f6), semi-bold.
+- If no target date (stock sufficient): shows "—" in grey.
+
+**Status column:**
+- "Needs Production": amber badge background (#fef3c7), amber text (#92400e)
+- "Stock Sufficient": green badge background (#dcfce7), green text (#166534)
+
+**Table styling:**
+- Read-only — user cannot edit values.
+- Scrollable horizontally (many date columns).
+- Sortable by clicking column headers (this is a reference table, not the production table — sorting here is fine).
+- Matches the app's minimalist table styling (same borders, fonts, spacing as the interactive table).
+
+**Empty cells in date columns:** Display as blank (not "0").
+
+**Negative Bal. to Produce:** Display as blank (not the negative number).
+
+---
+
+## 8. PRODUCTION INSIGHTS — STOCK-BASED RECOMMENDATIONS
+
+The Production Insights panel (Panel 1) incorporates Next 10 Days data.
+
+**New insight — Stock priority:**
+```
+📊 Stock-Level Priority
+
+FPR: 260309 (Elite XP Startex, Mini-pellet 50kg) is 
+flagged as "prio replenish." Stock data shows current 
+loading is 92.3 MT against a target of 310.6 MT. 
+Based on daily demand, this product should be ready 
+by March 23. Consider scheduling this order to complete 
+before that date.
+```
+
+**New insight — Stock sufficient:**
+```
+✅ Stock Sufficient — Can Deprioritize
+
+FPR: 260309 (Gallimax 2 Plus Ready Mix, 50kg) is 
+"prio replenish" but stock levels show warehouse 
+loading plus scheduled demand will meet the 759.3 MT 
+target by March 23 without additional production. 
+This order can be moved to lower priority.
+```
+
+**New insight — Multiple orders same product:**
+```
+📊 Multiple Orders — Same Product
+
+5 orders exist for Elite XP Startex (total: 225 MT) 
+across Line 1. Stock target date is March 23. Consider 
+combining some orders or scheduling them consecutively 
+to minimize changeover and meet the deadline.
+```
+
+---
+
+## 9. ALERTS & REMINDERS — STOCK-LEVEL ALERTS
+
+The Alerts & Reminders panel (Panel 2) shows stock-level warnings.
+
+**New alert — Stock data upload reminder:**
+```
+📊 Next 10 Days Data
+
+Last upload: March 17, 2026 (yesterday).
+Upload today's file for accurate prioritization.
+
+[Upload Next 10 Days]    ← small orange button, opens Next 10 Days page
+```
+
+**New alert — Critical stock:**
+```
+🔴 Critical Stock — Immediate Production
+
+Salto Baby Stag w/Grits (1000000000915) has a stock 
+deficit. Current loading (25.2 MT) is insufficient — 
+balance is negative. SAP orders: 24 MT on Line 3. 
+Target date: March 18 (URGENT).
+```
+
+**Alert severity based on target date proximity:**
+
+| Days until target | Severity | Icon |
+|---|---|---|
+| Past target date | Critical | 🔴 |
+| Within 1 day | Critical | 🔴 |
+| Within 2 days | Urgent | 🟠 |
+| Within 3 days | Warning | 🟡 |
+| 4+ days | Info | 🔵 |
+```

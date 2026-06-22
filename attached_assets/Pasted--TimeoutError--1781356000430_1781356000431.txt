@@ -1,0 +1,88 @@
+---------------------------------------------------------------------------
+TimeoutError                              Traceback (most recent call last)
+Cell In[3], line 23
+     19     elapsed = time.time() - t0
+     20     info(f'Round-trip: {elapsed:.1f}s')
+     21     return payload
+     22 
+---> 23 trace = run_trace()
+     24 if not trace.get('ok'):
+     25     err('Trace failed: ' + str(trace.get('error')))
+     26 else:
+
+Cell In[3], line 15, in run_trace()
+     11     t0 = time.time()
+     12     try:
+     13         with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as resp:
+     14             payload = json.loads(resp.read().decode('utf-8'))
+---> 15     except urllib.error.HTTPError as e:
+     16         body = e.read().decode('utf-8', 'replace')
+     17         err(f'HTTP {e.code}: {body[:500]}')
+     18         raise
+
+File /nix/store/6334pjf6w2q623rgvwi499qaiym1p6yv-python3-3.11.14/lib/python3.11/urllib/request.py:216, in urlopen(url, data, timeout, cafile, capath, cadefault, context)
+    214 else:
+    215     opener = _opener
+--> 216 return opener.open(url, data, timeout)
+
+File /nix/store/6334pjf6w2q623rgvwi499qaiym1p6yv-python3-3.11.14/lib/python3.11/urllib/request.py:519, in OpenerDirector.open(self, fullurl, data, timeout)
+    516     req = meth(req)
+    518 sys.audit('urllib.Request', req.full_url, req.data, req.headers, req.get_method())
+--> 519 response = self._open(req, data)
+    521 # post-process response
+    522 meth_name = protocol+"_response"
+
+File /nix/store/6334pjf6w2q623rgvwi499qaiym1p6yv-python3-3.11.14/lib/python3.11/urllib/request.py:536, in OpenerDirector._open(self, req, data)
+    533     return result
+    535 protocol = req.type
+--> 536 result = self._call_chain(self.handle_open, protocol, protocol +
+    537                           '_open', req)
+    538 if result:
+    539     return result
+
+File /nix/store/6334pjf6w2q623rgvwi499qaiym1p6yv-python3-3.11.14/lib/python3.11/urllib/request.py:496, in OpenerDirector._call_chain(self, chain, kind, meth_name, *args)
+    494 for handler in handlers:
+    495     func = getattr(handler, meth_name)
+--> 496     result = func(*args)
+    497     if result is not None:
+    498         return result
+
+File /nix/store/6334pjf6w2q623rgvwi499qaiym1p6yv-python3-3.11.14/lib/python3.11/urllib/request.py:1377, in HTTPHandler.http_open(self, req)
+   1376 def http_open(self, req):
+-> 1377     return self.do_open(http.client.HTTPConnection, req)
+
+File /nix/store/6334pjf6w2q623rgvwi499qaiym1p6yv-python3-3.11.14/lib/python3.11/urllib/request.py:1352, in AbstractHTTPHandler.do_open(self, http_class, req, **http_conn_args)
+   1350     except OSError as err: # timeout error
+   1351         raise URLError(err)
+-> 1352     r = h.getresponse()
+   1353 except:
+   1354     h.close()
+
+File /nix/store/6334pjf6w2q623rgvwi499qaiym1p6yv-python3-3.11.14/lib/python3.11/http/client.py:1395, in HTTPConnection.getresponse(self)
+   1393 try:
+   1394     try:
+-> 1395         response.begin()
+   1396     except ConnectionError:
+   1397         self.close()
+
+File /nix/store/6334pjf6w2q623rgvwi499qaiym1p6yv-python3-3.11.14/lib/python3.11/http/client.py:325, in HTTPResponse.begin(self)
+    323 # read until we get a non-100 response
+    324 while True:
+--> 325     version, status, reason = self._read_status()
+    326     if status != CONTINUE:
+    327         break
+
+File /nix/store/6334pjf6w2q623rgvwi499qaiym1p6yv-python3-3.11.14/lib/python3.11/http/client.py:286, in HTTPResponse._read_status(self)
+    285 def _read_status(self):
+--> 286     line = str(self.fp.readline(_MAXLINE + 1), "iso-8859-1")
+    287     if len(line) > _MAXLINE:
+    288         raise LineTooLong("status line")
+
+File /nix/store/6334pjf6w2q623rgvwi499qaiym1p6yv-python3-3.11.14/lib/python3.11/socket.py:718, in SocketIO.readinto(self, b)
+    716 while True:
+    717     try:
+--> 718         return self._sock.recv_into(b)
+    719     except timeout:
+    720         self._timeout_occurred = True
+
+TimeoutError: timed out

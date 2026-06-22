@@ -1,0 +1,210 @@
+```
+Implement the following CRITICAL fix:
+
+---
+
+## CRITICAL FIX: STATUS DETERMINATION — COMPARISON IS INVERTED
+
+The status determination function has an INVERTED comparison. DFL > Inventory is being labeled "Sufficient" when it should be "Critical". This is the ROOT CAUSE of all the sorting, icon, and label issues.
+
+---
+
+### PROOF THE LOGIC IS INVERTED
+
+From the tooltip in the snip:
+```
+Gall 21 Chicken Layer P (Breeder) 50Kg
+DFL:        24.0 MT
+Inventory:  0.7 MT
+Ratio:      34.29        ← DFL is 34x the Inventory
+Buffer:     -3328.6%     ← massively negative
+Status:     Sufficient   ← THIS IS WRONG
+```
+
+DFL (24.0) is 34x greater than Inventory (0.7). This is clearly CRITICAL, not Sufficient. The comparison is backwards.
+
+---
+
+### FIND THE BUG
+
+Search the ENTIRE codebase for the status determination. The bug is a comparison that looks like one of these:
+
+```javascript
+// BUG PATTERN 1: Direct inversion
+if (dfl >= inventory) return 'Sufficient';
+if (dfl < inventory) return 'Critical';
+
+// BUG PATTERN 2: Inverted condition
+if (dfl <= inventory) { status = 'Critical'; }
+else { status = 'Sufficient'; }
+
+// BUG PATTERN 3: Wrong variable order
+if (inventory >= dfl) { status = 'Critical'; }
+
+// BUG PATTERN 4: Fulfillment-based inversion
+const fulfillment = dfl / inventory;
+if (fulfillment < 1) { status = 'Critical'; }  // WRONG — <1 means DFL < Inv = Sufficient
+if (fulfillment > 1) { status = 'Sufficient'; } // WRONG — >1 means DFL > Inv = Critical
+
+// BUG PATTERN 5: Buffer-based inversion
+const buffer = (inventory - dfl) / inventory;
+if (buffer > 0) { status = 'Critical'; }  // WRONG — positive buffer = Sufficient
+if (buffer < 0) { status = 'Sufficient'; } // WRONG — negative buffer = Critical
+
+// BUG PATTERN 6: Swapped labels
+const isUrgent = dfl < inventory;  // WRONG — should be dfl > inventory
+const isSufficient = dfl > inventory; // WRONG — should be dfl < inventory
+```
+
+### THE CORRECT LOGIC
+
+```javascript
+function determineProductStatus(product, dailyColumns, today) {
+  const dfl = parseFloat(product.due_for_loading) || 0;
+  const inventory = parseFloat(product.inventory) || 0;
+  
+  // ========================================
+  // RULE: DFL > Inventory = BAD = CRITICAL
+  // RULE: DFL < Inventory = GOOD = SUFFICIENT
+  // ========================================
+  
+  // CRITICAL: DFL already greater than or equal to Inventory
+  // This means required demand EXCEEDS current stock
+  // Example: DFL 24.0, Inventory 0.7 → 24.0 >= 0.7 → CRITICAL
+  if (dfl >= inventory) {
+    return 'Critical';
+  }
+  
+  // From here, DFL < Inventory (stock covers demand for now)
+  // Check when cumulative sum will exceed inventory
+  let cumulativeSum = dfl;
+  let breachDay = null;
+  
+  for (let i = 0; i < dailyColumns.length; i++) {
+    const dayValue = parseFloat(product[dailyColumns[i].key]) || 0;
+    cumulativeSum += dayValue;
+    
+    if (cumulativeSum >= inventory && breachDay === null) {
+      breachDay = i;
+      break;
+    }
+  }
+  
+  // Never breaches within 10 days = SUFFICIENT
+  if (breachDay === null) {
+    return 'Sufficient';
+  }
+  
+  // Calculate days until breach
+  const breachDate = new Date(dailyColumns[breachDay].date);
+  const todayClean = new Date(today);
+  todayClean.setHours(0, 0, 0, 0);
+  const diffMs = breachDate.getTime() - todayClean.getTime();
+  const daysUntilBreach = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+  
+  // URGENT: Breaches within 3 days
+  if (daysUntilBreach <= 3) {
+    return 'Urgent';
+  }
+  
+  // MONITOR: Breaches within 4-10 days
+  return 'Monitor';
+}
+```
+
+### VERIFICATION FORMULA
+
+```
+IF dfl >= inventory → CRITICAL (always)
+IF dfl < inventory AND cumulative breaches within 3 days → URGENT
+IF dfl < inventory AND cumulative breaches within 4-10 days → MONITOR
+IF dfl < inventory AND cumulative NEVER breaches → SUFFICIENT
+```
+
+### VERIFY WITH ACTUAL DATA
+
+| Product | DFL | Inventory | DFL >= Inv? | Expected Status |
+|---|---|---|---|---|
+| Gall 21 Chicken Layer | 24.0 | 0.7 | YES (24.0 >= 0.7) | Critical |
+| Salto Baby Stag | 25.2 | 23.4 | YES (25.2 >= 23.4) | Critical |
+| Ave Max Duck Layex 2 | 194.2 | 181.5 | YES (194.2 >= 181.5) | Critical |
+| Gallimax 3 Maintenance | 46.3 | 74.9 | NO (46.3 < 74.9) | Urgent (breaches soon) |
+| Elite XP Startex | 92.3 | 310.6 | NO (92.3 < 310.6) | Sufficient (never breaches) |
+| Gallimax Pigeon Pellet | 2.5 | 27.3 | NO (2.5 < 27.3) | Sufficient (never breaches) |
+| Classic Hog Growex | 20.5 | 217.6 | NO (20.5 < 217.6) | Sufficient (never breaches) |
+
+---
+
+### ALSO FIX EVERYWHERE ELSE
+
+This inverted logic may exist in MULTIPLE places. Search and fix ALL of them:
+
+| Location | What to search for | What to fix |
+|---|---|---|
+| N10D tab — status determination | `determineProductStatus()` | Fix comparison |
+| N10D tab — status column | Status rendering | Ensure reads fixed function |
+| Auto-sequence — stock status | Any DFL vs Inventory comparison | Fix comparison |
+| Auto-sequence — sorting | Status-based sorting | Ensure uses fixed status |
+| Auto-sequence — avail date assignment | Status check for assigning dates | Fix comparison |
+| Auto-sequence — metric cards | Stock sufficient count | Ensure uses fixed status |
+| Auto-sequence — sequence analysis AI | Status labels in prompt | Fix labels |
+| Order table — avail date icon | Icon color determination | Ensure uses fixed status |
+| Order table — summary column | Template line generation | Ensure uses fixed status |
+| Hover tooltip — status display | Status color and label | Ensure uses fixed status |
+| N10D tooltip — status display | Status color and label | Ensure uses fixed status |
+| Buffer calculation | Buffer formula | Confirm correct direction |
+| Ratio calculation | Ratio formula | Confirm correct direction |
+
+### SEARCH TERMS
+
+Search the entire codebase for these terms and verify each one:
+
+```
+dfl >= inventory
+dfl > inventory
+dfl <= inventory
+dfl < inventory
+inventory >= dfl
+inventory > dfl
+inventory <= dfl
+inventory < dfl
+due_for_loading
+fulfillment
+buffer
+ratio
+stock_sufficient
+stockSufficient
+needs_production
+needsProduction
+Critical
+Urgent
+Monitor
+Sufficient
+```
+
+Every single comparison must follow:
+```
+DFL >= Inventory → BAD (Critical / needs production)
+DFL < Inventory → GOOD (start of sufficient, then check daily columns)
+```
+
+---
+
+### AFTER FIX — EXPECTED AUTO-SEQUENCE FOR LINE 1
+
+```
+1. Gall 21 Chicken Layer — Mar 30 (Critical, DFL 24.0 > Inv 0.7, produce TODAY)
+2. Gallimax 3 Maintenance — Mar 31 / Apr 1 (Urgent, dated deadline)
+3. [Monitor products sorted by their N10D Avail dates]
+4. Salto Conditioner — Apr 11 (dated order)
+5-10. Elite XP Startex, Gallimax Pigeon — Stock sufficient (bottom)
+```
+
+NOT:
+```
+1-7. Elite XP Startex (wrongly prioritized)
+8. Gallimax Pigeon
+9. Salto Conditioner
+10. Gall 21 Chicken Layer (wrongly at bottom as "Sufficient")
+```
+```

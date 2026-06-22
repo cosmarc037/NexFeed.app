@@ -1,0 +1,277 @@
+```
+Fix the AI note in the Scheduling Impact card to be structured and readable instead of a dense paragraph:
+
+---
+
+## FIX: AI NOTE — STRUCTURED OUTPUT
+
+### UPDATED AI PROMPT FOR SCHEDULING IMPACT NOTE
+
+```javascript
+function buildSchedulingImpactNotePrompt(context, impactData) {
+  if (impactData.delayedOrders.length === 0 && impactData.fasterOrders.length === 0) {
+    return null;
+  }
+  
+  return `
+You are a production scheduling advisor. Provide a brief analysis of the scheduling impact from combining orders on ${context.line}.
+
+Delayed orders:
+${impactData.delayedOrders.length > 0
+  ? impactData.delayedOrders.map(o => `- Prio ${o.prio}: ${o.name} — ${o.shiftFormatted} later`).join('\n')
+  : 'None'}
+
+Faster orders:
+${impactData.fasterOrders.length > 0
+  ? impactData.fasterOrders.map(o => `- Prio ${o.prio}: ${o.name} — ${o.shiftFormatted} earlier`).join('\n')
+  : 'None'}
+
+Product context:
+${impactData.delayedOrders.map(o => {
+  const lineOrder = context.lineContext.find(lo => lo.prio === o.prio);
+  return lineOrder ? `- ${o.name}: N10D status ${lineOrder.n10dStatus}, Avail: ${lineOrder.availDate}` : '';
+}).filter(Boolean).join('\n')}
+
+${impactData.fasterOrders.map(o => {
+  const lineOrder = context.lineContext.find(lo => lo.prio === o.prio);
+  return lineOrder ? `- ${o.name}: N10D status ${lineOrder.n10dStatus}, Avail: ${lineOrder.availDate}` : '';
+}).filter(Boolean).join('\n')}
+
+Combined order details:
+- Volume: ${context.combinedVolume} MT
+- Production Time: ${context.combinedProductionHours} hrs
+- N10D Status: ${context.n10dStatus || 'N/A'}
+
+RESPONSE RULES:
+- Write 3-5 sentences analyzing the significance of the impact.
+- Each sentence should be on its OWN LINE — do not write a single dense paragraph.
+- Cover these points across your sentences:
+  1. Whether the delays are significant or acceptable
+  2. Which delayed orders are most concerning (Critical/Urgent status, near avail dates)
+  3. Whether the time saved for faster orders offsets the delays
+  4. Any recommendation (proceed with caution, acceptable trade-off, etc.)
+- Use product names and specific details.
+- Do NOT list individual orders again — the bullet list above already shows them.
+- Do NOT use markdown formatting.
+- Do NOT use labels like "INTERSPERSED ORDERS" or "DOWNSTREAM ORDERS".
+- Keep each sentence concise and on its own line.
+
+EXAMPLE OUTPUT (for reference — do not copy verbatim):
+
+These delays are a significant concern as they impact critical and urgent replenishment needs.
+Gall 21 Chicken Layer and Gallimax 3 Maintenance are both flagged as Urgent, and a 24-hour delay may risk stockout.
+The 15-hour delay on Gallimax 3 Maintenance Red Pellet is also notable given its safety stock status.
+On the positive side, downstream orders after the combined block will start 1.53 hrs earlier due to eliminated changeovers.
+Overall, proceed with caution — consider whether the changeover savings justify the delays to urgent products.
+  `;
+}
+```
+
+### DISPLAY COMPONENT — RENDER EACH SENTENCE ON ITS OWN LINE
+
+```jsx
+function SchedulingImpactCard({ group, lineOrders, context }) {
+  const [impactData, setImpactData] = useState(null);
+  const [aiNote, setAiNote] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+  
+  useEffect(() => {
+    generateImpact();
+  }, []);
+  
+  async function generateImpact() {
+    setIsLoading(true);
+    
+    const data = buildSchedulingImpactData(group, lineOrders);
+    setImpactData(data);
+    
+    if (data.delayedOrders.length > 0 || data.fasterOrders.length > 0) {
+      try {
+        const prompt = buildSchedulingImpactNotePrompt(context, data);
+        if (prompt) {
+          const response = await callAI(prompt);
+          const cleaned = cleanSchedulingNote(response);
+          setAiNote(cleaned);
+        }
+      } catch (error) {
+        console.error('AI note failed:', error);
+        setAiNote(null);
+      }
+    }
+    
+    setIsLoading(false);
+  }
+  
+  async function handleRefresh() {
+    setAiNote(null);
+    await generateImpact();
+  }
+  
+  const hasNoImpact = impactData && 
+    impactData.delayedOrders.length === 0 && 
+    impactData.fasterOrders.length === 0;
+  
+  return (
+    <div className="combine-card">
+      <div className="combine-card-header">
+        <span>📊 Scheduling Impact</span>
+        <button 
+          className="combine-card-refresh"
+          onClick={handleRefresh}
+          title="Refresh analysis"
+        >
+          ↻ Refresh
+        </button>
+      </div>
+      
+      <div className="combine-card-body combine-card-body-text">
+        {isLoading && !impactData && (
+          <span className="combine-card-loading">Analyzing scheduling impact...</span>
+        )}
+        
+        {hasNoImpact && (
+          <span className="scheduling-no-impact">
+            No scheduling impact — all orders remain on their current schedule.
+          </span>
+        )}
+        
+        {/* Calculated bullet list — delayed orders */}
+        {impactData && impactData.delayedOrders.length > 0 && (
+          <div className="scheduling-impact-section">
+            <div className="scheduling-impact-label scheduling-impact-delayed">
+              Delayed orders:
+            </div>
+            {impactData.delayedOrders.map((order, index) => (
+              <div key={index} className="scheduling-impact-item scheduling-impact-item-delayed">
+                <span className="scheduling-impact-bullet">⚠</span>
+                <span className="scheduling-impact-text">
+                  Prio {order.prio}: {order.name} — starts <strong>{order.shiftFormatted} later</strong>
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+        
+        {/* Calculated bullet list — faster orders */}
+        {impactData && impactData.fasterOrders.length > 0 && (
+          <div className="scheduling-impact-section">
+            <div className="scheduling-impact-label scheduling-impact-faster">
+              Faster orders:
+            </div>
+            {impactData.fasterOrders.map((order, index) => (
+              <div key={index} className="scheduling-impact-item scheduling-impact-item-faster">
+                <span className="scheduling-impact-bullet">✅</span>
+                <span className="scheduling-impact-text">
+                  Prio {order.prio}: {order.name} — starts <strong>{order.shiftFormatted} earlier</strong>
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+        
+        {/* AI note — structured sentences */}
+        {aiNote && (
+          <div className="scheduling-impact-ai-note">
+            {aiNote.map((sentence, index) => (
+              <p key={index} className="scheduling-impact-ai-sentence">
+                {sentence}
+              </p>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+```
+
+### CLEAN AND PARSE AI NOTE INTO INDIVIDUAL SENTENCES
+
+```javascript
+function cleanSchedulingNote(response) {
+  let cleaned = response.trim();
+  
+  // Remove markdown
+  cleaned = cleaned.replace(/\*\*/g, '');
+  cleaned = cleaned.replace(/#{1,6}\s*/g, '');
+  cleaned = cleaned.replace(/\*([^*]+)\*/g, '$1');
+  cleaned = cleaned.replace(/_([^_]+)_/g, '$1');
+  
+  // Remove any labels the AI might add
+  cleaned = cleaned.replace(/^(INTERSPERSED ORDERS|DOWNSTREAM ORDERS|ANALYSIS|SUMMARY|NOTE)[:\s]*/gim, '');
+  cleaned = cleaned.replace(/^\d+\.\s*/gm, '');
+  
+  // Split into individual sentences/lines
+  // First try splitting by newlines (preferred — AI was told to put each on its own line)
+  let sentences = cleaned.split('\n')
+    .map(s => s.trim())
+    .filter(s => s.length > 0);
+  
+  // If only 1 line (AI wrote a paragraph), split by sentence endings
+  if (sentences.length <= 1 && cleaned.length > 100) {
+    sentences = cleaned
+      .split(/(?<=[.!?])\s+/)
+      .map(s => s.trim())
+      .filter(s => s.length > 0);
+  }
+  
+  // Limit to 5 sentences max
+  if (sentences.length > 5) {
+    sentences = sentences.slice(0, 5);
+  }
+  
+  return sentences;
+}
+```
+
+### STYLING
+
+```css
+/* AI note container */
+.scheduling-impact-ai-note {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #f3f4f6;
+}
+
+/* Each sentence on its own line */
+.scheduling-impact-ai-sentence {
+  font-size: 12px;
+  color: #6b7280;
+  line-height: 1.6;
+  margin: 0 0 6px 0;
+}
+
+.scheduling-impact-ai-sentence:last-child {
+  margin-bottom: 0;
+}
+```
+
+---
+
+## VERIFICATION
+
+### Structure
+1. ✅ Delayed orders shown as calculated bullet list
+2. ✅ Faster orders shown as calculated bullet list
+3. ✅ AI note below with separator line
+4. ✅ Each AI sentence on its own line — not a dense paragraph
+
+### AI note content
+5. ✅ 3-5 sentences covering significance, urgency, trade-offs, recommendation
+6. ✅ Uses product names and specific details
+7. ✅ Does not repeat the individual order list
+8. ✅ No "INTERSPERSED ORDERS" or "DOWNSTREAM ORDERS" labels
+9. ✅ No markdown formatting
+
+### Parsing
+10. ✅ Splits by newlines first (AI instructed to write one sentence per line)
+11. ✅ Falls back to sentence splitting if AI writes a paragraph
+12. ✅ Strips labels and markdown
+13. ✅ Capped at 5 sentences
+
+### Edge cases
+14. ✅ No delays, no faster → "No scheduling impact — all orders remain on their current schedule."
+15. ✅ AI call fails → bullet list still shows (calculated), no AI note
+16. ✅ Refresh regenerates AI note with fresh analysis
+```

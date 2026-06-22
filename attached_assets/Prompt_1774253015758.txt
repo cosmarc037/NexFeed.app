@@ -1,0 +1,175 @@
+```
+Implement the following change to the NexFeed application:
+
+---
+
+## HIDEABLE MAIN HEADERS — HIDE ENTIRE COLUMN GROUPS
+
+In addition to hiding individual columns, users should also be able to hide entire main header groups at once, collapsing all sub-columns under that group.
+
+---
+
+### HIDEABLE MAIN HEADER GROUPS
+
+| Main Header Group | Hideable | Sub-columns |
+|---|---|---|
+| Order Details | ✅ Yes | Planned Order FG, SFG, PMX, Production Order FG1, SFG1, SFGPMX, Material Code SFG, Material Code FG, Item Description, Form, Volume, Batch Size, Number of Batches, Number of Bags, Production Time, HA Info, HA Prep |
+| Notes | ✅ Yes | FPR Notes, Special Remarks |
+| Bagger Details | ✅ Yes | Threads, Sacks, Markings, Tags |
+| Completion & Tracking | ✅ Yes | Start Date, Start Time, Avail Date, Completion Date, End Date, History |
+
+**Always visible (cannot hide the group):**
+- Prio column
+- Drag handle
+- FPR column
+- Status column
+
+Note: Individual columns within these groups are STILL independently hideable as before. This adds the ability to hide the ENTIRE group at once.
+
+---
+
+### HOW TO HIDE A MAIN HEADER GROUP
+
+**Hover over the main header group name:**
+
+Normal state:
+```
+┌────────────────────────────────────────────┐
+│              ORDER DETAILS                  │
+└────────────────────────────────────────────┘
+```
+
+Hover state:
+```
+┌────────────────────────────────────────────┐
+│              ORDER DETAILS           Hide  │
+└────────────────────────────────────────────┘
+```
+
+- "Hide" text appears on the right side of the main header cell on hover.
+- Same styling as individual column "Hide" text:
+  - Text: "Hide" in grey (#9ca3af), 10px, italic
+  - Background: semi-transparent white (rgba(255,255,255,0.9))
+  - Border-radius: 3px
+  - Padding: 2px 6px
+  - Cursor: pointer
+- Appears after 300ms hover delay.
+- Disappears when mouse leaves the header area.
+
+**On click "Hide":**
+- ALL sub-columns under that main header group collapse at once.
+- A single thin indicator replaces the entire group (same Excel-style sliver as individual column hiding).
+- Animation: smooth collapse (~200-300ms, ease-in-out).
+
+---
+
+### HIDDEN MAIN HEADER INDICATOR
+
+When an entire main header group is hidden:
+
+```
+Before:
+┌──────┬──────┬───────────────────────────┬──────┬──────────────────┬─────────────┬─────────────────────┐
+│ Prio │ FPR  │      ORDER DETAILS        │Status│      NOTES       │BAGGER DETAILS│COMPLETION & TRACKING│
+└──────┴──────┴───────────────────────────┴──────┴──────────────────┴─────────────┴─────────────────────┘
+
+After hiding ORDER DETAILS:
+┌──────┬──────┬┆┬──────┬──────────────────┬─────────────┬─────────────────────┐
+│ Prio │ FPR  │┆│Status│      NOTES       │BAGGER DETAILS│COMPLETION & TRACKING│
+└──────┴──────┴┆┴──────┴──────────────────┴─────────────┴─────────────────────┘
+               ↑
+        ORDER DETAILS hidden
+```
+
+**Indicator styling:**
+- Same as individual column hidden indicator:
+  - Width: 6px
+  - Border-left: 2px solid #e5e7eb
+  - Border-right: 2px solid #e5e7eb
+  - Full table height
+  - Cursor on hover: col-resize (↔)
+  - Hover background: light blue (#eff6ff)
+  - Hover border color: blue (#3b82f6)
+
+**Tooltip on hover over indicator:**
+```
+"Double-click to show Order Details (17 columns)"
+```
+- Shows the group name AND the number of columns in the group.
+- Grey text (#6b7280), 10px, italic.
+
+**Double-click on indicator:**
+- Expands all sub-columns under that main header group back to their full widths.
+- Smooth expand animation (~200-300ms).
+
+---
+
+### INTERACTION BETWEEN INDIVIDUAL AND GROUP HIDING
+
+**Scenario 1: User hides entire group, then unhides it**
+- All sub-columns return to visible.
+- Any sub-columns that were individually hidden BEFORE the group was hidden remain hidden.
+- Example:
+  - User hides "Volume" column individually.
+  - User hides "Order Details" group → entire group collapses.
+  - User unhides "Order Details" group → all columns return EXCEPT "Volume" which was already individually hidden.
+
+**Scenario 2: User hides some individual columns, then hides the group**
+- The entire group collapses to a single indicator.
+- When unhidden, the group restores to its previous state (with individually hidden columns still hidden).
+
+**Scenario 3: User hides the group, then tries to unhide an individual column**
+- Not possible while the group is hidden — the individual indicators are not visible.
+- User must unhide the group first, then unhide individual columns.
+
+---
+
+### SESSION PERSISTENCE
+
+- Group hidden state is saved in localStorage alongside individual column states.
+- Key: `nexfeed_hidden_column_groups`
+- Value: Array of hidden group names, e.g., `["order_details", "notes"]`
+- On page load, check both individual and group hidden states.
+- Global — same visibility across all line tabs.
+
+---
+
+### MAIN HEADERS THAT CANNOT BE HIDDEN
+
+The following are not main header groups and cannot be hidden as groups (but their individual columns can still be hidden):
+
+| Element | Hideable as group? |
+|---|---|
+| Prio | ❌ No (standalone column) |
+| Drag handle | ❌ No (standalone, UI element) |
+| FPR | ❌ No (standalone column) |
+| Status | ❌ No (standalone column) |
+
+These columns sit outside any main header group. They can be individually hidden (as per previous implementation) but there is no group-level hide for them.
+
+---
+
+### VISUAL EXAMPLE — MULTIPLE GROUPS HIDDEN
+
+```
+All visible:
+┌──────┬──────┬─────────────────────┬──────┬───────┬─────────────┬─────────────────────┐
+│ Prio │ FPR  │   ORDER DETAILS     │Status│ NOTES │BAGGER DETAIL│ COMPLETION/TRACKING  │
+└──────┴──────┴─────────────────────┴──────┴───────┴─────────────┴─────────────────────┘
+
+Notes + Bagger Details hidden:
+┌──────┬──────┬─────────────────────┬──────┬┆┬┆┬─────────────────────┐
+│ Prio │ FPR  │   ORDER DETAILS     │Status│┆│┆│ COMPLETION/TRACKING  │
+└──────┴──────┴─────────────────────┴──────┴┆┴┆┴─────────────────────┘
+                                            ↑  ↑
+                                      Notes  Bagger
+                                      hidden hidden
+
+All groups hidden:
+┌──────┬──────┬┆┬──────┬┆┬┆┬┆┐
+│ Prio │ FPR  │┆│Status│┆│┆│┆│
+└──────┴──────┴┆┴──────┴┆┴┆┴┆┘
+               ↑        ↑  ↑  ↑
+         Order Details Notes Bag Comp
+```
+```

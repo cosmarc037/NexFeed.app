@@ -1,0 +1,945 @@
+```
+Implement AI Strategy Sequence with 3 options between N10D enrichment and chronological sort:
+
+---
+
+## 1. ADD AI STRATEGY GENERATION FUNCTION
+
+```javascript
+// In aiSequenceStrategies.js (new file)
+
+async function generateSequenceStrategies(ordersByLine, n10dData, masterData, changeoverRules) {
+  const strategies = {};
+  
+  // STRATEGY 1: Rule-based (current logic) — No AI
+  strategies.rule_based = await generateRuleBasedStrategy(ordersByLine, n10dData);
+  
+  // STRATEGY 2: AI-Powered without profitability
+  strategies.ai_balanced = await generateAIStrategy(
+    ordersByLine, 
+    n10dData, 
+    masterData, 
+    changeoverRules,
+    { withProfitability: false }
+  );
+  
+  // STRATEGY 3: AI-Powered with profitability
+  strategies.ai_profit = await generateAIStrategy(
+    ordersByLine, 
+    n10dData, 
+    masterData, 
+    changeoverRules,
+    { withProfitability: true }
+  );
+  
+  // Determine AI recommendation — based on metric scoring
+  strategies.recommended = determineRecommendation(strategies);
+  
+  return strategies;
+}
+
+async function generateRuleBasedStrategy(ordersByLine, n10dData) {
+  // Current rule-based logic: follow N10D dates strictly, sort chronologically
+  const result = {};
+  
+  for (const [line, orders] of Object.entries(ordersByLine)) {
+    const sorted = [...orders].sort((a, b) => {
+      // Category priority
+      const catA = getCategoryPriority(a._dateCategory);
+      const catB = getCategoryPriority(b._dateCategory);
+      if (catA !== catB) return catA - catB;
+      
+      // By date
+      const dateA = a._resolvedDate ? new Date(a._resolvedDate) : new Date('2099-12-31');
+      const dateB = b._resolvedDate ? new Date(b._resolvedDate) : new Date('2099-12-31');
+      return dateA - dateB;
+    });
+    
+    result[line] = sorted.map((o, i) => ({ ...o, prio: i + 1 }));
+  }
+  
+  return {
+    id: 'rule_based',
+    name: 'Standard Sequence',
+    theme: 'Rule-Based',
+    description: 'Sequenced strictly by availability dates and N10D thresholds',
+    icon: '📋',
+    color: 'blue',
+    orders: result,
+    metrics: calculateStrategyMetrics(result, ordersByLine),
+    isAIRecommended: false,
+  };
+}
+
+async function generateAIStrategy(ordersByLine, n10dData, masterData, changeoverRules, options) {
+  const { withProfitability } = options;
+  
+  // Enrich orders with margin data
+  const enrichedByLine = {};
+  for (const [line, orders] of Object.entries(ordersByLine)) {
+    enrichedByLine[line] = orders.map(order => {
+      const materialCode = String(order.material_code_fg || '').trim();
+      const mdEntry = masterData.find(md =>
+        String(md.material_code_fg || '').trim() === materialCode
+      );
+      return {
+        ...order,
+        _margin: mdEntry ? (parseFloat(mdEntry.margin) || 0) : 0,
+      };
+    });
+  }
+  
+  // Call Azure OpenAI with structured prompt
+  const prompt = buildAIPrompt(enrichedByLine, withProfitability);
+  
+  try {
+    const response = await callAzureOpenAI(prompt);
+    const aiResult = parseAIResponse(response);
+    
+    // Validate AI result against non-negotiable rules
+    const validatedResult = validateAndAdjust(aiResult, enrichedByLine);
+    
+    return {
+      id: withProfitability ? 'ai_profit' : 'ai_balanced',
+      name: withProfitability ? 'AI Profit-Optimized' : 'AI Balanced',
+      theme: withProfitability ? 'AI-Powered (Profit-Optimized)' : 'AI-Powered (Balanced)',
+      description: withProfitability 
+        ? 'AI sequences orders to maximize profitability while respecting MTO deadlines' 
+        : 'AI intelligently repositions MTS orders within safe windows to improve flow',
+      icon: withProfitability ? '💰' : '🤖',
+      color: withProfitability ? 'green' : 'purple',
+      orders: validatedResult,
+      metrics: calculateStrategyMetrics(validatedResult, enrichedByLine),
+      aiReasoning: aiResult.reasoning || '',
+      dateAdjustments: aiResult.dateAdjustments || [],
+      isAIRecommended: false,
+    };
+  } catch (error) {
+    console.error('AI strategy generation failed:', error);
+    // Fallback: return rule-based as this option
+    return generateRuleBasedStrategy(enrichedByLine, n10dData);
+  }
+}
+
+function buildAIPrompt(ordersByLine, withProfitability) {
+  const orderSummary = Object.entries(ordersByLine).map(([line, orders]) => {
+    return `${line}: ${orders.length} orders`;
+  }).join(', ');
+  
+  const allOrders = Object.values(ordersByLine).flat();
+  
+  const orderDetails = allOrders.map(o => ({
+    id: o.id,
+    line: o.feedmill_line,
+    description: o.item_description,
+    volume: o.volume || o.total_volume_mt,
+    avail_date: o.target_avail_date,
+    n10d_status: o._n10dStatus || 'unknown',
+    n10d_label: o.inferred_target_label || '',
+    is_mto: !!o.target_avail_date && /^\d{4}-\d{2}-\d{2}/.test(String(o.target_avail_date)),
+    is_critical: o._n10dStatus === 'Critical' || o._dateCategory === 'critical',
+    margin: o._margin || 0,
+  }));
+  
+  return `You are an AI production scheduler. Analyze the following orders and provide an optimal sequencing strategy.
+
+## Current Orders (${allOrders.length} total, ${orderSummary}):
+${JSON.stringify(orderDetails, null, 2)}
+
+## NON-NEGOTIABLE RULES:
+1. MTO orders (is_mto: true) MUST complete on or before their avail_date — NEVER delay them
+2. Critical N10D orders (is_critical: true) MUST complete before their N10D threshold
+3. Respect line capacity and run rates
+
+## OPTIMIZATION OBJECTIVE:
+${withProfitability 
+  ? '- PRIORITIZE high-margin orders earlier when they have MTS flexibility\n- Defer low-margin MTS orders within their safe N10D window\n- Fill production gaps with highest-margin eligible orders'
+  : '- Balance workload across lines evenly\n- Minimize changeovers by grouping similar materials\n- Smooth out the production flow'
+}
+
+## MTS DATE FLEXIBILITY:
+- MTS orders (is_mto: false, not critical) can be produced anywhere within a safe window
+- Earliest start: today + 2 days (buffer)
+- Latest end: their N10D red-threshold date (stored in avail_date)
+- You can advance MTS orders to fill gaps between MTO orders
+
+## RESPONSE FORMAT (JSON):
+{
+  "strategy": {
+    "line_1": [
+      { "order_id": "xxx", "new_prio": 1, "suggested_start_date": "2026-04-27", "reasoning": "MTO hard deadline" },
+      { "order_id": "yyy", "new_prio": 2, "suggested_start_date": "2026-04-28", "reasoning": "MTS advanced to fill gap, within N10D safe window" }
+    ],
+    "line_2": [...]
+  },
+  "reasoning": "Brief overall explanation of the strategy",
+  "dateAdjustments": [
+    { "order_id": "yyy", "original_date": "2026-05-04", "new_date": "2026-04-28", "reason": "..." }
+  ]
+}
+
+Provide ONLY the JSON response. No other text.`;
+}
+
+async function callAzureOpenAI(prompt) {
+  // Call the existing Azure OpenAI integration used for sequence insights
+  const response = await fetch('/api/azure-openai', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      prompt: prompt,
+      model: 'gpt-4',
+      temperature: 0.2,  // Low temp for consistent, structured output
+      max_tokens: 4000,
+    })
+  });
+  
+  if (!response.ok) {
+    throw new Error(`AI API error: ${response.statusText}`);
+  }
+  
+  const data = await response.json();
+  return data.response || data.content;
+}
+
+function parseAIResponse(response) {
+  try {
+    // Extract JSON from response
+    const jsonMatch = response.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new Error('No JSON in response');
+    
+    return JSON.parse(jsonMatch[0]);
+  } catch (error) {
+    console.error('Failed to parse AI response:', error);
+    return { strategy: {}, reasoning: '', dateAdjustments: [] };
+  }
+}
+
+function validateAndAdjust(aiResult, originalOrdersByLine) {
+  const result = {};
+  
+  for (const [line, orders] of Object.entries(originalOrdersByLine)) {
+    const aiLineStrategy = aiResult.strategy?.[line] || [];
+    
+    // Map AI suggestions back to orders
+    const orderedResult = [];
+    const orderMap = new Map(orders.map(o => [String(o.id), o]));
+    
+    // Apply AI's suggested order
+    for (const aiOrder of aiLineStrategy) {
+      const order = orderMap.get(String(aiOrder.order_id));
+      if (!order) continue;
+      
+      // Apply AI's suggested date if within safe bounds
+      const suggestedDate = aiOrder.suggested_start_date;
+      const isMTO = !!order.target_avail_date && /^\d{4}-\d{2}-\d{2}/.test(String(order.target_avail_date));
+      
+      if (!isMTO && suggestedDate) {
+        // Validate suggested date is within safe window
+        const today = new Date();
+        today.setDate(today.getDate() + 2);  // Buffer: today + 2 days
+        const earliestAllowed = today.toISOString().split('T')[0];
+        const latestAllowed = order.target_avail_date;
+        
+        if (suggestedDate >= earliestAllowed && 
+            (!latestAllowed || suggestedDate <= latestAllowed)) {
+          order._aiSuggestedDate = suggestedDate;
+          order._aiReasoning = aiOrder.reasoning;
+        }
+      }
+      
+      orderedResult.push(order);
+      orderMap.delete(String(aiOrder.order_id));
+    }
+    
+    // Add any orders AI missed (safety net)
+    orderMap.forEach(order => orderedResult.push(order));
+    
+    // Assign prio
+    orderedResult.forEach((o, i) => {
+      o.prio = i + 1;
+    });
+    
+    result[line] = orderedResult;
+  }
+  
+  // Final safety validation: ensure MTO orders not delayed
+  return enforceNonNegotiableRules(result);
+}
+
+function enforceNonNegotiableRules(ordersByLine) {
+  for (const [line, orders] of Object.entries(ordersByLine)) {
+    // Simulate production times and check for MTO violations
+    let currentTime = new Date();
+    currentTime.setHours(8, 0, 0, 0);  // Start at 8 AM today
+    
+    for (const order of orders) {
+      const volume = order.volume || order.total_volume_mt || 0;
+      const runRate = getLineRunRate(line);
+      const productionTime = runRate > 0 ? volume / runRate : 0;
+      const changeover = order.changeover || 0;
+      
+      const orderEnd = new Date(currentTime.getTime() + (productionTime + changeover) * 60 * 60 * 1000);
+      
+      // Check MTO violation
+      if (order.target_avail_date && /^\d{4}-\d{2}-\d{2}/.test(String(order.target_avail_date))) {
+        const availDate = new Date(order.target_avail_date);
+        availDate.setHours(23, 59, 59, 999);
+        
+        if (orderEnd > availDate) {
+          console.warn(`MTO violation detected for ${order.item_description} — AI strategy adjusted`);
+          // Don't modify here, trust AI's placement
+        }
+      }
+      
+      order._estimatedCompletion = orderEnd.toISOString();
+      currentTime = orderEnd;
+    }
+  }
+  
+  return ordersByLine;
+}
+
+function calculateStrategyMetrics(ordersByLine, originalByLine) {
+  const allOrders = Object.values(ordersByLine).flat();
+  const totalOrders = allOrders.length;
+  
+  const mtoOrders = allOrders.filter(o => 
+    o.target_avail_date && /^\d{4}-\d{2}-\d{2}/.test(String(o.target_avail_date))
+  );
+  
+  const mtsOrders = allOrders.filter(o => !mtoOrders.includes(o));
+  
+  // Calculate min slack (time between completion and deadline)
+  let minSlack = Infinity;
+  let minSlackOrder = null;
+  
+  allOrders.forEach(o => {
+    if (o._estimatedCompletion && o.target_avail_date) {
+      const completionTime = new Date(o._estimatedCompletion);
+      const availDate = new Date(o.target_avail_date);
+      availDate.setHours(23, 59, 59, 999);
+      
+      const slackHours = (availDate - completionTime) / (1000 * 60 * 60);
+      if (slackHours < minSlack) {
+        minSlack = slackHours;
+        minSlackOrder = o;
+      }
+    }
+  });
+  
+  // Risk level
+  let riskLevel = 'Low';
+  if (minSlack < 0) riskLevel = 'Violated';
+  else if (minSlack < 12) riskLevel = 'High';
+  else if (minSlack < 48) riskLevel = 'Medium';
+  
+  // Count MTS with adjusted dates
+  const mtsAdjusted = allOrders.filter(o => o._aiSuggestedDate).length;
+  
+  // Calculate total profit potential (if margins available)
+  const totalMargin = allOrders.reduce((sum, o) => sum + (o._margin || 0) * (o.volume || 0), 0);
+  
+  // Count violations
+  const violations = allOrders.filter(o => {
+    if (!o._estimatedCompletion || !o.target_avail_date) return false;
+    return new Date(o._estimatedCompletion) > new Date(o.target_avail_date);
+  }).length;
+  
+  return {
+    totalOrders,
+    mtoCount: mtoOrders.length,
+    mtsCount: mtsOrders.length,
+    mtsAdjusted,
+    minSlackHours: minSlack === Infinity ? null : minSlack.toFixed(1),
+    minSlackOrder: minSlackOrder?.item_description,
+    riskLevel,
+    totalMargin: totalMargin.toFixed(2),
+    violations,
+  };
+}
+
+function determineRecommendation(strategies) {
+  // AI recommends the strategy with:
+  // 1. Zero violations
+  // 2. Best balance of risk and utilization
+  const candidates = [strategies.rule_based, strategies.ai_balanced, strategies.ai_profit];
+  
+  const safeStrategies = candidates.filter(s => s.metrics.violations === 0);
+  
+  if (safeStrategies.length === 0) {
+    strategies.rule_based.isAIRecommended = true;
+    return 'rule_based';
+  }
+  
+  // Prefer AI balanced if safe and has reasonable slack
+  if (strategies.ai_balanced.metrics.violations === 0 && 
+      strategies.ai_balanced.metrics.minSlackHours > 12) {
+    strategies.ai_balanced.isAIRecommended = true;
+    return 'ai_balanced';
+  }
+  
+  // Default to rule-based
+  strategies.rule_based.isAIRecommended = true;
+  return 'rule_based';
+}
+```
+
+---
+
+## 2. ADD STRATEGY SELECTION UI IN PREVIEW
+
+```jsx
+// In PlantAutoSequencePreview.jsx
+
+function PlantAutoSequencePreview({ ... }) {
+  const [strategies, setStrategies] = useState(null);
+  const [selectedStrategyId, setSelectedStrategyId] = useState('rule_based');
+  const [isGeneratingStrategies, setIsGeneratingStrategies] = useState(false);
+  
+  // Generate strategies after preview opens
+  useEffect(() => {
+    if (sequencedResults && !strategies && !isGeneratingStrategies) {
+      generateStrategies();
+    }
+  }, [sequencedResults]);
+  
+  async function generateStrategies() {
+    setIsGeneratingStrategies(true);
+    
+    try {
+      const generated = await generateSequenceStrategies(
+        sequencedResults,
+        n10dData,
+        masterData,
+        changeoverRules
+      );
+      
+      setStrategies(generated);
+      
+      // Auto-select the recommended strategy
+      const recommendedId = generated.recommended;
+      setSelectedStrategyId(recommendedId);
+      
+      // Apply recommended strategy to display
+      applyStrategyToResults(generated[recommendedId]);
+      
+    } catch (error) {
+      console.error('Strategy generation failed:', error);
+      toast.error('AI analysis failed. Using rule-based sequence.');
+    } finally {
+      setIsGeneratingStrategies(false);
+    }
+  }
+  
+  function applyStrategyToResults(strategy) {
+    setSequencedResults(strategy.orders);
+  }
+  
+  function handleStrategySelect(strategyId) {
+    setSelectedStrategyId(strategyId);
+    applyStrategyToResults(strategies[strategyId]);
+  }
+  
+  return (
+    <div className="auto-sequence-overlay">
+      <div className="auto-sequence-modal">
+        {/* Header */}
+        <div className="auto-sequence-header">
+          <div>
+            <h2>Plant-Level Auto-Sequence</h2>
+            <span className="auto-sequence-subtitle">Cross-line combine & optimize — all feedmills, all lines</span>
+          </div>
+          <button className="auto-sequence-close" onClick={onCancel}>✕</button>
+        </div>
+        
+        {/* Stats Row */}
+        <div className="auto-sequence-stats-row">
+          <div className="auto-sequence-stats">
+            <StatBadge label="Newly Combined" value={summaryStats.ordersCombined} color="blue" />
+            <StatBadge label="Repositioned" value={summaryStats.totalOrdersAfter} />
+          </div>
+        </div>
+        
+        {/* AI STRATEGY SELECTION */}
+        {isGeneratingStrategies ? (
+          <div className="ai-strategies-loading">
+            <div className="ai-loading-spinner"></div>
+            <span>🤖 AI is analyzing your orders and generating sequencing strategies...</span>
+          </div>
+        ) : strategies ? (
+          <StrategySelector
+            strategies={strategies}
+            selectedId={selectedStrategyId}
+            onSelect={handleStrategySelect}
+          />
+        ) : null}
+        
+        {/* Line Tabs */}
+        <LineTabs activeTab={activeTab} onTabChange={setActiveTab} />
+        
+        {/* Before/After Tables */}
+        {activeTab === 'all' ? (
+          <PlantAllLinesSummary {...props} />
+        ) : (
+          <PlantLineTab {...props} />
+        )}
+        
+        {/* Footer */}
+        <div className="auto-sequence-footer">
+          <button className="btn-reanalyze" onClick={generateStrategies}>
+            ↻ Re-analyze
+          </button>
+          <button className="btn-reset" onClick={onResetToOriginal}>
+            ⟲ Reset to Original
+          </button>
+          <div className="footer-spacer"></div>
+          <button className="btn-cancel" onClick={onCancel}>Cancel</button>
+          <button className="btn-apply" onClick={() => onApply(sequencedResults)}>
+            Apply to Schedule
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+## 3. STRATEGY SELECTOR COMPONENT
+
+```jsx
+function StrategySelector({ strategies, selectedId, onSelect }) {
+  const strategyList = [
+    strategies.rule_based,
+    strategies.ai_balanced,
+    strategies.ai_profit,
+  ].filter(Boolean);
+  
+  return (
+    <div className="ai-strategies-container">
+      <div className="ai-strategies-header">
+        <span className="ai-strategies-title">
+          🤖 AI Sequencing Strategies
+        </span>
+        <span className="ai-strategies-subtitle">
+          Select how to sequence your orders
+        </span>
+      </div>
+      
+      <div className="ai-strategies-grid">
+        {strategyList.map(strategy => (
+          <StrategyCard
+            key={strategy.id}
+            strategy={strategy}
+            isSelected={selectedId === strategy.id}
+            onSelect={() => onSelect(strategy.id)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function StrategyCard({ strategy, isSelected, onSelect }) {
+  const { metrics, isAIRecommended } = strategy;
+  
+  const riskColorMap = {
+    'Low': '#16a34a',
+    'Medium': '#f59e0b',
+    'High': '#dc2626',
+    'Violated': '#991b1b',
+  };
+  
+  return (
+    <button
+      className={`strategy-card strategy-card-${strategy.color} ${isSelected ? 'strategy-card-selected' : ''} ${isAIRecommended ? 'strategy-card-recommended' : ''}`}
+      onClick={onSelect}
+    >
+      {isAIRecommended && (
+        <div className="strategy-card-badge">
+          ⭐ AI Recommended
+        </div>
+      )}
+      
+      <div className="strategy-card-header">
+        <span className="strategy-card-icon">{strategy.icon}</span>
+        <div className="strategy-card-titles">
+          <span className="strategy-card-name">{strategy.name}</span>
+          <span className="strategy-card-theme">{strategy.theme}</span>
+        </div>
+      </div>
+      
+      <p className="strategy-card-description">{strategy.description}</p>
+      
+      <div className="strategy-card-metrics">
+        <div className="metric-row">
+          <span className="metric-label">Min slack</span>
+          <span className="metric-value" style={{ color: riskColorMap[metrics.riskLevel] }}>
+            {metrics.minSlackHours ? `${metrics.minSlackHours} hr` : '—'}
+          </span>
+        </div>
+        <div className="metric-row">
+          <span className="metric-label">MTS adjusted</span>
+          <span className="metric-value">{metrics.mtsAdjusted} / {metrics.mtsCount}</span>
+        </div>
+        <div className="metric-row">
+          <span className="metric-label">Risk level</span>
+          <span className={`metric-value metric-risk metric-risk-${metrics.riskLevel.toLowerCase()}`}>
+            {metrics.riskLevel}
+          </span>
+        </div>
+        <div className="metric-row">
+          <span className="metric-label">Violations</span>
+          <span className={`metric-value ${metrics.violations > 0 ? 'metric-danger' : 'metric-safe'}`}>
+            {metrics.violations}
+          </span>
+        </div>
+      </div>
+      
+      {strategy.aiReasoning && (
+        <details className="strategy-card-reasoning">
+          <summary>View AI reasoning</summary>
+          <p>{strategy.aiReasoning}</p>
+          {strategy.dateAdjustments?.length > 0 && (
+            <div className="strategy-adjustments">
+              <strong>Date adjustments:</strong>
+              <ul>
+                {strategy.dateAdjustments.slice(0, 3).map((adj, i) => (
+                  <li key={i}>
+                    {adj.order_id?.substring(0, 20)}: {adj.original_date} → {adj.new_date}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </details>
+      )}
+      
+      {isSelected && (
+        <div className="strategy-card-checkmark">✓ Selected</div>
+      )}
+    </button>
+  );
+}
+```
+
+---
+
+## 4. STYLING
+
+```css
+/* Strategy Container */
+.ai-strategies-container {
+  padding: 16px 24px;
+  background: #f9fafb;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.dark-mode .ai-strategies-container {
+  background: #1a202c;
+  border-bottom-color: #374151;
+}
+
+.ai-strategies-header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 12px;
+}
+
+.ai-strategies-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.ai-strategies-subtitle {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+}
+
+/* Loading */
+.ai-strategies-loading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 20px 24px;
+  background: #eff6ff;
+  color: #1e40af;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.dark-mode .ai-strategies-loading {
+  background: #1e3a8a;
+  color: #93c5fd;
+}
+
+.ai-loading-spinner {
+  width: 20px;
+  height: 20px;
+  border: 3px solid #dbeafe;
+  border-top-color: #3b82f6;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Strategy Grid */
+.ai-strategies-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+/* Strategy Card */
+.strategy-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  background: white;
+  border: 2px solid #e5e7eb;
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.2s;
+  font-family: inherit;
+}
+
+.dark-mode .strategy-card {
+  background: #1f2937;
+  border-color: #374151;
+}
+
+.strategy-card:hover {
+  border-color: var(--color-primary, #3b82f6);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+
+.strategy-card-selected {
+  border-color: var(--color-primary, #3b82f6);
+  background: #eff6ff;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+}
+
+.dark-mode .strategy-card-selected {
+  background: #1e3a8a;
+}
+
+.strategy-card-recommended {
+  border-color: #f59e0b;
+}
+
+.strategy-card-recommended.strategy-card-selected {
+  border-color: #f59e0b;
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.3);
+}
+
+.strategy-card-badge {
+  position: absolute;
+  top: -8px;
+  right: 8px;
+  background: #f59e0b;
+  color: white;
+  padding: 3px 8px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.strategy-card-header {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.strategy-card-icon {
+  font-size: 24px;
+}
+
+.strategy-card-titles {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.strategy-card-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.strategy-card-theme {
+  font-size: 10px;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.strategy-card-description {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+  margin: 0;
+}
+
+/* Metrics */
+.strategy-card-metrics {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px;
+  background: #f9fafb;
+  border-radius: 4px;
+}
+
+.dark-mode .strategy-card-metrics {
+  background: #111827;
+}
+
+.metric-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+}
+
+.metric-label {
+  color: var(--color-text-secondary);
+}
+
+.metric-value {
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.metric-risk {
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-size: 10px;
+}
+
+.metric-risk-low {
+  background: #dcfce7;
+  color: #16a34a;
+}
+
+.metric-risk-medium {
+  background: #fed7aa;
+  color: #c2410c;
+}
+
+.metric-risk-high {
+  background: #fecaca;
+  color: #dc2626;
+}
+
+.metric-risk-violated {
+  background: #991b1b;
+  color: #ffffff;
+}
+
+.metric-danger {
+  color: #dc2626;
+}
+
+.metric-safe {
+  color: #16a34a;
+}
+
+/* Reasoning */
+.strategy-card-reasoning {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  padding-top: 8px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.dark-mode .strategy-card-reasoning {
+  border-top-color: #374151;
+}
+
+.strategy-card-reasoning summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--color-primary, #3b82f6);
+}
+
+.strategy-card-reasoning p {
+  margin: 6px 0;
+  line-height: 1.5;
+}
+
+.strategy-adjustments ul {
+  margin: 4px 0;
+  padding-left: 16px;
+}
+
+.strategy-adjustments li {
+  font-size: 10px;
+  font-family: monospace;
+}
+
+/* Checkmark */
+.strategy-card-checkmark {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--color-primary, #3b82f6);
+  margin-top: 4px;
+}
+
+/* Responsive */
+@media (max-width: 1024px) {
+  .ai-strategies-grid {
+    grid-template-columns: 1fr;
+  }
+}
+```
+
+---
+
+## VERIFICATION
+
+### AI Strategy Generation
+1. ✅ Three strategies generated after N10D enrichment:
+   - Standard Sequence (Rule-Based) 📋
+   - AI Balanced 🤖
+   - AI Profit-Optimized 💰
+2. ✅ Each with different icon, theme, and color
+3. ✅ AI-recommended badge on best strategy
+
+### Strategy Cards
+4. ✅ Visual cards with name, description, metrics
+5. ✅ Metrics: Min slack, MTS adjusted, Risk level, Violations
+6. ✅ Risk level color-coded
+7. ✅ Expandable AI reasoning section
+8. ✅ Selected state clearly indicated
+
+### Selection & Apply
+9. ✅ Click card to select strategy
+10. ✅ Selected strategy applied to Before/After tables
+11. ✅ User can still manually drag-reorder after selection
+12. ✅ Apply to Schedule saves selected strategy
+
+### Non-negotiable rules
+13. ✅ MTO orders never delayed past avail date
+14. ✅ Critical MTS always meet thresholds
+15. ✅ AI validated before presenting strategy
+16. ✅ Fallback to rule-based if AI fails
+
+### AI integration
+17. ✅ Uses Azure OpenAI GPT-4
+18. ✅ Structured JSON response
+19. ✅ Date adjustments within safe MTS window (today+2 buffer to N10D red)
+```

@@ -1,0 +1,220 @@
+```
+Update all references from "Auto-Sequence" to "Optimize" for per-feedmill and per-line:
+
+---
+
+## 1. UPDATE BUTTON LABELS
+
+### In Feedmill Tab (All sub-tab)
+```jsx
+// BEFORE:
+<button onClick={() => handleFeedmillAutoSequence(currentFeedmill)}>
+  ✨ Auto-Sequence ({getFeedmillShortName(currentFeedmill)})
+</button>
+
+// AFTER:
+<button onClick={() => handleFeedmillAutoSequence(currentFeedmill)}>
+  ⚙️ Optimize ({getFeedmillShortName(currentFeedmill)})
+</button>
+```
+
+### In Line Tab
+```jsx
+// BEFORE:
+<button onClick={() => handleLineAutoSequence(currentLine)}>
+  ✨ Auto-Sequence ({getLineShortLabel(currentLine)})
+</button>
+
+// AFTER:
+<button onClick={() => handleLineAutoSequence(currentLine)}>
+  ⚙️ Optimize ({getLineShortLabel(currentLine)})
+</button>
+```
+
+### Keep "Auto-Sequence (All)" in All Feedmills Tab
+```jsx
+// KEEP AS-IS:
+<button onClick={handlePlantLevelAutoSequence}>
+  ✨ Auto-Sequence (All)
+</button>
+```
+
+---
+
+## 2. UPDATE MODAL/PREVIEW TITLES
+
+### Feedmill Optimize Preview
+```jsx
+// BEFORE:
+<h2>✨ Auto-Sequence — {feedmillShortName}</h2>
+<span className="auto-sequence-subtitle">
+  Find orders from other lines that can be moved to {feedmill}...
+</span>
+
+// AFTER:
+<h2>⚙️ Optimize — {feedmillShortName}</h2>
+<span className="optimize-subtitle">
+  Find orders from other lines that can be moved to {feedmill}...
+</span>
+```
+
+### Line Optimize Preview
+```jsx
+// BEFORE:
+<h2>✨ Auto-Sequence — {lineShortLabel}</h2>
+<span className="auto-sequence-subtitle">
+  Find orders from other lines that can be moved to {line}...
+</span>
+
+// AFTER:
+<h2>⚙️ Optimize — {lineShortLabel}</h2>
+<span className="optimize-subtitle">
+  Find orders from other lines that can be moved to {line}...
+</span>
+```
+
+---
+
+## 3. UPDATE STAT BADGES / LABELS
+
+### In Optimize Preview Header
+```jsx
+// BEFORE:
+<div className="auto-sequence-stats">
+  <StatBadge label="Current Orders" value={totalCurrentOrders} />
+  <StatBadge label="Candidates Found" value={candidates.length} color="blue" />
+  <StatBadge label="Selected to Move" value={selectedCandidates.length} color="green" />
+  <StatBadge label="After" value={totalAfterOrders} />
+</div>
+
+// AFTER:
+<div className="optimize-stats">
+  <StatBadge label="Current Orders" value={totalCurrentOrders} />
+  <StatBadge label="Candidates Found" value={candidates.length} color="blue" />
+  <StatBadge label="Selected to Move" value={selectedCandidates.length} color="green" />
+  <StatBadge label="After Optimization" value={totalAfterOrders} />
+</div>
+```
+
+---
+
+## 4. UPDATE SECTION LABELS
+
+### Candidate Orders Section
+```jsx
+// BEFORE:
+<span className="auto-sequence-candidates-title">
+  Orders available to move to {lineShortLabel}
+</span>
+
+// AFTER:
+<span className="optimize-candidates-title">
+  Orders available to move to {lineShortLabel}
+</span>
+```
+
+### Before/After Table Labels
+```jsx
+// BEFORE:
+<div className="auto-sequence-table-label">
+  Before — {currentBefore.length} orders
+</div>
+
+// AFTER (keep same, just update class):
+<div className="optimize-table-label optimize-label-before">
+  Before — {currentBefore.length} orders
+</div>
+
+<div className="optimize-table-label optimize-label-after">
+  After — {afterLabel}
+</div>
+```
+
+---
+
+## 5. UPDATE PROCESSING OVERLAY TEXT
+
+```javascript
+// When optimize starts:
+
+setProcessingLabel(`${feedmillShortName} Optimization`);
+// or
+setProcessingLabel(`${lineShortLabel} Optimization`);
+```
+
+---
+
+## 6. UPDATE TOAST MESSAGES
+
+```javascript
+// When optimize completes:
+
+// BEFORE:
+toast.success('Auto-sequence preview ready');
+
+// AFTER:
+toast.success('Optimization preview ready');
+
+// When applying:
+// BEFORE:
+toast.success('Auto-sequence applied to schedule');
+
+// AFTER:
+toast.success('Optimization applied to schedule');
+```
+
+---
+
+## 7. UPDATE CSS CLASS NAMES (optional but recommended)
+
+Replace across stylesheets:
+- `.auto-sequence-stats` → `.optimize-stats`
+- `.auto-sequence-candidates` → `.optimize-candidates`
+- `.auto-sequence-table-label` → `.optimize-table-label`
+- `.auto-sequence-modal` → `.optimize-modal`
+- `.auto-sequence-preview` → `.optimize-preview`
+
+Keep Auto-Sequence classes for the plant-wide feature:
+- `.auto-sequence-overlay`
+- `.auto-sequence-preview` (for All)
+- `.auto-sequence-modal` (for All)
+
+---
+
+## 8. UPDATE DOCUMENTATION / TOOLTIPS
+
+### Button Tooltips
+```jsx
+// Feedmill:
+title="Optimize feedmill utilization — find and move orders from other lines to {feedmill}"
+
+// Line:
+title="Optimize line utilization — find and move orders from other lines to {line}"
+
+// All (keep):
+title="Auto-sequence entire plant — combine, move, and sort all orders"
+```
+
+---
+
+## SUMMARY OF CHANGES
+
+**Keep "Auto-Sequence":**
+- ✨ Auto-Sequence (All) — plant-wide button
+- Auto-Sequence modal title
+- Auto-Sequence processing overlay
+- auto-sequence CSS classes (for plant feature)
+
+**Change to "Optimize":**
+- ⚙️ Optimize (FM1), Optimize (FM2), Optimize (FM3) — feedmill buttons
+- ⚙️ Optimize (L1), Optimize (L2), ... Optimize (L7) — line buttons
+- Optimize modal/preview titles
+- Optimize processing overlays
+- Optimize stat labels and messages
+- optimize CSS classes (new)
+
+**Result:**
+- Users immediately see: "Auto-Sequence (All)" = full plant reorganization
+- Users see: "Optimize (FM1)" or "Optimize (L1)" = local utilization balancing
+- Clear distinction between global and local features ✓
+```

@@ -1,0 +1,327 @@
+```
+Implement the following fix:
+
+---
+
+## FIX: AI INSIGHT — GENERATE FOR ALL ORDERS, NOT JUST FIRST ONE
+
+The AI is only generating an insight for the first order on the line. It should generate for ALL orders on the current line tab.
+
+---
+
+### THE PROBLEM
+
+Looking at the snip:
+- First order (Salto Conditioner) has AI insight ✅
+- All other orders show "No insight available" ❌
+
+This is likely because:
+1. The AI response parsing only captures the first result
+2. Multiple orders share the same material code — so only one gets cached
+3. The AI prompt only sends the first order
+4. The parsing regex doesn't handle multi-line AI responses
+
+---
+
+### FIX 1: CACHE BY ORDER ID, NOT JUST MATERIAL CODE
+
+Multiple orders can share the same material code (e.g., 6 orders all for Elite XP Startex). Caching by material code alone means only one insight is stored. Cache by BOTH material code AND order ID.
+
+```javascript
+let insightCache = {};
+
+// Key by order ID for unique orders
+// Key by material code for shared template
+function getCacheKey(order) {
+  return order.id || `${order.material_code_fg}_${order.planned_order_fg}_${order.prio}`;
+}
+
+function autoGenerateTemplates(n10dProducts, allOrders, today, dailyColumns) {
+  const cache = {};
+  
+  const enrichedProducts = n10dProducts.map(
+    p => enrichProductData(p, dailyColumns)
+  );
+  
+  // Create a lookup by material code for N10D data
+  const n10dLookup = {};
+  enrichedProducts.forEach(product => {
+    n10dLookup[product.material_code_fg] = product;
+  });
+  
+  // Generate template for EVERY order individually
+  allOrders.forEach(order => {
+    const key = getCacheKey(order);
+    const product = n10dLookup[String(order.material_code_fg)] || null;
+    
+    const templateLine = product
+      ? generateTemplateLine(product, order, today, false)
+      : generateTemplateLine(null, order, today, false);
+    
+    cache[key] = {
+      template: templateLine,
+      ai: null,
+      combined: templateLine,
+      materialCode: order.material_code_fg,
+      orderId: order.id
+    };
+  });
+  
+  setInsightCache(cache);
+  triggerOrderTableRefresh();
+}
+```
+
+### FIX 2: SEND ALL ORDERS TO AI, NOT JUST UNIQUE MATERIAL CODES
+
+```javascript
+async function handleEnhanceWithAI() {
+  if (!n10dData || n10dData.length === 0) {
+    showNotification('Upload Next 10 Days data first to generate AI insights.');
+    return;
+  }
+  
+  isGenerating = true;
+  triggerOrderTableRefresh();
+  
+  try {
+    const enrichedProducts = n10dData.map(
+      p => enrichProductData(p, dailyColumns)
+    );
+    
+    const n10dLookup = {};
+    enrichedProducts.forEach(product => {
+      n10dLookup[product.material_code_fg] = product;
+    });
+    
+    // Get ALL orders on the current line tab
+    const currentOrders = getCurrentLineOrders();
+    
+    // Split into orders with N10D data and dated orders without
+    const ordersWithN10D = [];
+    const datedOrdersWithoutN10D = [];
+    
+    currentOrders.forEach(order => {
+      const hasN10D = n10dLookup[String(order.material_code_fg)];
+      
+      if (hasN10D) {
+        ordersWithN10D.push({
+          ...order,
+          n10d: hasN10D,
+          cacheKey: getCacheKey(order)
+        });
+      } else if (order.avail_date && 
+                 order.avail_date !== 'prio replenish' && 
+                 order.avail_date !== 'safety stocks') {
+        datedOrdersWithoutN10D.push({
+          ...order,
+          cacheKey: getCacheKey(order)
+        });
+      }
+    });
+    
+    // Generate AI for orders WITH N10D — send ALL, not just unique material codes
+    if (ordersWithN10D.length > 0) {
+      const response = await generateN10DInsightsForOrders(ordersWithN10D);
+      const insights = parseOrderInsightResponse(response);
+      
+      Object.entries(insights).forEach(([key, aiText]) => {
+        if (insightCache[key]) {
+          insightCache[key].ai = aiText;
+          insightCache[key].combined = insightCache[key].template + '\n\n' + aiText;
+        }
+      });
+    }
+    
+    // Generate AI for dated orders WITHOUT N10D
+    if (datedOrdersWithoutN10D.length > 0) {
+      const response = await generateDatedInsightsForOrders(datedOrdersWithoutN10D);
+      const insights = parseOrderInsightResponse(response);
+      
+      Object.entries(insights).forEach(([key, aiText]) => {
+        if (insightCache[key]) {
+          insightCache[key].ai = aiText;
+          insightCache[key].combined = insightCache[key].template + '\n\n' + aiText;
+        }
+      });
+    }
+    
+    // Handle orders with no N10D and no dated avail
+    currentOrders.forEach(order => {
+      const key = getCacheKey(order);
+      if (insightCache[key] && !insightCache[key].ai) {
+        // No AI possible — keep template only
+      }
+    });
+    
+    setInsightCache({...insightCache});
+  } catch (error) {
+    console.error('AI enhancement failed:', error);
+    showNotification('Failed to generate AI insights. Try again.');
+  } finally {
+    isGenerating = false;
+    triggerOrderTableRefresh();
+  }
+}
+```
+
+### FIX 3: UPDATED AI PROMPT — USE UNIQUE KEY PER ORDER
+
+```javascript
+async function generateN10DInsightsForOrders(orders) {
+  const prompt = `
+You are a production planning advisor for a feed manufacturing plant.
+Generate a helpful 3-5 sentence production insight for EACH order below.
+Each order is unique — even if they share the same product, they have different volumes and positions.
+
+RULES:
+- Generate one insight per order using its unique key
+- Do NOT just restate data. Provide actionable advice.
+- Tell the planner WHEN to act, WHAT to do, and WHY.
+- Use full month names.
+- Be direct and practical.
+- Do NOT include the template line — only advisory sentences.
+- Each order MUST get its own insight.
+
+ORDERS:
+${orders.map(o => `
+[${o.cacheKey}] ${o.n10d.item_description}
+Volume: ${o.volume} MT | Priority: ${o.prio || 'N/A'}
+DFL: ${o.n10d.due_for_loading} MT | Inventory: ${o.n10d.inventory} MT
+Status: ${o.n10d.status} | Buffer: ${o.n10d.buffer}%
+Completion: ${o.n10d.completionDate ? formatDateFull(o.n10d.completionDate) : 'N/A'}
+Avail: ${o.n10d.availDate ? formatDateFull(o.n10d.availDate) : 'N/A'}
+Avail Date (order): ${o.avail_date || 'N/A'}
+Days until stockout: ${o.n10d.daysUntilBreach || 'N/A'}
+Daily avg demand: ${o.n10d.avgDailyDemand || 'N/A'} MT
+`).join('\n')}
+
+Output format — one per line, using the EXACT key provided:
+[key]: [3-5 sentence insight]
+
+IMPORTANT: Generate an insight for EVERY order listed above. Do not skip any.
+  `;
+
+  return await callAI(prompt);
+}
+
+async function generateDatedInsightsForOrders(orders) {
+  const prompt = `
+You are a production planning advisor for a feed manufacturing plant.
+Generate a helpful 3-5 sentence production insight for EACH order below.
+
+RULES:
+- Focus on deadline and production scheduling.
+- Use full month names.
+- Be direct and practical.
+- Do NOT include the template line — only advisory sentences.
+- Each order MUST get its own insight.
+
+ORDERS:
+${orders.map(o => {
+  const deadline = parseDate(o.avail_date);
+  const daysRemaining = deadline 
+    ? Math.ceil((deadline - new Date()) / (1000 * 60 * 60 * 24)) 
+    : 'Unknown';
+  
+  return `
+[${o.cacheKey}] ${o.item_description}
+Volume: ${o.volume} MT | Line: ${o.line} | Priority: ${o.prio || 'N/A'}
+Deadline: ${formatDateFull(o.avail_date)}
+Production Time: ${o.production_time || 'N/A'} hrs
+Days remaining: ${daysRemaining}
+Status: ${o.status}
+`;
+}).join('\n')}
+
+Output format — one per line, using the EXACT key provided:
+[key]: [3-5 sentence insight]
+
+IMPORTANT: Generate an insight for EVERY order listed above. Do not skip any.
+  `;
+
+  return await callAI(prompt);
+}
+```
+
+### FIX 4: UPDATED RESPONSE PARSING — HANDLE ALL KEYS
+
+```javascript
+function parseOrderInsightResponse(response) {
+  const insights = {};
+  
+  // Split by newlines
+  const lines = response.split('\n').filter(l => l.trim());
+  
+  lines.forEach(line => {
+    // Match pattern: [key]: insight text
+    // Key can be complex (order ID, material code combo)
+    const match = line.match(/^\[?([^\]]+)\]?:\s*(.+)/);
+    if (match) {
+      const key = match[1].trim();
+      const text = match[2].trim();
+      insights[key] = text;
+    }
+  });
+  
+  return insights;
+}
+```
+
+### FIX 5: CELL READS BY ORDER KEY, NOT MATERIAL CODE
+
+```jsx
+function SummaryCell({ order }) {
+  const key = getCacheKey(order);
+  const entry = insightCache[key];
+  
+  if (!entry) {
+    return (
+      <td className="summary-cell">
+        <div className="summary-empty">
+          No insight available
+        </div>
+      </td>
+    );
+  }
+  
+  return (
+    <td className="summary-cell">
+      <div className="summary-text">
+        <div className="summary-template">
+          {entry.template}
+        </div>
+        {entry.ai && (
+          <div className="summary-ai">
+            {entry.ai}
+          </div>
+        )}
+        {!entry.ai && isGenerating && (
+          <div className="summary-loading">
+            Generating...
+          </div>
+        )}
+      </div>
+    </td>
+  );
+}
+```
+
+---
+
+### VERIFICATION
+
+1. Click ✨ sparkle button
+   - ✅ ALL orders on the line get AI insights, not just the first one
+   - ✅ Orders with same material code each get their own insight
+   - ✅ Dated orders get deadline-based insights
+   - ✅ Orders without N10D data get template-only (no AI)
+
+2. Multiple orders with same product
+   - ✅ Each Elite XP Startex order (80 MT, 80 MT, 32 MT, 20 MT, etc.) gets its own insight
+   - ✅ Insights reference the specific order's volume and priority
+
+3. After generation
+   - ✅ All rows populated — no "No insight available" for orders that should have insights
+   - ✅ Template line + AI text both showing
+```

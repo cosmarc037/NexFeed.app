@@ -1,0 +1,442 @@
+```
+Add date change highlighting in the auto-sequence preview:
+
+---
+
+## 1. TRACK WHICH ORDERS HAD DATE CHANGES
+
+```javascript
+// When building the preview, compare old vs new dates
+
+function handlePlantLevelAutoSequence() {
+  try {
+    // ... existing code ...
+    
+    const allActiveOrders = enrichedOrders.filter(...);
+    
+    // Track which orders have date changes
+    const dateChanges = new Map();
+    
+    const ordersWithFreshN10D = allActiveOrders.map(order => {
+      const materialCode = String(order.material_code_fg || '').trim();
+      const oldDate = order.target_avail_date;
+      
+      if (order.date_source === 'n10d' && n10dData && n10dData.length > 0 && materialCode) {
+        const n10dEntry = n10dData.find(n =>
+          String(n.material_code || n.material_code_fg || '').trim() === materialCode
+        );
+        
+        if (n10dEntry) {
+          const newInferredDate = n10dEntry.inferred_target_date || n10dEntry.target_date;
+          const newStatus = String(n10dEntry.status || n10dEntry.stock_status || '').trim();
+          
+          if (newInferredDate && /^\d{4}-\d{2}-\d{2}/.test(newInferredDate)) {
+            // Check if date actually changed
+            if (oldDate !== newInferredDate) {
+              dateChanges.set(String(order.id), {
+                oldDate: oldDate,
+                newDate: newInferredDate,
+                oldLabel: order.inferred_target_label,
+                newLabel: newStatus,
+              });
+            }
+            
+            return {
+              ...order,
+              target_avail_date: newInferredDate,
+              inferred_target_date: newInferredDate,
+              inferred_target_label: newStatus,
+              _dateChanged: oldDate !== newInferredDate,  // Flag if changed
+              _oldDate: oldDate,
+            };
+          }
+        }
+      }
+      
+      return order;
+    });
+    
+    // Store date changes for display
+    setDateChangesMap(dateChanges);
+    
+    // ... rest of code ...
+  } catch (error) {
+    // ...
+  }
+}
+```
+
+---
+
+## 2. UPDATE THE AFTER TABLE — HIGHLIGHT DATE CHANGES
+
+```jsx
+// In PlantAutoSequencePreview — After table rows
+
+function PlantAfterRow({ order, originalLineOrders, dateChangesMap }) {
+  const hasDateChange = dateChangesMap?.has(String(order.id));
+  const dateChange = hasDateChange ? dateChangesMap.get(String(order.id)) : null;
+  
+  return (
+    <tr className={`auto-sequence-row-after ${order._movement === 'new_to_line' ? 'as-movement-new' : ''} ${hasDateChange ? 'as-date-changed' : ''}`}>
+      {/* ... existing cells ... */}
+      
+      {/* Add a visual indicator before item description */}
+      <td className="as-col-indicator">
+        {hasDateChange && (
+          <span
+            className="as-date-change-badge"
+            title={`Date updated: ${formatDate(dateChange.oldDate)} → ${formatDate(dateChange.newDate)}`}
+          >
+            📅
+          </span>
+        )}
+        {order._movement === 'new_to_line' && (
+          <span className="as-movement-badge" title="Moved from another line">
+            ➜
+          </span>
+        )}
+        {order._isCombined && (
+          <span className="as-combined-badge" title="Combined order">
+            🔗
+          </span>
+        )}
+      </td>
+      
+      {/* ... rest of cells ... */}
+    </tr>
+  );
+}
+```
+
+---
+
+## 3. ADD DATE CHANGE COLUMN — SHOW BEFORE/AFTER IN PREVIEW
+
+Or add an explicit "Date Change" info column:
+
+```jsx
+// In PlantAutoSequencePreview — After table header
+
+<table className="auto-sequence-table-after">
+  <thead>
+    <tr>
+      <th className="as-col-prio">Prio</th>
+      <th className="as-col-fpr">FPR</th>
+      {/* ... other headers ... */}
+      <th className="as-col-avail-date">Avail Date</th>
+      <th className="as-col-date-change">📅 Date Change</th>  {/* NEW */}
+      {/* ... rest of headers ... */}
+    </tr>
+  </thead>
+  <tbody>
+    {ordersToRender.map(order => (
+      <PlantAfterRow
+        key={order.id}
+        order={order}
+        dateChangesMap={dateChangesMap}
+      />
+    ))}
+  </tbody>
+</table>
+
+// In PlantAfterRow
+
+function PlantAfterRow({ order, dateChangesMap }) {
+  const dateChange = dateChangesMap?.get(String(order.id));
+  
+  return (
+    <tr className={`${dateChange ? 'as-row-date-changed' : ''}`}>
+      {/* ... existing cells ... */}
+      
+      <td className="as-col-avail-date">
+        {order.target_avail_date ? (
+          <>
+            <span className="avail-date-value">{formatDate(order.target_avail_date)}</span>
+            {order.inferred_target_label && (
+              <span className="avail-date-label">{order.inferred_target_label}</span>
+            )}
+          </>
+        ) : (
+          <span className="avail-date-label">{order.inferred_target_label || '—'}</span>
+        )}
+      </td>
+      
+      {/* NEW: Date Change indicator */}
+      <td className="as-col-date-change">
+        {dateChange ? (
+          <div className="date-change-info">
+            <div className="date-change-old">
+              {formatDate(dateChange.oldDate)}
+            </div>
+            <div className="date-change-arrow">→</div>
+            <div className="date-change-new">
+              {formatDate(dateChange.newDate)}
+            </div>
+            {dateChange.oldLabel !== dateChange.newLabel && (
+              <div className="date-change-label-note">
+                {dateChange.oldLabel} → {dateChange.newLabel}
+              </div>
+            )}
+          </div>
+        ) : (
+          <span className="date-change-none">—</span>
+        )}
+      </td>
+      
+      {/* ... rest of cells ... */}
+    </tr>
+  );
+}
+```
+
+---
+
+## 4. STYLING FOR DATE CHANGES
+
+```css
+/* Row highlighting for date changes */
+.as-row-date-changed {
+  background: #fef3c7;
+}
+
+.dark-mode .as-row-date-changed {
+  background: #3d3200;
+}
+
+/* Date change column */
+.as-col-date-change {
+  min-width: 120px;
+  padding: 8px;
+}
+
+.date-change-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.date-change-old {
+  color: #9ca3af;
+  text-decoration: line-through;
+}
+
+.date-change-arrow {
+  color: #ea580c;
+  text-align: center;
+  font-size: 11px;
+}
+
+.date-change-new {
+  color: #16a34a;
+  font-weight: 700;
+}
+
+.date-change-label-note {
+  font-size: 9px;
+  color: #6b7280;
+  font-style: italic;
+  margin-top: 2px;
+}
+
+.date-change-none {
+  color: #d1d5db;
+}
+
+/* Badge in indicator column */
+.as-date-change-badge {
+  font-size: 12px;
+  cursor: help;
+  margin-right: 4px;
+}
+
+.as-movement-badge {
+  font-size: 12px;
+  margin-right: 4px;
+}
+
+.as-combined-badge {
+  font-size: 12px;
+  margin-right: 4px;
+}
+
+/* Entire row highlight */
+.as-row-date-changed {
+  border-left: 3px solid #f59e0b;
+}
+
+.dark-mode .as-row-date-changed {
+  border-left: 3px solid #d97706;
+}
+```
+
+---
+
+## 5. UPDATE AFTER LABEL — SHOW DATE CHANGE COUNT
+
+```jsx
+// In PlantAutoSequencePreview header
+
+const dateChangeCount = dateChangesMap?.size || 0;
+const movedCount = sequencedResults ? 
+  Object.values(sequencedResults).flat().filter(o => o._movement === 'new_to_line').length : 0;
+const combinedCount = summaryStats?.ordersCombined || 0;
+
+const afterLabel = `After — ${totalAfterOrders} orders${
+  combinedCount > 0 ? ` · ${combinedCount} combined` : ''
+}${
+  movedCount > 0 ? ` · ${movedCount} moved` : ''
+}${
+  dateChangeCount > 0 ? ` · ${dateChangeCount} date updated` : ''
+}${
+  !combinedCount && !movedCount && !dateChangeCount ? ' · no changes' : ''
+}`;
+
+<div className="auto-sequence-table-label auto-sequence-label-after">
+  <span className="auto-sequence-label-icon">✨</span>
+  {afterLabel}
+</div>
+```
+
+---
+
+## 6. EXPORT/REPORT DATE CHANGES
+
+Optional: Show summary of all date changes:
+
+```jsx
+// In PlantAutoSequencePreview — add a collapsible section
+
+{dateChangesMap && dateChangesMap.size > 0 && (
+  <div className="date-changes-summary">
+    <div className="date-changes-header">
+      <span>📅 {dateChangesMap.size} Orders with Updated Dates</span>
+      <button 
+        className="btn-toggle-details"
+        onClick={() => setShowDateChangeDetails(!showDateChangeDetails)}
+      >
+        {showDateChangeDetails ? '▼' : '▶'}
+      </button>
+    </div>
+    
+    {showDateChangeDetails && (
+      <div className="date-changes-list">
+        {Array.from(dateChangesMap.entries()).map(([orderId, change]) => {
+          const order = allOrders.find(o => String(o.id) === orderId);
+          return (
+            <div key={orderId} className="date-change-item">
+              <span className="date-change-product">
+                {order?.item_description?.substring(0, 40)}
+              </span>
+              <span className="date-change-values">
+                {formatDate(change.oldDate)} → {formatDate(change.newDate)}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    )}
+  </div>
+)}
+```
+
+Styling:
+
+```css
+.date-changes-summary {
+  margin: 12px 0;
+  padding: 10px;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 6px;
+}
+
+.dark-mode .date-changes-summary {
+  background: #3d3200;
+  border-color: #78350f;
+}
+
+.date-changes-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  color: #92400e;
+}
+
+.dark-mode .date-changes-header {
+  color: #fbbf24;
+}
+
+.btn-toggle-details {
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 11px;
+  color: #92400e;
+}
+
+.date-changes-list {
+  margin-top: 8px;
+  max-height: 200px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.date-change-item {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  padding: 4px;
+  background: #fef9e7;
+  border-radius: 3px;
+}
+
+.date-change-product {
+  font-weight: 500;
+  color: #92400e;
+}
+
+.date-change-values {
+  color: #b45309;
+  font-family: monospace;
+  font-size: 10px;
+}
+```
+
+---
+
+## VERIFICATION
+
+### Date change tracking
+1. ✅ Old date vs new date compared
+2. ✅ Only flagged if dates actually differ
+3. ✅ Stored in `dateChangesMap`
+4. ✅ Includes old/new dates and labels
+
+### Visual indicators
+5. ✅ 📅 Badge in indicator column
+6. ✅ Row highlighted in yellow
+7. ✅ "Date Change" column shows: old → new
+8. ✅ Label changes shown (e.g., "safety stocks" → "prio replenish")
+
+### After label
+9. ✅ Shows: "After — 6 orders · 1 already combined · 3 date updated · no changes"
+10. ✅ Accurate count of what changed
+
+### Summary section
+11. ✅ Collapsible list of all date changes
+12. ✅ Shows product name and old → new dates
+13. ✅ Only shown if date changes exist
+
+### Example
+- Before: Gallimax = May 5, 2026 (safety stocks)
+- After: Gallimax = April 11, 2026 (prio replenish)
+- Shows: 📅 yellow highlight + "May 5 → April 11" + "safety stocks → prio replenish"
+```

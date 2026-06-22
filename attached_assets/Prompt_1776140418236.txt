@@ -1,0 +1,521 @@
+```
+Fix the Auto-Sequence Preview comparison view:
+
+---
+
+## FIX 1: BOTH TABLES SAME WIDTH AND SAME COLUMNS
+
+```jsx
+function AutoSequencePreview({ 
+  line, 
+  originalOrders, 
+  sequencedOrders, 
+  onApply, 
+  onCancel, 
+  onReanalyze, 
+  onResetToOriginal 
+}) {
+  const movedCount = sequencedOrders.filter(o => o._movement !== 'same').length;
+  
+  return (
+    <div className="auto-sequence-overlay">
+      <div className="auto-sequence-modal">
+        {/* Header */}
+        <div className="auto-sequence-header">
+          <div>
+            <h2>✨ Auto-Sequence Preview</h2>
+            <span className="auto-sequence-subtitle">{getFeedmillName(line)} — {line}</span>
+          </div>
+          <button className="auto-sequence-close" onClick={onCancel}>✕</button>
+        </div>
+        
+        {/* Stats badges */}
+        <div className="auto-sequence-stats">
+          {/* ... existing stat badges ... */}
+          <StatBadge label="Orders Moved" value={movedCount} color="orange" />
+        </div>
+        
+        {/* Sequence Analysis */}
+        <div className="auto-sequence-analysis">
+          {/* ... existing sequence analysis ... */}
+        </div>
+        
+        {/* Comparison tables — side by side, SAME width */}
+        <div className="auto-sequence-comparison">
+          <div className="auto-sequence-comparison-scroll">
+            
+            {/* BEFORE table */}
+            <div className="auto-sequence-table-panel">
+              <div className="auto-sequence-table-label auto-sequence-label-before">
+                <span className="auto-sequence-label-icon">📋</span>
+                Before
+              </div>
+              <div className="auto-sequence-table-wrapper">
+                <table className="auto-sequence-table auto-sequence-table-before">
+                  <thead>
+                    <tr>
+                      <th className="as-col-prio">Prio</th>
+                      <th className="as-col-fpr">FPR</th>
+                      <th className="as-col-planned">Planned Order</th>
+                      <th className="as-col-material">Material Code (FG)</th>
+                      <th className="as-col-desc">Item Description</th>
+                      <th className="as-col-form">Form</th>
+                      <th className="as-col-volume">Volume (MT)</th>
+                      <th className="as-col-batch">Batch Size</th>
+                      <th className="as-col-batches">Batches</th>
+                      <th className="as-col-prod">Production Time</th>
+                      <th className="as-col-start-date">Start Date</th>
+                      <th className="as-col-start-time">Start Time</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {originalOrders.map((order, index) => (
+                      <tr key={order.id} className="auto-sequence-row-before">
+                        <td className="as-col-prio">
+                          <span className="as-prio-badge">{index + 1}</span>
+                        </td>
+                        <td className="as-col-fpr">{order.fpr}</td>
+                        <td className="as-col-planned">
+                          <div>{order.planned_order_fg}</div>
+                          <div className="as-sub-text">{order.planned_order_sfg}</div>
+                        </td>
+                        <td className="as-col-material">{order.material_code_fg}</td>
+                        <td className="as-col-desc">
+                          <div className="as-desc-main">{order.item_description}</div>
+                          <div className="as-sub-text">{order.category}</div>
+                        </td>
+                        <td className="as-col-form">{order.form}</td>
+                        <td className="as-col-volume">
+                          <strong>{order.volume}</strong> MT
+                        </td>
+                        <td className="as-col-batch">{order.batch_size}</td>
+                        <td className="as-col-batches">{order.batches}</td>
+                        <td className="as-col-prod">
+                          <div><strong>{formatProductionTime(order.production_time)}</strong></div>
+                          <div className="as-sub-text">CO: {formatProductionTime(order._changeoverTotal || order.changeover || 0)}</div>
+                        </td>
+                        <td className="as-col-start-date">{order.start_date ? formatDate(order.start_date) : '—'}</td>
+                        <td className="as-col-start-time">{order.start_time || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            
+            {/* Divider */}
+            <div className="auto-sequence-divider"></div>
+            
+            {/* AFTER table */}
+            <div className="auto-sequence-table-panel">
+              <div className="auto-sequence-table-label auto-sequence-label-after">
+                <span className="auto-sequence-label-icon">✨</span>
+                After — {movedCount} orders repositioned
+              </div>
+              <div className="auto-sequence-table-wrapper">
+                <table className="auto-sequence-table auto-sequence-table-after">
+                  <thead>
+                    <tr>
+                      <th className="as-col-drag"></th>
+                      <th className="as-col-prio">Prio</th>
+                      <th className="as-col-fpr">FPR</th>
+                      <th className="as-col-planned">Planned Order</th>
+                      <th className="as-col-material">Material Code (FG)</th>
+                      <th className="as-col-desc">Item Description</th>
+                      <th className="as-col-form">Form</th>
+                      <th className="as-col-volume">Volume (MT)</th>
+                      <th className="as-col-batch">Batch Size</th>
+                      <th className="as-col-batches">Batches</th>
+                      <th className="as-col-prod">Production Time</th>
+                      <th className="as-col-start-date">Start Date</th>
+                      <th className="as-col-start-time">Start Time</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sequencedOrders.map((order) => (
+                      <tr key={order.id} className="auto-sequence-row-after">
+                        <td className="as-col-drag">
+                          <span className="as-drag-handle">⠿</span>
+                        </td>
+                        <td className="as-col-prio">
+                          <span className="as-prio-badge as-prio-badge-after">{order.prio}</span>
+                        </td>
+                        <td className="as-col-fpr">{order.fpr}</td>
+                        <td className="as-col-planned">
+                          <div>{order.planned_order_fg}</div>
+                          <div className="as-sub-text">{order.planned_order_sfg}</div>
+                        </td>
+                        <td className="as-col-material">{order.material_code_fg}</td>
+                        <td className="as-col-desc">
+                          <div className="as-desc-with-movement">
+                            <MovementIndicator movement={order._movement} delta={order._movementDelta} />
+                            <div>
+                              <div className="as-desc-main">{order.item_description}</div>
+                              <div className="as-sub-text">{order.category}</div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="as-col-form">{order.form}</td>
+                        <td className="as-col-volume">
+                          <strong>{order.volume}</strong> MT
+                        </td>
+                        <td className="as-col-batch">{order.batch_size}</td>
+                        <td className="as-col-batches">{order.batches}</td>
+                        <td className="as-col-prod">
+                          <div><strong>{formatProductionTime(order.production_time)}</strong></div>
+                          <div className="as-sub-text">CO: {formatProductionTime(order._changeoverTotal || order.changeover || 0)}</div>
+                        </td>
+                        <td className="as-col-start-date">
+                          {order.start_date ? (
+                            formatDate(order.start_date)
+                          ) : (
+                            <span className="as-placeholder">Set start date</span>
+                          )}
+                        </td>
+                        <td className="as-col-start-time">
+                          {order.start_time ? (
+                            order.start_time
+                          ) : (
+                            <span className="as-placeholder">Set time</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        {/* Footer */}
+        <div className="auto-sequence-footer">
+          <div className="auto-sequence-footer-left">
+            <button className="btn-reanalyze" onClick={onReanalyze}>
+              ↻ Re-analyze
+            </button>
+            <button className="btn-reset" onClick={onResetToOriginal}>
+              ↺ Reset to Original
+            </button>
+          </div>
+          <div className="auto-sequence-footer-right">
+            <button className="btn-cancel" onClick={onCancel}>Cancel</button>
+            <button className="btn-apply" onClick={() => onApply(sequencedOrders)}>
+              Apply to Schedule
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+## FIX 2: MOVEMENT INDICATOR — ICON ONLY, NO HIGHLIGHT
+
+```jsx
+function MovementIndicator({ movement, delta }) {
+  if (movement === 'same' || delta === 0) return null;
+  
+  if (movement === 'up') {
+    return (
+      <span 
+        className="as-movement-icon as-movement-icon-up" 
+        title={`Moved up ${delta} position${delta > 1 ? 's' : ''}`}
+      >
+        ▲
+      </span>
+    );
+  }
+  
+  if (movement === 'down') {
+    return (
+      <span 
+        className="as-movement-icon as-movement-icon-down" 
+        title={`Moved down ${delta} position${delta > 1 ? 's' : ''}`}
+      >
+        ▼
+      </span>
+    );
+  }
+  
+  return null;
+}
+```
+
+---
+
+## FIX 3: UPDATED STYLING — EQUAL WIDTH, NO ROW HIGHLIGHTS
+
+```css
+/* REMOVE row highlights */
+/* DELETE these: */
+.as-row-moved-up { }
+.as-row-moved-down { }
+.as-movement { }
+.as-movement-up { }
+.as-movement-down { }
+.as-prio-with-movement { }
+
+/* Table panels — EQUAL width */
+.auto-sequence-table-panel {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Both panels take equal space */
+.auto-sequence-comparison-scroll {
+  display: flex;
+  overflow-x: auto;
+  flex: 1;
+}
+
+/* Ensure minimum width so columns don't collapse */
+.auto-sequence-table {
+  width: 100%;
+  min-width: 900px;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+/* Description cell with movement icon */
+.as-desc-with-movement {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+/* Movement icon — small arrow next to item description */
+.as-movement-icon {
+  flex-shrink: 0;
+  font-size: 9px;
+  margin-top: 3px;
+}
+
+.as-movement-icon-up {
+  color: #16a34a;
+}
+
+.as-movement-icon-down {
+  color: #dc2626;
+}
+
+/* No row background changes — clean rows */
+.auto-sequence-row-after {
+  background: #ffffff;
+}
+
+.auto-sequence-row-after:hover {
+  background: #fafafa;
+}
+
+.auto-sequence-row-before {
+  background: #fafafa;
+  cursor: default;
+}
+
+.auto-sequence-row-before:hover {
+  background: #f3f4f6;
+}
+
+/* Column widths — same for both tables */
+.as-col-prio { width: 50px; text-align: center; }
+.as-col-fpr { width: 65px; }
+.as-col-planned { width: 90px; }
+.as-col-material { width: 120px; }
+.as-col-desc { min-width: 180px; }
+.as-col-form { width: 55px; }
+.as-col-volume { width: 75px; text-align: right; }
+.as-col-batch { width: 65px; text-align: right; }
+.as-col-batches { width: 55px; text-align: right; }
+.as-col-prod { width: 100px; }
+.as-col-start-date { width: 95px; }
+.as-col-start-time { width: 75px; }
+.as-col-drag { width: 24px; text-align: center; }
+
+/* Divider */
+.auto-sequence-divider {
+  width: 2px;
+  flex-shrink: 0;
+  background: #e5e7eb;
+}
+
+/* Table labels — sticky */
+.auto-sequence-table-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  font-size: 13px;
+  font-weight: 700;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  flex-shrink: 0;
+}
+
+.auto-sequence-label-before {
+  background: #f9fafb;
+  color: #6b7280;
+  border-bottom: 2px solid #e5e7eb;
+}
+
+.auto-sequence-label-after {
+  background: #fff7ed;
+  color: #92400e;
+  border-bottom: 2px solid #fed7aa;
+}
+
+/* Before table muted style */
+.auto-sequence-table-before td {
+  color: #6b7280;
+}
+
+.auto-sequence-table-before .as-desc-main {
+  color: #4b5563;
+  font-weight: 500;
+}
+
+.auto-sequence-table-before strong {
+  color: #4b5563;
+}
+
+/* Prio badges */
+.as-prio-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: 700;
+  background: #f3f4f6;
+  color: #374151;
+  border: 1px solid #d1d5db;
+}
+
+.as-prio-badge-after {
+  background: #fff7ed;
+  color: #92400e;
+  border-color: #fed7aa;
+}
+
+/* Scrollbar */
+.auto-sequence-comparison-scroll::-webkit-scrollbar {
+  height: 8px;
+}
+
+.auto-sequence-comparison-scroll::-webkit-scrollbar-track {
+  background: #f3f4f6;
+}
+
+.auto-sequence-comparison-scroll::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 4px;
+}
+
+/* Table wrapper — scroll vertically */
+.auto-sequence-table-wrapper {
+  overflow-y: auto;
+  flex: 1;
+}
+
+/* Sub text */
+.as-sub-text {
+  font-size: 10px;
+  color: #9ca3af;
+  margin-top: 2px;
+}
+
+/* Description */
+.as-desc-main {
+  font-size: 12px;
+  color: #1a1a1a;
+  font-weight: 500;
+}
+
+/* Drag handle */
+.as-drag-handle {
+  cursor: grab;
+  color: #d1d5db;
+  font-size: 14px;
+}
+
+.as-drag-handle:hover {
+  color: #6b7280;
+}
+
+/* Placeholder */
+.as-placeholder {
+  color: #d1d5db;
+  font-style: italic;
+  font-size: 11px;
+}
+
+/* Full screen modal */
+.auto-sequence-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: #ffffff;
+  z-index: 10001;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.auto-sequence-comparison {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+```
+
+---
+
+## VERIFICATION
+
+### Equal table widths
+1. ✅ Both Before and After tables use flex: 1 (equal width)
+2. ✅ Both tables have the SAME columns
+3. ✅ Before: Prio, FPR, Planned Order, Material Code, Item Description, Form, Volume, Batch Size, Batches, Production Time, Start Date, Start Time
+4. ✅ After: same columns plus drag handle column
+
+### No row highlights
+5. ✅ No green/red row background for moved orders
+6. ✅ Clean white rows in After table
+7. ✅ Clean grey rows in Before table
+8. ✅ Only hover effect on rows
+
+### Movement icons next to Item Description
+9. ✅ ▲ green icon before item description for moved-up orders
+10. ✅ ▼ red icon before item description for moved-down orders
+11. ✅ No icon for orders that stayed in same position
+12. ✅ Icon is small (9px) and subtle
+13. ✅ Tooltip shows "Moved up/down X positions"
+
+### Layout example
+14. ✅ Before: "Gall 21 Chicken Layer P (Breeder) 50Kg"
+15. ✅ After: "▲ Gall 21 Chicken Layer P (Breeder) 50Kg" (if moved up)
+16. ✅ After: "▼ Elite XP Startex, Mini-pellet 50kg" (if moved down)
+
+### Before table
+17. ✅ Read-only, non-interactive
+18. ✅ No drag handles
+19. ✅ Muted colors (grey text)
+20. ✅ Shows original order before sequencing
+
+### After table
+21. ✅ Has drag handles
+22. ✅ Has start date/time pickers
+23. ✅ Interactive
+24. ✅ Label shows "After — 17 orders repositioned"
+```

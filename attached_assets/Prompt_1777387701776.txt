@@ -1,0 +1,411 @@
+```
+Update the AI sequencing logic so it uses the live Changeover Rules configuration from the application instead of any hardcoded or approximate changeover matrix.
+
+---
+
+## OBJECTIVE
+
+Make the AI fully aligned with the Changeover Rules tab so that:
+- if the user updates any changeover values in the app, the AI will automatically use those updated values
+- AI reasoning, AI prompts, and post-processing heuristics all use the same source of truth
+- feedmill-specific differences (e.g. FM1 vs FM2 vs FM3) are respected
+- no hardcoded changeover assumptions remain in AI Balanced / AI Profit-Optimized logic
+
+This applies to:
+- AI prompt generation
+- AI Balanced heuristic scoring
+- AI Profit-Optimized heuristic scoring
+- any internal “estimated savings” or compatibility evaluation used during sequencing
+
+---
+
+## 1. REMOVE HARDCODED CHANGEOVER VALUES FROM AI LOGIC
+
+Search for and remove any static or fallback values like:
+- base changeover = 0.17
+- diameter change = 1.50 flat
+- yellow ↔ brown = 0.33
+- red/green transitions = 1.00
+- category change = 0.33
+
+Do not use hardcoded changeover constants inside:
+- `buildAIBalancedPrompt(...)`
+- `buildAISequencePrompt(...)`
+- `estimateCompatibilityGain(...)`
+- `scoreBalancedCandidateDate(...)`
+- `scoreProfitCandidateDate(...)`
+- any changeover comparison helper used by AI sequencing
+
+All of these must use the configured rules passed from the app.
+
+---
+
+## 2. USE THE SAME CHANGEOVER CALCULATION FUNCTION AS THE APP
+
+If the app already has a function like this:
+
+```javascript
+calculateChangeoverBetween(fromOrder, toOrder, changeoverRules)
+```
+
+then use that exact function everywhere in AI sequencing logic.
+
+If not, create a single shared helper and ensure both:
+- the scheduling engine
+- the AI sequencing engine
+
+use the same function.
+
+Example:
+
+```javascript
+function calculateChangeoverBetween(fromOrder, toOrder, changeoverRules, feedmill) {
+  const formKey = String(toOrder.form || fromOrder.form || '').trim();
+  const baseChangeover =
+    parseFloat(changeoverRules?.baseByForm?.[formKey]) ||
+    parseFloat(changeoverRules?.baseChangeoverByForm?.[formKey]) ||
+    parseFloat(changeoverRules?.baseDefault) ||
+    0;
+
+  let total = baseChangeover;
+
+  const fromDiameter = normalizeDiameter(fromOrder.diameter);
+  const toDiameter = normalizeDiameter(toOrder.diameter);
+  const fromColor = normalizeColor(fromOrder.color);
+  const toColor = normalizeColor(toOrder.color);
+  const fromCategory = normalizeCategory(fromOrder.category);
+  const toCategory = normalizeCategory(toOrder.category);
+
+  const fmKey = normalizeFeedmillKey(feedmill || fromOrder.feedmill || toOrder.feedmill);
+
+  // diameter change
+  if (fromDiameter !== toDiameter) {
+    total += parseFloat(changeoverRules?.additions?.diameterChange?.[fmKey]) || 0;
+  }
+
+  // SKU color change
+  if (fromColor !== toColor) {
+    total += resolveColorChangeCost(fromColor, toColor, changeoverRules, fmKey);
+  }
+
+  // category change
+  if (fromCategory !== toCategory) {
+    total += parseFloat(changeoverRules?.additions?.categoryChange?.[fmKey]) || 0;
+  }
+
+  return Number(total.toFixed(2));
+}
+```
+
+Use actual field names from your app’s existing Changeover Rules structure.
+
+---
+
+## 3. ADD HELPERS TO READ LIVE CHANGEOVER RULES
+
+```javascript
+function normalizeFeedmillKey(value) {
+  const v = String(value || '').toLowerCase();
+  if (v.includes('fm1') || v.includes('feedmill 1')) return 'FM1';
+  if (v.includes('fm2') || v.includes('feedmill 2')) return 'FM2';
+  if (v.includes('fm3') || v.includes('feedmill 3') || v.includes('pmx')) return 'FM3';
+  return 'FM1';
+}
+
+function normalizeColor(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function normalizeCategory(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function normalizeDiameter(value) {
+  return String(value || '').replace(/\s+/g, '').toLowerCase();
+}
+
+function resolveColorChangeCost(fromColor, toColor, changeoverRules, fmKey) {
+  const rules = changeoverRules?.additions || {};
+
+  const isFromRedGreen = fromColor === 'red' || fromColor === 'green';
+  const isToRedGreen = toColor === 'red' || toColor === 'green';
+
+  if ((fromColor === 'red' || fromColor === 'green') && toColor !== fromColor) {
+    return parseFloat(rules?.redOrGreenToAny?.[fmKey]) || 0;
+  }
+
+  if (isToRedGreen && !isFromRedGreen) {
+    return parseFloat(rules?.anyToRedOrGreen?.[fmKey]) || 0;
+  }
+
+  if (fromColor !== toColor) {
+    return parseFloat(rules?.yellowBrownViceVersa?.[fmKey]) || 0;
+  }
+
+  return 0;
+}
+```
+
+Adjust property names to match the actual structure from the Changeover Rules tab.
+
+---
+
+## 4. PASS LIVE CHANGEOVER RULES INTO AI PROMPTS
+
+Update AI prompt builders so that instead of describing a hardcoded matrix, the prompt explains the actual current configured rules.
+
+### BEFORE:
+```javascript
+const changeoverExamples = `
+Base changeover: 0.17 hours
+Diameter change (3mm ↔ 4mm): 1.5 hours
+SKU Color change (Yellow ↔ Brown): 0.33 hours
+Any to Red/Green: 1.0 hours
+Category change: 0.33 hours
+`;
+```
+
+### AFTER:
+```javascript
+function buildDynamicChangeoverPromptSection(changeoverRules) {
+  const fm1 = 'FM1';
+  const fm2 = 'FM2';
+  const fm3 = 'FM3';
+
+  return `
+### LIVE CHANGEOVER RULES (from app configuration)
+Base changeover by form:
+- P: ${changeoverRules?.baseByForm?.P ?? 'n/a'} hr
+- MP: ${changeoverRules?.baseByForm?.MP ?? 'n/a'} hr
+- C: ${changeoverRules?.baseByForm?.C ?? 'n/a'} hr
+
+Additional changeover by feedmill:
+- Diameter change:
+  - FM1: ${changeoverRules?.additions?.diameterChange?.[fm1] ?? 'n/a'} hr
+  - FM2: ${changeoverRules?.additions?.diameterChange?.[fm2] ?? 'n/a'} hr
+  - FM3: ${changeoverRules?.additions?.diameterChange?.[fm3] ?? 'n/a'} hr
+
+- Yellow ↔ Brown:
+  - FM1: ${changeoverRules?.additions?.yellowBrownViceVersa?.[fm1] ?? 'n/a'} hr
+  - FM2: ${changeoverRules?.additions?.yellowBrownViceVersa?.[fm2] ?? 'n/a'} hr
+  - FM3: ${changeoverRules?.additions?.yellowBrownViceVersa?.[fm3] ?? 'n/a'} hr
+
+- Red/Green → Any:
+  - FM1: ${changeoverRules?.additions?.redOrGreenToAny?.[fm1] ?? 'n/a'} hr
+  - FM2: ${changeoverRules?.additions?.redOrGreenToAny?.[fm2] ?? 'n/a'} hr
+  - FM3: ${changeoverRules?.additions?.redOrGreenToAny?.[fm3] ?? 'n/a'} hr
+
+- Any → Red/Green:
+  - FM1: ${changeoverRules?.additions?.anyToRedOrGreen?.[fm1] ?? 'n/a'} hr
+  - FM2: ${changeoverRules?.additions?.anyToRedOrGreen?.[fm2] ?? 'n/a'} hr
+  - FM3: ${changeoverRules?.additions?.anyToRedOrGreen?.[fm3] ?? 'n/a'} hr
+
+- Category change:
+  - FM1: ${changeoverRules?.additions?.categoryChange?.[fm1] ?? 'n/a'} hr
+  - FM2: ${changeoverRules?.additions?.categoryChange?.[fm2] ?? 'n/a'} hr
+  - FM3: ${changeoverRules?.additions?.categoryChange?.[fm3] ?? 'n/a'} hr
+
+Use these exact rules when reasoning about better grouping and lower changeover.
+`;
+}
+```
+
+Then inject it into:
+- `buildAIBalancedPrompt(...)`
+- `buildAISequencePrompt(...)`
+- any AI strategy prompt builder
+
+---
+
+## 5. UPDATE AI BALANCED HEURISTICS TO USE LIVE RULES
+
+### BEFORE:
+```javascript
+function estimateCompatibilityGain(order, candidateDate, orders, changeoverRules) {
+  // uses hardcoded thresholds or static matrix
+}
+```
+
+### AFTER:
+```javascript
+function estimateCompatibilityGain(order, candidateDate, orders, changeoverRules, line) {
+  const sameDateOrders = orders.filter(o => {
+    const dt = normalizeDate(o._aiSuggestedDate || o.target_avail_date);
+    return dt === candidateDate && String(o.id) !== String(order.id);
+  });
+
+  if (sameDateOrders.length === 0) return 1;
+
+  let bestGain = 0;
+
+  sameDateOrders.forEach(other => {
+    const co = calculateChangeoverBetween(order, other, changeoverRules, line);
+
+    if (co <= 0.17) bestGain = Math.max(bestGain, 4);
+    else if (co <= 0.50) bestGain = Math.max(bestGain, 3);
+    else if (co <= 0.83) bestGain = Math.max(bestGain, 2);
+    else bestGain = Math.max(bestGain, 1);
+  });
+
+  return bestGain;
+}
+```
+
+And update all callers:
+
+```javascript
+score += estimateCompatibilityGain(order, candidateDate, orders, changeoverRules, line) * 10;
+```
+
+---
+
+## 6. UPDATE AI PROFIT-OPTIMIZED HEURISTICS TO USE LIVE RULES TOO
+
+Any profitability scoring that uses:
+- runtime
+- changeover
+- contribution margin per hour
+
+must use real live changeover values from the configured rules.
+
+### Example:
+```javascript
+function calculateProfitRate(order, prevOrder, changeoverRules, line) {
+  const margin = parseFloat(order._margin || 0) || 0;
+  const volume = parseFloat(order.volume_override || order.volume || order.total_volume_mt || 0) || 0;
+  const runRate = getLineRunRate(normalizeLine(line));
+  const productionHours = runRate > 0 ? volume / runRate : 0;
+
+  const changeoverHours = prevOrder
+    ? calculateChangeoverBetween(prevOrder, order, changeoverRules, line)
+    : 0;
+
+  const totalHours = productionHours + changeoverHours;
+
+  if (totalHours <= 0) return 0;
+  return margin / totalHours;
+}
+```
+
+This ensures that if the user changes changeover rules, profit-rate ranking changes too.
+
+---
+
+## 7. UPDATE ANY “ESTIMATED SAVINGS” OR AI EXPLANATION TEXT
+
+If the UI shows messages like:
+- “This move saves 1.5 hours of changeover”
+- “Grouped to reduce 0.83 hr transition”
+
+those values must also come from `calculateChangeoverBetween(...)` using live rules, not hardcoded assumptions.
+
+### Example:
+```javascript
+function describeChangeoverSavings(prevOrder, oldNextOrder, newNextOrder, changeoverRules, line) {
+  const oldCost = calculateChangeoverBetween(prevOrder, oldNextOrder, changeoverRules, line);
+  const newCost = calculateChangeoverBetween(prevOrder, newNextOrder, changeoverRules, line);
+  const saved = Math.max(0, oldCost - newCost);
+
+  return {
+    oldCost,
+    newCost,
+    saved: Number(saved.toFixed(2)),
+  };
+}
+```
+
+---
+
+## 8. ENSURE CHANGEOVER RULES ARE PASSED INTO ALL AI STRATEGY FUNCTIONS
+
+Make sure these functions all receive the live `changeoverRules` object:
+- `generateSequenceStrategies(...)`
+- `generateAIBalancedSequence(...)`
+- `generateAIStrategy(...)`
+- `buildAIBalancedPrompt(...)`
+- `buildAISequencePrompt(...)`
+- any fallback modal generator for strategies
+- any re-analyze / regenerate strategies flow
+
+### Example:
+```javascript
+const generated = await generateSequenceStrategies(
+  sequencedResults,
+  n10dData,
+  masterData,
+  changeoverRules
+);
+```
+
+And do not allow any fallback function to omit `changeoverRules`.
+
+---
+
+## 9. REMOVE DUPLICATE / PARALLEL CHANGEOVER LOGIC
+
+If there are multiple versions of changeover calculations in the codebase:
+- keep only one shared source of truth
+- all scheduling, AI prompts, AI heuristics, and insights must use it
+
+Search for:
+- `0.17`
+- `1.50`
+- `1.00`
+- `0.33`
+inside AI sequencing files and replace with live-rule lookups or shared helper usage where appropriate.
+
+---
+
+## 10. FAIL SAFELY IF RULES ARE MISSING
+
+If changeover rules are unavailable:
+- use the current app defaults only as a final fallback
+- but log a warning in console
+- do not silently drift into stale hardcoded AI logic
+
+### Example:
+```javascript
+function getSafeRuleValue(value, fallback, label) {
+  if (value == null || Number.isNaN(parseFloat(value))) {
+    console.warn(`[AI Changeover] Missing rule for ${label}, using fallback ${fallback}`);
+    return fallback;
+  }
+  return parseFloat(value);
+}
+```
+
+---
+
+## VERIFICATION
+
+### Source of truth alignment
+1. ✅ AI uses the same live Changeover Rules configuration as the app
+2. ✅ No hardcoded matrix remains in AI prompt generation
+3. ✅ No hardcoded matrix remains in AI Balanced heuristics
+4. ✅ No hardcoded matrix remains in AI Profit-Optimized heuristics
+5. ✅ Scheduling engine and AI engine now share one changeover calculation function
+
+### Feedmill-specific logic
+6. ✅ FM1 diameter change uses FM1-configured value
+7. ✅ FM2 diameter change uses FM2-configured value
+8. ✅ FM3 diameter change uses FM3-configured value
+9. ✅ Red/Green transition costs respect per-feedmill configuration
+10. ✅ Category change costs respect per-feedmill configuration
+
+### Dynamic prompt behavior
+11. ✅ AI prompt shows current configured changeover rules, not fixed assumptions
+12. ✅ If a user changes values in Changeover Rules tab, the next AI run reflects them
+13. ✅ AI reasoning about grouping and savings matches live app configuration
+
+### Heuristic accuracy
+14. ✅ Compatibility scoring uses actual configured changeover values
+15. ✅ Profit-rate calculation uses actual configured changeover values
+16. ✅ Estimated savings / insight text uses actual configured changeover values
+17. ✅ AI decisions remain directionally and numerically aligned with configured rules
+
+### Regression protection
+18. ✅ Existing scheduling still works
+19. ✅ AI Balanced still reduces changeovers using live rules
+20. ✅ AI Profit-Optimized still ranks opportunities using live rules
+21. ✅ No mismatch between UI-calculated changeover and AI-assumed changeover
+```

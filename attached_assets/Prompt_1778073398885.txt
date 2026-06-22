@@ -1,0 +1,146 @@
+```
+Fix the combine-in-place action insight so it does not show contradictory queue-time statements like “0.0 MT before” when the orders were already on the same line.
+
+---
+
+## PROBLEM TO FIX
+
+Current insight example:
+"2 orders of Salto Conditioner P 1kg (Bundle) (9.0 MT total) already on L1 were combined into a single production run — no MT moved between lines. Queue times evaluated: L1: 0.0 MT ÷ 20 MT/hr = 0.00 hrs. L1 was confirmed optimal with the lowest queue time of 0.00 hrs (9.0 MT ÷ 20 MT/hr). This eliminates 1 changeover, saving approximately 10 min."
+
+This has multiple issues:
+
+1. It says the orders were already on L1, but then says L1 had 0.0 MT before
+2. It uses contradictory queue values:
+   - 0.0 MT ÷ 20 = 0.00 hrs
+   - 9.0 MT ÷ 20 = 0.45 hrs
+3. It says “lowest queue time of 0.00 hrs” even though 9.0 MT at 20 MT/hr is 0.45 hrs
+4. It frames a combine-in-place action like a line-move/line-selection event instead of an in-place consolidation
+
+---
+
+## OBJECTIVE
+
+For combine-in-place actions:
+- use the true pre-combine line load
+- do not say the line had zero load if the original orders were already there
+- do not talk about “lowest queue time” using 0.00 hrs if the line already had load
+- focus the insight on:
+  - in-place combination
+  - unchanged total MT on the line
+  - reduced changeover/setup
+  - simplified production run
+
+---
+
+## 1. FOR COMBINE-IN-PLACE, DO NOT USE TEMPORARY ZERO-LOAD STATE
+
+If two or more orders already on the same line are combined on that same line:
+- the pre-combine line load must include those original orders
+- do not compute the “before” queue from an empty temporary intermediate state
+
+Example:
+- 3 MT + 6 MT already on L1
+- before combine load = 9 MT
+- not 0 MT
+
+---
+
+## 2. USE TRUE BEFORE/AFTER LOADS FOR THE SAME LINE
+
+For combine-in-place:
+- before line load = total line load before combine
+- after line load = total line load after combine
+
+If no MT moved between lines, then often:
+- before load = after load
+
+Example:
+- before = 9.0 MT
+- after = 9.0 MT
+- run rate = 20 MT/hr
+- queue before = 0.45 hrs
+- queue after = 0.45 hrs
+
+Do not describe this as:
+- 0.00 hrs before
+- 0.45 hrs after
+unless new MT was actually added to the line
+
+---
+
+## 3. REMOVE “LOWEST QUEUE TIME” LANGUAGE IF THIS IS JUST A COMBINE-IN-PLACE EVENT
+
+If the action is only:
+- combining orders already on the same line
+
+then do not say:
+- “L1 was confirmed optimal with the lowest queue time...”
+
+unless the system truly evaluated multiple eligible lines and that comparison is correct.
+
+For a pure in-place combine:
+- that phrase is unnecessary and confusing
+
+Instead, explain:
+- the line remained the same
+- no inter-line movement happened
+- the benefit is fewer changeovers / simpler setup
+
+---
+
+## 4. USE A COMBINE-IN-PLACE SPECIFIC TEMPLATE
+
+Use wording like:
+
+```text
+2 orders of {item} already on {line} were combined into a single {totalMT} MT production run — no MT was moved between lines. Before combining, {line} already had {beforeMT} MT queued, equivalent to {beforeQueue} hrs at {runRate} MT/hr. After combining, the total queued load remained {afterMT} MT, so queue time stayed at {afterQueue} hrs. This consolidation eliminates {changeoversSaved} changeover(s), saving approximately {minutesSaved} minutes.
+```
+
+This should be the preferred narrative for same-line combination.
+
+---
+
+## 5. ENSURE MATH IS CONSISTENT
+
+Do not display:
+- `9.0 MT ÷ 20 MT/hr = 0.00 hrs`
+
+That is mathematically incorrect.
+
+Make sure all queue statements are based on:
+```javascript
+queueHours = totalMT / runRate
+```
+
+rounded correctly.
+
+Example:
+- `9.0 ÷ 20 = 0.45 hrs`
+
+---
+
+## 6. DO NOT MIX DIFFERENT STATES IN THE SAME SENTENCE
+
+The current insight appears to mix:
+- zero-load temporary internal state
+- final combined load
+- optimal-line evaluation wording
+
+Do not combine these in one explanation.
+
+For combine-in-place, use one coherent state model:
+- before combine
+- after combine
+- no line movement
+- changeover savings
+
+---
+
+## 7. VERIFICATION
+
+1. ✅ Combine-in-place insight no longer says the line had 0.0 MT if orders were already on that line
+2. ✅ Queue-time math is correct
+3. ✅ “Lowest queue time” wording is removed unless truly applicable
+4. ✅ Insight focuses on in-place consolidation and reduced changeovers
+5. ✅ The narrative is internally consistent

@@ -1,0 +1,422 @@
+```
+Update the Actions Taken display to highlight MT changes and bold important details:
+
+---
+
+## 1. UPDATE AI PROMPT — INSTRUCT BOLD AND MT CHANGES
+
+```javascript
+function buildActionsPrompt(placementLog) {
+  return `
+You are a production scheduling advisor. Explain each action taken during a plant-level auto-sequence.
+
+LINE RUN RATES:
+- Line 1: 20 MT/hr
+- Line 2: 20 MT/hr
+- Line 3: 10 MT/hr
+- Line 4: 10 MT/hr
+- Line 5: 10 MT/hr
+- Line 6: 10 MT/hr
+- Line 7: 10 MT/hr
+
+Queue Time Formula: Total MT on line ÷ Line run rate = Queue time in hours
+Lower queue time = better (earlier to complete)
+
+For EACH action below, write a detailed 3-5 sentence explanation.
+
+MANDATORY CONTENT:
+1. What happened (combined/moved)
+2. Show ALL eligible lines with queue time calculation
+3. Why the chosen line had the lowest queue time
+4. For MOVED orders: show the MT change on BOTH the source and destination line
+   - Source line: "[before MT] MT → [after MT] MT" (decreased)
+   - Destination line: "[before MT] MT → [after MT] MT" (increased)
+5. For COMBINED orders: show the MT change on the destination line
+6. Changeovers saved (if combined)
+
+FORMATTING RULES:
+- Wrap important values in ** for bold:
+  - The chosen line name: **L1**
+  - The chosen queue time: **14.55 hrs**
+  - MT changes: **291.0 MT → 351.0 MT**
+  - Changeovers saved: **1 changeover**
+  - Time saved: **0.17 hrs**
+- Show source line MT change: L2 decreased from **348.0 MT to 288.0 MT**
+- Show destination line MT change: L1 increased from **291.0 MT to 351.0 MT**
+- Always show the queue time formula with actual numbers
+
+ACTIONS:
+
+${placementLog.map((entry, index) => {
+  const lineDetails = entry.lineScores
+    .map(ls => `${getLineShortName(ls.line)}: ${ls.totalMTBefore.toFixed(1)} MT ÷ ${ls.runRate} MT/hr = ${ls.queueTimeBefore.toFixed(2)} hrs → After: ${ls.totalMTAfter.toFixed(1)} MT (${ls.queueTimeAfter.toFixed(2)} hrs)`)
+    .join('\n    ');
+  
+  if (entry.type === 'combined') {
+    const allSameLine = entry.fromLines.every(l => l === entry.toLine);
+    return `
+ACTION ${index + 1}: COMBINED
+Product: ${entry.product}
+Orders Combined: ${entry.ordersCount}
+Total Volume: ${entry.totalVolume} MT
+Movement: ${allSameLine ? 'All orders already on ' + getLineShortName(entry.toLine) + ' — combined in place' : 'Orders from ' + entry.fromLines.map(l => getLineShortName(l)).join(', ') + ' combined on ' + getLineShortName(entry.toLine)}
+Individual Orders:
+${entry.individualVolumes.map(iv => `  - ${iv.volume} MT from ${getLineShortName(iv.fromLine)}`).join('\n')}
+Eligible Lines (before removal → after placement):
+    ${lineDetails}
+Chosen: ${getLineShortName(entry.toLine)} (queue time: ${entry.bestLineReason.queueTime.toFixed(2)} hrs)
+Destination MT Change: ${getLineShortName(entry.toLine)} went from ${entry.bestLineReason.totalMTBefore.toFixed(1)} MT to ${entry.bestLineReason.totalMTAfter.toFixed(1)} MT (${entry.bestLineReason.queueTimeAfter.toFixed(2)} hrs)
+Changeovers Saved: ${entry.changeoversSaved} (${entry.timeSaved.toFixed(2)} hrs saved)
+`;
+  }
+  
+  if (entry.type === 'moved') {
+    const fromScore = entry.lineScores.find(ls => ls.line === entry.fromLine);
+    const toScore = entry.lineScores.find(ls => ls.line === entry.toLine);
+    return `
+ACTION ${index + 1}: MOVED
+Product: ${entry.product}
+Volume: ${entry.volume} MT
+From: ${getLineShortName(entry.fromLine)} → To: ${getLineShortName(entry.toLine)}
+Eligible Lines (before removal → after placement):
+    ${lineDetails}
+Chosen: ${getLineShortName(entry.toLine)} (queue time: ${toScore?.queueTimeBefore.toFixed(2)} hrs)
+Source Line MT Change: ${getLineShortName(entry.fromLine)} was ${(fromScore?.totalMTBefore || 0) + entry.volume} MT, after removal: ${fromScore?.totalMTBefore.toFixed(1)} MT
+Destination Line MT Change: ${getLineShortName(entry.toLine)} was ${toScore?.totalMTBefore.toFixed(1)} MT, after placement: ${toScore?.totalMTAfter.toFixed(1)} MT
+Original Line Queue: ${getLineShortName(entry.fromLine)} had ${entry.fromLineReason.queueTime.toFixed(2)} hrs
+`;
+  }
+  
+  return '';
+}).join('\n')}
+
+RESPONSE FORMAT:
+For each action write:
+ACTION [number]:
+[3-5 sentence explanation with **bold** on important values]
+
+RULES:
+- Show ALL eligible lines with queue time calculations.
+- Use EXACT numbers from data — do NOT invent.
+- MUST show MT changes on source and destination lines for moved orders.
+- MUST wrap important values in ** for bold.
+- Do NOT say "other options not provided."
+  `;
+}
+```
+
+---
+
+## 2. UPDATE FALLBACK — ADD MT CHANGES AND BOLD
+
+```javascript
+function generateFallbackExplanation(entry) {
+  if (entry.type === 'combined') {
+    const allSameLine = entry.fromLines.every(l => l === entry.toLine);
+    const bestLS = entry.lineScores.find(ls => ls.line === entry.toLine);
+    
+    const allLineDetails = entry.lineScores
+      .map(ls => `${getLineShortName(ls.line)}: ${ls.totalMTBefore.toFixed(1)} MT ÷ ${ls.runRate} MT/hr = ${ls.queueTimeBefore.toFixed(2)} hrs`)
+      .join('; ');
+    
+    if (allSameLine) {
+      return `${entry.ordersCount} orders of **${entry.product}** already on **${getLineShortName(entry.toLine)}** were combined into a single **${entry.totalVolume} MT** run. Queue times evaluated — ${allLineDetails}. **${getLineShortName(entry.toLine)}** was confirmed as optimal with the lowest queue time of **${entry.bestLineReason.queueTime.toFixed(2)} hrs**. ${getLineShortName(entry.toLine)} MT changed from **${entry.bestLineReason.totalMTBefore.toFixed(1)} MT → ${entry.bestLineReason.totalMTAfter.toFixed(1)} MT** (${entry.bestLineReason.queueTimeAfter.toFixed(2)} hrs). This eliminates **${entry.changeoversSaved} changeover${entry.changeoversSaved > 1 ? 's' : ''}**, saving **${formatTimeShift(entry.timeSaved)}**.`;
+    } else {
+      const otherLines = [...new Set(entry.fromLines.filter(l => l !== entry.toLine))];
+      
+      // Show MT changes for source lines
+      const sourceChanges = otherLines.map(sourceLine => {
+        const sourceScore = entry.lineScores.find(ls => ls.line === sourceLine);
+        if (sourceScore) {
+          return `${getLineShortName(sourceLine)}: **${(sourceScore.totalMTAfter + entry.totalVolume).toFixed(1)} MT → ${sourceScore.totalMTAfter.toFixed(1)} MT**`;
+        }
+        return '';
+      }).filter(Boolean).join('; ');
+      
+      return `${entry.ordersCount} orders of **${entry.product}** were combined into **${entry.totalVolume} MT** on **${getLineShortName(entry.toLine)}**, pulling from ${otherLines.map(l => getLineShortName(l)).join(', ')}. Queue times evaluated — ${allLineDetails}. **${getLineShortName(entry.toLine)}** had the lowest queue time of **${entry.bestLineReason.queueTime.toFixed(2)} hrs**. ${getLineShortName(entry.toLine)} MT: **${entry.bestLineReason.totalMTBefore.toFixed(1)} MT → ${entry.bestLineReason.totalMTAfter.toFixed(1)} MT** (${entry.bestLineReason.queueTimeAfter.toFixed(2)} hrs). ${sourceChanges ? 'Source lines: ' + sourceChanges + '.' : ''} This eliminates **${entry.changeoversSaved} changeover${entry.changeoversSaved > 1 ? 's' : ''}**, saving **${formatTimeShift(entry.timeSaved)}**.`;
+    }
+  }
+  
+  if (entry.type === 'moved') {
+    const fromScore = entry.lineScores.find(ls => ls.line === entry.fromLine);
+    const toScore = entry.lineScores.find(ls => ls.line === entry.toLine);
+    
+    // Calculate original MT on source line (before removal)
+    const sourceOriginalMT = (fromScore?.totalMTBefore || 0) + entry.volume;
+    const sourceAfterMT = fromScore?.totalMTBefore || 0;
+    const destBeforeMT = toScore?.totalMTBefore || 0;
+    const destAfterMT = toScore?.totalMTAfter || 0;
+    
+    const allLineDetails = entry.lineScores
+      .map(ls => `${getLineShortName(ls.line)}: ${ls.totalMTBefore.toFixed(1)} MT ÷ ${ls.runRate} MT/hr = ${ls.queueTimeBefore.toFixed(2)} hrs`)
+      .join('; ');
+    
+    return `**${entry.product}** (**${entry.volume} MT**) was moved from **${getLineShortName(entry.fromLine)}** to **${getLineShortName(entry.toLine)}**. Queue times evaluated — ${allLineDetails}. **${getLineShortName(entry.toLine)}** had the lowest queue time of **${toScore?.queueTimeBefore.toFixed(2)} hrs**. ${getLineShortName(entry.fromLine)} decreased from **${sourceOriginalMT.toFixed(1)} MT → ${sourceAfterMT.toFixed(1)} MT**. ${getLineShortName(entry.toLine)} increased from **${destBeforeMT.toFixed(1)} MT → ${destAfterMT.toFixed(1)} MT** (${toScore?.queueTimeAfter.toFixed(2)} hrs).`;
+  }
+  
+  return 'Action details unavailable.';
+}
+```
+
+---
+
+## 3. RENDER BOLD TEXT IN EXPLANATIONS
+
+The AI and fallback both use **text** for bold. Parse and render:
+
+```jsx
+function ActionExplanation({ text }) {
+  // Parse **bold** markers into <strong> elements
+  const parts = text.split(/(\*\*[^*]+\*\*)/g);
+  
+  return (
+    <span>
+      {parts.map((part, index) => {
+        if (part.startsWith('**') && part.endsWith('**')) {
+          const boldText = part.slice(2, -2);
+          return <strong key={index} className="action-bold">{boldText}</strong>;
+        }
+        return <span key={index}>{part}</span>;
+      })}
+    </span>
+  );
+}
+```
+
+### USE IN PlantActionsTaken
+
+```jsx
+{!isLoadingAI && placementLog.map((entry, index) => {
+  const explanation = (!useFallback && aiExplanations && aiExplanations[index])
+    ? aiExplanations[index]
+    : generateFallbackExplanation(entry);
+  
+  const isAI = !useFallback && aiExplanations && aiExplanations[index];
+  
+  return (
+    <div key={index} className="plant-action-card">
+      {/* Action header */}
+      <div className="plant-action-header">
+        {entry.type === 'combined' ? (
+          <>
+            <span className="plant-action-icon">🔗</span>
+            <span className="plant-action-title">
+              Combined <strong>{entry.ordersCount}</strong> orders of <strong>{entry.product}</strong> ({entry.totalVolume} MT) → <strong>{getLineShortName(entry.toLine)}</strong>
+            </span>
+          </>
+        ) : entry.type === 'moved' ? (
+          <>
+            <span className="plant-action-icon">↗</span>
+            <span className="plant-action-title">
+              Moved <strong>{entry.product}</strong> ({entry.volume} MT) {getLineShortName(entry.fromLine)} → <strong>{getLineShortName(entry.toLine)}</strong>
+            </span>
+          </>
+        ) : null}
+      </div>
+      
+      {/* MT Change badges */}
+      {entry.type === 'moved' && (
+        <div className="plant-action-mt-changes">
+          <MTChangeBadge
+            line={entry.fromLine}
+            beforeMT={(entry.lineScores.find(ls => ls.line === entry.fromLine)?.totalMTBefore || 0) + entry.volume}
+            afterMT={entry.lineScores.find(ls => ls.line === entry.fromLine)?.totalMTAfter || 0}
+            direction="decrease"
+          />
+          <span className="plant-action-mt-arrow">→</span>
+          <MTChangeBadge
+            line={entry.toLine}
+            beforeMT={entry.lineScores.find(ls => ls.line === entry.toLine)?.totalMTBefore || 0}
+            afterMT={entry.lineScores.find(ls => ls.line === entry.toLine)?.totalMTAfter || 0}
+            direction="increase"
+          />
+        </div>
+      )}
+      
+      {entry.type === 'combined' && (
+        <div className="plant-action-mt-changes">
+          <MTChangeBadge
+            line={entry.toLine}
+            beforeMT={entry.bestLineReason.totalMTBefore}
+            afterMT={entry.bestLineReason.totalMTAfter}
+            direction="increase"
+          />
+        </div>
+      )}
+      
+      {/* Explanation */}
+      <div className={`plant-action-explanation ${isAI ? '' : 'plant-action-fallback'}`}>
+        <ActionExplanation text={explanation} />
+      </div>
+      
+      {/* Sub-orders for combined */}
+      {entry.type === 'combined' && entry.individualVolumes && (
+        <div className="plant-action-sub-orders">
+          {entry.individualVolumes.map((iv, subIdx) => (
+            <span key={subIdx} className="plant-action-sub-chip">
+              {getLineShortName(iv.fromLine)} · {iv.volume} MT
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+})}
+```
+
+---
+
+## 4. MT CHANGE BADGE COMPONENT
+
+```jsx
+function MTChangeBadge({ line, beforeMT, afterMT, direction }) {
+  const diff = afterMT - beforeMT;
+  const diffFormatted = diff > 0 ? `+${diff.toFixed(1)}` : diff.toFixed(1);
+  
+  return (
+    <div className={`mt-change-badge mt-change-${direction}`}>
+      <span className="mt-change-line">{getLineShortName(line)}</span>
+      <span className="mt-change-values">
+        <span className="mt-change-before">{beforeMT.toFixed(1)} MT</span>
+        <span className="mt-change-arrow">→</span>
+        <span className="mt-change-after">{afterMT.toFixed(1)} MT</span>
+      </span>
+      <span className="mt-change-diff">({diffFormatted} MT)</span>
+    </div>
+  );
+}
+```
+
+---
+
+## 5. STYLING
+
+```css
+/* Action bold text */
+.action-bold {
+  font-weight: 700;
+  color: #1a1a1a;
+}
+
+/* MT Change badges container */
+.plant-action-mt-changes {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+  flex-wrap: wrap;
+}
+
+.plant-action-mt-arrow {
+  color: #9ca3af;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* MT Change badge */
+.mt-change-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 11px;
+}
+
+.mt-change-decrease {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+}
+
+.mt-change-increase {
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+}
+
+.mt-change-line {
+  font-weight: 700;
+  font-size: 11px;
+}
+
+.mt-change-decrease .mt-change-line {
+  color: #dc2626;
+}
+
+.mt-change-increase .mt-change-line {
+  color: #16a34a;
+}
+
+.mt-change-values {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: #374151;
+}
+
+.mt-change-before {
+  text-decoration: line-through;
+  color: #9ca3af;
+  font-size: 10px;
+}
+
+.mt-change-arrow {
+  color: #9ca3af;
+  font-size: 10px;
+}
+
+.mt-change-after {
+  font-weight: 700;
+  color: #1a1a1a;
+}
+
+.mt-change-diff {
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.mt-change-decrease .mt-change-diff {
+  color: #dc2626;
+}
+
+.mt-change-increase .mt-change-diff {
+  color: #16a34a;
+}
+```
+
+---
+
+## VERIFICATION
+
+### MT changes shown
+1. ✅ Moved orders show source line MT: "348.0 MT → 288.0 MT" (decreased)
+2. ✅ Moved orders show destination line MT: "291.0 MT → 351.0 MT" (increased)
+3. ✅ Combined orders show destination line MT change
+4. ✅ Source badge is red-tinted, destination badge is green-tinted
+5. ✅ Old MT has strikethrough, new MT is bold
+6. ✅ Diff shown in parentheses: "(-60.0 MT)" or "(+60.0 MT)"
+
+### Bold important details
+7. ✅ Chosen line name bolded: **L1**
+8. ✅ Chosen queue time bolded: **14.55 hrs**
+9. ✅ MT changes bolded: **291.0 MT → 351.0 MT**
+10. ✅ Changeovers saved bolded: **1 changeover**
+11. ✅ Time saved bolded: **0.17 hrs**
+12. ✅ Product name bolded in explanation
+
+### AI prompt
+13. ✅ Instructs AI to use ** for bold
+14. ✅ Provides before/after MT for all lines
+15. ✅ AI told to show MT changes for source and destination
+
+### Fallback
+16. ✅ Fallback also uses ** for bold
+17. ✅ Fallback shows source MT change for moved orders
+18. ✅ Fallback shows destination MT change
+19. ✅ ActionExplanation component parses ** into <strong>
+
+### Display
+20. ✅ MT change badges between header and explanation
+21. ✅ Visual badges with red/green color coding
+22. ✅ Sub-order chips for combined orders
+```

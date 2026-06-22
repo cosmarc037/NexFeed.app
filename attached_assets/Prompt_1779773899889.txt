@@ -1,0 +1,228 @@
+Please update the **plant-level auto-sequence cross-line movement logic for generated orders** so that generated orders use the correct material-code mapping when checking master-data run-rate eligibility.
+
+---
+
+## 1. FIX RUN-RATE LOOKUP FOR GENERATED ORDERS DURING CROSS-LINE MOVEMENT
+
+There appears to be an issue in the plant-level auto-sequence cross-line movement logic for **generated orders**.
+
+Generated orders were previously updated so they can now be moved across lines during auto-sequencing, subject to:
+- historical run-rate eligibility
+- non-overlap checks
+- normal line-scoring logic
+
+However, generated orders still do not appear to move even in cases where:
+- another partner/eligible line has lower queue time
+- and master data already contains run rates for both lines
+
+### Likely issue
+The run-rate gate for generated orders may still be using the wrong material-code field when checking eligibility.
+
+### Expected result
+Generated orders should correctly pass the run-rate eligibility gate when their corresponding material has valid run rates in master data for the destination line.
+
+---
+
+## 2. FOR GENERATED ORDERS, USE SFG MATERIAL CODE AS THE LOOKUP KEY
+
+Please update the cross-line movement eligibility logic so that for **generated orders**, the app uses the order’s:
+
+- **SFG Material Code**
+
+as the lookup key for run-rate eligibility.
+
+### Important
+This is specific to **generated orders**.
+
+For normal orders, preserve the existing logic that uses:
+- **FG Material Code**
+
+### Expected result
+The app should no longer rely on FG-based generated-order identity for cross-line run-rate evaluation.
+
+---
+
+## 3. MATCH THE GENERATED ORDER’S SFG MATERIAL CODE AGAINST FG MATERIAL CODE IN MASTER DATA
+
+Please implement the following mapping rule for generated orders when checking master-data run-rate support:
+
+### Generated-order run-rate lookup rule
+- **Generated Order SFG Material Code**
+  should be matched against
+- **Master Data FG Material Code**
+
+### Reason
+In the current generated-order design, the generated order’s meaningful production identity is carried on the **SFG side**, while the master-data run-rate record appears to be stored under the **FG material code** field.
+
+### Expected result
+If a generated order has:
+- `SFG Material Code = 3000000000248`
+
+and master data has:
+- `FG Material Code = 3000000000248`
+- with valid run rates on `L1` and `L2`
+
+then the generated order should be considered eligible for cross-line movement to Line 1 or Line 2, subject to the other existing rules.
+
+---
+
+## 4. PRESERVE NORMAL ORDER LOOKUP BEHAVIOR
+
+Please do not change the existing run-rate lookup behavior for **normal orders**.
+
+### Normal-order lookup should remain:
+- Order **FG Material Code**
+  matched against
+- Master Data **FG Material Code**
+
+### Expected result
+This change should only correct the generated-order path, not affect standard orders.
+
+---
+
+## 5. APPLY THIS FIX TO BOTH COMBINE-SCAN ELIGIBILITY AND SOLO MOVE ELIGIBILITY IF RUN-RATE GATING IS USED THERE
+
+Please ensure that anywhere the plant-level auto-sequence checks destination-line run-rate eligibility for generated orders, it uses the corrected lookup logic.
+
+This includes:
+- combined generated-order movement eligibility
+- solo generated-order movement eligibility
+- any helper/shared function used by both
+
+### Expected result
+Generated orders should not fail eligibility in one movement path while succeeding in another due to inconsistent lookup logic.
+
+---
+
+## 6. DO NOT CHANGE THE NON-OVERLAP RULE
+
+Please preserve the existing non-overlap rule for generated orders:
+
+- generated orders must not be moved to a destination line if that line already has another generated order from the same Powermix source
+
+### Important
+This request is only about fixing the **run-rate lookup mapping**.
+
+Do not weaken or remove the overlap protection rule.
+
+---
+
+## 7. DO NOT CHANGE OTHER CROSS-LINE MOVEMENT GATES
+
+Please preserve the existing plant-level movement gates such as:
+- destination line must be active / not in shutdown
+- destination line must not be improperly overloaded
+- queue-time scoring still determines the best line
+- source orders that are hard-locked remain hard-locked
+- planned orders remain line-locked if that rule still applies
+- completed/cancelled orders remain excluded
+
+### Expected result
+The only change should be:
+- generated orders use the correct material-code lookup for run-rate eligibility
+
+---
+
+## 8. EXAMPLE SCENARIO TO SUPPORT
+
+### Example
+A generated order has:
+- `SFG Material Code = 3000000000248`
+
+Master data contains:
+- `FG Material Code = 3000000000248`
+- `L1 Rate = 19.30`
+- `L2 Rate = 19.30`
+
+If the generated order is being evaluated for movement between Line 1 and Line 2, then:
+
+- the order should pass the run-rate eligibility gate for both lines
+- provided other restrictions do not block it
+
+### Expected result
+The generated order should not be incorrectly treated as ineligible just because the lookup is using the wrong material field.
+
+---
+
+## 9. UPDATE DEBUG LOGGING TO SHOW THE GENERATED-ORDER LOOKUP MAPPING CLEARLY
+
+Please update or add debug logs so it is obvious which material code is being used for generated-order cross-line run-rate checks.
+
+### Goal
+Make it easy to confirm that:
+- generated orders use **SFG material code**
+- the lookup matches against **master data FG material code**
+- the resulting run-rate eligibility is correct
+
+---
+
+## IMPORTANT
+
+Please implement this lookup rule for plant-level cross-line movement:
+
+### Normal orders
+- use **Order FG Material Code**
+- match against **Master Data FG Material Code**
+
+### Generated orders
+- use **Order SFG Material Code**
+- match against **Master Data FG Material Code**
+
+This fix should be applied to the generated-order run-rate gate used before destination scoring.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log the material-code mapping used during generated-order cross-line eligibility checks.
+
+```javascript
+console.debug('[Generated Order Run-Rate Lookup]', {
+  orderId,
+  isGeneratedOrder: true,
+  orderSfgMaterialCode,
+  masterDataMatchField: 'fgMaterialCode',
+  matchedMasterDataRecord,
+  candidateLine,
+  candidateLineRunRate,
+  eligibleForCrossLineMove: candidateLineRunRate > 0,
+});
+```
+
+```javascript
+console.debug('[Normal Order Run-Rate Lookup]', {
+  orderId,
+  isGeneratedOrder: false,
+  orderFgMaterialCode,
+  masterDataMatchField: 'fgMaterialCode',
+  matchedMasterDataRecord,
+  candidateLine,
+  candidateLineRunRate,
+  eligibleForCrossLineMove: candidateLineRunRate > 0,
+});
+```
+
+```javascript
+console.debug('[Generated Order Cross-Line Gate Result]', {
+  orderId,
+  sourceLine,
+  candidateLine,
+  passedRunRateGate,
+  blockedByOverlap,
+  finalEligibleForScoring,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Normal orders still use `FG Material Code → Master Data FG Material Code`
+2. ✅ Generated orders now use `SFG Material Code → Master Data FG Material Code`
+3. ✅ A generated order with matching master-data FG record and valid L1/L2 run rates passes the run-rate gate
+4. ✅ Generated orders are no longer incorrectly rejected due to wrong material-code lookup
+5. ✅ Plant-level auto-sequence can now evaluate generated orders for cross-line movement when run-rate support exists
+6. ✅ Non-overlap protection for generated orders remains intact
+7. ✅ Other movement gates and scoring rules remain unchanged
+8. ✅ Debug logs clearly show the material-code mapping and run-rate result
+9. ✅ No UI errors or console errors are introduced

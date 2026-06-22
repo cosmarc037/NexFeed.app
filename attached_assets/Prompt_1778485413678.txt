@@ -1,0 +1,307 @@
+```
+Please revisit and improve the AI’s MTS-related date suggestion behavior so that when MTS advancement is active, the AI does not merely move orders to earlier dates, but instead uses **best-fit daily packing** under the 24-hour day capacity, while also clustering orders per day to reduce changeover when supported by the 3-Dimension Analysis.
+
+---
+
+## IMPORTANT SCOPE
+
+This is **not** a request to replace the current AI sequencing engine.
+
+Do **not** rewrite or overhaul:
+- the overall AI strategy generation
+- the 3-Dimension Analysis framework
+- the existing strategy titles/descriptions
+- the overall sequencing engine that is already working
+
+This is only an enhancement to the AI’s **date suggestion / date assignment** behavior when MTS flexibility is active.
+
+Keep the current AI working as-is, and improve only how it places flexible orders onto dates.
+
+---
+
+## OBJECTIVE
+
+Right now, the AI can already:
+- identify when MTS advancement is PRIMARY or active
+- move eligible orders earlier
+- avoid compromising protected orders
+
+However, the AI is still too loose in how it assigns dates.
+
+It advances orders to earlier dates, but it does **not** pack those dates strongly enough toward the available 24-hour capacity.
+
+This leads to results like:
+- one early day with only 3.1 hours
+- another day with only 2.2 hours
+- many underutilized days
+- weak capacity usage even though MTS advancement is supposedly the main strategy
+
+We want to improve that.
+
+---
+
+## REQUIRED BEHAVIOR
+
+When the AI decides that MTS advancement is active/appropriate, it should:
+
+1. use **best-fit packing** into daily buckets
+2. treat each day as a **24-hour capacity cap**
+3. include **production hours + changeover hours** in the daily used-hours calculation
+4. move whole orders only (do not split in this enhancement)
+5. respect safe windows, Future Dispatches, urgency, and protection rules
+6. if the 3-Dimension Analysis says changeover reduction matters, also cluster compatible orders within the day to reduce changeover
+7. use the 3-Dimension priority ordering to break tradeoffs between better utilization and better changeover
+
+---
+
+## 1. DO NOT JUST ADVANCE ORDERS TO EARLIER DATES — PACK THEM INTELLIGENTLY
+
+The current behavior appears to do:
+- “this order can move earlier”
+- then assign it to an earlier day
+- but without strongly optimizing the occupancy of that day
+
+This is not enough.
+
+Instead, the AI should look at all eligible flexible orders together and ask:
+- what combination of orders best fits this day’s remaining capacity?
+- which mix also maintains or improves changeover?
+- should another compatible order be packed into this same day before opening a new date bucket?
+
+The AI should stop scattering lightly loaded days when a better packed arrangement is possible.
+
+---
+
+## 2. USE BEST-FIT PACKING, NOT JUST EARLIEST-DATE FILLING
+
+The desired behavior is **best-fit packing**, not simple earliest-date-first assignment.
+
+That means if multiple valid flexible orders are eligible for a day, the AI should consider:
+- which orders fit best within the remaining hours of that day
+- which orders produce stronger utilization
+- which orders improve changeover compatibility
+- which orders still respect all date/dispatch safety rules
+
+Do not simply place the next eligible order on the earliest earlier date and stop there.
+
+---
+
+## 3. DAILY CAPACITY = 24 HOURS INCLUDING PRODUCTION + CHANGEOVER
+
+When evaluating whether orders fit on a day, the daily used-hours budget must include:
+
+- production hours
+- plus changeover hours assigned to that day
+
+### Rule
+```text
+day_used_hours = sum(production_hours_of_orders_on_day) + sum(changeovers_assigned_to_day)
+```
+
+A day must not exceed:
+- **24 hours**
+
+This is the daily capacity cap because the plant operates 24/7.
+
+---
+
+## 4. IF AN ORDER DOES NOT FIT, MOVE THE WHOLE ORDER TO THE NEXT FEASIBLE DAY
+
+For this enhancement:
+- do not split orders
+- do not partially fit them into a day
+
+If an order cannot fit within the remaining capacity of the day:
+- move the whole order to the next feasible day
+
+This keeps the behavior operationally simple.
+
+---
+
+## 5. ONLY APPLY THIS WHEN MTS FLEXIBILITY IS ACTUALLY ACTIVE
+
+This behavior should be triggered only when the AI’s own 3-Dimension Analysis indicates that MTS advancement/flexibility is appropriate.
+
+If MTS is deprioritized, do not force this packing logic aggressively.
+
+This avoids contradictions where:
+- the AI says MTS is not the focus
+- but the execution still performs strong date movement and packing anyway
+
+So:
+- MTS PRIMARY / active → use this enhanced packing logic
+- MTS DEPRIORITIZED → do not use it as the main behavior
+
+---
+
+## 6. RESPECT FUTURE DISPATCHES / ORDER PROTECTION RULES
+
+Even with best-fit packing, the AI must still respect:
+- Future Dispatch target logic
+- critical / urgent / monitor protections
+- MTO protection
+- safe windows
+- any existing valid order movement constraints
+
+This enhancement must not compromise protected orders just to improve utilization.
+
+### Protected behavior
+- MTO orders remain protected
+- Critical / Urgent / Monitor orders remain tightly controlled
+- only flexible eligible orders should be considered for the packing optimization
+
+---
+
+## 7. ALLOW MTS STOCK SUFFICIENT LATER-THAN-TARGET FLEXIBILITY AS ALREADY AGREED
+
+Keep the previously agreed rule:
+
+Only **MTS + stock sufficient** orders may be moved later than target date,
+and only:
+- up to **14 days later**
+
+This flexibility should remain available in the date suggestion logic when valid and useful.
+
+This later movement can help:
+- complement protected MTO anchors
+- reduce changeovers
+- improve daily packing
+- cluster compatible orders more effectively
+
+Do not give this later-than-target flexibility to:
+- MTO
+- Critical
+- Urgent
+- Monitor
+
+---
+
+## 8. ALSO CLUSTER ORDERS WITHIN THE DAY TO REDUCE CHANGEOVER WHEN THE 3-DIMENSION ANALYSIS SUPPORTS IT
+
+Best-fit packing is not only about hours.
+
+If the 3-Dimension Analysis says changeover reduction is also important, then the AI should try to pack each day with combinations of orders that are also changeover-compatible.
+
+This means the AI should consider within-day clustering such as:
+- same diameter
+- same color
+- compatible category adjacency
+- avoiding expensive transitions when possible
+
+So the day-level packing should not just maximize hours.
+It should also support lower same-day changeover when that dimension is active.
+
+---
+
+## 9. USE 3-DIMENSION PRIORITY ORDERING TO RESOLVE TRADEOFFS
+
+If two valid best-fit combinations are possible for a given day:
+- one provides slightly better fill
+- another provides slightly better changeover
+
+Then the AI should break the tie according to the 3-Dimension Analysis priorities.
+
+### Example logic
+If:
+- MTS advancement = PRIMARY
+- Changeover reduction = SECONDARY
+
+Then prefer:
+1. better fill / utilization
+2. then tie-break by changeover compatibility
+
+If:
+- Changeover reduction = PRIMARY
+- MTS advancement = SECONDARY
+
+Then prefer:
+1. better within-day clustering / lower changeover
+2. then tie-break by utilization
+
+This is required.
+
+The AI must follow its own stated priority structure when making packing choices.
+
+---
+
+## 10. FIX THE TYPE OF OUTCOME SHOWN IN THE CURRENT SCREENSHOT
+
+The current result shows:
+- May 11 = 3.1 hrs (13.1%)
+- May 13 = 13.5 hrs (56.4%)
+- May 14 = 2.2 hrs (9.0%)
+- May 22 = 0.2 hrs (0.8%)
+
+Even though MTS advancement is PRIMARY.
+
+This indicates the AI is advancing dates but still leaving days underfilled.
+
+Please improve the date placement logic so that if a better packed arrangement is possible without compromising rules, the AI finds it instead of leaving many lightly used days.
+
+---
+
+## 11. KEEP THE DAILY UTILIZATION KPI AS-IS — IMPROVE THE INPUTS
+
+Do not try to fix this by changing the KPI formula.
+
+Instead:
+- keep the Daily utilization KPI
+- improve the date assignment behavior
+- let the utilization improve naturally because the AI is now packing days more intelligently
+
+This is the correct fix.
+
+---
+
+## 12. ADD DEBUG LOGGING FOR BEST-FIT DAY PACKING
+
+Temporarily log:
+
+```javascript
+console.debug('[AI Best-Fit Day Packing]', {
+  strategyId,
+  title: strategy.title,
+  mtsPriority: threeDimension.mtsPriority,
+  changeoverPriority: threeDimension.changeoverPriority,
+  candidateDay,
+  candidateOrders: candidateOrders.map(o => ({
+    orderId: o.id,
+    item: o.item_description,
+    productionHours: o.production_hours,
+    estimatedChangeover: o.changeover_hours,
+    targetDate: o.target_date,
+    suggestedDate: o.suggested_date,
+    orderType: o.isMTO ? 'MTO' : 'MTS',
+    urgencyClass: o.urgency_class,
+    stockStatus: o.stock_status,
+  })),
+  chosenCombination: chosenOrders.map(o => o.id),
+  usedHoursAfterPacking,
+  capacityLimit: 24,
+  selectionReason: 'best_fit_with_3d_priority_tiebreak',
+});
+```
+
+This should help verify:
+- the AI is evaluating combinations
+- the AI is packing days under the 24-hour cap
+- the AI is using 3-dimension priority logic when selecting the best combination
+
+---
+
+## 13. VERIFICATION
+
+1. ✅ The existing AI sequencing engine remains intact and is not replaced
+2. ✅ Only the MTS-related date suggestion / date placement behavior is enhanced
+3. ✅ When MTS advancement is active, the AI uses best-fit daily packing instead of loosely scattering orders across early dates
+4. ✅ Daily packing respects the 24-hour daily cap
+5. ✅ Daily used hours include both production + changeover
+6. ✅ Orders are moved as whole orders only; they are not split in this enhancement
+7. ✅ Future Dispatches protections and safe windows are still respected
+8. ✅ MTO orders remain protected
+9. ✅ Only MTS stock sufficient orders can use the later-than-target flexibility up to 14 days
+10. ✅ Within-day packing also considers changeover compatibility when supported by the 3-Dimension Analysis
+11. ✅ Tradeoffs between better fill and better changeover are resolved using the 3-Dimension priority ordering
+12. ✅ Underfilled early days are reduced when a better packed arrangement is feasible
+13. ✅ Daily utilization improves naturally from smarter date placement, without changing the KPI definition
+```

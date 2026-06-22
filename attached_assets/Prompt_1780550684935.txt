@@ -1,0 +1,188 @@
+Please improve the **Auto-Sequence AI**, specifically the **MTS advancement logic**, so that when **MTS advancement is identified as a primary sequencing lever**, the AI more actively uses **underutilized earlier days** instead of leaving visible gaps in the schedule.
+
+---
+
+## 1. MAKE MTS ADVANCEMENT MORE AGGRESSIVE WHEN IT IS A PRIMARY LEVER
+
+Right now, the AI can identify **MTS advancement** as:
+- `HIGH`
+- `PRIMARY`
+
+but the resulting schedule can still leave obvious underutilized earlier days.
+
+### Required improvement
+When MTS advancement is identified as a primary strategy, the AI should more actively search for flexible orders that can be pulled earlier.
+
+### Goal
+Make the resulting sequence reflect the strategy that the AI itself says it is prioritizing.
+
+### Expected result
+If MTS advancement is primary, the final schedule should visibly show stronger early advancement of flexible orders.
+
+---
+
+## 2. MAKE THE AI LOOK FOR UNDERUTILIZED EARLIER DAYS AND FILL THEM
+
+Please make the AI more intentional about identifying underutilized earlier dates and using them for safe MTS advancement.
+
+### Examples of what the AI should consider
+- Is **today** underutilized?
+- Is **tomorrow** underutilized?
+- Are intermediate dates like `June 6`, `June 7`, `June 8` lightly loaded or empty?
+- Are there flexible orders currently sitting on later dates such as `June 9` or `June 14` that could safely be moved earlier?
+
+### Goal
+Do not leave earlier days obviously underloaded if there are flexible orders that can safely fill them.
+
+### Expected result
+The AI should make better use of visible schedule gaps.
+
+---
+
+## 3. IF TODAY OR AN EARLIER DATE IS LIGHTLY LOADED, LET THE AI PULL FLEXIBLE ORDERS FORWARD
+
+If today (or another earlier day) has very little scheduled work, and there are flexible orders on later dates, the AI should consider moving some of that work earlier.
+
+### Example
+If:
+- today is `June 4`
+- `June 4` only has one short order
+- and there are flexible orders sitting on `June 9` or `June 14`
+
+then the AI should consider advancing some of those later orders into `June 4`, `June 5`, `June 6`, etc., where feasible.
+
+### Goal
+Use earlier days more efficiently.
+
+### Expected result
+The AI should not leave clearly underutilized earlier days unused while flexible work remains on much later dates.
+
+---
+
+## 4. DO NOT SKIP OBVIOUS OPEN DAYS WITHOUT GOOD REASON
+
+There are cases where the AI suggests an order for `June 9`, even though:
+- the last earlier order is on `June 5`
+- and `June 6`, `June 7`, and `June 8` appear open or lightly loaded
+
+### Required improvement
+If the AI leaves those earlier dates unused, it should only do so for a strong reason.
+
+### Goal
+Prevent situations where the schedule visibly looks like it missed an obvious advancement opportunity.
+
+### Expected result
+The AI should either:
+- use those earlier underloaded dates
+or
+- have a clear reason for not using them
+
+---
+
+## 5. MAKE MTS ADVANCEMENT REFLECT TRUE LOAD-BALANCING, NOT JUST MINOR EARLY SHIFTS
+
+Please improve the AI so MTS advancement is not just:
+- a few isolated earlier moves
+
+but instead behaves like:
+- meaningful workload spreading across earlier underutilized days
+
+### Goal
+If MTS advancement is marked primary, the final schedule should feel like a real load-balancing strategy.
+
+### Expected result
+The AI should spread flexible work more intelligently across earlier available dates.
+
+---
+
+## 6. KEEP THE AI BALANCING ADVANCEMENT WITH CHANGEOVERS AND OTHER FACTORS
+
+The AI should still consider:
+- changeover cost
+- material grouping
+- urgency / future dispatches
+- effective/suggested dates
+- production flow
+
+but when MTS advancement is primary, it should not let these other factors completely prevent reasonable use of empty earlier days.
+
+### Goal
+Create better balance between:
+- sequence efficiency
+- and earlier workload utilization
+
+### Expected result
+The AI should still optimize changeovers, but not at the expense of leaving obviously underutilized earlier days unused.
+
+---
+
+## 7. MAKE THE FINAL SEQUENCE INSIGHT EXPLAIN WHY A LATER DATE WAS USED IF EARLIER DAYS WERE OPEN
+
+If the AI intentionally keeps an order on a later date even though earlier days appear open, please make the Sequence Insight explain why.
+
+### Goal
+Help users understand why the AI did not use an earlier visible gap.
+
+### Expected result
+When an order stays on `June 9` or `June 14` despite open earlier days, the explanation should make that choice understandable.
+
+---
+
+## IMPORTANT
+
+Please improve the AI’s **MTS advancement logic** so that when MTS advancement is identified as a **primary sequencing lever**, the AI more actively uses **underutilized earlier days**.
+
+This means:
+- detecting earlier lightly loaded days
+- pulling flexible MTS orders forward more intentionally
+- not skipping obvious open dates like `June 6`, `June 7`, or `June 8` without good reason
+- making the final schedule visibly reflect the advancement strategy the AI says it is prioritizing
+
+The goal is for the schedule to better utilize early capacity instead of leaving obvious gaps while flexible work remains on much later dates.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log MTS advancement opportunity detection and earlier-gap usage.
+
+```javascript
+console.debug('[Auto-Sequence MTS Advancement Opportunity]', {
+  strategyId,
+  line,
+  earlierUnderloadedDates,
+  flexibleOrdersOnLaterDates,
+  mtsAdvancementPrimary: true,
+});
+```
+
+```javascript
+console.debug('[Auto-Sequence MTS Earlier-Day Usage]', {
+  orderId,
+  originalDate,
+  suggestedDate,
+  advancedEarlier,
+  skippedAvailableEarlierDates,
+});
+```
+
+```javascript
+console.debug('[Auto-Sequence MTS Gap Explanation]', {
+  orderId,
+  suggestedDate,
+  hadEarlierOpenDates,
+  reasonForNotUsingEarlierDates,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ MTS advancement becomes more meaningful when marked as primary
+2. ✅ Earlier underutilized days are more actively used
+3. ✅ Flexible later orders are pulled forward when feasible
+4. ✅ Obvious open days are not skipped without good reason
+5. ✅ The final schedule better reflects actual load balancing
+6. ✅ Sequence Insight explains later placement when earlier gaps exist
+7. ✅ No UI errors or console errors are introduced

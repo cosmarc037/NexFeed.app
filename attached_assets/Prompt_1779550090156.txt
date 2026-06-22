@@ -1,0 +1,213 @@
+Please update the **shutdown diversion logic and shutdown status-selection behavior** so that orders already in progress or completed are excluded from diversion and cannot be selected during line shutdown handling.
+
+---
+
+## 1. EXCLUDE DONE AND IN-PRODUCTION ORDERS FROM SHUTDOWN DIVERSION
+
+When a line is placed in shutdown and the application prepares orders for diversion, please exclude any orders that are already:
+
+- `in_production`
+- `completed`
+
+### Reason
+If an order is already:
+- ongoing / in production, or
+- already done / completed
+
+then it should not be diverted to another line because the product is already being or has already been produced.
+
+### Expected result
+Shutdown diversion should only apply to orders that are still eligible for movement, such as active/not-yet-started orders.
+
+Orders with status:
+- `in_production`
+- `completed`
+
+must not be included in the diversion candidate set.
+
+---
+
+## 2. DISABLE SELECTION OF DONE AND IN-PRODUCTION ORDERS DURING SHUTDOWN
+
+When a line is in shutdown and users are selecting orders for diversion, they should not be able to select orders whose status is already:
+
+- `in_production`
+- `completed`
+
+### Expected UI behavior
+During shutdown handling:
+- orders with status `in_production` should not be selectable
+- orders with status `completed` should not be selectable
+
+This can be implemented by:
+- disabling the checkbox/selection control
+- greying out the row
+- blocking the row from the selectable diversion list
+- or otherwise making it clearly unavailable for diversion
+
+### Goal
+Prevent users from accidentally diverting orders that are already underway or already finished.
+
+---
+
+## 3. FILTER THE DIVERSION CANDIDATE LIST TO ELIGIBLE ORDERS ONLY
+
+Please update the shutdown diversion workflow so the list of diversion candidates is based only on eligible orders.
+
+### Eligible for diversion
+Orders that are:
+- active / normal
+- not yet started
+- not completed
+- not currently in production
+
+### Not eligible for diversion
+Orders that are:
+- `in_production`
+- `completed`
+
+### Expected result
+The diversion modal/page/list should reflect only orders that are actually valid to move during shutdown.
+
+If non-eligible rows are still shown for context, they must be clearly marked as non-selectable.
+
+---
+
+## 4. PREVENT BACKEND / RULE-LEVEL DIVERSION EVEN IF UI SELECTION FAILS
+
+Please enforce this rule not only in the UI, but also in the diversion logic itself.
+
+### Important
+Even if a row is somehow passed through the UI or a request is triggered manually, the system must not divert an order whose status is:
+- `in_production`
+- `completed`
+
+### Expected result
+The backend/service/business-rule layer must reject diversion attempts for these statuses, even if the frontend does not block them properly.
+
+---
+
+## 5. KEEP EXISTING SHUTDOWN DIVERSION HISTORY FOR ELIGIBLE ORDERS ONLY
+
+Please preserve the existing diversion history behavior for valid diverted orders, such as:
+
+- `Diverted / Feedmill Diverted: Line A → Line B`
+- `Reverted / Feedmill Reverted: Line B → Line A`
+
+### Important
+Orders that are:
+- `in_production`
+- `completed`
+
+should not receive diversion history entries, because they should never be diverted in the first place.
+
+### Expected result
+Diversion/reversion history continues to work only for valid, movable orders.
+
+---
+
+## 6. ALIGN STATUS-BASED LOCKING WITH SHUTDOWN BEHAVIOR
+
+Please ensure the shutdown flow respects the business meaning of each status:
+
+### `in_production`
+This means the order is already being produced / ongoing.
+It must not be diverted.
+
+### `completed`
+This means the order is already done.
+It must not be diverted.
+
+### Expected result
+The shutdown workflow should treat these statuses as locked from diversion.
+
+---
+
+## 7. DO NOT BREAK OTHER SHUTDOWN OR DIVERSION RULES
+
+Please preserve existing shutdown/diversion logic for:
+- eligible orders
+- diversion target line logic
+- priority adjustments
+- revert behavior
+- combined-group handling
+- shutdown reason handling
+- existing diversion history entries
+
+This update is specifically to ensure that:
+- `in_production` orders are excluded from diversion
+- `completed` orders are excluded from diversion
+- users cannot select them during shutdown
+
+---
+
+## IMPORTANT
+
+Please preserve this business rule:
+
+If an order is already:
+- **ongoing / in production**, or
+- **done / completed**
+
+then it should not be part of shutdown diversion, because the product is already being produced or already finished.
+
+During shutdown selection:
+- these rows must not be selectable
+- and the system must not divert them even if a request somehow reaches the backend
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log shutdown diversion candidate filtering and blocked diversion attempts.
+
+```javascript
+console.debug('[Shutdown Diversion Candidate Filter]', {
+  lineId,
+  shutdownId,
+  totalOrders,
+  eligibleOrders,
+  excludedInProductionOrders,
+  excludedCompletedOrders,
+});
+```
+
+```javascript
+console.debug('[Shutdown Diversion Selection Blocked]', {
+  orderId,
+  fpr,
+  status,
+  selectable: false,
+  reason:
+    status === 'in_production'
+      ? 'order_already_in_production'
+      : status === 'completed'
+      ? 'order_already_completed'
+      : 'unknown',
+});
+```
+
+```javascript
+console.debug('[Shutdown Diversion Backend Reject]', {
+  orderId,
+  fpr,
+  status,
+  attemptedDiversion: true,
+  rejected: ['in_production', 'completed'].includes(status),
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Orders with status `in_production` are excluded from shutdown diversion
+2. ✅ Orders with status `completed` are excluded from shutdown diversion
+3. ✅ Users cannot select `in_production` orders during shutdown handling
+4. ✅ Users cannot select `completed` orders during shutdown handling
+5. ✅ If non-eligible orders are shown in the list, they are clearly disabled or marked as unavailable
+6. ✅ Backend/business logic also prevents diversion of `in_production` and `completed` orders
+7. ✅ Eligible orders can still be diverted normally
+8. ✅ Existing diversion and reversion history still works for valid diverted orders
+9. ✅ No diversion history is written for orders that are already in production or completed
+10. ✅ No UI errors or console errors are introduced

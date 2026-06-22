@@ -1,0 +1,237 @@
+Please update the **generated order auto-sequencing and combination rules** based on the client’s latest clarification.
+
+---
+
+## 1. ALLOW GENERATED ORDERS TO PARTICIPATE IN CROSS-LINE AUTO-SEQUENCING
+
+The application previously treated generated orders as fixed to their assigned destination line and excluded them from the auto-sequence behavior where orders may be moved to other lines.
+
+Please update this rule.
+
+### New client rule
+Generated orders may still be moved to other lines during auto-sequencing, as long as:
+- the move is valid based on historical run-rate eligibility
+- and it does not cause overlap with the same order on the adjacent line
+
+### Expected result
+Generated orders should no longer be treated as permanently fixed to their initial target line for auto-sequencing purposes.
+
+They may now participate in cross-line movement if they meet the required conditions.
+
+---
+
+## 2. KEEP HISTORICAL RUN-RATE ELIGIBILITY AS A REQUIREMENT
+
+Please preserve the existing business logic that line eligibility depends on historical run-rate availability for the specific destination line.
+
+### Rule
+A generated order may only be moved to another line if that generated order is eligible to run on that specific line based on its historical run-rate support.
+
+### Important
+Do not allow generated orders to move freely to any line without checking line-specific eligibility.
+
+### Expected result
+Generated orders can move across lines only when:
+- the destination line is historically valid for that order
+- the move is allowed under the same run-rate-based eligibility rules used elsewhere in the app
+
+---
+
+## 3. PREVENT OVERLAP WITH THE SAME ORDER ON THE ADJACENT LINE
+
+Please implement the client’s condition:
+
+> Generated orders may be moved during auto-sequencing **as long as they do not overlap with the same order on the adjacent line**.
+
+### Goal
+Do not allow a generated order to be repositioned in a way that causes the same order/material/order-pair to overlap on an adjacent line.
+
+### Expected result
+If moving the generated order would create a conflicting overlap with the same order on an adjacent line, that move should be blocked or rejected by the auto-sequencing logic.
+
+### Important
+If needed, interpret “same order” using the app’s actual generated/source-linked identity model, such as the linked generated order pair, matching SFG identity, or equivalent order identity used by the system.
+
+---
+
+## 4. INCLUDE GENERATED ORDERS IN AUTO-SEQUENCE EVALUATION, NOT AS FIXED APPEND-ONLY ROWS
+
+Please make sure generated orders are treated as actual sequence candidates during auto-sequencing, rather than simply staying fixed on their original assigned line or being appended without cross-line evaluation.
+
+### Goal
+Generated orders should now be considered by the sequencing engine in the same broader optimization flow, subject to:
+- run-rate eligibility
+- non-overlap rules
+- other higher-priority sequencing constraints
+
+### Expected result
+Generated orders can be repositioned across valid lines when beneficial and allowed, instead of being excluded from that part of the optimizer.
+
+---
+
+## 5. UPDATE COMBINATION RULES TO USE SFG MATERIAL CODE, NOT FG MATERIAL CODE
+
+Please update the order combination rule for generated orders so that combination eligibility is based on:
+
+- **SFG Material Code**
+
+and not on:
+- **FG Material Code**
+
+### New rule
+Orders may be combined **only if the SFG Material Code is the same**.
+
+### Expected result
+Generated-order combination logic should no longer rely on FG Material Code matching.
+
+This is especially important because the generated-order field-mapping logic now centers on the SFG side rather than FG.
+
+---
+
+## 6. APPLY THE SFG MATERIAL CODE MATCHING RULE TO GENERATED ORDER COMBINATION CHECKS
+
+Please ensure that any logic that decides whether generated orders can be combined now checks:
+
+- `source/generated order A SFG material code`
+against
+- `source/generated order B SFG material code`
+
+### Rule
+If SFG Material Codes match:
+- combination may proceed, subject to other combination rules
+
+If SFG Material Codes do not match:
+- combination must not proceed
+
+### Expected result
+The app should no longer combine generated orders based on FG material identity.
+
+---
+
+## 7. PRESERVE OTHER COMBINATION RULES UNLESS NEEDED
+
+This request only changes the material-code basis for generated-order combination.
+
+Please preserve other combination behavior such as:
+- combine cap
+- sequence eligibility
+- compatibility rules
+- history logging
+- UI grouping
+- combined-order display
+
+unless they directly depend on the old FG-based matching rule.
+
+### Expected result
+The app should keep existing combination behavior intact, except that the matching basis is now **SFG Material Code**.
+
+---
+
+## 8. PRESERVE OTHER AUTO-SEQUENCING CONSTRAINTS
+
+This update should not override stronger sequencing/business rules.
+
+Please continue respecting:
+- avail date constraints
+- urgency / criticality
+- changeover optimization
+- run-rate eligibility
+- shutdown restrictions
+- line validity
+- overlap prevention
+- other AI sequence priorities
+
+### Expected result
+Generated orders are now movable, but still remain subject to the app’s normal operational guardrails.
+
+---
+
+## 9. UPDATE AI REASONING / SEQUENCE INSIGHT IF GENERATED ORDERS ARE MOVED
+
+If generated orders are now allowed to move across lines during auto-sequencing, please update the **AI reasoning** and/or **Sequence Insight** to reflect that when relevant.
+
+### Goal
+Users should understand why a generated order was moved from its originally assigned target line.
+
+### Example reasoning
+- `Generated order moved to an eligible adjacent line based on historical run-rate support and non-overlap feasibility.`
+- `Repositioned across lines to improve sequence efficiency without overlapping the same order on the adjacent line.`
+
+### Expected result
+If generated-order movement influences placement, the explanation should make that visible.
+
+---
+
+## IMPORTANT
+
+Please implement the following updated business rules:
+
+### Generated orders
+- generated orders are no longer always fixed to their initial assigned target line
+- they may be moved during auto-sequencing
+- but only when:
+  - the destination line is historically eligible
+  - and the move does not overlap with the same order on the adjacent line
+
+### Generated-order combination
+- generated orders may be combined only if their **SFG Material Code** matches
+- do not use **FG Material Code** as the basis for generated-order combination
+
+This request updates the earlier rule that excluded generated orders from cross-line auto-sequencing.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log generated-order movement eligibility and SFG-based combination checks.
+
+```javascript
+console.debug('[Generated Order Cross-Line Eligibility]', {
+  orderId,
+  currentLine,
+  candidateLine,
+  isGeneratedOrder: true,
+  hasHistoricalRunRateOnCandidateLine,
+  wouldOverlapSameOrderOnAdjacentLine,
+  moveAllowed:
+    hasHistoricalRunRateOnCandidateLine &&
+    !wouldOverlapSameOrderOnAdjacentLine,
+});
+```
+
+```javascript
+console.debug('[Generated Order Auto-Sequence Move]', {
+  orderId,
+  originalAssignedLine,
+  movedToLine,
+  moveReason,
+});
+```
+
+```javascript
+console.debug('[Generated Order Combination Check]', {
+  orderAId,
+  orderBId,
+  sfgMaterialCodeA,
+  sfgMaterialCodeB,
+  fgMaterialCodeA,
+  fgMaterialCodeB,
+  canCombine: sfgMaterialCodeA === sfgMaterialCodeB,
+  combinationBasis: 'SFG material code',
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Generated orders are no longer automatically fixed to their original assigned target line during auto-sequencing
+2. ✅ Generated orders may be moved to other lines only if the destination line has valid historical run-rate eligibility
+3. ✅ Generated orders are not moved if the move would overlap with the same order on an adjacent line
+4. ✅ Generated orders are included in cross-line auto-sequence evaluation as real candidates
+5. ✅ Generated-order movement still respects existing sequencing constraints such as avail date and urgency
+6. ✅ Generated-order combination checks now use `SFG Material Code`
+7. ✅ Generated-order combination no longer depends on `FG Material Code`
+8. ✅ Generated orders are combined only when their SFG Material Codes match
+9. ✅ AI reasoning / Sequence Insight can explain generated-order line movement when relevant
+10. ✅ No UI errors or console errors are introduced

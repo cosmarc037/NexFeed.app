@@ -1,0 +1,521 @@
+```
+Redesign the sequencing strategy generation so the app keeps one Standard Sequence plus two AI-generated sequencing strategies PER LINE.
+
+---
+
+## OBJECTIVE
+
+Replace the current fixed AI strategies ("AI Balanced" and "AI Profit-Optimized") with two truly AI-generated sequencing options for each production line.
+
+The new strategy set per line should be:
+
+1. Standard Sequence
+   - fixed, rule-based baseline
+   - keeps current logic
+   - visible as the non-AI fallback
+   - never marked as Recommended
+
+2. AI Option 1
+   - AI-generated strategy name
+   - AI-generated line-specific sequencing approach
+   - based on the current lineup of that line after combine + queue placement + N10D
+   - must respect all hard scheduling rules
+
+3. AI Option 2
+   - AI-generated strategy name
+   - AI-generated line-specific sequencing approach
+   - based on the current lineup of that line after combine + queue placement + N10D
+   - must respect all hard scheduling rules
+
+Important:
+- strategy generation is now **per line**, not plant-wide
+- each line can have different AI strategy names, different sequencing focus, and different recommended option
+- because each line’s lineup is different, the AI should analyze each line independently
+
+---
+
+## 1. KEEP THE EXISTING UPSTREAM FLOW
+
+Do NOT change the upstream processing flow.
+
+The app should still do the following first:
+1. combine scan / cross-line combination
+2. queue-time placement / line assignment
+3. N10D enrichment / avail-date assignment
+
+Only after those steps are complete should the AI strategy generation begin.
+
+That means by the time AI runs for a line:
+- the orders are already assigned to that line
+- combine logic is already applied
+- current avail dates / N10D statuses are already present
+- the line has its current initial lineup
+
+---
+
+## 2. STRATEGY GENERATION IS NOW PER LINE
+
+For each line independently:
+- build Standard Sequence using the current rule-based logic
+- generate 2 AI sequencing alternatives for that specific line only
+
+This means:
+- Line 1 may have AI strategies very different from Line 2
+- recommendation is decided within each line, not globally
+- users compare 3 strategy options inside each line tab:
+  - Standard
+  - AI Option 1
+  - AI Option 2
+
+Do not force the same AI strategy names or approach across all lines.
+
+---
+
+## 3. KEEP STANDARD SEQUENCE AS THE BASELINE PER LINE
+
+Retain the existing Standard Sequence exactly as the non-AI fallback for each line.
+
+Standard Sequence should:
+- remain visible as the first strategy card inside each line
+- keep the current rule-based logic
+- act as the baseline comparison
+- never receive the Recommended badge
+
+Always set:
+```javascript
+standard.isAIRecommended = false;
+```
+
+---
+
+## 4. REMOVE FIXED USER-FACING “AI BALANCED” AND “AI PROFIT-OPTIMIZED”
+
+Do not show predefined AI cards titled:
+- AI Balanced
+- AI Profit-Optimized
+
+Internally, you may still reuse some of the balancing / profitability heuristics if helpful, but those should be hidden implementation helpers, not fixed user-facing strategy types.
+
+The final visible AI options per line must now be:
+- AI Option 1
+- AI Option 2
+
+with AI-generated names, subtitles, descriptions, and sequencing logic.
+
+---
+
+## 5. HAVE THE AI ANALYZE THE CURRENT LINEUP OF EACH LINE
+
+For each line, provide the AI with the current lineup after:
+- line assignment
+- combination
+- N10D enrichment
+
+The AI should analyze that specific line’s schedule and propose exactly 2 sequencing strategies for that line.
+
+The AI must consider:
+- avail dates
+- N10D status
+- protected / actual dated orders
+- MTO rules
+- critical / urgent / monitor rules
+- material compatibility
+- changeover reduction
+- production hours
+- margin / profit score
+- line flow / sequence continuity
+
+The AI should be free to choose its own sequencing idea based on the lineup.
+
+Examples of possible AI-generated strategy ideas:
+- advance higher-profit-score flexible orders
+- group compatible materials to reduce changeovers
+- create more slack against near-term demand risk
+- prioritize lower-profit but earlier-risk orders first
+- preserve continuity of same material/form runs
+- reduce exposure to later bottlenecks
+
+These are only examples.
+The AI should invent the strategies based on the actual line context.
+
+---
+
+## 6. HARD CONSTRAINTS ARE NON-NEGOTIABLE
+
+Both AI-generated strategies per line must respect the hard scheduling rules.
+
+They must not:
+- delay MTO / actual dated protected orders unsafely
+- violate critical / urgent / monitor constraints
+- ignore avail dates
+- break safe-window rules for flexible orders
+- create invalid dates
+
+### Hard rules to preserve:
+- MTO / actual dated orders must remain protected
+- Critical orders remain prioritized
+- Urgent / Monitor may move earlier, but not later than their target date
+- Flexible / sufficient orders may be adjusted only inside safe windows
+- Chronology and scheduling logic must remain understandable
+- Material compatibility and profitability may influence sequencing, but must not override hard protections
+
+If an AI strategy violates hard rules:
+- reject or repair it before showing it to users
+
+Do not display invalid strategy options.
+
+---
+
+## 7. BUILD A PER-LINE AI STRATEGY PROMPT
+
+Create a prompt builder that works on one line at a time.
+
+### Suggested function:
+```javascript
+function buildAILineStrategyPrompt({
+  line,
+  lineOrders,
+  changeoverRules,
+  masterData,
+  n10dData,
+}) {
+  // returns prompt string
+}
+```
+
+The prompt should tell the AI:
+- you are analyzing one production line
+- the current lineup already went through combine / placement / N10D
+- propose exactly 2 alternative sequencing strategies for this line
+- create your own strategy names
+- make the strategies distinct
+- respect hard constraints
+- return valid structured JSON only
+
+### The prompt should explicitly say:
+- do not just return “balanced” and “profit” unless truly justified by the lineup
+- create names based on the actual sequencing objective
+- suggested dates are allowed only for eligible flexible orders
+- all order placements must remain valid
+
+---
+
+## 8. EXPECTED AI OUTPUT SHAPE PER LINE
+
+For a given line, the AI should return:
+
+```json
+{
+  "strategies": [
+    {
+      "strategy_id": "ai_option_1",
+      "strategy_name": "High-Value Early Flow",
+      "subtitle": "AI-generated strategy",
+      "short_description": "Advances stronger profit-score opportunities while protecting dated orders.",
+      "reasoning_summary": "This strategy moves higher-profit-score flexible orders earlier where safe, while preserving protected dates and keeping line flow manageable.",
+      "orders": [
+        { "order_id": "A1", "suggested_date": "2026-04-29" },
+        { "order_id": "A2", "suggested_date": "2026-04-30" },
+        { "order_id": "A3", "suggested_date": "2026-05-01" }
+      ]
+    },
+    {
+      "strategy_id": "ai_option_2",
+      "strategy_name": "Material Continuity Focus",
+      "subtitle": "AI-generated strategy",
+      "short_description": "Groups compatible materials to reduce changeovers and smooth production flow.",
+      "reasoning_summary": "This strategy reduces sequence disruption by grouping compatible materials within safe scheduling windows.",
+      "orders": [
+        { "order_id": "A2", "suggested_date": "2026-04-30" },
+        { "order_id": "A1", "suggested_date": "2026-04-29" },
+        { "order_id": "A3", "suggested_date": "2026-05-01" }
+      ]
+    }
+  ]
+}
+```
+
+Important:
+- output is per line
+- `orders` is an ordered array for that line only
+- each AI option should contain all orders for that line
+- suggested dates are optional but must be valid
+
+---
+
+## 9. GENERATE STRATEGIES FOR EACH LINE INDEPENDENTLY
+
+Create a new pipeline that loops line by line.
+
+### Suggested structure:
+```javascript
+async function generateLineStrategies({
+  line,
+  lineOrders,
+  n10dData,
+  masterData,
+  changeoverRules,
+}) {
+  // returns standard + ai_option_1 + ai_option_2 for this line
+}
+```
+
+Then aggregate at UI level by line tab.
+
+For each line:
+1. build Standard Sequence
+2. call AI for 2 line-specific strategies
+3. validate AI output
+4. map returned order IDs to existing row objects
+5. apply AI-suggested dates if valid
+6. compute production times, changeovers, completion dates
+7. compute metrics
+8. generate sequence insights
+9. determine recommended among the 2 AI options only
+
+---
+
+## 10. VALIDATE AND REPAIR AI OUTPUT PER LINE
+
+After the AI returns strategies for a line:
+- ensure all order IDs exist
+- ensure all orders for the line are included exactly once
+- reject duplicates / missing orders
+- validate suggested dates against hard rules
+- if invalid date, revert that order to safe fallback/original date
+- recompute final row values after mapping
+- reassign priorities
+
+If one AI option is invalid beyond repair:
+- regenerate or derive a safe fallback AI option for that line
+- but do not show a broken option
+
+---
+
+## 11. UI STRUCTURE PER LINE
+
+Inside each line tab, the strategy cards should now be:
+
+- Standard Sequence
+- AI Option 1 (AI-generated name shown prominently)
+- AI Option 2 (AI-generated name shown prominently)
+
+Example for Line 2:
+- Standard Sequence
+- High-Value Early Flow
+- Material Continuity Focus
+
+Example for Line 5:
+- Standard Sequence
+- Date Cushion First
+- Low-Changeover Run
+
+So each line may show different AI strategy names.
+
+---
+
+## 12. STRATEGY CARD CONTENT
+
+Each strategy card per line should show:
+- strategy name
+- subtitle / theme
+- short description
+- min slack
+- MTS adjusted
+- risk level
+- violations
+- “View AI reasoning”
+
+Suggested data model per strategy:
+
+```javascript
+{
+  id: 'ai_option_1',
+  name: 'High-Value Early Flow',
+  theme: 'AI-generated strategy',
+  description: 'Advances stronger profit-score opportunities while protecting dated orders.',
+  reasoningSummary: 'This strategy moves higher-profit-score flexible orders earlier where safe, while preserving protected dates and keeping line flow manageable.',
+  orders: [...], // for this line only
+  metrics: { ... },
+  isAIRecommended: false,
+  isAI: true,
+  sourceType: 'ai_generated',
+  line: 'Line 2'
+}
+```
+
+Standard:
+```javascript
+{
+  id: 'standard',
+  name: 'Standard Sequence',
+  theme: 'Rule-based',
+  description: 'Follows the current rule-based sequencing flow using dates and priority rules.',
+  orders: [...],
+  metrics: { ... },
+  isAIRecommended: false,
+  isAI: false,
+  sourceType: 'rule_based',
+  line: 'Line 2'
+}
+```
+
+---
+
+## 13. RECOMMENDED BADGE LOGIC IS PER LINE AND ONLY AMONG AI OPTIONS
+
+Recommendation must now be decided per line.
+
+For each line:
+- compare only the 2 AI-generated options
+- never include Standard in recommendation competition
+- if neither AI strategy is valid/eligible, show no Recommended badge
+
+### Eligibility rules:
+A strategy is eligible for recommendation if:
+- violations = 0
+- min slack >= 1.5 hours
+- no hard-rule failures
+
+### Selection:
+Among eligible AI options on that line, choose the one with the better weighted score.
+
+Suggested weights:
+- Slack / safety: 40%
+- Risk level: 25%
+- Optimization effect: 20%
+- Profitability metric: 15%
+
+Example:
+```javascript
+const eligibleAIOptions = [aiOption1, aiOption2].filter(isEligibleForRecommendation);
+```
+
+Standard must always remain:
+```javascript
+standard.isAIRecommended = false;
+```
+
+---
+
+## 14. SEQUENCE INSIGHT MUST ALSO BE PER LINE + PER STRATEGY
+
+Because the strategy options are now AI-generated per line, the Sequence Insight must:
+- be generated using the selected strategy for that line
+- reflect the actual AI-generated strategy name/objective
+- explain why the order is in that position under that line’s selected strategy
+
+Do not reuse old assumptions like:
+- one strategy is always balanced
+- one strategy is always profit
+
+Instead, insight generation should use:
+- line
+- strategy_id
+- strategy_name
+- strategy reasoning summary
+- actual row context
+- neighboring orders
+- dates
+- changeovers
+- profit score if relevant
+
+---
+
+## 15. UPDATE THE INSIGHT PROMPT TO USE AI-GENERATED STRATEGY CONTEXT
+
+When generating row-level insights for AI options, pass:
+- `strategy_name`
+- `strategy_description`
+- `reasoning_summary`
+- `line`
+
+So the AI can explain:
+- why this order is placed here for this specific strategy on this specific line
+
+Example:
+- “Placed earlier under the ‘High-Value Early Flow’ strategy because it improves profit score while staying within the safe date window.”
+- “Grouped under the ‘Material Continuity Focus’ strategy to reduce changeovers with adjacent compatible orders.”
+
+---
+
+## 16. GENERATION PIPELINE SUMMARY
+
+For each line:
+1. build Standard Sequence
+2. build AI strategy prompt for that line
+3. generate exactly 2 AI strategies for that line
+4. validate and repair outputs
+5. compute final row values
+6. compute strategy metrics
+7. generate AI sequence insights per strategy
+8. choose recommended among the 2 AI options only
+9. render cards in the line tab
+
+---
+
+## 17. FALLBACK BEHAVIOR PER LINE
+
+If AI generation fails for one line:
+- keep Standard Sequence for that line
+- optionally derive 1 or 2 safe fallback AI alternatives internally if possible
+- but do not expose old fixed “Balanced” / “Profit” labels as if they were AI-generated
+- if no valid AI options can be generated for that line, show Standard only plus a clear fallback notice for that line
+
+This should not block other lines from generating AI strategies successfully.
+
+---
+
+## 18. IMPLEMENTATION NOTES
+
+### A. Reuse existing helpers where possible
+You may reuse existing internal helpers from:
+- balanced sequencing logic
+- profit scoring logic
+- date validation logic
+- metrics calculation
+- insight generation
+
+But do not expose those old strategy names in the UI anymore.
+
+### B. Preserve chronology
+Final displayed order per strategy should still make chronological sense after AI-suggested dates are applied.
+
+### C. Preserve exact row calculations
+Production time, changeover, completion date, and profit score should still use the same final row values as before.
+
+---
+
+## 19. VERIFICATION
+
+### Strategy generation
+1. ✅ Standard Sequence remains available per line
+2. ✅ Fixed AI Balanced / AI Profit-Optimized are no longer shown as user-facing cards
+3. ✅ Exactly 2 AI-generated strategies are created for each line
+4. ✅ AI generates strategy names per line
+5. ✅ AI generates descriptions and reasoning per line
+6. ✅ Different lines can have different AI strategy names and focuses
+
+### Constraints
+7. ✅ AI strategies respect hard scheduling constraints
+8. ✅ Invalid AI-suggested dates are rejected or repaired
+9. ✅ Protected orders remain protected
+10. ✅ MTO / actual dated rules remain intact
+11. ✅ Chronological logic remains understandable
+
+### Recommendation
+12. ✅ Recommended badge is decided per line
+13. ✅ Recommended badge is only assigned among AI options
+14. ✅ Standard Sequence is never recommended
+15. ✅ If neither AI option is eligible, no Recommended badge appears for that line
+
+### Insights
+16. ✅ Sequence Insight reflects the selected AI-generated strategy for that line
+17. ✅ Insight changes when switching between Standard / AI Option 1 / AI Option 2
+18. ✅ Insight no longer assumes fixed “balanced” or “profit” strategy templates
+
+### UX
+19. ✅ Users can compare Standard + 2 AI-generated options inside each line
+20. ✅ The experience feels AI-driven and line-specific
+21. ✅ Strategy names/descriptions vary according to actual line lineup
+```

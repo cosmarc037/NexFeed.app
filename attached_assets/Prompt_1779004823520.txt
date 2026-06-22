@@ -1,0 +1,174 @@
+Please fix the diversion impact analysis and actual target-line insertion logic so the app determines the correct placement of a diverted order based on the target line’s current lineup and the diverted order’s scheduling context.
+
+There is currently a problem where the diversion modal says an order will be inserted at the last position in the target line, and the actual diverted order is also placed too far down the line, even when its avail date is earlier than the orders already in that target line.
+
+This needs to be corrected.
+
+---
+
+## CONFIRMED ISSUE
+
+Example:
+- source order has avail date = May 17
+- user diverts it to Line 2
+- target line contains later-dated orders such as May 21 / May 22
+- but the impact analysis says the order will be inserted at the last priority position
+- and the actual diverted result also places it near the end
+
+This is incorrect.
+
+The app should not simply append the diverted order to the last position if the order should be inserted earlier based on the target line’s schedule context.
+
+---
+
+## REQUIRED BEHAVIOR
+
+When a user selects a recommended target line for diversion, the app must determine the likely insertion position by analyzing the **current lineup of the target line**.
+
+The app should consider:
+- the diverted order’s avail date / target date
+- the current lineup of orders in the target line
+- the avail dates of orders already in that target line
+- the diverted order’s production hours
+- the current queue / sequence structure in the target line
+- and any existing sequencing logic relevant to that line
+
+### Goal
+The impact analysis should estimate the actual likely insertion position, not just assume:
+- “append to the end”
+- or “last priority + 1”
+
+---
+
+## IMPACT ANALYSIS MUST BE SEQUENCE-AWARE
+
+Please improve the “Insertion Position” logic in the diversion modal.
+
+Instead of:
+- always showing the last position
+
+the app should evaluate:
+- where the diverted order should realistically fit into the target line
+
+This should result in a more accurate position prediction such as:
+- priority 5
+- priority 6
+- etc.
+
+depending on the target line’s current lineup and the diverted order’s urgency/avail date.
+
+---
+
+## ACTUAL DIVERTED PLACEMENT MUST MATCH THE ANALYSIS
+
+The same logic used in the impact analysis should also drive the actual insertion of the diverted order into the target line.
+
+That means:
+- if the analysis says the order should be inserted at a certain position
+- the actual diverted order should be placed accordingly
+- not simply appended to the end of the line
+
+The impact analysis and actual diversion result should be aligned.
+
+---
+
+## MINIMUM INSERTION LOGIC EXPECTATION
+
+At minimum, the insertion logic must not ignore target-line avail dates.
+
+If the diverted order has an earlier avail date than later orders already in the target line, it should not automatically be placed behind them.
+
+Please ensure the target line’s current avail-date ordering is considered.
+
+---
+
+## IDEAL INSERTION LOGIC
+
+Preferably, the insertion position should consider:
+- avail date / target date urgency
+- current target line queue
+- production hours
+- downstream sequence impact
+- and line-specific scheduling context
+
+This does not have to become a full AI auto-sequence run, but it should be much more accurate than simple append-to-end behavior.
+
+---
+
+## DEADLINE / TARGET DATE CONTEXT
+
+The diversion impact analysis should also understand that insertion position affects:
+- whether the order remains on time
+- whether it misses its avail date
+- whether it displaces later orders
+- whether target-line queueing is still feasible
+
+So the position analysis should be tied to actual scheduling impact, not just row numbering.
+
+---
+
+## REQUIRED OUTPUT IMPROVEMENT IN IMPACT ANALYSIS
+
+Please improve the modal text so it can explain things like:
+- where the order will likely be inserted
+- why it will be inserted there
+- whether later orders will be shifted
+- whether the diverted order still remains before its target date
+
+Example:
+“This order will likely be inserted ahead of later May 21–22 orders on Line 2 because its avail date is May 17, which places it earlier in the target line sequence.”
+
+That would be much more accurate than simply saying “Priority 11”.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log:
+
+```javascript
+console.debug('[Diversion Target Line Insertion Analysis]', {
+  divertedOrderId,
+  divertedOrderAvailDate,
+  divertedOrderProductionHours,
+  targetLine,
+  targetLineOrders: targetLineOrders.map(o => ({
+    orderId: o.id,
+    priority: o.priority,
+    availDate: o.availDate,
+    productionHours: o.productionHours,
+  })),
+  computedInsertionPosition,
+});
+```
+
+```javascript
+console.debug('[Diversion Insertion Decision]', {
+  divertedOrderId,
+  targetLine,
+  insertionPosition,
+  insertedBeforeOrderId,
+  insertedAfterOrderId,
+  reason,
+});
+```
+
+```javascript
+console.debug('[Diversion Analysis vs Actual Placement]', {
+  divertedOrderId,
+  predictedPosition,
+  actualPosition,
+  matched,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Diversion impact analysis no longer defaults to last-position insertion
+2. ✅ Impact analysis considers target line’s current lineup
+3. ✅ Impact analysis considers the diverted order’s avail date / target date
+4. ✅ Orders with earlier avail dates are not incorrectly placed behind much later-dated orders
+5. ✅ Actual diverted placement matches the insertion logic described in the impact analysis
+6. ✅ Modal gives a more realistic explanation of where the order will be inserted and why

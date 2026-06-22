@@ -1,0 +1,359 @@
+```
+Fix sequence insight: proper "more" expand, tooltip positioning, and caching:
+
+---
+
+## 1. FIX PlantAfterRow — INLINE EXPAND WITH "MORE", NO TOOLTIP
+
+```jsx
+function PlantAfterRow({ order, onUncombineSingle, insight, isLoadingInsight }) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [showFullInsight, setShowFullInsight] = useState(false);
+  
+  const MAX_DISPLAY_LENGTH = 80;
+  const displayInsight = insight && insight.length > MAX_DISPLAY_LENGTH
+    ? insight.substring(0, MAX_DISPLAY_LENGTH) + '...'
+    : insight;
+  const hasMore = insight && insight.length > MAX_DISPLAY_LENGTH;
+  
+  return (
+    <>
+      <tr className={`auto-sequence-row-after ${order._isCombined ? 'as-row-combined' : ''}`}>
+        {/* ... all existing cells unchanged ... */}
+        
+        {/* Sequence Insight cell — NO title tooltip */}
+        <td className="as-col-insight">
+          {isLoadingInsight ? (
+            <span className="as-insight-loading">
+              <span className="as-insight-dot-1">·</span>
+              <span className="as-insight-dot-2">·</span>
+              <span className="as-insight-dot-3">·</span>
+            </span>
+          ) : insight ? (
+            <div className="as-insight-cell">
+              <span className="as-insight-icon">💡</span>
+              <div className="as-insight-text-wrapper">
+                <span className="as-insight-text">
+                  {showFullInsight ? insight : displayInsight}
+                </span>
+                {hasMore && (
+                  <button
+                    className="as-insight-more"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowFullInsight(!showFullInsight);
+                    }}
+                  >
+                    {showFullInsight ? 'less' : 'more'}
+                  </button>
+                )}
+              </div>
+            </div>
+          ) : (
+            <span className="as-insight-empty">—</span>
+          )}
+        </td>
+      </tr>
+      
+      {/* ... existing expanded sub-orders ... */}
+    </>
+  );
+}
+```
+
+---
+
+## 2. STYLING — TEXT WRAPS INSIDE CELL, NO OVERFLOW
+
+```css
+/* Sequence Insight column */
+.as-col-insight {
+  min-width: 220px;
+  max-width: 300px;
+  padding: 8px 10px;
+  vertical-align: top;
+}
+
+/* Insight cell — flex row with icon + text */
+.as-insight-cell {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+}
+
+.as-insight-icon {
+  font-size: 11px;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+/* Text wrapper — contains text + more button */
+.as-insight-text-wrapper {
+  display: inline;
+  line-height: 1.6;
+}
+
+.as-insight-text {
+  font-size: 11px;
+  color: #6b7280;
+  word-break: break-word;
+  white-space: normal;
+}
+
+/* "more" / "less" button — inline with text */
+.as-insight-more {
+  background: none;
+  border: none;
+  color: #ea580c;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+  margin-left: 4px;
+  white-space: nowrap;
+  display: inline;
+}
+
+.as-insight-more:hover {
+  text-decoration: underline;
+}
+
+/* Loading dots */
+.as-insight-loading {
+  display: flex;
+  gap: 2px;
+  color: #9ca3af;
+  font-size: 14px;
+}
+
+.as-insight-dot-1,
+.as-insight-dot-2,
+.as-insight-dot-3 {
+  animation: insight-pulse 1.2s infinite;
+}
+
+.as-insight-dot-2 { animation-delay: 0.2s; }
+.as-insight-dot-3 { animation-delay: 0.4s; }
+
+@keyframes insight-pulse {
+  0%, 80%, 100% { opacity: 0.3; }
+  40% { opacity: 1; }
+}
+
+.as-insight-empty {
+  font-size: 11px;
+  color: #d1d5db;
+}
+```
+
+---
+
+## 3. CACHE INSIGHTS AT PARENT LEVEL — PERSIST ACROSS TAB SWITCHES
+
+```jsx
+function PlantAutoSequencePreview({ ... }) {
+  // ... existing state ...
+  
+  // Cache insights per line — keyed by line name
+  const insightCacheRef = useRef({});
+  // Track fingerprints to detect changes
+  const fingerprintCacheRef = useRef({});
+  
+  function getLineFingerprint(line) {
+    const orders = sequencedResults?.[line] || [];
+    return orders.map(o => `${o.id}_${o.prio}_${o._isCombined ? 'C' : 'R'}_${o._movement || 's'}`).join('|');
+  }
+  
+  function getCachedInsights(line) {
+    const currentFingerprint = getLineFingerprint(line);
+    const cachedFingerprint = fingerprintCacheRef.current[line];
+    
+    // Return cached if fingerprint matches
+    if (cachedFingerprint === currentFingerprint && insightCacheRef.current[line]) {
+      return insightCacheRef.current[line];
+    }
+    
+    return null;
+  }
+  
+  function setCachedInsights(line, insights) {
+    const fingerprint = getLineFingerprint(line);
+    insightCacheRef.current[line] = insights;
+    fingerprintCacheRef.current[line] = fingerprint;
+  }
+  
+  function invalidateLineCache(line) {
+    delete insightCacheRef.current[line];
+    delete fingerprintCacheRef.current[line];
+  }
+  
+  // When uncombine happens, only invalidate that line
+  function handleUncombineSingle(line, combinedOrder) {
+    // ... existing uncombine logic ...
+    
+    // Invalidate ONLY this line's insight cache
+    invalidateLineCache(line);
+  }
+  
+  // Also cache AI explanations (Actions Taken)
+  const aiExplanationsCacheRef = useRef(null);
+  const aiPlacementLogFingerprintRef = useRef(null);
+  
+  function getPlacementLogFingerprint() {
+    return placementLog.map(e => `${e.type}_${e.product}_${e.toLine}`).join('|');
+  }
+  
+  async function generateAIExplanations(log) {
+    const fingerprint = getPlacementLogFingerprint();
+    
+    // Return cached if unchanged
+    if (fingerprint === aiPlacementLogFingerprintRef.current && aiExplanationsCacheRef.current) {
+      setAiExplanations(aiExplanationsCacheRef.current);
+      return;
+    }
+    
+    setIsLoadingAI(true);
+    try {
+      const prompt = buildActionsPrompt(log);
+      const response = await callAI(prompt);
+      const parsed = parseActionsResponse(response, log);
+      if (Object.keys(parsed).length >= log.length * 0.5) {
+        setAiExplanations(parsed);
+        aiExplanationsCacheRef.current = parsed;
+        aiPlacementLogFingerprintRef.current = fingerprint;
+      } else {
+        setUseFallback(true);
+      }
+    } catch {
+      setUseFallback(true);
+    }
+    setIsLoadingAI(false);
+  }
+  
+  return (
+    // ... existing JSX ...
+    
+    {activeTab !== 'summary' && (
+      <PlantLineTab
+        line={activeTab}
+        originalOrders={originalSnapshot[activeTab] || []}
+        sequencedOrders={sequencedResults[activeTab] || []}
+        placementLog={placementLog}
+        aiExplanations={aiExplanations}
+        isLoadingAI={isLoadingAI}
+        useFallback={useFallback}
+        onUncombineSingle={(combinedOrder) => handleUncombineSingle(activeTab, combinedOrder)}
+        getCachedInsights={() => getCachedInsights(activeTab)}
+        setCachedInsights={(insights) => setCachedInsights(activeTab, insights)}
+      />
+    )}
+  );
+}
+```
+
+---
+
+## 4. UPDATE PlantLineTab — USE PARENT CACHE
+
+```jsx
+function PlantLineTab({ 
+  line, 
+  originalOrders, 
+  sequencedOrders, 
+  placementLog,
+  aiExplanations,
+  isLoadingAI,
+  useFallback,
+  onUncombineSingle,
+  getCachedInsights,
+  setCachedInsights
+}) {
+  const [rowInsights, setRowInsights] = useState(null);
+  const [isLoadingRowInsights, setIsLoadingRowInsights] = useState(false);
+  
+  useEffect(() => {
+    if (sequencedOrders.length === 0) return;
+    
+    // Check parent cache first
+    const cached = getCachedInsights ? getCachedInsights() : null;
+    
+    if (cached) {
+      // Use cached — no AI call
+      setRowInsights(cached);
+      setIsLoadingRowInsights(false);
+    } else {
+      // Generate new
+      loadRowInsights();
+    }
+  }, [line, sequencedOrders]);
+  
+  async function loadRowInsights() {
+    setIsLoadingRowInsights(true);
+    const insights = await generateRowInsights(
+      sequencedOrders, originalOrders, line, placementLog
+    );
+    setRowInsights(insights);
+    setIsLoadingRowInsights(false);
+    
+    // Store in parent cache
+    if (setCachedInsights) {
+      setCachedInsights(insights);
+    }
+  }
+  
+  // ... rest of component unchanged ...
+  
+  return (
+    <div className="plant-line-tab">
+      {/* ... */}
+      <tbody>
+        {sequencedOrders.map(order => (
+          <PlantAfterRow
+            key={order.id}
+            order={order}
+            onUncombineSingle={onUncombineSingle}
+            insight={rowInsights?.[order.prio] || null}
+            isLoadingInsight={isLoadingRowInsights}
+          />
+        ))}
+      </tbody>
+      {/* ... */}
+    </div>
+  );
+}
+```
+
+---
+
+## VERIFICATION
+
+### "More" expands text properly
+1. ✅ Truncated to 80 chars with "..." by default
+2. ✅ Clicking "more" expands INLINE — text wraps within the cell
+3. ✅ Clicking "less" collapses back to truncated
+4. ✅ No popover/tooltip that can be clipped or hidden
+5. ✅ Text wraps with word-break: break-word
+6. ✅ No text going outside the container
+
+### No tooltip clipping issue
+7. ✅ Removed title attribute — no browser tooltip
+8. ✅ Full text shown inline via "more" instead
+9. ✅ No dark tooltip overlapping the header
+
+### Caching — insights persist across tab switches
+10. ✅ insightCacheRef stores insights per line
+11. ✅ fingerprintCacheRef tracks order fingerprint per line
+12. ✅ Switching to Line 2 and back to Line 1 → instant (no regeneration)
+13. ✅ Only regenerates if fingerprint changes (uncombine, drag, etc.)
+14. ✅ Uses useRef (not useState) so cache survives re-renders
+
+### Caching — Actions Taken AI also cached
+15. ✅ aiExplanationsCacheRef stores the AI response
+16. ✅ Only regenerates if placementLog fingerprint changes
+17. ✅ Tab switches don't trigger new AI calls
+
+### Invalidation on changes
+18. ✅ Uncombine single → invalidates ONLY that line's cache
+19. ✅ Next time user views that line → regenerates
+20. ✅ Other lines' caches untouched
+```

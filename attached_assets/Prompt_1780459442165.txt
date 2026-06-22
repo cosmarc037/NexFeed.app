@@ -1,0 +1,144 @@
+Please fix the **Divert Order final applied priority** so that the diverted order is inserted at the **exact priority position reviewed in the modal**.
+
+---
+
+## 1. MAKE THE FINAL DIVERTED ORDER POSITION MATCH THE MODAL’S REVIEWED INSERTION POSITION
+
+There is currently a mismatch where the **Divert Order** modal shows one insertion position, but after confirmation the order is placed at a different priority in the target line.
+
+### Current issue example
+The modal shows:
+- target line = `Line 2`
+- `Insertion Position: Priority 5`
+
+But after confirming the diversion, the order is actually placed at:
+- `Prio 10`
+
+### Required rule
+The final diverted order must be inserted at the exact priority position reviewed in the modal.
+
+### Expected result
+If the modal says:
+- `Line 2, Priority 5`
+
+then after confirmation the order must appear at:
+- `Line 2, Prio 5`
+
+---
+
+## 2. DO NOT APPEND OR RECALCULATE A DIFFERENT POSITION AFTER CONFIRMATION
+
+Please make sure the apply-diversion step does not silently:
+- append the order later in the sequence
+- recalculate a different slot
+- or use another placement rule after the user has already reviewed the insertion position
+
+### Goal
+The modal-reviewed position should be the final source of truth.
+
+### Expected result
+No more cases where the reviewed target priority is lost during the actual diversion.
+
+---
+
+## 3. USE THE SAME SHARED INSERTION RESULT FOR:
+- target line selection
+- modal insertion summary
+- impact analysis
+- final applied diversion
+
+Please ensure all parts of the divert flow use the same insertion-position result.
+
+### Expected result
+The following should all agree:
+- selected target line
+- reviewed insertion priority
+- impact analysis
+- final table result after diversion
+
+---
+
+## 4. REVIEW WHETHER DIVERSION IS STILL USING A FALLBACK / APPEND LOGIC DURING APPLY
+
+Since the order is ending up much later than reviewed, please check whether the final apply step is still falling back to:
+- append-to-end behavior
+- stale-sequence insertion
+- incorrect reindexing
+- or another non-reviewed insertion path
+
+### Expected result
+The actual diversion should follow the exact reviewed slot instead of a fallback position.
+
+---
+
+## 5. APPLY THIS TO DIVERT ORDER ACROSS ALL LINES / FEEDMILLS
+
+Please make sure this fix applies consistently for **Divert Order** across:
+- `Line 1` to `Line 7`
+- `FM1`
+- `FM2`
+- `FM3`
+- `PMX`
+
+### Expected result
+Any diverted order should land exactly where the modal said it would be inserted.
+
+---
+
+## IMPORTANT
+
+Please enforce this rule for **Divert Order**:
+
+> If the modal says the order will be diverted to **Line X, Priority Y**, then after confirmation the order must actually be inserted at **Line X, Priority Y**.
+
+Example:
+- reviewed position = `Line 2, Priority 5`
+- final applied result must also be = `Line 2, Prio 5`
+
+No more cases where the app reviews one priority but applies another.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log reviewed diversion priority vs final applied diversion priority.
+
+```javascript
+console.debug('[Divert Order Final Priority Match]', {
+  orderId,
+  targetLine,
+  reviewedPriority,
+  finalAppliedPriority,
+  exactMatch: reviewedPriority === finalAppliedPriority,
+});
+```
+
+```javascript
+console.debug('[Divert Order Apply Path]', {
+  orderId,
+  targetLine,
+  usedReviewedInsertionPosition: true,
+  fallbackAppendUsed: false,
+});
+```
+
+```javascript
+console.debug('[Divert Order Priority Drift]', {
+  orderId,
+  targetLine,
+  reviewedPriority,
+  finalAppliedPriority,
+  drift: finalAppliedPriority - reviewedPriority,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Divert Order modal shows the reviewed insertion priority
+2. ✅ Final diverted order lands at that exact reviewed priority
+3. ✅ No fallback append/recompute behavior overrides the reviewed slot
+4. ✅ Target line and priority remain consistent from review to apply
+5. ✅ The fix works across all lines/feedmills
+6. ✅ No UI errors or console errors are introduced

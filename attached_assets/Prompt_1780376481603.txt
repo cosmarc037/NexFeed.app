@@ -1,0 +1,87 @@
+Please fix the layout of the **AI vs Final Sequence — Adjustment Details** table in the **Plant-Level Auto-Sequence** modal so it aligns properly with the rest of the preview content and no longer sits too close to the edges.
+
+---
+
+## 1. ADD PROPER HORIZONTAL MARGIN / PADDING AROUND THE TABLE SECTION
+
+The **AI vs Final Sequence — Adjustment Details** table currently appears too close to the left and right edges of the modal/container.
+
+### Current issue
+It looks like the section has little or no outer spacing compared to the rest of the preview content.
+
+### Expected behavior
+Please add proper horizontal margin or inner container padding so the table aligns with the rest of the content blocks inside the modal.
+
+### Goal
+The section should visually feel part of the same content layout as the preview and action sections, not stretched edge-to-edge.
+
+### Expected result
+The table should sit inside the same visual content width as the rest of the modal content.
+
+---
+
+## 2. ALIGN THE TABLE SECTION WITH THE REST OF THE PREVIEW CONTENT
+
+Please make sure the **AI vs Final Sequence** section aligns consistently with:
+- the preview content above it
+- the action cards/sections below it
+- other inner content blocks in the modal
+
+### Expected result
+The left and right boundaries of this table section should line up with the surrounding preview content, rather than extending closer to the modal edges.
+
+---
+
+## 3. KEEP THE TABLE FULLY READABLE WHILE ADDING THE SPACING
+
+Please preserve readability and usable width for the table while improving the spacing.
+
+### Goal
+We still want the table to have enough horizontal room, but it should not appear visually cramped against the modal edges.
+
+### Expected result
+The table remains readable, but the overall layout feels properly padded and visually balanced.
+
+---
+
+## 4. APPLY THE SAME CONTENT CONTAINER STYLE USED BY OTHER PREVIEW BLOCKS IF POSSIBLE
+
+If the modal already has a standard inner content/container spacing pattern used by other sections, please reuse that same pattern for the **AI vs Final Sequence** section.
+
+### Goal
+Keep the section consistent with the design language of the rest of the auto-sequence modal.
+
+### Expected result
+The table section uses the same content alignment and spacing as the rest of the preview UI.
+
+---
+
+## IMPORTANT
+
+Please update the **AI vs Final Sequence — Adjustment Details** section so it no longer appears flush against the modal edges.
+
+It should:
+- have proper horizontal spacing
+- align with the rest of the preview content
+- feel visually consistent with the other sections inside the modal
+
+---
+
+## DEBUG LOGGING
+
+```javascript
+console.debug('[Auto-Sequence AI vs Final Table Layout]', {
+  alignedWithPreviewContent: true,
+  horizontalSpacingAdjusted: true,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ The AI vs Final Sequence table no longer sits too close to the modal edges
+2. ✅ The section aligns with the rest of the preview content
+3. ✅ The table remains readable
+4. ✅ The overall modal layout looks more balanced
+5. ✅ No UI errors or layout regressions are introduced

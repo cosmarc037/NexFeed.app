@@ -1,0 +1,692 @@
+```
+Implement the following changes to the Smart Combine feature:
+
+---
+
+## 1. REMOVE THE TEMPLATE-BASED SCHEDULING IMPACT SECTION
+
+Remove the red "Scheduling Impact" box that currently shows template-based output like "Priority 11 delays Order X by ~21 days". This is now handled entirely by the AI Impact Analysis.
+
+### REMOVE
+
+```jsx
+{/* REMOVE THIS ENTIRE SECTION */}
+<div className="scheduling-impact-box">
+  <span className="scheduling-impact-icon">📊</span>
+  <span className="scheduling-impact-title">Scheduling Impact</span>
+  <p>Priority 11 delays Elite XP Litter Developer, Pellet 50kg by ~21 days 8 hrs...</p>
+</div>
+```
+
+### REMOVE ASSOCIATED CSS
+
+```css
+/* REMOVE */
+.scheduling-impact-box { ... }
+.scheduling-impact-icon { ... }
+.scheduling-impact-title { ... }
+```
+
+---
+
+## 2. UPDATED LAYOUT PER COMBINE GROUP
+
+```jsx
+function CombineGroup({ group, lineOrders, masterData, n10dData, changeoverRules }) {
+  const [analysis, setAnalysis] = useState(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(true);
+  
+  useEffect(() => {
+    generateCombineAnalysis();
+  }, []);
+  
+  async function generateCombineAnalysis() {
+    setIsAnalyzing(true);
+    try {
+      const context = buildCombineAnalysisContext(group, lineOrders, masterData, n10dData, changeoverRules);
+      const prompt = buildCombineAnalysisPrompt(context);
+      const response = await callAI(prompt);
+      const cleaned = parseCombineAnalysisResponse(response);
+      setAnalysis(cleaned);
+    } catch (error) {
+      console.error('Combine analysis failed:', error);
+      setAnalysis({
+        insertionPosition: 'Unable to determine. Review manually.',
+        schedulingImpact: 'Analysis unavailable.',
+        alerts: 'Please verify scheduling impact before approving.'
+      });
+    } finally {
+      setIsAnalyzing(false);
+    }
+  }
+  
+  return (
+    <div className="combine-group">
+      {/* Order cards */}
+      {group.orders.map(order => (
+        <CombineOrderCard key={order.id} order={order} />
+      ))}
+      
+      {/* Combined volume label */}
+      <div className="combine-volume-label">
+        Combined Volume: {group.combinedVolume} MT
+      </div>
+      
+      {/* Combined Production Summary */}
+      <div className="combine-summary-card">
+        <div className="combine-summary-header">
+          <span>📦</span> Combined Production Summary
+        </div>
+        <div className="combine-summary-body">
+          <div className="combine-summary-row">
+            <span>Combined Volume</span>
+            <span>{group.combinedVolume} MT</span>
+          </div>
+          <div className="combine-summary-row">
+            <span>Batch Size</span>
+            <span>{group.batchSize} MT</span>
+          </div>
+          <div className="combine-summary-row">
+            <span>Number of Batches</span>
+            <span>{group.combinedBatches}</span>
+          </div>
+          <div className="combine-summary-row">
+            <span>Total Bags</span>
+            <span>{group.combinedBags}</span>
+          </div>
+          <div className="combine-summary-row">
+            <span>Production Time (separate)</span>
+            <span>{group.separateProductionTime}</span>
+          </div>
+          <div className="combine-summary-row">
+            <span>Production Time (combined)</span>
+            <span>{group.combinedProductionTime}</span>
+          </div>
+        </div>
+      </div>
+      
+      {/* Changeover Savings — calculated, not AI */}
+      <div className="combine-savings-card">
+        <div className="combine-savings-header">
+          <span>⏱</span> Changeover Savings
+        </div>
+        <div className="combine-savings-body">
+          <span>{group.savingsCalculation}</span>
+          <span className="combine-savings-badge">✅ {group.totalSaved} saved</span>
+        </div>
+      </div>
+      
+      {/* Impact Analysis — AI powered */}
+      <div className="combine-analysis-card">
+        <div className="combine-analysis-header">
+          <span>✨ Impact Analysis</span>
+          {isAnalyzing && (
+            <span className="combine-analysis-loading">
+              <span className="refresh-spinning">🔄</span> Analyzing...
+            </span>
+          )}
+        </div>
+        
+        <div className="combine-analysis-scroll">
+          {isAnalyzing && !analysis && (
+            <div className="combine-analysis-loading-text">
+              Analyzing optimal insertion position and scheduling impact...
+            </div>
+          )}
+          
+          {analysis && (
+            <CombineAnalysisDisplay analysis={analysis} />
+          )}
+        </div>
+      </div>
+      
+      {/* Actions */}
+      <div className="combine-group-actions">
+        <button 
+          className="combine-approve-btn"
+          onClick={() => handleApprove(group, analysis)}
+          disabled={isAnalyzing}
+        >
+          Approve
+        </button>
+        <button 
+          className="combine-dismiss-btn"
+          onClick={() => handleDismiss(group)}
+        >
+          Dismiss
+        </button>
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+## 3. AI CONTEXT BUILDER
+
+```javascript
+function buildCombineAnalysisContext(group, lineOrders, masterData, n10dData, changeoverRules) {
+  const line = group.line;
+  
+  // All current orders on this line, sorted by prio
+  const currentLineOrders = lineOrders
+    .filter(o => o.line === line && o.status !== 'Done' && o.status !== 'Cancel PO')
+    .sort((a, b) => a.prio - b.prio);
+  
+  // The orders being combined
+  const combiningOrders = group.orders;
+  
+  // Combined order details
+  const combinedVolume = combiningOrders.reduce((s, o) => s + (parseFloat(o.volume) || 0), 0);
+  const runRate = parseFloat(combiningOrders[0].run_rate) || 0;
+  const combinedProductionHours = runRate > 0 ? combinedVolume / runRate : 0;
+  const combinedForm = combiningOrders[0].form;
+  
+  // Determine avail date for combined order
+  const datedOrders = combiningOrders.filter(o => {
+    const avail = (o.avail_date || '').toLowerCase();
+    return avail && !avail.includes('prio') && !avail.includes('safety') && avail !== '' && avail !== '—';
+  });
+  
+  const nonDatedOrders = combiningOrders.filter(o => {
+    const avail = (o.avail_date || '').toLowerCase();
+    return !avail || avail.includes('prio') || avail.includes('safety') || avail === '' || avail === '—';
+  });
+  
+  let combinedAvailDate = null;
+  let availDateType = 'none';
+  
+  if (datedOrders.length > 0) {
+    // Use earliest dated avail date
+    const sorted = datedOrders.sort((a, b) => new Date(a.avail_date) - new Date(b.avail_date));
+    combinedAvailDate = sorted[0].avail_date;
+    availDateType = 'dated';
+  } else if (nonDatedOrders.length > 0) {
+    // Use the first non-dated avail type
+    combinedAvailDate = nonDatedOrders[0].avail_date;
+    availDateType = 'priority_based';
+  }
+  
+  // Orders that will be REMOVED after combining (all except the one that stays)
+  const orderPrios = combiningOrders.map(o => o.prio).sort((a, b) => a - b);
+  const removedPrios = orderPrios.slice(1); // All except the earliest prio
+  
+  // N10D / Future Dispatches data for the combined product
+  const n10dProduct = n10dData?.find(
+    p => String(p.material_code_fg) === String(combiningOrders[0].material_code_fg)
+  );
+  const n10dStatus = n10dProduct ? getProductStatus(
+    n10dProduct.due_for_loading, n10dProduct.inventory,
+    getDailyColumns(), n10dProduct, new Date()
+  ) : null;
+  
+  // Base changeover for combined order
+  const baseChangeover = getBaseChangeover(combinedForm, changeoverRules.baseChangeover);
+  
+  // Build line context — each order with key details
+  const lineContext = currentLineOrders.map(o => {
+    const oN10d = n10dData?.find(p => String(p.material_code_fg) === String(o.material_code_fg));
+    const oStatus = oN10d ? getProductStatus(
+      oN10d.due_for_loading, oN10d.inventory,
+      getDailyColumns(), oN10d, new Date()
+    ) : null;
+    
+    const vol = parseFloat(o.volume) || 0;
+    const rate = parseFloat(o.run_rate) || 0;
+    const prodHrs = rate > 0 ? (vol / rate).toFixed(2) : '0.00';
+    
+    return {
+      prio: o.prio,
+      name: o.item_description,
+      volume: o.volume,
+      form: o.form,
+      prodHours: prodHrs,
+      availDate: o.avail_date || '—',
+      n10dStatus: oStatus || 'N/A',
+      completionDate: o.completion_date || '—',
+      changeover: (o._changeoverTotal ?? parseFloat(o.changeover) ?? 0).toFixed(2),
+      isBeingCombined: combiningOrders.some(co => co.id === o.id),
+      color: o.color || '—',
+      diameter: o.diameter || '—',
+      category: o.category || '—'
+    };
+  });
+  
+  return {
+    line,
+    combiningOrders: combiningOrders.map(o => ({
+      prio: o.prio,
+      name: o.item_description,
+      volume: o.volume,
+      availDate: o.avail_date || '—',
+      form: o.form
+    })),
+    combinedVolume,
+    combinedProductionHours: combinedProductionHours.toFixed(2),
+    combinedForm,
+    combinedAvailDate,
+    availDateType,
+    removedPrios,
+    n10dStatus,
+    n10dDfl: n10dProduct?.due_for_loading || null,
+    n10dInventory: n10dProduct?.inventory || null,
+    baseChangeover,
+    lineContext,
+    totalOrdersOnLine: currentLineOrders.length
+  };
+}
+```
+
+---
+
+## 4. AI PROMPT
+
+```javascript
+function buildCombineAnalysisPrompt(context) {
+  return `
+You are a production scheduling advisor for a feed manufacturing plant.
+The planner is considering combining orders on ${context.line}.
+
+ORDERS BEING COMBINED:
+${context.combiningOrders.map(o => `  Prio ${o.prio}: ${o.name} | ${o.volume} MT | Avail: ${o.availDate} | Form: ${o.form}`).join('\n')}
+
+COMBINED ORDER DETAILS:
+  Total Volume: ${context.combinedVolume} MT
+  Form: ${context.combinedForm}
+  Production Time: ${context.combinedProductionHours} hrs
+  Base Changeover: ${context.baseChangeover} hrs
+  Avail Date (combined): ${context.combinedAvailDate || 'None'}
+  Avail Date Type: ${context.availDateType}
+  Future Dispatches Status: ${context.n10dStatus || 'N/A'}
+  DFL: ${context.n10dDfl || 'N/A'} MT | Inventory: ${context.n10dInventory || 'N/A'} MT
+
+ORDERS THAT WILL BE REMOVED (merged into combined): Prio ${context.removedPrios.join(', Prio ')}
+
+CURRENT LINE SEQUENCE (${context.line}, ${context.totalOrdersOnLine} orders):
+${context.lineContext.map(o => `  Prio ${o.prio}: ${o.name} | ${o.volume} MT | Prod: ${o.prodHours} hrs | CO: ${o.changeover} hrs | Avail: ${o.availDate} | N10D: ${o.n10dStatus} | Completion: ${o.completionDate}${o.isBeingCombined ? ' ← BEING COMBINED' : ''} | Color: ${o.color} | Diameter: ${o.diameter} | Category: ${o.category}`).join('\n')}
+
+RULES FOR DETERMINING INSERTION POSITION:
+1. If the combined order has a DATED avail date (e.g., "April 2, 2026"), insert it at a position where it can be completed before or on that date. Match it near orders with similar avail dates.
+2. If the combined order has a NON-DATED avail date (e.g., "prio replenish", "safety reorder"), you have freedom to determine the best position based on:
+   - Future Dispatches stock status (Critical orders should be higher priority)
+   - Production time impact (avoid creating bottlenecks)
+   - Downstream order delays (minimize or avoid delays to other orders)
+3. NEVER place the combined order at a position that delays a Critical or Urgent downstream order past its avail date.
+4. When removing the merged orders, the remaining orders shift up to fill the gaps. Account for this in your analysis.
+5. Consider changeover impact — placing the combined order between two specific orders may add or reduce changeover time based on color, diameter, and category transitions.
+
+RESPOND IN EXACTLY THIS FORMAT (no markdown, no headers with #):
+
+Insertion Position:
+[State the recommended priority number and explain why. Be specific — mention avail dates, stock status, and what orders are above and below.]
+
+Scheduling Impact:
+[Describe what happens to downstream orders. Name specific orders that shift, and by how much time. If no delays, say so. If delays occur, quantify them in hours.]
+
+Alerts:
+[List any warnings — orders that may miss avail dates, capacity concerns, or reasons NOT to combine. If no alerts, state "No alerts — all orders remain on schedule."]
+  `;
+}
+```
+
+---
+
+## 5. RESPONSE PARSER
+
+```javascript
+function parseCombineAnalysisResponse(response) {
+  let cleaned = response;
+  
+  // Remove markdown
+  cleaned = cleaned.replace(/#{1,6}\s*/g, '');
+  cleaned = cleaned.replace(/\*\*/g, '');
+  cleaned = cleaned.replace(/\*([^*]+)\*/g, '$1');
+  cleaned = cleaned.replace(/_([^_]+)_/g, '$1');
+  
+  // Parse three sections
+  const result = {
+    insertionPosition: '',
+    schedulingImpact: '',
+    alerts: ''
+  };
+  
+  // Try to split by section labels
+  const insertionMatch = cleaned.match(/Insertion Position:\s*([\s\S]*?)(?=Scheduling Impact:|$)/i);
+  const impactMatch = cleaned.match(/Scheduling Impact:\s*([\s\S]*?)(?=Alerts?:|$)/i);
+  const alertsMatch = cleaned.match(/Alerts?:\s*([\s\S]*?)$/i);
+  
+  if (insertionMatch) result.insertionPosition = insertionMatch[1].trim();
+  if (impactMatch) result.schedulingImpact = impactMatch[1].trim();
+  if (alertsMatch) result.alerts = alertsMatch[1].trim();
+  
+  // Fallback — if parsing fails, put everything in insertion
+  if (!result.insertionPosition && !result.schedulingImpact && !result.alerts) {
+    result.insertionPosition = cleaned.trim();
+    result.schedulingImpact = 'See above.';
+    result.alerts = 'Please review manually.';
+  }
+  
+  return result;
+}
+```
+
+---
+
+## 6. ANALYSIS DISPLAY COMPONENT
+
+```jsx
+function CombineAnalysisDisplay({ analysis }) {
+  if (!analysis) return null;
+  
+  return (
+    <div className="combine-analysis-content">
+      {/* Insertion Position */}
+      <div className="combine-analysis-section">
+        <div className="combine-analysis-section-header">
+          <span className="combine-analysis-section-icon">📍</span>
+          <span>Insertion Position</span>
+        </div>
+        <div className="combine-analysis-section-body">
+          {analysis.insertionPosition}
+        </div>
+      </div>
+      
+      {/* Scheduling Impact */}
+      <div className="combine-analysis-section">
+        <div className="combine-analysis-section-header">
+          <span className="combine-analysis-section-icon">📊</span>
+          <span>Scheduling Impact</span>
+        </div>
+        <div className="combine-analysis-section-body">
+          {analysis.schedulingImpact}
+        </div>
+      </div>
+      
+      {/* Alerts */}
+      <div className="combine-analysis-section combine-analysis-alerts">
+        <div className="combine-analysis-section-header">
+          <span className="combine-analysis-section-icon">⚠</span>
+          <span>Alerts</span>
+        </div>
+        <div className="combine-analysis-section-body">
+          {analysis.alerts}
+        </div>
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+## 7. STYLING
+
+```css
+.combine-analysis-card {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  overflow: hidden;
+  margin: 8px 0;
+}
+
+.combine-analysis-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  background: #fff7ed;
+  border-bottom: 1px solid #fed7aa;
+  font-size: 12px;
+  font-weight: 600;
+  color: #92400e;
+}
+
+.combine-analysis-scroll {
+  max-height: 250px;
+  overflow-y: auto;
+  padding: 12px 14px;
+}
+
+.combine-analysis-scroll::-webkit-scrollbar {
+  width: 5px;
+}
+
+.combine-analysis-scroll::-webkit-scrollbar-track {
+  background: #f3f4f6;
+}
+
+.combine-analysis-scroll::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 3px;
+}
+
+.combine-analysis-content {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.combine-analysis-section {
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.combine-analysis-section-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: #f9fafb;
+  font-size: 11px;
+  font-weight: 700;
+  color: #374151;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.combine-analysis-section-icon {
+  font-size: 12px;
+}
+
+.combine-analysis-section-body {
+  padding: 8px 10px;
+  font-size: 12px;
+  color: #374151;
+  line-height: 1.6;
+}
+
+/* Alerts section — subtle warning background */
+.combine-analysis-alerts {
+  border-color: #fde68a;
+}
+
+.combine-analysis-alerts .combine-analysis-section-header {
+  background: #fefce8;
+  color: #92400e;
+}
+
+.combine-analysis-alerts .combine-analysis-section-body {
+  background: #fffbeb;
+}
+
+.combine-analysis-loading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #6b7280;
+  font-weight: 400;
+}
+
+.combine-analysis-loading-text {
+  font-size: 12px;
+  color: #9ca3af;
+  font-style: italic;
+  padding: 20px 0;
+  text-align: center;
+}
+```
+
+---
+
+## 8. APPROVE HANDLER — USE AI RECOMMENDED POSITION
+
+```javascript
+function handleApprove(group, analysis) {
+  // Parse the AI's recommended position from the analysis
+  const recommendedPrio = parseRecommendedPrio(analysis?.insertionPosition, group);
+  
+  // Combine the orders
+  const combiningOrders = group.orders;
+  const combinedVolume = combiningOrders.reduce((s, o) => s + (parseFloat(o.volume) || 0), 0);
+  
+  // Determine avail date — earliest dated, or first non-dated
+  const datedOrders = combiningOrders.filter(o => {
+    const avail = (o.avail_date || '').toLowerCase();
+    return avail && !avail.includes('prio') && !avail.includes('safety') && avail !== '' && avail !== '—';
+  }).sort((a, b) => new Date(a.avail_date) - new Date(b.avail_date));
+  
+  const combinedAvailDate = datedOrders.length > 0
+    ? datedOrders[0].avail_date
+    : combiningOrders[0].avail_date;
+  
+  // Create combined order based on the first order
+  const baseOrder = { ...combiningOrders[0] };
+  baseOrder.volume = combinedVolume;
+  baseOrder.avail_date = combinedAvailDate;
+  baseOrder.prio = recommendedPrio;
+  baseOrder.batches = Math.ceil(combinedVolume / (parseFloat(baseOrder.batch_size) || 1));
+  baseOrder.bags = baseOrder.batches * (parseFloat(baseOrder.fg_weight) || 1) * 20;
+  
+  const runRate = parseFloat(baseOrder.run_rate) || 0;
+  baseOrder.production_time = runRate > 0 ? (combinedVolume / runRate).toFixed(2) : '0.00';
+  
+  // Mark as combined
+  baseOrder._isCombined = true;
+  baseOrder._combinedFrom = combiningOrders.map(o => o.id);
+  
+  // Remove all original orders
+  const orderIdsToRemove = combiningOrders.map(o => o.id);
+  
+  // Insert combined order and remove originals
+  let updatedOrders = allOrders.filter(o => !orderIdsToRemove.includes(o.id));
+  updatedOrders.push(baseOrder);
+  
+  // Re-sort and re-assign prios
+  const lineOrders = updatedOrders
+    .filter(o => o.line === group.line)
+    .sort((a, b) => a.prio - b.prio);
+  
+  lineOrders.forEach((o, idx) => {
+    o.prio = idx + 1;
+  });
+  
+  // Recalculate everything
+  recalculateAllChangeovers(updatedOrders, getDefaultChangeoverRules());
+  recalculateCompletionDates(updatedOrders);
+  
+  setAllOrders(updatedOrders);
+  showNotification('success', `Orders combined: ${baseOrder.item_description} (${combinedVolume} MT) at Priority ${recommendedPrio}.`);
+}
+
+function parseRecommendedPrio(insertionText, group) {
+  if (!insertionText) {
+    // Fallback — use earliest avail date logic
+    return getEarliestAvailDatePrio(group);
+  }
+  
+  // Try to extract priority number from AI text
+  // Look for patterns like "Priority 5", "Prio 5", "position 5", "priority number 5"
+  const patterns = [
+    /[Pp]riority\s*(\d+)/,
+    /[Pp]rio\s*(\d+)/,
+    /position\s*(\d+)/i,
+    /insert(?:ed)?\s+at\s+(?:priority\s+)?(\d+)/i,
+    /(?:recommend|suggest)\w*\s+(?:priority\s+)?(\d+)/i
+  ];
+  
+  for (const pattern of patterns) {
+    const match = insertionText.match(pattern);
+    if (match) {
+      return parseInt(match[1], 10);
+    }
+  }
+  
+  // Fallback
+  return getEarliestAvailDatePrio(group);
+}
+
+function getEarliestAvailDatePrio(group) {
+  const datedOrders = group.orders.filter(o => {
+    const avail = (o.avail_date || '').toLowerCase();
+    return avail && !avail.includes('prio') && !avail.includes('safety') && avail !== '' && avail !== '—';
+  });
+  
+  if (datedOrders.length > 0) {
+    const earliest = datedOrders.sort((a, b) => new Date(a.avail_date) - new Date(b.avail_date))[0];
+    return earliest.prio;
+  }
+  
+  // Use lowest prio number among combined orders
+  return Math.min(...group.orders.map(o => o.prio));
+}
+```
+
+---
+
+## 9. UPDATE CHATBOT SYSTEM PROMPT
+
+```
+Smart Combine:
+- AI-powered order combination that matches orders with the same FG, SFG, Line, and SCADA
+- AI determines the optimal insertion position based on:
+  - Avail dates (dated orders anchor to their date, non-dated orders get AI-optimized placement)
+  - Future Dispatches stock status (Critical/Urgent products placed higher)
+  - Production time impact and downstream delays
+- Impact Analysis shows: Insertion Position, Scheduling Impact, and Alerts
+- Users can approve or dismiss each recommendation
+- After combining, users can still drag/drop to adjust position
+```
+
+---
+
+## VERIFICATION
+
+### Layout
+1. ✅ No more separate red "Scheduling Impact" box
+2. ✅ Only Summary + Changeover Savings + AI Impact Analysis
+3. ✅ Impact Analysis has three sub-sections: Insertion Position, Scheduling Impact, Alerts
+4. ✅ Impact Analysis in scrollable container (max 250px)
+5. ✅ Each sub-section has icon, header, and body
+
+### AI Position Logic
+6. ✅ Dated avail date → AI inserts near that date in the sequence
+7. ✅ Non-dated avail date → AI freely determines best position
+8. ✅ Critical/Urgent products prioritized higher
+9. ✅ AI avoids delaying Critical/Urgent downstream orders
+10. ✅ AI considers changeover impact at different positions
+11. ✅ Combined order uses earliest dated avail date among merged orders
+12. ✅ AI accounts for removed order slots shifting the sequence
+
+### Avail Date
+13. ✅ Order A (April 2, Prio 8) + Order B (April 15, Prio 3) → uses April 2
+14. ✅ Both "prio replenish" → AI picks best position freely
+15. ✅ Mixed dated + non-dated → uses the dated one
+
+### Response Quality
+16. ✅ Insertion Position always present with specific prio number
+17. ✅ Scheduling Impact names specific orders and delay amounts
+18. ✅ Alerts present even if "No alerts"
+19. ✅ No markdown in output
+20. ✅ No conflicting info between sections (single AI source)
+
+### Approve
+21. ✅ Parses AI recommended prio from the analysis text
+22. ✅ Falls back to earliest avail date prio if parsing fails
+23. ✅ Combined order placed at AI recommended position
+24. ✅ All changeovers and completion dates recalculated
+25. ✅ Users can drag/drop after to adjust
+```

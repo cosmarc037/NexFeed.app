@@ -1,0 +1,294 @@
+Please implement a new feature for Powermix / Line 5 orders.
+
+This is a new operational rule:
+when certain qualifying orders are plotted on **Line 5**, the system must automatically create a corresponding additional linked order on a configured destination line using a configured percentage of the original order quantity.
+
+This should be implemented as configurable logic, not hard-coded directly into the sequencing flow.
+
+---
+
+## 1. BUSINESS RULE
+
+If an eligible FG is scheduled on **Line 5 (Powermix)**, a linked additional order must automatically be created using the configured:
+
+- mapped SFG / material
+- target line
+- percentage of original volume
+- batch value
+
+This is not a move of the original order.
+The original Line 5 order must remain.
+The system should create an **additional linked order** on the configured destination line.
+
+---
+
+## 2. INITIAL RULE SET
+
+Use the following mapping table:
+
+| FG Code Request | SFG Material | Description | Target Line | Percentage | Batch |
+|---|---|---|---|---:|---:|
+| 1000000000039 | 3000000000248 | Gallimax 2 plus | Line 2 | 85 | 4 |
+| 1000000000041 | 3000000000033 | Salto Stag Developer | Line 2 | 80 | 4 |
+| 1000000000543 | 3000000000033 | Salto Stag Developer | Line 2 | 80 | 4 |
+| 1000000001387 | 3000000000480 | Gallimax 2 Plus red | Line 2 | 85 | 4 |
+| 1000000000565 | 3000000000057 | Gallimax PMP | Line 2 | 40 | 4 |
+| 1000000001121 | 3000000001289 | Pork Solution Booster Plus (Cooked Mash)-1st pass | Line 6 | 81 | 2 |
+
+---
+
+## 3. EXAMPLES
+
+### Example A
+If original order on Line 5 has:
+- FG = 1000000000039
+- Volume = 200 MT
+
+Then automatically create an additional linked order:
+- Material = 3000000000248
+- Line = Line 2
+- Volume = 170 MT
+- Batch = 4
+
+because 200 × 85% = 170.
+
+### Example B
+If original order on Line 5 has:
+- FG = 1000000000041
+- Volume = 100 MT
+
+Then automatically create an additional linked order:
+- Material = 3000000000033
+- Line = Line 2
+- Volume = 80 MT
+- Batch = 4
+
+because 100 × 80% = 80.
+
+### Example C
+If original order on Line 5 has:
+- FG = 1000000001121
+- Volume = 137 MT
+
+Then automatically create an additional linked order:
+- Material = 3000000001289
+- Line = Line 6
+- Volume = 110.97 MT
+- Batch = 2
+
+because 137 × 81% = 110.97.
+
+---
+
+## 4. CREATE A NEW CONFIGURATION TAB
+
+Add a new tab under **Configurations** called:
+
+## Powermix Split Rules
+
+This should allow users to maintain the mapping rules without code changes.
+
+Suggested placement under Configurations:
+- Order History
+- Changeover Rules
+- Master Data
+- Future Dispatches
+- Material Forecasts (if already present)
+- Powermix Split Rules
+
+If Material Forecasts is not yet implemented, just place Powermix Split Rules after Future Dispatches.
+
+---
+
+## 5. POWERMIX SPLIT RULES TABLE
+
+Create a configuration table with columns such as:
+
+- FG Code Request
+- Source FG Description
+- SFG Material Code
+- SFG Description
+- Target Line
+- Percentage
+- Batch
+- Active
+
+Optional future columns:
+- Remarks
+- Effective Date
+- Created By
+- Updated By
+
+Required capabilities:
+- add rule
+- edit rule
+- deactivate rule
+- search/filter
+- import/export if possible
+
+---
+
+## 6. TRIGGER CONDITION
+
+The auto-generation logic should trigger only when:
+- the source order is assigned to **Line 5**
+- and the source FG has an active Powermix Split Rule
+
+If the order is not on Line 5, do nothing.
+
+If there is no matching rule, do nothing.
+
+---
+
+## 7. GENERATED ORDER LOGIC
+
+When a rule matches:
+
+### Generated quantity
+Use:
+`generated_qty = original_qty * percentage / 100`
+
+### Generated line
+Use the configured target line.
+
+### Generated material
+Use the configured SFG/material code.
+
+### Batch
+Use the configured batch value.
+
+### Quantity precision
+For now, keep quantity to 2 decimal places unless the app already has a standard rounding rule.
+
+---
+
+## 8. TRACEABILITY / LINKAGE
+
+The generated order must remain linked to the original Line 5 order.
+
+Please store or track fields such as:
+- parent/source order id
+- source line
+- auto_generated flag
+- generation rule id
+- generated_from_powermix flag
+
+This is required so the app can:
+- avoid duplicates
+- update linked orders correctly
+- cancel linked orders if source order is removed
+- explain where generated orders came from
+
+---
+
+## 9. DUPLICATE PREVENTION
+
+Do not create duplicate linked orders every time:
+- the line is reloaded
+- the sequence is re-run
+- the preview refreshes
+
+Before creating a generated order, check whether a linked generated order already exists for:
+- the same source order
+- the same rule
+
+If it exists:
+- update it if needed
+- do not create a second duplicate row
+
+This is very important.
+
+---
+
+## 10. UPDATE / DELETE BEHAVIOR
+
+### If the original Line 5 order quantity changes:
+Update the linked generated order quantity accordingly, unless there is already a future manual detach rule.
+
+### If the original Line 5 order is removed:
+Remove, cancel, or deactivate the linked generated order accordingly.
+
+### If the original order changes to another line:
+If it is no longer on Line 5, then the linked generated order should no longer remain active as a Powermix-generated order.
+
+For now, simplest behavior is acceptable as long as source/child consistency is maintained.
+
+---
+
+## 11. UI LABELING / VISIBILITY
+
+Generated linked orders should be identifiable in the UI.
+
+Consider displaying something like:
+- Auto-generated
+- Powermix split
+- Derived from Line 5 order
+
+This helps users understand why the order appeared on another line.
+
+---
+
+## 12. FUTURE-PROOFING
+
+Although the current data suggests these are the only products relevant to Line 5 today, the implementation must be configurable so users can later:
+- change percentage
+- change target line
+- change batch
+- add new FG rules
+- deactivate old rules
+
+Do not hard-code the current mapping permanently into business logic.
+
+Use the configuration table as the source of truth.
+
+---
+
+## 13. DEBUG LOGGING
+
+Temporarily log:
+
+```javascript
+console.debug('[Powermix Split Rule Evaluation]', {
+  sourceOrderId,
+  sourceLine,
+  sourceFgCode,
+  sourceQty,
+  matchedRule,
+});
+```
+
+```javascript
+console.debug('[Powermix Generated Order]', {
+  sourceOrderId,
+  sourceFgCode,
+  generatedMaterialCode,
+  targetLine,
+  percentage,
+  generatedQty,
+  batch,
+});
+```
+
+```javascript
+console.debug('[Powermix Duplicate Check]', {
+  sourceOrderId,
+  ruleId,
+  existingGeneratedOrderId,
+  actionTaken, // created | updated | skipped
+});
+```
+
+---
+
+## 14. VERIFICATION
+
+1. ✅ Orders on Line 5 with matching rules automatically generate linked orders on configured destination lines
+2. ✅ Original Line 5 orders remain intact
+3. ✅ Generated quantity uses the configured percentage
+4. ✅ Generated order uses the configured SFG/material
+5. ✅ Generated order uses the configured target line
+6. ✅ Generated order uses the configured batch value
+7. ✅ Duplicate generated orders are prevented
+8. ✅ Users can manage rules through the new Configurations > Powermix Split Rules tab
+9. ✅ Rule changes do not require code edits
+10. ✅ Generated orders remain traceable to their original Line 5 source order

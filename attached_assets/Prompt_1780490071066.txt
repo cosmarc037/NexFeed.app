@@ -1,0 +1,184 @@
+Please fix the auto-sequence ordering so that the **AI itself handles the urgency/date sequencing logic**, and the final preview is sorted using the **AI’s resolved ranking**, instead of leaving orders visibly out of chronological/urgency order.
+
+---
+
+## 1. GIVE THE AI EXPLICIT CONTEXT ON HOW TO HANDLE ORDERS BY URGENCY / DISPATCH STATUS
+
+Please strengthen the AI prompt/context so it clearly understands how to sequence orders based on urgency and future dispatch needs.
+
+### Required behavior context for the AI
+Please instruct the AI to treat orders like this:
+
+- **Critical**  
+  If an order is critical based on future dispatch requirements / stockout risk, it should be prioritized for production **today**.
+
+- **Urgent / Monitor**  
+  These orders may be advanced early if doing so improves readiness and does not create worse downstream impact.
+
+- **Sufficient / Flexible**  
+  These orders may be advanced or delayed within their allowable planning window, up to **14 days**, if that helps optimize the sequence.
+
+### Goal
+Make the AI itself understand the intended urgency/date behavior, instead of relying on later sorting or rule correction.
+
+### Expected result
+The AI should sequence orders according to the business meaning of Critical / Urgent / Monitor / Flexible.
+
+---
+
+## 2. MAKE THE AI’S RESOLVED RANK THE BASIS FOR THE FINAL SORT ORDER
+
+Please use the AI’s final resolved ranking as the basis for sorting the preview table.
+
+### Important
+If the AI is already sequencing with full context on:
+- avail dates
+- urgency
+- future dispatches
+- deadlines
+- changeovers
+- line constraints
+- allowable windows
+
+then the final display should follow that AI-resolved rank.
+
+### Goal
+Avoid having one AI sequence internally and another visible sort order in the table.
+
+### Expected result
+The visible preview order should match the AI’s resolved sequence directly.
+
+---
+
+## 3. DO NOT ALLOW EARLIER-DATE / HIGHER-URGENCY ORDERS TO APPEAR TOO LOW IN THE TABLE WITHOUT AI JUSTIFICATION
+
+Right now, there are still cases where rows with earlier or more urgent dates appear too far down the list.
+
+### Required behavior
+If a row appears later than expected, that placement should be because the AI intentionally ranked it there based on full context — not because the table failed to sort properly afterward.
+
+### Goal
+The table should no longer look visibly unsorted or contradictory.
+
+### Expected result
+Any order’s visible position should be explainable by the AI’s resolved rank.
+
+---
+
+## 4. MAKE THE AI USE AVAIL DATE AND URGENCY TO SHAPE THE RANKING ITSELF
+
+Please make sure the AI includes date-awareness directly in the rank decision.
+
+### Important
+The AI should not treat ranking and date handling as separate disconnected ideas.
+
+Instead, the AI should understand:
+- Critical tied to future dispatch = produce today
+- Urgent / Monitor = can move earlier
+- Flexible / Sufficient = can float within the broader planning window
+- avail date still matters as part of the prioritization
+
+### Expected result
+The AI’s ranking naturally reflects the intended date/urgency order.
+
+---
+
+## 5. USE THE AI RANK TO KEEP THE TABLE VISIBLY COHERENT
+
+Please make the final visible preview follow the AI rank so the user can trust that:
+- the AI decided the sequence
+- the table reflects that same decision
+
+### Goal
+Prevent the preview from looking manually unsorted even when the AI supposedly already ranked the orders.
+
+### Expected result
+The final row order should visually match the AI’s intended sequencing outcome.
+
+---
+
+## 6. KEEP THE AI CONTEXT RICH, INCLUDING CURRENT LINEUP, FUTURE DISPATCHES, CHANGEOVERS, AND DATE WINDOWS
+
+Please continue giving the AI full scheduling context such as:
+- current lineup of orders
+- future dispatch requirements
+- urgency tiers
+- avail dates
+- changeovers
+- line constraints
+- production times / run rates
+- planning windows (including 14-day flexibility where applicable)
+
+### Goal
+Let the AI rank the orders with enough operational context to make the visible sequence coherent and realistic.
+
+### Expected result
+The ranking becomes a true sequencing decision, not just a partial suggestion.
+
+---
+
+## IMPORTANT
+
+Please improve auto-sequence so that:
+
+- the AI clearly understands urgency/date behavior:
+  - **Critical** → produce today when required by future dispatch
+  - **Urgent / Monitor** → can be advanced early
+  - **Sufficient / Flexible** → may move within a 14-day window
+- the AI uses this logic directly when ranking the orders
+- the final preview table is then sorted using the AI’s resolved rank
+- the preview should no longer look visibly out of order relative to urgency/date expectations
+
+This should make the sequence feel truly AI-driven and visually coherent.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log urgency/date context in the AI input and final AI-rank sorting.
+
+```javascript
+console.debug('[Auto-Sequence AI Urgency/Date Context]', {
+  strategyId,
+  orders: aiInputOrders?.map(o => ({
+    orderId: o.orderId,
+    availDate: o.availDate,
+    urgency: o.urgency,
+    futureDispatchRisk: o.futureDispatchRisk,
+    safeWindowEnd: o.safeWindowEnd,
+  })),
+});
+```
+
+```javascript
+console.debug('[Auto-Sequence AI Final Rank Sort]', {
+  strategyId,
+  finalRowsByAiRank: finalRows?.map(r => ({
+    orderId: r.orderId || r.entityId,
+    aiRank: r.aiRank,
+    availDate: r.availDate,
+    urgency: r.urgency,
+  })),
+});
+```
+
+```javascript
+console.debug('[Auto-Sequence Visible Order Consistency]', {
+  strategyId,
+  previewOrderIds: previewRows?.map(r => r.orderId || r.entityId),
+  sortedByAiResolvedRank: true,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ AI receives explicit urgency/date sequencing rules
+2. ✅ Critical orders tied to future dispatch are prioritized for today
+3. ✅ Urgent / Monitor orders can be advanced early
+4. ✅ Flexible / Sufficient orders can move within the 14-day window
+5. ✅ AI uses those rules in its ranking
+6. ✅ Final preview is sorted by the AI’s resolved rank
+7. ✅ The visible order looks coherent relative to urgency/date expectations
+8. ✅ No UI errors or console errors are introduced

@@ -1,0 +1,515 @@
+```
+Fix the Plant-Level Auto-Sequence preview to match the per-line preview look and feel:
+
+---
+
+## 1. PLANT LINE TAB — MATCH PER-LINE PREVIEW EXACTLY
+
+The per-line tabs inside the plant-level preview must have ALL the same columns and look as the per-line auto-sequence preview.
+
+```jsx
+function PlantLineTab({ line, originalOrders, sequencedOrders, changeoverRules, masterData, n10dData }) {
+  const movedCount = sequencedOrders.filter(o => o._movement !== 'same').length;
+  const newFromOtherLines = sequencedOrders.filter(o => o._movement === 'new_to_line').length;
+  const combinedCount = sequencedOrders.filter(o => o._isCombined).length;
+  
+  return (
+    <div className="plant-line-tab">
+      {/* Line stats — same style as per-line preview */}
+      <div className="auto-sequence-stats" style={{ padding: '12px 24px' }}>
+        <StatBadge label="Before" value={originalOrders.length} />
+        <StatBadge label="After" value={sequencedOrders.length} />
+        {newFromOtherLines > 0 && (
+          <StatBadge label="From Other Lines" value={newFromOtherLines} color="blue" />
+        )}
+        <StatBadge label="Orders Moved" value={movedCount} color="orange" />
+        {combinedCount > 0 && (
+          <StatBadge label="Combined Groups" value={combinedCount} color="green" />
+        )}
+      </div>
+      
+      {/* Before and After — inside container, same as per-line */}
+      <div className="auto-sequence-comparison">
+        <div className="auto-sequence-comparison-container">
+          <div className="auto-sequence-comparison-scroll">
+            
+            {/* BEFORE table — full columns */}
+            <div className="auto-sequence-table-panel">
+              <div className="auto-sequence-table-label auto-sequence-label-before">
+                <span className="auto-sequence-label-icon">📋</span>
+                Before — {originalOrders.length} orders
+              </div>
+              <div className="auto-sequence-table-wrapper">
+                <table className="auto-sequence-table auto-sequence-table-before">
+                  <thead>
+                    <tr>
+                      <th className="as-col-prio">Prio</th>
+                      <th className="as-col-fpr">FPR</th>
+                      <th className="as-col-planned">Planned Order</th>
+                      <th className="as-col-material">Material Code (FG)</th>
+                      <th className="as-col-desc">Item Description</th>
+                      <th className="as-col-form">Form</th>
+                      <th className="as-col-volume">Volume (MT)</th>
+                      <th className="as-col-batch">Batch Size</th>
+                      <th className="as-col-batches">Batches</th>
+                      <th className="as-col-prod">Production Time</th>
+                      <th className="as-col-start-date">Start Date</th>
+                      <th className="as-col-start-time">Start Time</th>
+                      <th className="as-col-avail">Avail Date</th>
+                      <th className="as-col-completion">Estimated Completion Date</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {originalOrders.map((order, index) => (
+                      <tr key={order.id} className="auto-sequence-row-before">
+                        <td className="as-col-prio">
+                          <span className="as-prio-badge">{index + 1}</span>
+                        </td>
+                        <td className="as-col-fpr">{order.fpr}</td>
+                        <td className="as-col-planned">
+                          <div>{order.planned_order_fg}</div>
+                          <div className="as-sub-text">{order.planned_order_sfg}</div>
+                        </td>
+                        <td className="as-col-material">{order.material_code_fg}</td>
+                        <td className="as-col-desc">
+                          <div className="as-desc-main">{order.item_description}</div>
+                          <div className="as-sub-text">{order.category}</div>
+                        </td>
+                        <td className="as-col-form">{order.form}</td>
+                        <td className="as-col-volume"><strong>{order.volume}</strong> MT</td>
+                        <td className="as-col-batch">{order.batch_size}</td>
+                        <td className="as-col-batches">{order.batches}</td>
+                        <td className="as-col-prod">
+                          <div><strong>{formatProductionTime(order.production_time)}</strong></div>
+                          <div className="as-sub-text">CO: {formatProductionTime(order._changeoverTotal || order.changeover || 0)}</div>
+                        </td>
+                        <td className="as-col-start-date">{order.start_date ? formatDate(order.start_date) : '—'}</td>
+                        <td className="as-col-start-time">{order.start_time || '—'}</td>
+                        <td className="as-col-avail">{formatAvailDate(order.target_avail_date)}</td>
+                        <td className="as-col-completion">{order.completion_date || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            
+            {/* Divider */}
+            <div className="auto-sequence-divider"></div>
+            
+            {/* AFTER table — full columns + drag + indicators */}
+            <div className="auto-sequence-table-panel">
+              <div className="auto-sequence-table-label auto-sequence-label-after">
+                <span className="auto-sequence-label-icon">✨</span>
+                After — {sequencedOrders.length} orders
+                {movedCount > 0 && ` (${movedCount} repositioned)`}
+                {newFromOtherLines > 0 && ` (${newFromOtherLines} from other lines)`}
+              </div>
+              <div className="auto-sequence-table-wrapper">
+                <table className="auto-sequence-table auto-sequence-table-after">
+                  <thead>
+                    <tr>
+                      <th className="as-col-drag"></th>
+                      <th className="as-col-prio">Prio</th>
+                      <th className="as-col-fpr">FPR</th>
+                      <th className="as-col-planned">Planned Order</th>
+                      <th className="as-col-material">Material Code (FG)</th>
+                      <th className="as-col-desc">Item Description</th>
+                      <th className="as-col-form">Form</th>
+                      <th className="as-col-volume">Volume (MT)</th>
+                      <th className="as-col-batch">Batch Size</th>
+                      <th className="as-col-batches">Batches</th>
+                      <th className="as-col-prod">Production Time</th>
+                      <th className="as-col-start-date">Start Date</th>
+                      <th className="as-col-start-time">Start Time</th>
+                      <th className="as-col-avail">Avail Date</th>
+                      <th className="as-col-completion">Estimated Completion Date</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sequencedOrders.map((order) => (
+                      <PlantAfterRow key={order.id} order={order} />
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+## 2. AFTER ROW — WITH COMBINED ORDER EXPANSION
+
+```jsx
+function PlantAfterRow({ order }) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  
+  return (
+    <>
+      {/* Main order row */}
+      <tr className={`auto-sequence-row-after ${order._isCombined ? 'as-row-combined' : ''}`}>
+        <td className="as-col-drag">
+          <span className="as-drag-handle">⠿</span>
+        </td>
+        <td className="as-col-prio">
+          <span className="as-prio-badge as-prio-badge-after">{order.prio}</span>
+        </td>
+        <td className="as-col-fpr">{order.fpr}</td>
+        <td className="as-col-planned">
+          <div>{order.planned_order_fg}</div>
+          <div className="as-sub-text">{order.planned_order_sfg}</div>
+        </td>
+        <td className="as-col-material">{order.material_code_fg}</td>
+        <td className="as-col-desc">
+          <div className="as-desc-with-movement">
+            {/* Line badge for orders from other lines */}
+            {order._movedFromLine && (
+              <span
+                className="as-line-badge"
+                title={`This order came from ${order._movedFromLine}`}
+              >
+                {getLineShortName(order._movedFromLine)}
+              </span>
+            )}
+            
+            {/* Combined icon with expand toggle */}
+            {order._isCombined && (
+              <button
+                className="as-combined-toggle"
+                onClick={() => setIsExpanded(!isExpanded)}
+                title={`${order._combinedFrom?.length || 0} orders combined — click to ${isExpanded ? 'collapse' : 'expand'}`}
+              >
+                🔗
+              </button>
+            )}
+            
+            {/* Movement indicator */}
+            {order._movement === 'up' || order._movement === 'down' ? (
+              <MovementIndicator movement={order._movement} delta={order._movementDelta} />
+            ) : null}
+            
+            <div>
+              <div className="as-desc-main">{order.item_description}</div>
+              <div className="as-sub-text">{order.category}</div>
+              {/* Combined count label */}
+              {order._isCombined && order._combinedFrom && (
+                <div className="as-combined-label">
+                  {order._combinedFrom.length} orders combined
+                  {order._combinedFromLines && order._combinedFromLines.length > 1 && (
+                    <span> · from {order._combinedFromLines.map(l => getLineShortName(l)).join(', ')}</span>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </td>
+        <td className="as-col-form">{order.form}</td>
+        <td className="as-col-volume"><strong>{order.volume}</strong> MT</td>
+        <td className="as-col-batch">{order.batch_size}</td>
+        <td className="as-col-batches">{order.batches}</td>
+        <td className="as-col-prod">
+          <div><strong>{formatProductionTime(order.production_time)}</strong></div>
+          <div className="as-sub-text">CO: {formatProductionTime(order._changeoverTotal || order.changeover || 0)}</div>
+        </td>
+        <td className="as-col-start-date">
+          {order.start_date ? formatDate(order.start_date) : <span className="as-placeholder">Set start date</span>}
+        </td>
+        <td className="as-col-start-time">
+          {order.start_time || <span className="as-placeholder">Set time</span>}
+        </td>
+        <td className="as-col-avail">{formatAvailDate(order.target_avail_date)}</td>
+        <td className="as-col-completion">
+          {order.completion_date || <span className="as-placeholder">Set completion</span>}
+        </td>
+      </tr>
+      
+      {/* Expanded combined orders */}
+      {isExpanded && order._isCombined && order._combinedFrom && (
+        order._combinedFrom.map((subOrder, subIndex) => (
+          <tr key={`sub-${order.id}-${subIndex}`} className="as-row-combined-sub">
+            <td className="as-col-drag"></td>
+            <td className="as-col-prio"></td>
+            <td className="as-col-fpr">
+              <span className="as-sub-fpr">{subOrder.fpr}</span>
+            </td>
+            <td className="as-col-planned">
+              <div className="as-sub-text">{subOrder.planned_order_fg || '—'}</div>
+              <div className="as-sub-text">{subOrder.planned_order_sfg || '—'}</div>
+            </td>
+            <td className="as-col-material">
+              <span className="as-sub-text">{subOrder.material_code_fg || '—'}</span>
+            </td>
+            <td className="as-col-desc">
+              <div className="as-sub-desc">
+                {/* Source line badge */}
+                <span
+                  className="as-line-badge as-line-badge-small"
+                  title={`Originally from ${subOrder.line}`}
+                >
+                  {getLineShortName(subOrder.line)}
+                </span>
+                <div>
+                  <div className="as-sub-text-dark">{subOrder.item_description || order.item_description}</div>
+                </div>
+              </div>
+            </td>
+            <td className="as-col-form">
+              <span className="as-sub-text">{subOrder.form || order.form}</span>
+            </td>
+            <td className="as-col-volume">
+              <span className="as-sub-text">{subOrder.volume} MT</span>
+            </td>
+            <td className="as-col-batch">
+              <span className="as-sub-text">{subOrder.batch_size || '—'}</span>
+            </td>
+            <td className="as-col-batches">
+              <span className="as-sub-text">{subOrder.batches || '—'}</span>
+            </td>
+            <td className="as-col-prod">
+              <span className="as-sub-text">{subOrder.production_time ? formatProductionTime(subOrder.production_time) : '—'}</span>
+            </td>
+            <td className="as-col-start-date"><span className="as-sub-text">—</span></td>
+            <td className="as-col-start-time"><span className="as-sub-text">—</span></td>
+            <td className="as-col-avail">
+              <span className="as-sub-text">{formatAvailDate(subOrder.target_avail_date) || '—'}</span>
+            </td>
+            <td className="as-col-completion"><span className="as-sub-text">—</span></td>
+          </tr>
+        ))
+      )}
+    </>
+  );
+}
+```
+
+---
+
+## 3. UPDATE combinedFrom DATA — STORE FULL ORDER INFO
+
+When combining orders, store full details for each sub-order so they can be displayed:
+
+```javascript
+// In plantLevelCombineAndPlace — when creating combined order
+baseOrder._combinedFrom = combineGroup.orders.map(o => ({
+  id: o.id,
+  line: o._originalLine,
+  fpr: o.fpr,
+  volume: o.volume,
+  item_description: o.item_description,
+  form: o.form,
+  material_code_fg: o.material_code_fg,
+  planned_order_fg: o.planned_order_fg,
+  planned_order_sfg: o.planned_order_sfg,
+  batch_size: o.batch_size,
+  batches: o.batches,
+  production_time: o.production_time,
+  target_avail_date: o.target_avail_date,
+  category: o.category
+}));
+```
+
+---
+
+## 4. STYLING
+
+```css
+/* Combined row — subtle left border */
+.as-row-combined {
+  border-left: 3px solid #16a34a;
+}
+
+/* Combined toggle button */
+.as-combined-toggle {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.as-combined-toggle:hover {
+  transform: scale(1.2);
+}
+
+/* Combined label */
+.as-combined-label {
+  font-size: 9px;
+  color: #16a34a;
+  font-weight: 600;
+  margin-top: 2px;
+}
+
+/* Sub-order rows */
+.as-row-combined-sub {
+  background: #f0fdf4;
+  border-left: 3px solid #16a34a;
+}
+
+.as-row-combined-sub td {
+  padding: 6px 10px;
+  border-bottom: 1px solid #dcfce7;
+  vertical-align: top;
+}
+
+.as-sub-fpr {
+  font-size: 11px;
+  color: #6b7280;
+}
+
+.as-sub-desc {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.as-sub-text-dark {
+  font-size: 11px;
+  color: #4b5563;
+}
+
+/* Small line badge for sub-orders */
+.as-line-badge-small {
+  font-size: 8px;
+  padding: 0px 4px;
+}
+
+/* Line badge */
+.as-line-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 700;
+  background: #dbeafe;
+  color: #1d4ed8;
+  border: 1px solid #93c5fd;
+  flex-shrink: 0;
+  cursor: default;
+  margin-top: 2px;
+}
+
+/* Movement indicator */
+.as-movement-icon {
+  flex-shrink: 0;
+  font-size: 8px;
+  margin-top: 4px;
+}
+
+.as-movement-icon-up { color: #16a34a; }
+.as-movement-icon-down { color: #dc2626; }
+
+/* Description with movement */
+.as-desc-with-movement {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+/* Sub text */
+.as-sub-text {
+  font-size: 10px;
+  color: #9ca3af;
+  margin-top: 1px;
+}
+
+/* All cells top-aligned */
+.auto-sequence-table td {
+  vertical-align: top;
+}
+
+/* Plant line tab layout */
+.plant-line-tab {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Comparison inside plant tab — same as per-line */
+.plant-line-tab .auto-sequence-comparison {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding: 0 24px 16px 24px;
+}
+
+.plant-line-tab .auto-sequence-comparison-container {
+  flex: 1;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: #ffffff;
+}
+
+.plant-line-tab .auto-sequence-comparison-scroll {
+  display: flex;
+  overflow-x: auto;
+  flex: 1;
+}
+
+/* Table panels equal width */
+.plant-line-tab .auto-sequence-table-panel {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Table min width for full columns */
+.plant-line-tab .auto-sequence-table {
+  min-width: 1100px;
+}
+```
+
+---
+
+## VERIFICATION
+
+### Full columns in plant-level preview
+1. ✅ Before table: Prio, FPR, Planned Order, Material Code (FG), Item Description, Form, Volume (MT), Batch Size, Batches, Production Time, Start Date, Start Time, Avail Date, Estimated Completion Date
+2. ✅ After table: same columns + drag handle
+3. ✅ Both tables same width inside container
+
+### Combined orders visible
+4. ✅ Combined orders show 🔗 icon next to item description
+5. ✅ "3 orders combined · from L1, L3" label below description
+6. ✅ Click 🔗 expands to show sub-orders
+7. ✅ Sub-orders show in green-tinted rows
+8. ✅ Sub-orders show source line badge (L1, L3, L7)
+9. ✅ Sub-orders show full details: FPR, planned order, material code, volume, form, avail date
+10. ✅ Click 🔗 again collapses sub-orders
+
+### Combined data stored
+11. ✅ _combinedFrom stores full order details (not just id and volume)
+12. ✅ Each sub-order has: id, line, fpr, volume, item_description, form, material_code_fg, planned_order_fg/sfg, batch_size, batches, production_time, target_avail_date
+
+### Look and feel matches per-line preview
+13. ✅ Tables inside rounded container with border
+14. ✅ Same table labels ("Before — X orders", "After — X orders")
+15. ✅ Same divider between tables
+16. ✅ Same prio badges
+17. ✅ Same font sizes
+18. ✅ Same cell padding
+19. ✅ Same top-aligned cells
+20. ✅ Stats badges above tables
+
+### Indicators
+21. ✅ Line badge (L1, L4) for orders from other lines
+22. ✅ ▲ green arrow for moved-up orders
+23. ✅ ▼ red arrow for moved-down orders
+24. ✅ 🔗 for combined orders
+25. ✅ Tooltip on line badge shows full line name
+```

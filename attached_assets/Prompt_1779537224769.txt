@@ -1,0 +1,224 @@
+Please update the **History column / audit trail behavior** so that manual edits to editable order fields are also recorded in history.
+
+---
+
+## 1. ADD HISTORY LOGGING FOR EDITABLE ORDER FIELDS
+
+The application currently logs major workflow events such as upload, status changes, cut order, volume override, reorder, diversion, AI sequencing, and combination. Please expand the History logging so that **manual edits to editable order fields** are also recorded.
+
+### Goal
+Whenever a user edits one of the supported editable fields in an order row, the system should write a history entry showing:
+- which field was changed
+- the old value
+- the new value
+
+### Expected result
+Changes to editable order fields should no longer happen silently.
+
+---
+
+## 2. APPLY THIS TO THE FOLLOWING EDITABLE FIELDS
+
+Please add history tracking for edits to these fields:
+
+### Planned Orders
+- `Planned Order FG`
+- `Planned Order SFG`
+- `Planned Order SFG1`
+
+### Production Orders
+- `Production Order FG`
+- `Production Order SFG`
+- `Production Order SFG1`
+
+### Operational Fields
+- `SCADA`
+- `PV`
+- `HA Prep`
+
+### Scheduling Fields
+- `Start Date`
+- `Start Time`
+- `Avail Date`
+- `Completion Date`
+- `End Date`
+
+### Notes / Remarks
+- `FPR Notes`
+- `Special Remarks`
+
+---
+
+## 3. HISTORY ENTRY FORMAT FOR FIELD EDITS
+
+Please use a clear and consistent history format for field changes.
+
+### Recommended format
+- `Field updated: [Field Name] old_value → new_value`
+
+### Examples
+- `Field updated: Planned Order FG empty → 5925179`
+- `Field updated: Planned Order SFG 5881724 → 5924991`
+- `Field updated: Production Order FG empty → 70012345`
+- `Field updated: SCADA No → Yes`
+- `Field updated: Start Date empty → 2026-05-21`
+- `Field updated: Start Time 08:00 → 09:30`
+- `Field updated: End Date 2026-05-21 18:00 → 2026-05-21 20:00`
+- `Field updated: FPR Notes "rush" → "rush - approved by planner"`
+- `Field updated: Special Remarks empty → "For validation run"`
+
+### Important
+Use user-friendly field labels in the history message, not internal database keys.
+
+---
+
+## 4. HANDLE EMPTY / NULL VALUES CLEARLY
+
+Please ensure the history log correctly handles blank values.
+
+### Required display behavior
+If a field was previously blank, null, or unset, show it as:
+- `empty`
+
+If a field is cleared by the user, log that clearly as well.
+
+### Examples
+- `Field updated: Start Date empty → 2026-05-21`
+- `Field updated: Production Order SFG 70023456 → empty`
+- `Field updated: Special Remarks "urgent" → empty`
+
+### Goal
+Users should always understand whether a value was newly entered, replaced, or removed.
+
+---
+
+## 5. ONLY LOG WHEN THE VALUE ACTUALLY CHANGES
+
+Please avoid writing unnecessary history entries when:
+- the user opens and saves without changes
+- the same value is re-submitted
+- formatting-only events do not change the actual stored value
+
+### Expected behavior
+Only create a history entry if:
+- old value != new value
+
+This helps keep the History column clean and meaningful.
+
+---
+
+## 6. PRESERVE SEPARATE HISTORY ENTRIES FOR MULTIPLE FIELD CHANGES
+
+If a user updates multiple editable fields at the same time, the system may either:
+- log one entry per field, or
+- log one grouped entry with all changed fields
+
+Preferred behavior:
+- **one entry per field**, for clarity and audit precision
+
+### Example
+If a user updates:
+- Start Date
+- Start Time
+- Special Remarks
+
+then the system should preferably write three separate history entries:
+- `Field updated: Start Date empty → 2026-05-21`
+- `Field updated: Start Time empty → 08:00`
+- `Field updated: Special Remarks empty → "Priority release"`
+
+This makes the change trail easier to read and filter later.
+
+---
+
+## 7. INCLUDE THESE FIELD EDITS IN THE SAME ORDER HISTORY TIMELINE
+
+Please ensure these editable-field history entries appear in the same History timeline/feed used for other order events.
+
+### Goal
+Users should see a complete order-level audit trail in one place, including:
+- import
+- status changes
+- reorder / diversion / optimization
+- order combination
+- field-level edits
+
+Do not create a completely separate hidden log if the main History column is intended to serve as the visible audit trail.
+
+---
+
+## 8. DO NOT BREAK SYSTEM-GENERATED HISTORY EVENTS
+
+Please preserve the current history behavior for:
+- Uploaded
+- Cancel PO set from SAP upload
+- Status changed
+- Cut Order
+- Override volume
+- Manually reordered
+- Diverted / Reverted
+- Auto-sequenced
+- Optimized
+- Combined / merged order events
+
+This request is to **add field-edit audit history**, not to remove or disrupt existing history behavior.
+
+---
+
+## 9. OPTIONAL SOURCE TAGGING IF AVAILABLE
+
+If supported by the application, it would be helpful to distinguish whether the field edit was:
+- manually edited by a user
+- system-updated automatically
+- AI-suggested then accepted
+
+If source tagging is available, include it in the history metadata or message.
+
+### Example
+- `Field updated: Start Date empty → 2026-05-21 (manual)`
+- `Field updated: End Date 2026-05-21 18:00 → 2026-05-21 20:00 (system)`
+- `Field updated: Start Time empty → 09:00 (AI accepted)`
+
+If this is not currently supported, basic old → new history is still acceptable.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log field-edit history writes for supported editable fields.
+
+```javascript
+console.debug('[Order Field History]', {
+  orderId,
+  fpr,
+  fieldName,
+  oldValue,
+  newValue,
+  changeSource: 'manual_edit',
+});
+```
+
+```javascript
+console.debug('[Order Field History Entry Written]', {
+  fpr,
+  fieldName,
+  entryMessage,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Editing `Planned Order FG` creates a history entry showing old → new value
+2. ✅ Editing `Planned Order SFG` creates a history entry showing old → new value
+3. ✅ Editing `Planned Order SFG1` creates a history entry showing old → new value
+4. ✅ Editing `Production Order FG`, `Production Order SFG`, or `Production Order SFG1` creates history entries
+5. ✅ Editing `SCADA`, `PV`, or `HA Prep` creates history entries
+6. ✅ Editing `Start Date`, `Start Time`, `Avail Date`, `Completion Date`, or `End Date` creates history entries
+7. ✅ Editing `FPR Notes` or `Special Remarks` creates history entries
+8. ✅ Blank values are displayed clearly as `empty` when changed from or to null/blank
+9. ✅ No history entry is created if the stored value did not actually change
+10. ✅ Multiple field edits can be traced clearly in the order’s visible History timeline
+11. ✅ Existing history events for import, status changes, reorder, diversion, AI sequencing, and combination still work
+12. ✅ No UI errors or console errors are introduced

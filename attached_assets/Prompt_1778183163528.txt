@@ -1,0 +1,203 @@
+```
+Please revisit the AI sequencing behavior for changeover reduction because the resulting order table is still not clustered strongly enough to genuinely reduce changeovers across the full sequence.
+
+---
+
+## ISSUE OBSERVED
+
+The selected strategy is:
+
+### `Red Last Changeover Minimization`
+Description:
+> Positions the red Gamefowl order last to avoid expensive red → other color changeover and clusters same diameter swine and poultry orders earlier.
+
+The AI reasoning also says things like:
+- the red order was moved to avoid the costly red→other penalty
+- the strategy reduces total changeover significantly
+- faithfulness is 100.0%
+- the strategy is strongly reflected in the final lineup
+
+However, the actual After-table lineup is still:
+
+1. Yellow - 4.0mm
+2. Yellow - 3.0mm
+3. Brown - 3.0mm
+4. Yellow - 4.0mm
+5. Yellow - 3.0mm
+6. Red - 3.0mm
+
+---
+
+## WHAT LOOKS WRONG
+
+### 1. The red-last part is visible
+Yes, the red order is now last.
+
+### 2. But the rest of the lineup is still not well clustered
+The non-red orders are still split in a way that appears inefficient for changeover reduction:
+- Yellow 4.0mm appears twice, separated
+- Yellow 3.0mm appears twice, separated
+- Brown 3.0mm sits between yellow groups
+- there are still repeated diameter/color breaks before the final red
+
+This does not look like a strongly clustered, low-changeover run.
+
+### 3. The AI appears to optimize only one major transition
+It seems the AI is mainly solving:
+- put red at the end
+
+But it is not sufficiently optimizing the rest of the lineup to minimize the total transition cost across the whole sequence.
+
+### 4. The reasoning and faithfulness appear overstated
+If the final lineup is still fragmented like this, then claims such as:
+- `reduces total changeover significantly`
+- `strongly reflected`
+- `100.0% faithfulness`
+
+seem too strong.
+
+---
+
+## REQUEST
+
+Please improve how the AI actually applies changeover-reduction strategies so it optimizes the whole sequence, not just the final red placement.
+
+---
+
+## 1. OPTIMIZE THE FULL SEQUENCE, NOT JUST ONE EXPENSIVE TRANSITION
+
+When the AI identifies a costly transition such as:
+- red → non-red
+
+it should not stop at simply moving the red order to the end.
+
+It should also evaluate the remaining non-red lineup and reorder flexible orders to better cluster:
+- same color
+- same diameter
+- same category where relevant
+
+The goal should be:
+- lower total sequence changeover
+not just
+- removing one expensive transition
+
+---
+
+## 2. USE THE FULL CHANGEOVER RULES ACROSS ALL ADJACENT PAIRS
+
+The AI should evaluate the whole proposed sequence using the actual changeover rules, including:
+- color transitions
+- diameter transitions
+- category transitions
+- stacking penalties
+- directional penalties
+
+It should choose the arrangement with lower total cost across all adjacent pairs, not only solve one visible red-related break.
+
+---
+
+## 3. IMPROVE CLUSTERING OF COMPATIBLE ORDERS
+
+For a strategy claiming changeover minimization, the resulting sequence should more visibly cluster compatible orders.
+
+Examples of stronger clustering behavior:
+- keep Yellow 4.0mm orders together where possible
+- keep Yellow 3.0mm orders together where possible
+- avoid splitting same-color/same-diameter blocks unless date constraints require it
+- use Brown/Yellow bridging more intelligently when it lowers total cost
+
+The final sequence should look intentionally structured for lower changeover.
+
+---
+
+## 4. RECONSIDER HOW THE AI PRIORITIZES TRADEOFFS
+
+It appears the AI may be over-prioritizing one high-cost transition while under-prioritizing the rest of the sequence.
+
+Please improve the prompt/execution so the AI evaluates:
+- the full-sequence total changeover
+- the effect of moving each flexible order
+- whether grouping same diameter/color blocks yields better total savings than the current arrangement
+
+The AI should aim for the globally better sequence within the allowed date-safe window.
+
+---
+
+## 5. FEED THE AI THE ACTUAL LINE-UP + CHANGEOVER RULES + ADJACENT COST IMPACTS
+
+Make sure the AI sees:
+- the current ordered lineup
+- each order’s color
+- each order’s diameter
+- category
+- which orders are movable/flexible
+- actual date constraints
+- actual changeover rule penalties
+- optionally the current adjacent-pair penalty breakdown
+
+This will help it make smarter clustering decisions.
+
+---
+
+## 6. MAKE THE EXECUTION LAYER APPLY THE CLUSTERING MORE STRONGLY
+
+Even if the AI reasoning is good, the final table suggests the actual applied sequence is still too weakly transformed.
+
+Please review the execution layer so it:
+- preserves AI-recommended adjacency blocks
+- does not dilute the clustering intent too much
+- more faithfully applies the intended lower-changeover sequence
+
+---
+
+## 7. TONE DOWN CLAIMS IF THE FINAL LINEUP IS ONLY PARTIALLY IMPROVED
+
+If the final sequence only clearly achieves:
+- `red last`
+
+but does not strongly cluster the rest of the orders,
+then the reasoning should not overstate:
+- significant total reduction
+- strongly reflected
+- 100% faithfulness
+
+The reasoning and faithfulness score should match what the table actually shows.
+
+---
+
+## 8. REASSESS THE 100% FAITHFULNESS SCORE
+
+Please review how faithfulness is computed in this case.
+
+Because if the strategy claims:
+- changeover minimization
+- clustering same diameter/color runs earlier
+
+then the final lineup should visibly reflect that across the full sequence, not just in the last position of the red order.
+
+A fragmented lineup should not receive a perfect faithfulness score unless the strategy itself was much narrower.
+
+---
+
+## 9. PREFERRED OUTCOME
+
+For changeover-minimization strategies, the final lineup should look more like a deliberate low-changeover structure, for example:
+- same-diameter orders grouped more tightly
+- same-color runs grouped where possible
+- expensive red/green outgoing transitions minimized
+- fewer unnecessary diameter/color/category breaks before the final order
+
+It does not need to match a single exact sequence, but it should visibly look more clustered than what is currently shown.
+
+---
+
+## 10. VERIFICATION
+
+1. ✅ The AI strategy now evaluates the whole sequence, not just the final red placement
+2. ✅ Flexible orders are clustered more effectively to reduce total changeover
+3. ✅ Same color / same diameter orders are more visibly grouped where valid
+4. ✅ The final After-table lineup more clearly reflects a low-changeover structure
+5. ✅ The execution layer preserves the AI’s intended clustering more faithfully
+6. ✅ Faithfulness score is reviewed and is no longer overstated for only partial alignment
+7. ✅ Strategy reasoning no longer overclaims “strong reflection” or “significant reduction” unless the final table truly supports it
+```

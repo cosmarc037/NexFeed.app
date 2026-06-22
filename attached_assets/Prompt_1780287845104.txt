@@ -1,0 +1,248 @@
+Please fix the **auto-sequence preview vs applied schedule consistency** and the **production-time calculation logic** so that previewed values are faithfully applied and production time is always computed correctly from the order’s volume and run rate.
+
+---
+
+# 1. MAKE SURE THE PREVIEWED AI / AUTO-SEQUENCE DATE IS THE SAME DATE APPLIED TO THE SCHEDULE
+
+The current auto-sequence preview is still not reliably matching the final schedule after **Apply to Schedule**.
+
+### Required rule
+Whatever date/placement the preview shows for an order must be the same one that gets applied to the final schedule.
+
+### Important
+If the preview shows that the order is placed on a certain:
+- `Avail Date`
+- or schedule position/date context
+
+then that same result must be reflected in the schedule after applying.
+
+### Expected result
+There should be no case where the preview shows one date/placement and the applied schedule silently uses another one.
+
+---
+
+# 2. DO NOT LET THE APPLY STEP RECOMPUTE A DIFFERENT DATE OR PLACEMENT
+
+Please ensure the **Apply to Schedule** flow does not recompute or reinterpret the preview result differently.
+
+### Goal
+The preview selected by the user should be the same committed schedule result.
+
+### Expected result
+The applied schedule must use the same preview-selected:
+- date
+- placement
+- and derived schedule context
+
+not a slightly different recalculated version.
+
+---
+
+# 3. PRODUCTION TIME MUST ALWAYS BE CALCULATED AS `VOLUME / RUN RATE`
+
+Please enforce a consistent production-time rule:
+
+- `Production Time = Volume / Run Rate`
+
+### Important
+This should use:
+- the actual order volume shown in the row
+- the actual valid run rate for that order/line
+
+### Expected result
+Production time should always reflect the real volume-to-run-rate calculation.
+
+---
+
+# 4. FIX PRODUCTION-TIME MISCALCULATIONS IN BOTH PREVIEW AND APPLIED SCHEDULE
+
+There are still production-time errors in:
+- auto-sequence preview
+- final applied schedule
+
+### Current issue examples
+- a nonzero-volume order showing `0.00 hours`
+- preview production time not matching applied production time
+- production time not matching the row’s actual `Volume / Run Rate`
+
+### Expected result
+Production time must be correct and consistent in both:
+- the preview
+- and the final applied schedule
+
+---
+
+# 5. DO NOT ALLOW IMPOSSIBLE VALUES SUCH AS `0.00 HOURS` FOR NONZERO VOLUME ORDERS
+
+If an order has:
+- nonzero volume
+- and a valid run rate
+
+then it should not display:
+- `0.00 hours`
+
+### Expected result
+Any nonzero-volume order with a valid run rate must display a meaningful production time based on:
+- `Volume / Run Rate`
+
+### Goal
+Prevent obviously incorrect schedule values from appearing in the preview or applied schedule.
+
+---
+
+# 6. USE THE SAME PRODUCTION-TIME CALCULATION PATH IN PREVIEW AND APPLY
+
+Please make sure the preview and apply-to-schedule flows use the same production-time source of truth.
+
+### Important
+Do not let:
+- preview use one calculation path
+and
+- applied schedule use another
+
+### Expected result
+The production time seen in preview should be the same value the user gets after applying, aside from harmless formatting/rounding.
+
+---
+
+# 7. PRESERVE ONLY HARMLESS ROUNDING DIFFERENCES
+
+If display formatting causes a tiny rounding difference, that is acceptable.
+
+### Acceptable
+- `12.62 hours` in preview
+- `12.63 hrs` after apply
+
+### Not acceptable
+- materially different calculated times
+- `0.00 hours` for a large-volume order
+- preview time based on one volume/rate, applied time based on another
+
+### Expected result
+Only harmless formatting differences may remain, not actual calculation errors.
+
+---
+
+# 8. APPLY THIS ACROSS ALL LINES / FEEDMILLS
+
+Please make sure this fix applies consistently across:
+
+### FM1
+- `Line 1`
+- `Line 2`
+
+### FM2
+- `Line 3`
+- `Line 4`
+
+### FM3
+- `Line 6`
+- `Line 7`
+
+### PMX
+- `Line 5`
+
+### In short
+Apply this across:
+- `Line 1` to `Line 7`
+- `FM1`
+- `FM2`
+- `FM3`
+- `PMX`
+
+### Expected result
+Preview/apply consistency and correct production-time calculation should work across all lines, not just one line.
+
+---
+
+# IMPORTANT
+
+Please enforce these rules across all lines/feedmills:
+
+## Preview/apply consistency
+- whatever date/placement the preview shows must be the same one applied to the schedule
+
+## Production time
+- must always be calculated as:
+  - `Volume / Run Rate`
+- in both preview and applied schedule
+
+### This means:
+- no mismatched preview vs schedule dates
+- no production-time drift between preview and apply
+- no impossible `0.00 hours` values for nonzero-volume rows with valid run rate
+
+This must be fixed across:
+- `Line 1`
+- `Line 2`
+- `Line 3`
+- `Line 4`
+- `Line 5`
+- `Line 6`
+- `Line 7`
+- `FM1`
+- `FM2`
+- `FM3`
+- `PMX`
+
+---
+
+# DEBUG LOGGING
+
+Temporarily log preview/apply date consistency and production-time calculation.
+
+```javascript
+console.debug('[Auto-Sequence Preview vs Apply Consistency]', {
+  line,
+  feedmill,
+  orderId,
+  previewAvailDate,
+  appliedAvailDate,
+  previewPlacement,
+  appliedPlacement,
+  availDateMatches: String(previewAvailDate) === String(appliedAvailDate),
+});
+```
+
+```javascript
+console.debug('[Production Time Calculation Check]', {
+  line,
+  feedmill,
+  orderId,
+  volume,
+  runRate,
+  expectedProductionTime: runRate > 0 ? volume / runRate : null,
+  displayedProductionTime,
+  calculationMatches:
+    runRate > 0
+      ? Math.abs(displayedProductionTime - (volume / runRate)) < 0.01
+      : false,
+});
+```
+
+```javascript
+console.debug('[Invalid Production Time Detection]', {
+  line,
+  feedmill,
+  orderId,
+  volume,
+  runRate,
+  displayedProductionTime,
+  invalidZeroTimeForNonzeroVolume:
+    volume > 0 && runRate > 0 && displayedProductionTime === 0,
+});
+```
+
+---
+
+# VERIFICATION
+
+1. ✅ Previewed avail dates match the applied schedule
+2. ✅ Previewed placement/date context is preserved after apply
+3. ✅ Production time is always calculated as `Volume / Run Rate`
+4. ✅ Preview production time matches applied production time aside from harmless rounding
+5. ✅ Nonzero-volume orders with valid run rate no longer show `0.00 hours`
+6. ✅ No business-meaningful value drift occurs between preview and apply
+7. ✅ The fix works across `Line 1` to `Line 7`
+8. ✅ The fix works across `FM1`, `FM2`, `FM3`, and `PMX`
+9. ✅ No UI errors or console errors are introduced

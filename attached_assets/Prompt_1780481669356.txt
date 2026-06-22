@@ -1,0 +1,232 @@
+Please update the **Auto-Sequence** behavior so that the final sequence is driven by **AI only**, while the existing **deterministic refinement** logic is kept in the codebase but made **inactive / hidden / not used** in the active sequencing flow.
+
+---
+
+## 1. DO NOT REMOVE OR DELETE THE EXISTING AI LOGIC OR OTHER WORKING FEATURES
+
+Before anything else, please preserve the AI-related improvements and scheduling context that are already in place.
+
+### Important
+Do **not** replace or remove existing working AI logic such as:
+- AI strategy generation
+- AI sequencing flow
+- AI context on current lineup
+- AI context on changeovers
+- AI context on dates / dispatch / urgency / deadlines
+- AI transparency / preview behavior already implemented
+- other existing AI enhancements already added
+
+### Goal
+Only change the part where deterministic refinement takes over after the AI response.
+
+### Expected result
+All current AI capabilities remain in place, and only the deterministic post-processing is removed from active sequence behavior.
+
+---
+
+## 2. KEEP DETERMINISTIC REFINEMENT IN THE CODEBASE, BUT MAKE IT INACTIVE IN THE ACTIVE SEQUENCING FLOW
+
+Please do **not** delete the deterministic refinement implementation.
+
+### Important
+Keep the code, helper functions, and related logic in place for future use if needed.
+
+### But
+Make sure the deterministic refinement is:
+- hidden
+- inactive
+- not executed in the live auto-sequence flow
+- not used to alter the AI-generated sequence
+- not used to alter AI dates
+- not used to alter final preview/apply ordering
+
+### Expected result
+Deterministic refinement still exists in the codebase, but it is no longer part of the active sequence generation or application.
+
+---
+
+## 3. REMOVE DETERMINISTIC REFINEMENT FROM ACTUAL SEQUENCE DECISION-MAKING
+
+Please ensure the following deterministic refinement passes are **not used** to change the AI sequence in the active app flow:
+
+- hard constraint re-application
+- date clamping
+- contiguous cluster enforcement
+- completion-feasibility roll-forward
+- gap-filling pass
+
+### Important
+These should no longer modify:
+- AI rank
+- suggested dates
+- preview order
+- final applied order
+- final sequence structure
+
+### Expected result
+The final sequence shown and applied should come from the AI’s own sequencing output, not from rule-based post-adjustment.
+
+---
+
+## 4. FEED THE DETERMINISTIC REFINEMENT LOGIC INTO THE AI AS CONTEXT INSTEAD
+
+Instead of applying deterministic refinement after the AI responds, please move those operational rules into the AI’s input/prompt/context.
+
+### The AI should be given context such as:
+- MTO / critical order protections
+- legal scheduling windows
+- clustering preferences
+- completion-feasibility considerations
+- underloaded-day awareness
+- gap-filling intent
+- current lineup
+- future dispatch / avail-date context
+- changeover implications
+- run rates / production time context
+- other current sequencing rules that were previously enforced later
+
+### Goal
+Let the AI make the sequencing decision with full awareness of these constraints and priorities up front.
+
+### Expected result
+The AI itself becomes the sequencing engine, rather than being corrected afterward by deterministic logic.
+
+---
+
+## 5. MAKE THE FINAL SEQUENCE PURE AI-DRIVEN
+
+Please make the active auto-sequence result **pure AI-driven**.
+
+### This means
+- the AI should determine the sequence
+- the AI should determine the order ranking
+- the AI should determine the placement/date reasoning
+- the final preview and final applied schedule should reflect that AI result directly
+
+### Important
+Do not let rule-based refinement silently override the AI after the fact.
+
+### Expected result
+The app becomes truly AI-sequenced, not AI-suggested-then-rule-corrected.
+
+---
+
+## 6. DO NOT USE ANY RULE-BASED FALLBACK IN THE ACTIVE SEQUENCING BEHAVIOR
+
+Please do **not** include any rule-based fallback in the active sequencing behavior.
+
+### Important clarification
+This request is **not** asking for a hidden fallback to still influence the sequence.
+
+The deterministic refinement should remain in the codebase only as retained/inactive code, but it should:
+- not run
+- not affect ranking
+- not affect dates
+- not affect placement
+- not affect preview
+- not affect apply
+
+### Expected result
+No rule-based fallback participates in the sequence.
+
+---
+
+## 7. KEEP PREVIEW AND APPLY DIRECTLY ALIGNED TO THE AI RESULT
+
+Please make sure the selected preview reflects the AI-generated sequence directly, and that the final apply step uses that same AI-generated result.
+
+### Goal
+Users should see and apply the actual AI sequence without hidden post-processing.
+
+### Expected result
+Preview and apply remain aligned, both based on the same pure AI result.
+
+---
+
+## 8. UPDATE ANY UI / LABELING / EXPLANATION THAT STILL IMPLIES ACTIVE DETERMINISTIC REFINEMENT IF NEEDED
+
+If the app currently exposes or implies that deterministic refinement is actively reshaping the sequence, please update that behavior or messaging as needed.
+
+### Goal
+Avoid confusion if the app is now AI-driven directly.
+
+### Expected result
+The system no longer presents the final sequence as if it were determined by post-AI refinement.
+
+---
+
+## IMPORTANT
+
+Please implement this carefully with the following principles:
+
+### Preserve
+- all existing AI logic and improvements already in place
+- all current sequencing context already being fed to AI
+- all current AI strategy-generation behavior that is working
+
+### Keep but do not use
+- deterministic refinement code should remain in the codebase
+- but it must be hidden / inactive / not used in the active sequencing flow
+
+### Active sequencing must be pure AI
+- the AI should sequence the orders directly
+- the final preview and final applied schedule should follow the AI result
+- no deterministic refinement pass should alter the sequence afterward
+- no rule-based fallback should participate in the live sequencing behavior
+
+The goal is to make the app truly **AI-powered**, where the AI is the one actually sequencing the orders, using full operational context, instead of a rule-based engine making the final decision afterward.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log that deterministic refinement is retained but inactive, and that the active sequence comes directly from AI.
+
+```javascript
+console.debug('[Auto-Sequence Pure AI Mode]', {
+  pureAiSequencingEnabled: true,
+  deterministicRefinementRetainedInCodebase: true,
+  deterministicRefinementExecuted: false,
+});
+```
+
+```javascript
+console.debug('[Auto-Sequence Sequence Source]', {
+  strategyId,
+  previewSequenceSource: 'ai_only',
+  appliedSequenceSource: 'ai_only',
+  deterministicPostProcessingUsed: false,
+});
+```
+
+```javascript
+console.debug('[Auto-Sequence AI Context Expansion]', {
+  includesFormerDeterministicLogicAsPromptContext: true,
+  contextIncludes: [
+    'mto_critical_protection',
+    'legal_date_windows',
+    'clustering_preferences',
+    'completion_feasibility',
+    'underloaded_day_awareness',
+    'gap_fill_intent',
+    'current_lineup',
+    'future_dispatch',
+    'changeovers',
+    'run_rate_context',
+  ],
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Existing AI logic and enhancements remain intact
+2. ✅ Deterministic refinement code is preserved in the codebase
+3. ✅ Deterministic refinement is no longer executed in the active sequence flow
+4. ✅ No deterministic pass alters AI rank, dates, or placement
+5. ✅ No rule-based fallback participates in live sequencing
+6. ✅ AI receives the former refinement logic as prompt/context instead
+7. ✅ Preview reflects the pure AI sequence
+8. ✅ Apply uses the same pure AI sequence
+9. ✅ No UI errors or console errors are introduced

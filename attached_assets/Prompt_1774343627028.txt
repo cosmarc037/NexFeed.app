@@ -1,0 +1,256 @@
+```
+Implement the following fix to the NexFeed application:
+
+---
+
+## FIX: LINE RECOMMENDATION — GLOBAL BEST COMPARISON
+
+The line recommendation must compare against ALL lines globally, not just within the current feedmill. Only the line with the highest run rate across ALL feedmills gets "Recommended." Every other line gets "not recommended."
+
+---
+
+### LOGIC
+
+```javascript
+function getLineRecommendation(product, feedmillLines) {
+  const rateMap = {
+    'Line 1': { rate: product.l1_rate || 0, feedmill: 'Feedmill 1' },
+    'Line 2': { rate: product.l2_rate || 0, feedmill: 'Feedmill 1' },
+    'Line 3': { rate: product.l3_rate || 0, feedmill: 'Feedmill 2' },
+    'Line 4': { rate: product.l4_rate || 0, feedmill: 'Feedmill 2' },
+    'Line 5': { rate: product.l5_rate || 0, feedmill: 'Feedmill 3' },
+    'Line 6': { rate: product.l6_rate || 0, feedmill: 'Feedmill 3' },
+    'Line 7': { rate: product.l7_rate || 0, feedmill: 'Powermix' },
+  };
+  
+  // ALL lines with rate > 0, sorted by rate descending
+  const allAvailable = Object.entries(rateMap)
+    .filter(([line, data]) => data.rate > 0)
+    .map(([line, data]) => ({ line, rate: data.rate, feedmill: data.feedmill }))
+    .sort((a, b) => b.rate - a.rate);
+  
+  // Global best = first in sorted list
+  const globalBest = allAvailable.length > 0 ? allAvailable[0] : null;
+  
+  // Lines within current feedmill
+  const currentFeedmillLines = allAvailable
+    .filter(l => feedmillLines.includes(l.line));
+  
+  // Lines outside current feedmill
+  const otherFeedmillLines = allAvailable
+    .filter(l => !feedmillLines.includes(l.line));
+  
+  return { globalBest, currentFeedmillLines, otherFeedmillLines, allAvailable };
+}
+```
+
+### RULES
+
+1. **Only ONE line globally gets "Recommended"** — the one with the highest run rate across ALL lines
+2. **Every other line** gets "not recommended" appended
+3. If the global best is within the current feedmill → show ℹ blue box with "Recommended"
+4. If the global best is in a DIFFERENT feedmill → show ⚠ amber box warning that the current feedmill's line is not recommended
+
+---
+
+### DISPLAY SCENARIOS
+
+**Scenario A — Global best is within current feedmill:**
+
+User is on Feedmill 1 (Line 1, Line 2). Product has:
+- L1 Rate = 20.13 (global best)
+- L2 Rate = 20.05
+- L6 Rate = 7.16
+
+```
+┌──────────────────────────────────────────────────────────┐
+│ ℹ Recommended: Line 1 (rate: 20.13 min/batch) ✓          │
+│                                                          │
+│   Also available: Line 2 (20.05 min/batch)               │
+│   — not recommended                                      │
+│   ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─            │
+│   Also producible on Line 6 (7.16 min/batch)             │
+│   — not recommended                                      │
+│   Different feedmill — Feedmill 3                         │
+└──────────────────────────────────────────────────────────┘
+```
+
+- Blue container (#eff6ff, border #bfdbfe)
+- ✓ shown because user selected Line 1 which matches recommendation
+
+**Scenario B — Global best is within current feedmill but user selected a different line:**
+
+User selected Line 2 (not the recommended Line 1):
+
+```
+┌──────────────────────────────────────────────────────────┐
+│ ℹ Recommended: Line 1 (rate: 20.13 min/batch)            │
+│                                                          │
+│   Also available: Line 2 (20.05 min/batch)               │
+│   — not recommended                                      │
+│   ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─            │
+│   Also producible on Line 6 (7.16 min/batch)             │
+│   — not recommended                                      │
+│   Different feedmill — Feedmill 3                         │
+└──────────────────────────────────────────────────────────┘
+```
+
+- Blue container
+- No ✓ because user's selection (Line 2) doesn't match recommendation (Line 1)
+
+**Scenario C — Global best is in a DIFFERENT feedmill:**
+
+User is on Feedmill 3 (Line 5, Line 6). Product has:
+- L1 Rate = 20.13 (global best, Feedmill 1)
+- L2 Rate = 20.05 (Feedmill 1)
+- L6 Rate = 7.16 (current feedmill)
+
+```
+┌──────────────────────────────────────────────────────────┐
+│ ⚠ Line 6 can produce this product (7.16 min/batch)       │
+│   but is not recommended.                                │
+│                                                          │
+│   No other lines available in this feedmill.             │
+│   ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─            │
+│   Better options in other feedmills:                     │
+│                                                          │
+│   Line 1 (20.13 min/batch) — Feedmill 1                 │
+│   — Recommended                                          │
+│                                                          │
+│   Line 2 (20.05 min/batch) — Feedmill 1                 │
+│   — not recommended                                      │
+└──────────────────────────────────────────────────────────┘
+```
+
+- Amber container (#fffbeb, border #fcd34d)
+- Current feedmill's line is explicitly called out as "not recommended"
+- Global best is labeled "Recommended" even though it's in a different feedmill
+
+**Scenario D — Global best is in a different feedmill, current feedmill has multiple lines:**
+
+User is on Feedmill 2 (Line 3, Line 4). Product has:
+- L1 Rate = 20.13 (global best, Feedmill 1)
+- L3 Rate = 8.50 (current feedmill)
+- L4 Rate = 7.20 (current feedmill)
+- L6 Rate = 7.16 (Feedmill 3)
+
+```
+┌──────────────────────────────────────────────────────────┐
+│ ⚠ Best in this feedmill: Line 3 (8.50 min/batch)         │
+│   but is not recommended globally.                       │
+│                                                          │
+│   Also available: Line 4 (7.20 min/batch)                │
+│   — not recommended                                      │
+│   ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─            │
+│   Better options in other feedmills:                     │
+│                                                          │
+│   Line 1 (20.13 min/batch) — Feedmill 1                 │
+│   — Recommended                                          │
+│                                                          │
+│   Line 6 (7.16 min/batch) — Feedmill 3                   │
+│   — not recommended                                      │
+└──────────────────────────────────────────────────────────┘
+```
+
+- Amber container
+- "Best in this feedmill" instead of "Recommended"
+- Global best clearly labeled
+
+**Scenario E — Only one line globally has a rate:**
+
+```
+┌──────────────────────────────────────────────────────────┐
+│ ℹ Recommended: Line 5 (rate: 8.31 min/batch) ✓           │
+│                                                          │
+│   No other lines available.                              │
+└──────────────────────────────────────────────────────────┘
+```
+
+- Blue container
+- It's the only option so it's automatically recommended
+
+**Scenario F — No lines have rates:**
+
+```
+┌──────────────────────────────────────────────────────────┐
+│ ⚠ No production history found on any line.                │
+│   Run rate will need to be manually configured.           │
+└──────────────────────────────────────────────────────────┘
+```
+
+- Amber container
+
+**Scenario G — Two lines tied for global best:**
+
+```
+┌──────────────────────────────────────────────────────────┐
+│ ℹ Both lines are equally recommended:                     │
+│   Line 1 (rate: 20.00 min/batch)                         │
+│   Line 2 (rate: 20.00 min/batch)                         │
+│   ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─            │
+│   Also producible on Line 6 (7.16 min/batch)             │
+│   — not recommended                                      │
+│   Different feedmill — Feedmill 3                         │
+└──────────────────────────────────────────────────────────┘
+```
+
+- Blue container (since the tied lines include one in the current feedmill)
+
+---
+
+### STYLING SUMMARY
+
+**"Recommended" label:**
+
+| Property | Value |
+|---|---|
+| Font weight | 600 |
+| Color | Dark blue (#1e40af) |
+| ✓ | Green (#43a047), only when user's selection matches |
+
+**"not recommended" label:**
+
+| Property | Value |
+|---|---|
+| Font weight | 400 |
+| Color | Red-grey (#9f1239) |
+| Font style | Italic |
+| Font size | 11px |
+| Prefix | "— " (em dash + space) |
+
+**"— Recommended" label (for global best in other feedmill section):**
+
+| Property | Value |
+|---|---|
+| Font weight | 600 |
+| Color | Dark blue (#1e40af) |
+| Font size | 11px |
+| Prefix | "— " |
+
+**Linked line names (other feedmills):**
+
+| Property | Value |
+|---|---|
+| Color | Orange (#fd5108) |
+| Cursor | Pointer |
+| Hover | Underline, darker orange (#c2410c) |
+| Click | Confirmation dialog → navigate → reopen dialog pre-filled |
+
+**Container — Blue (recommendation within feedmill):**
+
+| Property | Value |
+|---|---|
+| Background | #eff6ff |
+| Border | 1px solid #bfdbfe |
+| Border-radius | 8px |
+| Padding | 12px 16px |
+
+**Container — Amber (no recommendation within feedmill):**
+
+| Property | Value |
+|---|---|
+| Background | #fffbeb |
+| Border | 1px solid #fcd34d |
+| Border-radius | 8px |
+| Padding | 12px 16px |
+```

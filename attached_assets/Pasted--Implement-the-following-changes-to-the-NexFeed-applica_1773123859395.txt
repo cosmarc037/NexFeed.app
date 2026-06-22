@@ -1,0 +1,193 @@
+```
+Implement the following changes to the NexFeed application:
+
+---
+
+## 1. AI-POWERED AUTO-SEQUENCE BUTTON WITH SIMULATION PREVIEW
+
+Add an AI-powered auto-sequence feature that analyzes and proposes the optimal order sequence based on scheduling constraints.
+
+**Button placement:**
+- Place a button labeled "Auto-Sequence" (or icon + label) in the toolbar area alongside the search bar and filters.
+- Button style: Outlined button with an AI/sparkle icon (✨) to indicate it is AI-assisted.
+- Button color: Orange outline (#fd5108), Orange text. On hover: filled Orange background, White text.
+
+**Button behavior:**
+- The button applies to the currently active feedmill tab and line.
+- On click, the AI analyzes all orders in the current line and generates a proposed optimal sequence.
+
+**AI analysis factors:**
+The AI considers the following when determining the best sequence:
+- **Avail Date priority:** Orders with earlier Avail Dates are prioritized to be scheduled first to meet deadlines.
+- **Completion Date constraint:** Each order's Completion Date must not go beyond its Avail Date.
+- **Production Time:** Total production hours per order (Number of Batches × Run Rate).
+- **Changeover Time:** Time between consecutive orders based on Material Code changes.
+- **Batch Size and Volume:** Larger volumes take longer and need to be accounted for.
+- **Non-dated orders:** Orders with non-date Avail Dates ("prio replenish", "safety stocks", etc.) are placed in gaps between dated orders to maximize production uptime. The AI identifies available gaps and slots non-dated orders where they fit best.
+- **Combined order groups:** Combined groups move as a block — the AI sequences the group based on the lead order's constraints.
+- **Conflict minimization:** The AI attempts to minimize the number of scheduling conflicts (upstream overlaps, deadline misses).
+- **Trade-off analysis:** If it is impossible to meet all Avail Dates, the AI identifies which orders have trade-offs and explains why.
+
+**Simulation preview modal:**
+
+When the AI finishes analysis, a full-screen or large modal opens showing the simulation preview:
+
+**Modal title:** "Auto-Sequence Preview — [Feedmill Name] [Line X]"
+
+**Modal layout:**
+
+**Top section — Summary bar:**
+```
+Orders analyzed: [X]  |  Conflicts resolved: [X]  |  Remaining conflicts: [X]  |  Trade-offs: [X]
+```
+
+**Middle section — Side-by-side comparison:**
+
+| Current Sequence | Proposed Sequence |
+|---|---|
+| Left panel showing the current order sequence as a simplified list | Right panel showing the proposed order sequence as a simplified list |
+
+Each order in both panels displays:
+- Prio number
+- FPR
+- Item Description (truncated if needed)
+- Volume (MT)
+- Avail Date
+- Estimated Completion Date
+- Status indicator:
+  - ✅ Green: Meets Avail Date deadline
+  - ⚠️ Yellow: Tight — Completion Date is within 6 hours of Avail Date
+  - 🔴 Red: Exceeds Avail Date (conflict)
+
+Orders that MOVED position are highlighted with a subtle blue background in the proposed sequence panel. Orders that stayed in the same position have no highlight.
+
+**Bottom section — AI Insights:**
+A text area where the AI explains its reasoning:
+- "Moved FPR: [value] ([Item Description]) from Prio [X] to Prio [Y] to meet Avail Date of [date]."
+- "Placed non-dated order FPR: [value] ([Item Description]) in gap between Prio [X] and Prio [Y] — [X] hours available, [Y] hours needed."
+- "⚠ Trade-off: FPR: [value] cannot meet Avail Date of [date] regardless of position. Earliest possible Completion Date: [date]. Consider adjusting upstream orders or splitting volume."
+- "⚠ Conflict: FPR: [value] and FPR: [value] both require completion before [date] but combined production time exceeds available time."
+
+**Modal buttons:**
+- [Apply Sequence]: Applies the proposed sequence to the interactive table. All Prio numbers, Start Dates, Start Times, and Completion Dates recalculate accordingly. Triggers the scheduling cascade.
+- [Cancel]: Closes the modal without making any changes.
+- [Export Preview]: Optional — exports the simulation comparison as a PDF or image for review.
+
+**Loading state:**
+- While the AI is analyzing, show a loading overlay on the modal: "Analyzing [X] orders... Optimizing sequence..." with a progress indicator or animation.
+
+---
+
+## 2. SMART COMBINE — NEW ORDERS COMBINED WITH EXISTING ORDERS (M-W-F UPLOAD PATTERN)
+
+When a new SAP file is uploaded (e.g., Wednesday orders), the system must distinguish between existing orders (already in the table from Monday) and new orders (from the Wednesday upload) and show Smart Combine recommendations for new orders that can be combined with existing orders.
+
+**Determining "new" vs "existing" orders:**
+- The system uses the FPR value to determine if an order is new or existing.
+- FPR contains a date in YYMMDD format (e.g., "260309" = March 09, 2026 = Monday).
+- When a new file is uploaded, any order with an FPR that does NOT already exist in the current table is considered a "new" order.
+- Orders with FPRs that already exist in the current table are "existing" orders.
+- Additionally, the FPR date itself indicates the batch date — newer FPR dates (e.g., "260311" = Wednesday) are the new upload, older FPR dates (e.g., "260309" = Monday) are existing.
+
+**Smart Combine panel behavior after new upload:**
+
+When the user opens the Smart Combine panel after uploading a new file:
+
+**Default view — "New + Existing" recommendations:**
+- The panel shows recommendation cards where NEW orders (from the latest upload) can be combined with EXISTING orders (already in the table) based on matching criteria (Material Code FG, Form, Line, Batch Size, Category).
+- Each recommendation card clearly labels which orders are new and which are existing:
+
+```
+Elite XP Growex 2, Pellet 50kg | Combine Group 1
+
+Material Code (FG)     1000000000244
+Category               Poultry
+Form                   P
+Line                   Line 2
+Batch Size             4.00
+
+─────────────────────────────────────
+EXISTING ORDER
+FPR: 260309                    80 MT  ×
+FG: 5875151            March 22, 2026
+SFG: 6012345
+─────────────────────────────────────
+NEW ORDER
+FPR: 260311                    80 MT  ×
+FG: 5878953            March 24, 2026
+SFG: 6012346
+─────────────────────────────────────
+
+Combined Volume: 160 MT
+
+[Insights & Warnings section]
+
+[Approve]  [Dismiss]
+```
+
+**Labels:**
+- "EXISTING ORDER": Small badge/label in Grey (#a1a8b3) above the order details.
+- "NEW ORDER": Small badge/label in Green (#43a047) above the order details.
+
+**Filtering:**
+- Add a filter/toggle at the top of the Smart Combine panel:
+  - [All Recommendations] — shows all combine possibilities (new+existing, new+new, existing+existing)
+  - [New + Existing Only] — DEFAULT after a new upload — shows only groups where at least one order is new and at least one is existing
+  - [New Orders Only] — shows only groups where all orders are new
+
+**Edge cases:**
+- If a new order has the same FPR as an existing order (same date, different order within the same day), the system uses the full FPR + FG/SFG combination to determine uniqueness. If the exact FPR + FG combination already exists, it is treated as a duplicate/update, not a new order.
+- If no new orders can be combined with existing orders, the panel shows: "No combine recommendations found for new orders. New orders do not match any existing orders based on Material Code, Form, Line, Batch Size, and Category."
+
+---
+
+## 3. START DATE — WORK BACKWARDS FROM AVAIL DATE FOR ALL ORDERS
+
+Modify the Start Date logic so that orders with valid Avail Dates always have their scheduling worked backwards from the Avail Date, rather than forward from the current date.
+
+**Previous rule (replaced):**
+- First order defaults to current date, 8:00 AM, and cascades forward.
+
+**New rule:**
+
+**For orders with valid Avail Dates:**
+
+**Step 1 — Determine the latest acceptable Completion Date:**
+- Latest Completion Date = Avail Date (the order must not go BEYOND the Avail Date; completing on the Avail Date itself is acceptable)
+
+**Step 2 — Work backwards to find Start Date:**
+- Start Date/Time = Latest Completion Date - Production Hours - Changeover Time (if applicable)
+- Example: Avail Date is March 22, 2026. Production time is 4 hours. Changeover is 30 minutes.
+  - Latest Completion = March 22, 2026 (any time on March 22 is acceptable)
+  - To complete by end of March 22: Start Date/Time = March 22 minus 4 hours minus 30 minutes.
+  - If we target completion by end of day (11:59 PM): Start = March 22, 7:29 PM.
+  - If we target completion by a reasonable production window (e.g., completion by 6:00 PM): Start = March 22, 1:30 PM.
+
+**Step 3 — Reasonable production window:**
+- Rather than targeting completion at 11:59 PM, target the Completion Date to fall within a reasonable window.
+- Default target: Complete the order so that the Completion Date is the Avail Date itself (any time during the Avail Date).
+- The AI/system should try to schedule the start as late as possible while still completing by the Avail Date, to leave earlier time slots available for other orders or non-dated orders.
+
+**Step 4 — Multiple orders with Avail Dates — sequential scheduling:**
+- When multiple orders have Avail Dates, the system schedules them in Avail Date order (earliest Avail Date first).
+- For each order, work backwards from its Avail Date to find its Start Date.
+- Ensure consecutive orders do not overlap:
+  - If Order 1 (Avail Date March 20) completes at March 20, 2:00 PM, and Order 2 (Avail Date March 22) works backwards to start at March 22, 10:00 AM, there is a gap from March 20, 2:00 PM to March 22, 10:00 AM. This gap is available for non-dated orders.
+  - If Order 1 (Avail Date March 22) and Order 2 (Avail Date March 22) both need to complete by March 22, the system cascades them: Order 1 starts first, completes, then Order 2 starts. If both cannot complete by March 22, the earlier order is scheduled first and the later order is flagged as a conflict.
+
+**For orders with NON-date Avail Dates:**
+- Orders with "prio replenish", "safety stocks", "for sched", etc. are NOT scheduled backwards from any date.
+- These orders have no scheduling anchor.
+- They are placed in available gaps by the user via drag-and-drop.
+- When first uploaded (no manual placement yet), they are appended after the last dated order with their Start Date/Time cascading from the previous order's Completion Date + Changeover Time.
+- Once the user drags them into a gap between dated orders, their Start Date/Time adjusts to fit the gap.
+
+**For the very first upload (no existing orders):**
+- If orders have valid Avail Dates: Work backwards from Avail Dates as described above.
+- If the first order has no Avail Date: Default to current date, 8:00 AM (original rule as fallback).
+- If ALL orders have no Avail Dates: Default to current date, 8:00 AM for the first order, cascade forward for subsequent orders.
+
+**Overriding the default 8:00 AM rule:**
+- The previous rule of "first order defaults to current date, 8:00 AM" now only applies when there are NO valid Avail Dates to anchor the schedule.
+- When valid Avail Dates exist, the schedule is anchored to those dates, not the current date.
+```

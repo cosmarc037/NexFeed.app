@@ -1,0 +1,507 @@
+```
+Fix the deadline miss calculation and AI output to correctly handle dated vs non-dated orders, N10D-based risk, and ensure proper data is passed to the AI:
+
+---
+
+## 1. UPDATED SHARED DEADLINE CALCULATION
+
+```javascript
+function calculateDeadlineMisses(group, lineOrders, n10dData) {
+  const combiningOrders = group.orders;
+  const combiningIds = combiningOrders.map(o => o.id);
+  const line = group.line;
+  
+  const currentLineOrders = lineOrders
+    .filter(o => o.line === line && o.status !== 'Done' && o.status !== 'Cancel PO')
+    .sort((a, b) => a.prio - b.prio);
+  
+  // Determine lead order
+  const datedCombining = combiningOrders.filter(o => {
+    const avail = o.target_avail_date;
+    return avail && /^\d{4}-\d{2}-\d{2}/.test(avail) && !isNaN(Date.parse(avail));
+  });
+  
+  let leadOrder;
+  if (datedCombining.length > 0) {
+    leadOrder = datedCombining.sort((a, b) =>
+      new Date(a.target_avail_date) - new Date(b.target_avail_date)
+    )[0];
+  } else {
+    leadOrder = combiningOrders.sort((a, b) => a.prio - b.prio)[0];
+  }
+  
+  const leadStartDate = leadOrder?.start_date
+    ? new Date(leadOrder.start_date)
+    : new Date();
+  
+  // Combined production
+  const combinedVolume = combiningOrders.reduce((s, o) => s + (parseFloat(o.volume) || 0), 0);
+  const combinedRate = parseFloat(combiningOrders[0].run_rate) || 0;
+  const combinedProdHrs = combinedRate > 0 ? combinedVolume / combinedRate : 0;
+  const combinedCO = combiningOrders[0]._changeoverTotal ?? parseFloat(combiningOrders[0].changeover) ?? 0;
+  
+  // Simulate "before" schedule
+  let runningTimeBefore = 0;
+  const beforeCompletion = {};
+  
+  currentLineOrders.forEach(order => {
+    const vol = parseFloat(order.volume) || 0;
+    const rate = parseFloat(order.run_rate) || 0;
+    const prodHrs = rate > 0 ? vol / rate : 0;
+    const co = order._changeoverTotal ?? parseFloat(order.changeover) ?? 0;
+    
+    beforeCompletion[order.id] = {
+      startHrs: runningTimeBefore,
+      endHrs: runningTimeBefore + prodHrs
+    };
+    runningTimeBefore += prodHrs + co;
+  });
+  
+  // Simulate "after" schedule
+  let runningTimeAfter = 0;
+  let combinedDone = false;
+  const afterCompletion = {};
+  
+  currentLineOrders.forEach(order => {
+    const vol = parseFloat(order.volume) || 0;
+    const rate = parseFloat(order.run_rate) || 0;
+    const prodHrs = rate > 0 ? vol / rate : 0;
+    const co = order._changeoverTotal ?? parseFloat(order.changeover) ?? 0;
+    
+    if (combiningIds.includes(order.id)) {
+      if (order.id === leadOrder.id && !combinedDone) {
+        const startTime = runningTimeAfter;
+        runningTimeAfter += combinedProdHrs + combinedCO;
+        afterCompletion[order.id] = {
+          startHrs: startTime,
+          endHrs: startTime + combinedProdHrs
+        };
+        combinedDone = true;
+      }
+      return;
+    }
+    
+    const startTime = runningTimeAfter;
+    runningTimeAfter += prodHrs + co;
+    afterCompletion[order.id] = {
+      startHrs: startTime,
+      endHrs: startTime + prodHrs
+    };
+  });
+  
+  const deadlineMisses = [];
+  
+  currentLineOrders.forEach(order => {
+    if (combiningIds.includes(order.id)) return;
+    if (!afterCompletion[order.id]) return;
+    
+    const targetAvail = order.target_avail_date;
+    const isDated = targetAvail && /^\d{4}-\d{2}-\d{2}/.test(targetAvail) && !isNaN(Date.parse(targetAvail));
+    
+    // Get N10D status
+    const n10dProduct = n10dData?.find(
+      p => String(p.material_code_fg) === String(order.material_code_fg)
+    );
+    const n10dStatus = n10dProduct ? getProductStatus(
+      n10dProduct.due_for_loading, n10dProduct.inventory,
+      getDailyColumns(), n10dProduct, new Date()
+    ) : null;
+    
+    // Calculate time shift
+    const beforeEnd = beforeCompletion[order.id]?.endHrs || 0;
+    const afterEnd = afterCompletion[order.id]?.endHrs || 0;
+    const shiftHrs = afterEnd - beforeEnd; // Positive = delayed
+    
+    // TYPE 1: Dated order — check if new completion exceeds avail date
+    if (isDated) {
+      const availDateObj = new Date(targetAvail);
+      const newCompletionMs = leadStartDate.getTime() + (afterCompletion[order.id].endHrs * 60 * 60 * 1000);
+      const newCompletionDate = new Date(newCompletionMs);
+      
+      if (newCompletionDate > availDateObj) {
+        const delayMs = newCompletionDate.getTime() - availDateObj.getTime();
+        const delayHrs = delayMs / (1000 * 60 * 60);
+        const delayDays = Math.ceil(delayMs / (1000 * 60 * 60 * 24));
+        
+        deadlineMisses.push({
+          type: 'dated',
+          prio: order.prio,
+          name: order.item_description,
+          fpr: order.fpr,
+          availDate: availDateObj.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
+          availDateISO: targetAvail,
+          newCompletion: newCompletionDate.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
+          newCompletionTime: newCompletionDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+          newCompletionFull: `${newCompletionDate.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })} ${newCompletionDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}`,
+          delayHrs: delayHrs,
+          delayFormatted: formatTimeShift(delayHrs),
+          delayDays: delayDays,
+          n10dStatus: n10dStatus || 'N/A',
+          shiftHrs: shiftHrs,
+          shiftFormatted: formatTimeShift(Math.abs(shiftHrs))
+        });
+      }
+    }
+    
+    // TYPE 2: Non-dated order — check if N10D is Critical or Urgent AND order is being delayed
+    if (!isDated && shiftHrs > 0.01) {
+      const isCritical = n10dStatus === 'Critical';
+      const isUrgent = n10dStatus === 'Urgent';
+      
+      if (isCritical || isUrgent) {
+        deadlineMisses.push({
+          type: 'n10d_risk',
+          prio: order.prio,
+          name: order.item_description,
+          fpr: order.fpr,
+          availDate: null,
+          availDateISO: null,
+          newCompletion: null,
+          newCompletionFull: null,
+          delayHrs: shiftHrs,
+          delayFormatted: formatTimeShift(shiftHrs),
+          delayDays: null,
+          n10dStatus: n10dStatus,
+          shiftHrs: shiftHrs,
+          shiftFormatted: formatTimeShift(shiftHrs)
+        });
+      }
+    }
+  });
+  
+  return deadlineMisses.sort((a, b) => {
+    // Critical first, then Urgent, then by delay
+    const statusOrder = { 'Critical': 0, 'Urgent': 1 };
+    const aOrder = statusOrder[a.n10dStatus] ?? 2;
+    const bOrder = statusOrder[b.n10dStatus] ?? 2;
+    if (aOrder !== bOrder) return aOrder - bOrder;
+    return (b.delayHrs || 0) - (a.delayHrs || 0);
+  });
+}
+```
+
+---
+
+## 2. UPDATE AI PROMPT — CORRECT DATA FORMAT FOR BOTH TYPES
+
+```javascript
+function buildSchedulingImpactPrompt(context, calculatedImpact) {
+  const hasEarlier = calculatedImpact.earlierOrders.length > 0;
+  const hasLater = calculatedImpact.laterOrders.length > 0;
+  const hasDeadlineMisses = calculatedImpact.deadlineMisses.length > 0;
+  
+  const earlierGroups = groupOrdersByShift(calculatedImpact.earlierOrders);
+  const laterGroups = groupOrdersByShift(calculatedImpact.laterOrders);
+  
+  // Separate dated and N10D-risk deadline misses
+  const datedMisses = calculatedImpact.deadlineMisses.filter(d => d.type === 'dated');
+  const n10dMisses = calculatedImpact.deadlineMisses.filter(d => d.type === 'n10d_risk');
+  
+  return `
+You are a production scheduling advisor for a feed manufacturing plant.
+Analyze the scheduling impact of combining orders on ${context.line}.
+
+COMBINED ORDER:
+  Product: ${context.combiningOrders[0]?.name}
+  Total Volume: ${context.combinedVolume} MT
+  Production Time: ${context.combinedProductionHours} hrs
+  Insertion Position: Priority ${context.insertionResult.prio}
+
+ORDER CONTEXT (N10D status, avail dates):
+${context.lineContext
+  .filter(o => !o.isBeingCombined)
+  .map(o => `  Prio ${o.prio}: ${o.name} | N10D: ${o.n10dStatus} | Avail: ${o.availDate} (${o.isDated ? 'DATED' : 'NON-DATED'}) | Completion: ${o.completionDate}`)
+  .join('\n')}
+
+=== PRE-GROUPED DATA ===
+
+${hasEarlier ? `Orders starting earlier (${calculatedImpact.earlierOrders.length} orders):
+${earlierGroups.map(g => `  Group: Prio ${g.prioRange} (${g.count} order${g.count > 1 ? 's' : ''}) — ${g.shiftFormatted} earlier
+  Orders: ${g.orders.map(o => `${o.name} (Prio ${o.prio}, N10D: ${o.n10dStatus || 'N/A'})`).join(', ')}`).join('\n')}` : ''}
+
+${hasLater ? `Orders starting later (${calculatedImpact.laterOrders.length} orders):
+${laterGroups.map(g => `  Group: Prio ${g.prioRange} (${g.count} order${g.count > 1 ? 's' : ''}) — ${g.shiftFormatted} later
+  Orders: ${g.orders.map(o => `${o.name} (Prio ${o.prio}, N10D: ${o.n10dStatus || 'N/A'})`).join(', ')}`).join('\n')}` : ''}
+
+${hasDeadlineMisses ? `ORDERS AT RISK (${calculatedImpact.deadlineMisses.length} orders):
+YOU MUST INCLUDE ALL OF THESE. DO NOT SKIP ANY.
+
+${datedMisses.length > 0 ? `Dated orders exceeding avail date:
+${datedMisses.map(o => `  ⛔ Prio ${o.prio}: ${o.name}
+     New Completion: ${o.newCompletionFull}
+     Avail Date: ${o.availDate}
+     Delay past avail: ~${o.delayFormatted}
+     N10D Status: ${o.n10dStatus}`).join('\n')}` : ''}
+
+${n10dMisses.length > 0 ? `Non-dated orders with Critical/Urgent stock risk:
+${n10dMisses.map(o => `  ⛔ Prio ${o.prio}: ${o.name}
+     N10D Status: ${o.n10dStatus}
+     Delayed by: ~${o.delayFormatted}
+     Risk: Stock depletion — delay may accelerate stockout`).join('\n')}` : ''}
+` : ''}
+
+=== YOUR RESPONSE ===
+
+PART 1 — GROUPED BULLETS:
+
+Only include sections that have data. Skip empty sections entirely.
+
+For "Orders starting earlier" and "Orders starting later":
+- Group orders with same time shift into ONE bullet.
+- Format for groups: ✅/⚠ Prio [range] ([count] orders) — all start ~[time] earlier/later. Notable: [2-3 Critical/Urgent orders with ACTUAL status].
+- Format for single: ✅/⚠ Prio [X]: [Name] — starts [time] earlier/later. [ACTUAL N10D status, e.g., "Critical" or "Urgent"].
+
+For "Orders at risk of missing avail date":
+- List EACH order individually.
+- For DATED orders: ⛔ Prio [X]: [Name] — new completion [date/time] exceeds avail date [date] by ~[delay]. [ACTUAL N10D status].
+- For NON-DATED Critical/Urgent orders: ⛔ Prio [X]: [Name] — [ACTUAL status, e.g., "Critical"] stock status. Delay of ~[time] may accelerate stock depletion.
+- NEVER write "[N10D status]" as literal text. Use the ACTUAL status value (Critical, Urgent, Sufficient, Monitor, N/A).
+- NEVER flag non-dated orders that are Sufficient, Monitor, or N/A.
+
+TIME FORMAT:
+- 0.17 hrs = 10 min
+- 4.18 hrs = 4 hrs 11 min
+- 7.59 hrs = 7 hrs 35 min
+- 10.00 hrs = 10 hrs
+- 15.86 hrs = 15 hrs 52 min
+Do NOT use decimal hours. Always convert.
+
+PART 2 — SUMMARY:
+Write "---SUMMARY---" on its own line, then 3-5 sentences. MANDATORY.
+
+${hasDeadlineMisses ? `
+Your summary MUST mention the at-risk orders by name.
+Do NOT say "safe to proceed" or "no risks" when at-risk orders exist.
+Mention whether the risk is avail date breach or stock depletion.
+` : `
+If no risks, be positive and recommend proceeding.
+`}
+
+CRITICAL RULES:
+- NEVER write "[N10D status]" or "[N10D: —]" as literal text. Replace with actual values.
+- NEVER flag non-dated orders as "at risk" unless they are Critical or Urgent.
+- At most ${earlierGroups.length + laterGroups.length} grouped bullets for earlier/later.
+- Deadline section bullets are always individual (not grouped).
+- NEVER say "no risks" when at-risk data exists above.
+  `;
+}
+```
+
+---
+
+## 3. UPDATE VALIDATION — FIX LITERAL [N10D STATUS] AND NON-DATED FILTERING
+
+```javascript
+function validateAndFixGrouping(parsedResponse, calculatedImpact) {
+  let result = { ...parsedResponse };
+  
+  // FIX: Remove literal "[N10D status]", "[N10D: —]" etc.
+  function cleanN10DPlaceholders(lines) {
+    return lines.map(line => {
+      let cleaned = line;
+      cleaned = cleaned.replace(/\[N10D status\]/gi, '');
+      cleaned = cleaned.replace(/\[N10D: —\]/gi, '');
+      cleaned = cleaned.replace(/\[N10D: N\/A\]/gi, '');
+      cleaned = cleaned.replace(/\[N10D:.*?\]/gi, '');
+      cleaned = cleaned.replace(/N10D: —/gi, '');
+      cleaned = cleaned.replace(/\.\s*\./g, '.'); // Clean double periods
+      cleaned = cleaned.replace(/\s+/g, ' ').trim();
+      return cleaned;
+    });
+  }
+  
+  result.earlierSection = cleanN10DPlaceholders(result.earlierSection);
+  result.laterSection = cleanN10DPlaceholders(result.laterSection);
+  result.deadlineSection = cleanN10DPlaceholders(result.deadlineSection);
+  result.summary = cleanN10DPlaceholders(result.summary);
+  
+  // FIX: Remove non-dated orders that are NOT Critical/Urgent from deadline section
+  // These should not have been flagged
+  result.deadlineSection = result.deadlineSection.filter(line => {
+    const lower = line.toLowerCase();
+    // Keep if it mentions an actual avail date (dated order)
+    if (lower.includes('exceeds avail date') && !lower.includes('no date') && !lower.includes('n/a')) {
+      return true;
+    }
+    // Keep if it mentions Critical or Urgent stock
+    if (lower.includes('critical') || lower.includes('urgent')) {
+      return true;
+    }
+    // Keep if it mentions stock depletion
+    if (lower.includes('stock depletion') || lower.includes('stockout')) {
+      return true;
+    }
+    // Remove — likely a non-dated, non-critical order that shouldn't be here
+    return false;
+  });
+  
+  // FIX: Force-add deadline section if calculated data has misses but AI missed them
+  if (calculatedImpact.deadlineMisses.length > 0 && result.deadlineSection.length === 0) {
+    console.warn('AI missed deadline section. Force-adding from calculated data.');
+    result.deadlineSection = calculatedImpact.deadlineMisses.map(o => {
+      if (o.type === 'dated') {
+        return `⛔ Prio ${o.prio}: ${o.name} — new completion ${o.newCompletionFull} exceeds avail date ${o.availDate} by ~${o.delayFormatted}. ${o.n10dStatus !== 'N/A' ? o.n10dStatus + '.' : ''}`;
+      }
+      if (o.type === 'n10d_risk') {
+        return `⛔ Prio ${o.prio}: ${o.name} — ${o.n10dStatus} stock status. Delay of ~${o.delayFormatted} may accelerate stock depletion.`;
+      }
+      return '';
+    }).filter(Boolean);
+  }
+  
+  // FIX: Summary contradiction check
+  if (calculatedImpact.deadlineMisses.length > 0 && result.summary.length > 0) {
+    const summaryText = result.summary.join(' ').toLowerCase();
+    if (summaryText.includes('safe to proceed') ||
+        summaryText.includes('no risks') ||
+        summaryText.includes('no delays') ||
+        summaryText.includes('no orders at risk')) {
+      console.warn('AI summary contradicts deadline data. Replacing.');
+      
+      const datedMisses = calculatedImpact.deadlineMisses.filter(d => d.type === 'dated');
+      const n10dMisses = calculatedImpact.deadlineMisses.filter(d => d.type === 'n10d_risk');
+      
+      const summaryLines = [];
+      
+      if (datedMisses.length > 0) {
+        const names = datedMisses.slice(0, 2).map(o => `${o.name} (Prio ${o.prio})`).join(' and ');
+        summaryLines.push(`The combination will push ${datedMisses.length} order(s) past their avail date, including ${names}.`);
+        summaryLines.push(`${datedMisses[0].name} will be delayed by approximately ${datedMisses[0].delayFormatted} past its avail date of ${datedMisses[0].availDate}.`);
+      }
+      
+      if (n10dMisses.length > 0) {
+        const names = n10dMisses.slice(0, 2).map(o => `${o.name} (Prio ${o.prio}, ${o.n10dStatus})`).join(' and ');
+        summaryLines.push(`Additionally, ${n10dMisses.length} order(s) with critical stock levels will be delayed, including ${names}, which may accelerate stock depletion.`);
+      }
+      
+      summaryLines.push('Proceed with caution — review the at-risk orders before approving this combination.');
+      
+      result.summary = summaryLines;
+    }
+  }
+  
+  // FIX: Auto-group earlier/later if too many bullets
+  const maxBullets = 6;
+  const earlierLaterBullets = result.earlierSection.length + result.laterSection.length;
+  
+  if (earlierLaterBullets > maxBullets) {
+    if (calculatedImpact.earlierOrders.length > 0) {
+      const groups = groupOrdersByShift(calculatedImpact.earlierOrders);
+      result.earlierSection = groups.map(g => {
+        const notables = pickNotableOrders(g.orders);
+        if (g.count === 1) {
+          return `✅ Prio ${g.prioRange}: ${g.orders[0].name} — starts ${g.shiftFormatted} earlier.${g.orders[0].n10dStatus && g.orders[0].n10dStatus !== 'N/A' ? ' ' + g.orders[0].n10dStatus + '.' : ''}`;
+        }
+        return `✅ Prio ${g.prioRange} (${g.count} orders) — all start ~${g.shiftFormatted} earlier.${notables ? ' Notable: ' + notables + '.' : ''}`;
+      });
+    }
+    
+    if (calculatedImpact.laterOrders.length > 0) {
+      const groups = groupOrdersByShift(calculatedImpact.laterOrders);
+      result.laterSection = groups.map(g => {
+        const notables = pickNotableOrders(g.orders);
+        if (g.count === 1) {
+          return `⚠ Prio ${g.prioRange}: ${g.orders[0].name} — starts ${g.shiftFormatted} later.${g.orders[0].n10dStatus && g.orders[0].n10dStatus !== 'N/A' ? ' ' + g.orders[0].n10dStatus + '.' : ''}`;
+        }
+        return `⚠ Prio ${g.prioRange} (${g.count} orders) — all start ~${g.shiftFormatted} later.${notables ? ' Notable: ' + notables + '.' : ''}`;
+      });
+    }
+  }
+  
+  return result;
+}
+```
+
+---
+
+## 4. UPDATE ALERTS CARD — USE SHARED DATA WITH CORRECT FORMATTING
+
+```jsx
+function AlertsCard({ sharedDeadlineMisses, combinedVolume, isAnalyzing }) {
+  const calculatedAlerts = [];
+  
+  // Deadline alerts — from shared source
+  sharedDeadlineMisses.forEach(dm => {
+    if (dm.type === 'dated') {
+      calculatedAlerts.push({
+        type: 'deadline',
+        message: `Combining will push downstream order FPR: ${dm.fpr} (${dm.name}) past its Avail Date by ${dm.delayFormatted}. New Completion: ${dm.newCompletionFull} → Avail Date: ${dm.availDate}`
+      });
+    } else if (dm.type === 'n10d_risk') {
+      calculatedAlerts.push({
+        type: 'n10d_risk',
+        message: `${dm.name} (Prio ${dm.prio}) has ${dm.n10dStatus} stock status. The ~${dm.delayFormatted} delay from combining may accelerate stock depletion.`
+      });
+    }
+  });
+  
+  // Volume ceiling
+  if (combinedVolume > 200) {
+    calculatedAlerts.push({
+      type: 'volume_ceiling',
+      message: `Volume warning: The combined total of ${combinedVolume} MT exceeds the recommended ceiling of 200 MT.`
+    });
+  }
+  
+  return (
+    <div className="combine-card combine-card-alerts">
+      <div className="combine-card-header combine-card-header-alerts">
+        <span>⚠ Alerts</span>
+      </div>
+      <div className="combine-card-body combine-card-body-text">
+        {isAnalyzing ? (
+          <span className="combine-card-loading">Checking for alerts...</span>
+        ) : calculatedAlerts.length > 0 ? (
+          <div className="combine-alerts-list">
+            {calculatedAlerts.map((alert, index) => (
+              <div key={index} className="combine-alert-item">
+                <span className="combine-alert-item-icon">⚠</span>
+                <span className="combine-alert-item-text">{alert.message}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <span className="combine-alerts-none">
+            No alerts — all orders remain on schedule.
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+## VERIFICATION
+
+### Dated order detection
+1. ✅ Order with avail date "2026-04-13" + completion exceeds → flagged as "dated" type
+2. ✅ Shows: "⛔ Prio X: Name — new completion [date] exceeds avail date [date] by ~[delay]. Critical."
+3. ✅ Works for all N10D statuses (Critical, Sufficient, etc.)
+
+### Non-dated order detection
+4. ✅ Non-dated + Critical + delayed → flagged as "n10d_risk" type
+5. ✅ Non-dated + Urgent + delayed → flagged as "n10d_risk" type
+6. ✅ Non-dated + Monitor + delayed → NOT flagged
+7. ✅ Non-dated + Sufficient + delayed → NOT flagged
+8. ✅ Non-dated + N/A + delayed → NOT flagged
+9. ✅ Shows: "⛔ Prio X: Name — Critical stock status. Delay of ~[time] may accelerate stock depletion."
+
+### No "[N10D status]" literal text
+10. ✅ All placeholder text cleaned from AI output
+11. ✅ Shows actual values: "Critical", "Urgent", "Sufficient", etc.
+12. ✅ "N/A" and "—" cleaned from output
+
+### Alignment between sections
+13. ✅ Scheduling Impact and Alerts use same calculateDeadlineMisses()
+14. ✅ If Alerts shows Gall 21 at risk → Scheduling Impact also shows it
+15. ✅ If no risks → both say no risks
+16. ✅ Summary never says "safe" when risks exist
+
+### Validation
+17. ✅ Non-dated non-critical orders filtered OUT of deadline section
+18. ✅ Missing deadline section force-added from calculated data
+19. ✅ Contradicting summary auto-replaced
+20. ✅ Grouped bullets for earlier/later enforced
+```

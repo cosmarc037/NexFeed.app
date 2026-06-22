@@ -1,0 +1,282 @@
+Please update the **SAP order upload / plotting logic** so that orders with a blank **Feedmill Line** value are **not skipped**, and are instead automatically assigned using an efficient fallback process based on **product form**, **historical line applicability**, and **current queue time**.
+
+This rewrite should correctly handle **Line 5 / Powermix** as an **MX-only line**, not as a general candidate line.
+
+---
+
+## 1. DO NOT SKIP ORDERS WHEN THE `FEEDMILL LINE` COLUMN IS BLANK
+
+Right now, if an order in the uploaded SAP order file has no value in the **Feedmill Line** column, the app skips that order and does not plot it into the schedule.
+
+Please change this behavior.
+
+### Required behavior
+If the SAP order has a blank/missing Feedmill Line value:
+- do **not** skip the order
+- still include it in the scheduling flow
+- attempt to auto-assign it to the correct line
+
+### Goal
+Prevent valid orders from being lost just because the Feedmill Line field is blank in the uploaded file.
+
+### Expected result
+Orders with missing line values are still plotted into the schedule.
+
+---
+
+## 2. HANDLE LINE 5 / POWERMIX AS AN `MX`-ONLY LINE
+
+Please treat **Line 5 / Powermix** as a dedicated line for **MX (Mix)** form products only.
+
+### Important
+Line 5 should **not** be treated as a normal candidate line alongside pelleting lines.
+
+### Required behavior
+- if the order is an **MX / Mix** product, it should be treated as a **Line 5-only** order
+- if the order is **not** an MX / Mix product, **Line 5 must not be considered at all**
+
+### Goal
+Reflect the real plant rule that Line 5 handles Mix/MX products only and does not compete with pelleting lines.
+
+### Expected result
+Line 5 is only used for MX orders and is never part of normal pelleting fallback logic.
+
+---
+
+## 3. IF THE ORDER IS AN `MX` / MIX PRODUCT, ASSIGN IT DIRECTLY TO LINE 5
+
+If the order has:
+- no Feedmill Line value
+- and its form/product type indicates it is an **MX / Mix** product
+
+then:
+- assign it directly to **Line 5 / Powermix**
+- do **not** calculate queue time
+- do **not** compare it with FM1–FM3
+
+### Goal
+Ensure Mix products are routed correctly to their dedicated line.
+
+### Expected result
+MX orders with missing line values are placed directly on Line 5.
+
+---
+
+## 4. FOR NON-MX ORDERS, USE AN EFFICIENT FALLBACK ORDER
+
+For non-MX orders with no Feedmill Line value, please use this fallback order:
+
+1. **If the order has only one applicable historical pelleting line** → assign directly to that line
+2. **If the order has multiple applicable historical pelleting lines** → compare queue time only across those applicable lines
+3. **If the order has no historical pelleting line applicability** → compare queue time across FM1–FM3 only
+
+### Important
+For non-MX orders:
+- **Line 5 must not be considered**
+- only pelleting lines should be used
+
+### Goal
+Use the shortest and most efficient placement path for normal production orders.
+
+### Expected result
+Non-MX orders are placed only across the appropriate pelleting lines.
+
+---
+
+## 5. IF THE ORDER HAS ONLY ONE APPLICABLE HISTORICAL PELLETING LINE, ASSIGN IT DIRECTLY
+
+If the order has:
+- no Feedmill Line value
+- is **not** an MX product
+- and only **one** applicable historical pelleting line from master data
+
+then:
+- assign it directly to that line
+- do **not** calculate queue time
+
+### Goal
+Avoid unnecessary queue-time logic when only one valid pelleting line exists.
+
+### Expected result
+Single-line historical applicability leads to immediate direct placement.
+
+---
+
+## 6. IF THE ORDER HAS MULTIPLE APPLICABLE HISTORICAL PELLETING LINES, USE QUEUE TIME ONLY FOR THOSE LINES
+
+If the order has:
+- no Feedmill Line value
+- is **not** an MX product
+- and has **multiple** applicable historical pelleting lines from master data
+
+then:
+- calculate queue time only for those applicable pelleting lines
+- assign the order to the line with the **lowest queue time**
+
+### Goal
+Use historical applicability first, then choose the least-loaded valid pelleting line.
+
+### Expected result
+Orders with multiple valid pelleting lines are assigned to the one with the lowest queue time.
+
+---
+
+## 7. IF THE ORDER HAS NO HISTORICAL PELLETING LINE APPLICABILITY, USE QUEUE TIME ACROSS FM1–FM3 ONLY
+
+If the order has:
+- no Feedmill Line value
+- is **not** an MX product
+- and has no historical run-rate / line applicability data
+
+then:
+- compare queue time across **FM1–FM3 only**
+- assign the order to the line with the **lowest queue time**
+
+### Goal
+Provide a safe general fallback for non-MX orders with no historical line data.
+
+### Expected result
+Orders with no history are assigned by queue time across FM1–FM3 only.
+
+---
+
+## 8. USE MATERIAL CODE / FG AS THE BASIS FOR HISTORICAL LINE APPLICABILITY LOOKUP
+
+Please use the order’s **material code / FG** to look up historical run-rate / line applicability in master data.
+
+### Goal
+Determine which lines the SKU is actually known to run on before choosing a placement path.
+
+### Expected result
+Historical line applicability is based on the correct SKU identifier.
+
+---
+
+## 9. KEEP THIS CONSISTENT WITH EXISTING LINE SUITABILITY LOGIC
+
+Please make the missing-line fallback consistent with the app’s existing logic for:
+- cross-line movement
+- line suitability
+- operational placement
+- combination-aware scheduling
+
+### Goal
+Make missing-line placement feel like a natural extension of the current scheduling logic.
+
+### Expected result
+The fallback placement remains operationally consistent across the app.
+
+---
+
+## 10. OPTIONAL BUT RECOMMENDED: MARK THAT THE LINE WAS SYSTEM-ASSIGNED
+
+If possible, add a small internal flag or note that the line was:
+- **auto-assigned because SAP Feedmill Line was blank**
+
+### Goal
+Allow the team to distinguish:
+- SAP/user-provided line
+vs
+- system-assigned fallback line
+
+### Expected result
+Missing-line placement is traceable if needed.
+
+---
+
+## IMPORTANT
+
+Please update the SAP order upload / plotting flow so that:
+
+- orders with a blank **Feedmill Line** are **not skipped**
+- **MX / Mix products** are treated as **Line 5-only** orders
+- MX orders with missing lines are assigned directly to **Line 5**
+- non-MX orders use this fallback order:
+  - **one applicable historical pelleting line** → assign directly
+  - **multiple applicable historical pelleting lines** → compare queue time across those applicable lines only
+  - **no historical applicability** → compare queue time across **FM1–FM3 only**
+- **Line 5 must not be considered for non-MX orders**
+
+This is needed because Line 5 is a dedicated Mix/MX line and should not be treated as a normal candidate among pelleting lines.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log which missing-line placement path was used.
+
+```javascript
+console.debug('[SAP Upload Missing Line Detected]', {
+  orderId,
+  materialCode,
+  itemDescription,
+  form,
+  feedmillLineMissing: true,
+});
+```
+
+```javascript
+console.debug('[SAP Upload Missing Line MX Check]', {
+  orderId,
+  materialCode,
+  form,
+  isMXOrder: form === 'MX' || form === 'Mix',
+});
+```
+
+```javascript
+console.debug('[SAP Upload Missing Line Historical Applicability]', {
+  orderId,
+  materialCode,
+  applicableLinesFromMasterData,
+  applicableLineCount: applicableLinesFromMasterData?.length || 0,
+});
+```
+
+```javascript
+console.debug('[SAP Upload Missing Line Fallback Path]', {
+  orderId,
+  materialCode,
+  fallbackPath:
+    isMXOrder
+      ? 'mx_direct_line5'
+      : applicableLineCount === 1
+      ? 'single_applicable_pelleting_line_direct_assign'
+      : applicableLineCount > 1
+      ? 'multiple_applicable_pelleting_lines_lowest_queue_time'
+      : 'no_applicable_history_lowest_queue_time_fm1_fm3',
+});
+```
+
+```javascript
+console.debug('[SAP Upload Missing Line Queue-Time Assignment]', {
+  orderId,
+  materialCode,
+  candidateLines,
+  queueTimesByLine,
+  selectedLine,
+});
+```
+
+```javascript
+console.debug('[SAP Upload Missing Line Final Placement]', {
+  orderId,
+  materialCode,
+  autoAssignedLine: selectedLine,
+  source: 'missing_feedmill_line_fallback',
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Orders with blank Feedmill Line values are no longer skipped
+2. ✅ Missing-line orders are still plotted into the schedule
+3. ✅ MX / Mix orders are assigned directly to Line 5
+4. ✅ Line 5 is never considered for non-MX orders
+5. ✅ Non-MX orders with one applicable pelleting line are assigned directly
+6. ✅ Non-MX orders with multiple applicable pelleting lines use the lowest queue time
+7. ✅ Non-MX orders with no historical applicability use queue time across FM1–FM3 only
+8. ✅ Missing-line placement remains consistent with the app’s line suitability logic
+9. ✅ No UI errors or console errors are introduced

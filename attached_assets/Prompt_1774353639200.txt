@@ -1,0 +1,324 @@
+```
+Implement the following changes to the Add New Order dialog:
+
+---
+
+## 1. PLANNED ORDERS — 7-DIGIT VALIDATION AND 3-COLUMN LAYOUT
+
+### VALIDATION
+
+Planned Order numbers are 7 digits, not 10.
+
+| Field | Validation |
+|---|---|
+| Planned Order FG | Exactly 7 digits |
+| Planned Order SFG | Exactly 7 digits |
+| Planned Order PMX | Exactly 7 digits |
+
+**Valid:**
+```
+✅ 5882491
+✅ 5915609
+```
+
+**Invalid:**
+```
+❌ 588249 (6 digits)
+❌ 58824910 (8 digits)
+❌ abcdefg (non-numeric)
+❌ 588 2491 (contains space)
+```
+
+**Validation error message (shown below the input):**
+```
+Must be exactly 7 digits
+```
+- 10px, red (#e53935), italic
+
+### 3-COLUMN LAYOUT
+
+```
+┌─ PLANNED ORDERS (Optional) ──────────────────────────────────┐
+│                                                              │
+│  Finished Goods (FG)   Semi-Finished Goods (SFG)  Powermix (PMX) │
+│  [Enter 7 digits]      [Enter 7 digits]           [Enter 7 digits] │
+│                                                              │
+└──────────────────────────────────────────────────────────────┘
+```
+
+| Column | Label | Width |
+|---|---|---|
+| Column 1 | Finished Goods (FG) | 1fr |
+| Column 2 | Semi-Finished Goods (SFG) | 1fr |
+| Column 3 | Powermix (PMX) | 1fr |
+
+Grid: 3 columns, equal width, 16px gap.
+
+### PMX — DISABLED FOR NON-LINE 5
+
+Powermix (PMX) field is ONLY enabled when Line 5 is selected. For all other lines, it is disabled.
+
+**When Line 5 is selected:**
+
+| Property | Value |
+|---|---|
+| PMX input | ✅ Enabled, editable |
+| Background | White (same as other inputs) |
+| Border | 1px solid #d1d5db |
+| Placeholder | "Enter 7 digits" |
+
+**When any other line is selected (Line 1, 2, 3, 4, 6, 7):**
+
+| Property | Value |
+|---|---|
+| PMX input | ❌ Disabled |
+| Background | Light grey (#f3f4f6) |
+| Border | 1px solid #e5e7eb |
+| Text color | Light grey (#d1d5db) |
+| Cursor | Not-allowed |
+| Placeholder | "Line 5 only" in grey italic |
+| Tooltip on hover | "Powermix is only applicable for Line 5" |
+
+**When line changes:**
+- If changing FROM Line 5 to another line → PMX field clears and disables
+- If changing TO Line 5 → PMX field enables
+
+---
+
+## 2. CONFIRMATION DIALOG BEFORE ADDING ORDER
+
+When the user clicks "Add Order" in the Add New Order dialog, a confirmation dialog appears BEFORE the order is actually added to the table.
+
+### FLOW
+
+1. User fills in all details in the Add New Order dialog
+2. User clicks "Add Order"
+3. Confirmation dialog appears with order summary
+4. User reviews and clicks "Confirm" → order is added
+5. Or user clicks "Cancel" → goes back to the Add New Order dialog (details preserved)
+
+### CONFIRMATION DIALOG LAYOUT
+
+```
+╔══════════════════════════════════════════════════════════════╗
+║                                                              ║
+║  Confirm New Order                                      ✕    ║
+║                                                              ║
+║  Please review the details before adding this order.         ║
+║                                                              ║
+║  ┌────────────────────────────────────────────────────────┐  ║
+║  │                                                        │  ║
+║  │  Material Code:    1000000000939    Volume (MT):  8 MT  │  ║
+║  │  Item:             Classic Hog      Production    0.40  │  ║
+║  │                    Growex, Pellet   Time:         hrs   │  ║
+║  │                    50kg                                 │  ║
+║  │  Form:             P                Avail Date:  Mar 20 │  ║
+║  │  Line:             Line 1           Position:    Prio 2 │  ║
+║  │                                                        │  ║
+║  │  Planned Order:                                        │  ║
+║  │  FG: 5882491    SFG: 5915609    PMX: —                 │  ║
+║  │                                                        │  ║
+║  └────────────────────────────────────────────────────────┘  ║
+║                                                              ║
+║                         [Cancel]    [Confirm]                ║
+║                                                              ║
+╚══════════════════════════════════════════════════════════════╝
+```
+
+### SUMMARY SECTION — 2-COLUMN LAYOUT
+
+Left column and right column, with fields paired:
+
+**Row 1:**
+
+| Left | Right |
+|---|---|
+| Material Code: 1000000000939 | Volume (MT): 8 MT |
+
+**Row 2:**
+
+| Left | Right |
+|---|---|
+| Item: Classic Hog Growex, Pellet 50kg | Production Time: 0.40 hrs |
+
+**Row 3:**
+
+| Left | Right |
+|---|---|
+| Form: P | Avail Date: March 20 |
+
+**Row 4:**
+
+| Left | Right |
+|---|---|
+| Line: Line 1 | Position: Prio 2 |
+
+**Planned Order row — 3-column:**
+
+| Column 1 | Column 2 | Column 3 |
+|---|---|---|
+| FG: 5882491 | SFG: 5915609 | PMX: — |
+
+### SUMMARY SECTION STYLING
+
+| Property | Value |
+|---|---|
+| Background | Light grey (#f9fafb) |
+| Border | 1px solid #e5e7eb |
+| Border-radius | 8px |
+| Padding | 16px 20px |
+
+**Labels:**
+
+| Property | Value |
+|---|---|
+| Font size | 12px |
+| Color | Grey (#6b7280) |
+| Font weight | 400 |
+
+**Values:**
+
+| Property | Value |
+|---|---|
+| Font size | 14px |
+| Color | Dark text (#1a1a1a) |
+| Font weight | 600 |
+
+**Row spacing:**
+
+| Property | Value |
+|---|---|
+| Gap between rows | 12px |
+| Gap between left and right columns | 24px |
+
+**"Planned Order" sub-section:**
+
+| Property | Value |
+|---|---|
+| Label "Planned Order:" | 12px, grey (#6b7280), font-weight 500 |
+| Margin top | 12px (above planned order row) |
+| 3-column grid | Equal width, 16px gap |
+| "—" for empty/disabled PMX | Grey (#d1d5db) |
+
+### CONFIRMATION DIALOG STYLING
+
+| Property | Value |
+|---|---|
+| Max width | 520px |
+| Background | White |
+| Border radius | 12px |
+| Padding | 24px 28px |
+| Overlay | rgba(0,0,0,0.4) |
+| Title "Confirm New Order" | 18px, font-weight 700, dark text |
+| Subtitle | 12px, grey (#6b7280) |
+
+### BUTTONS
+
+| Button | Styling |
+|---|---|
+| Cancel | Grey outlined. Border: 1px solid #d1d5db. Text: grey (#374151), 14px. Goes BACK to Add New Order dialog with details preserved. |
+| Confirm | Orange filled (#fd5108). White text, 14px, font-weight 600. Proceeds with adding the order. |
+
+### POSITION VALUE
+
+The "Position: Prio X" value in the confirmation dialog is calculated using the same insertion logic — chronological comparison of the avail date against existing orders.
+
+### EMPTY/OPTIONAL FIELDS
+
+If a field was not filled in (optional fields like Planned Orders):
+
+| Field | Display |
+|---|---|
+| FG (empty) | "—" in grey |
+| SFG (empty) | "—" in grey |
+| PMX (empty or disabled) | "—" in grey |
+| Production Time (no run rate) | "N/A" in grey |
+
+---
+
+## 3. PREVENT CLOSING ON BACKGROUND CLICK
+
+The Add New Order dialog should NOT close when the user clicks the background overlay. Only explicit close actions should dismiss the dialog.
+
+### WHAT CLOSES THE DIALOG
+
+| Action | Closes dialog? |
+|---|---|
+| Click the ✕ button (top-right) | ✅ Yes |
+| Click "Cancel" button | ✅ Yes |
+| Press Escape key | ✅ Yes |
+| Click the background overlay | ❌ NO — dialog stays open |
+
+### IMPLEMENTATION
+
+```javascript
+// When rendering the modal overlay
+<div 
+  className="modal-overlay" 
+  onClick={(e) => {
+    // Do NOT close on background click
+    // Only close via explicit actions (✕, Cancel, Escape)
+    e.stopPropagation();
+  }}
+>
+  <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+    {/* dialog content */}
+  </div>
+</div>
+```
+
+Or if using a modal library:
+```javascript
+<Modal 
+  closeOnOverlayClick={false}
+  closeOnEsc={true}
+>
+  {/* dialog content */}
+</Modal>
+```
+
+### APPLY TO BOTH DIALOGS
+
+This "no close on background click" rule applies to:
+- ✅ The Add New Order dialog
+- ✅ The Confirm New Order dialog
+- ✅ Any sub-dialogs (like "Switch to Line X?" confirmation)
+
+### ALSO APPLY THE SAME RULE TO THE CONFIRMATION DIALOG
+
+The confirmation dialog also should not close on background click:
+
+| Action | Closes confirmation? |
+|---|---|
+| Click ✕ | ✅ Yes — returns to Add New Order dialog |
+| Click "Cancel" | ✅ Yes — returns to Add New Order dialog |
+| Press Escape | ✅ Yes — returns to Add New Order dialog |
+| Click background | ❌ NO |
+| Click "Confirm" | ✅ Yes — adds order and closes everything |
+
+---
+
+## 4. COMPLETE FLOW
+
+```
+Step 1: User clicks "+ Add Order" in header container
+         ↓
+Step 2: Add New Order dialog opens
+        - User fills in details
+        - Cannot be closed by clicking background
+         ↓
+Step 3: User clicks "Add Order" button
+         ↓
+Step 4: Confirmation dialog appears ON TOP of the Add New Order dialog
+        - Shows order summary
+        - Cannot be closed by clicking background
+         ↓
+Step 5a: User clicks "Cancel" → returns to Add New Order dialog (details preserved)
+Step 5b: User clicks "Confirm" → order is added to table
+         ↓
+Step 6: Both dialogs close
+        - Success toast appears
+        - Table scrolls to new order
+        - New order row briefly highlights (yellow flash, 2 seconds)
+```
+```

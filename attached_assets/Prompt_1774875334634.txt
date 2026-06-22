@@ -1,0 +1,494 @@
+```
+Implement the following changes to the NexFeed application:
+
+---
+
+## SMART INSIGHT — SINGLE SOURCE OF TRUTH FROM N10D
+
+Generate AI insights once in the N10D tab, cache them, and reuse across Auto-Sequence tooltip and Smart Insight column in the order table.
+
+---
+
+### 1. DATA FLOW
+
+```
+N10D file uploaded / "Re-apply to Existing Orders" clicked
+    ↓
+AI generates 1-2 sentence insight per product (by material code)
+    ↓
+Cache insights in global store
+    ↓
+Auto-Sequence tooltip → reads from cache via material code
+    ↓
+Smart Insight column → reads from cache via material code
+```
+
+**Avail Date icon tooltip** — remains as-is (simple text), just ensure status alignment with N10D.
+
+---
+
+### 2. AI INSIGHT GENERATION — ON N10D
+
+Generate when:
+- N10D file is uploaded
+- User clicks "Re-apply to Existing Orders"
+
+```javascript
+async function generateAndCacheInsights(n10dProducts, allOrders, today) {
+  const insightCache = {};
+  
+  // === PART A: Products WITH N10D data (stock-based insight) ===
+  const n10dPrompt = `
+Generate a brief 1-2 sentence production insight for each product.
+Use the EXACT data provided. Be specific with numbers and dates.
+Use full month names (e.g., "April 5, 2026" not "Apr 5").
+Maximum 2 sentences per product.
+Be actionable — tell the planner what to do.
+
+Products:
+${n10dProducts.map(p => `
+[${p.material_code_fg}] ${p.item_description}
+DFL: ${p.due_for_loading} MT | Inventory: ${p.inventory} MT
+Status: ${p.status} | Buffer: ${p.buffer}%
+Completion: ${p.completionDate || 'N/A'} | Avail: ${p.availDate || 'N/A'}
+Bal to Prod: ${p.balanceToProduce} MT
+`).join('\n')}
+
+Output format — one per line:
+[material_code]: [1-2 sentence insight]
+  `;
+  
+  const n10dResponse = await callAI(n10dPrompt);
+  // Parse and store in cache
+  parseInsightResponse(n10dResponse, insightCache);
+  
+  // === PART B: Dated orders WITHOUT N10D data (deadline-based insight) ===
+  const datedOrders = allOrders.filter(order => {
+    const hasN10D = n10dProducts.some(
+      p => String(p.material_code_fg) === String(order.material_code_fg)
+    );
+    return !hasN10D && order.avail_date && 
+           order.avail_date !== 'prio replenish' && 
+           order.avail_date !== 'safety stocks';
+  });
+  
+  if (datedOrders.length > 0) {
+    const datedPrompt = `
+Generate a brief 1-2 sentence production insight for each order.
+These are dated MTO orders with specific deadlines.
+Focus on deadline proximity and production urgency.
+Use full month names. Maximum 2 sentences.
+
+Orders:
+${datedOrders.map(o => `
+[${o.material_code_fg}] ${o.item_description}
+Volume: ${o.volume} MT | Avail Date: ${formatDateFull(o.avail_date)}
+Line: ${o.line} | Status: ${o.status}
+Production Time: ${o.production_time} hrs
+`).join('\n')}
+
+Output format — one per line:
+[material_code]: [1-2 sentence insight]
+    `;
+    
+    const datedResponse = await callAI(datedPrompt);
+    parseInsightResponse(datedResponse, insightCache);
+  }
+  
+  // === PART C: Orders with NO N10D and NO avail date ===
+  // These get template-based insights (no AI call needed)
+  allOrders.forEach(order => {
+    if (!insightCache[order.material_code_fg]) {
+      insightCache[order.material_code_fg] = getTemplateInsight(order);
+    }
+  });
+  
+  // Store in global state
+  setInsightCache(insightCache);
+}
+
+function parseInsightResponse(response, cache) {
+  const lines = response.split('\n').filter(l => l.trim());
+  lines.forEach(line => {
+    const match = line.match(/^\[?(\d+)\]?:\s*(.+)/);
+    if (match) {
+      cache[match[1]] = match[2].trim();
+    }
+  });
+}
+
+function getTemplateInsight(order) {
+  const volume = order.volume || 0;
+  const line = order.line || 'unassigned';
+  return `This order is scheduled for ${volume} MT on ${line}. No stock level data available from Next 10 Days.`;
+}
+```
+
+---
+
+### 3. INSIGHT CACHE — GLOBAL STORE
+
+```javascript
+// Global insight cache
+const insightCache = {};
+
+// Get insight for any order by material code
+function getSmartInsight(materialCode) {
+  return insightCache[materialCode] || 'No insight available.';
+}
+
+// Check if insights are loaded
+function hasInsights() {
+  return Object.keys(insightCache).length > 0;
+}
+```
+
+---
+
+### 4. AVAIL DATE CELL — HOVER ON ENTIRE CELL
+
+Instead of requiring the user to hover precisely on the small icon, the entire Avail Date cell triggers the tooltip.
+
+### FIX
+
+```jsx
+function AvailDateCell({ order, n10dData }) {
+  const [showTooltip, setShowTooltip] = useState(false);
+  const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
+  const timeoutRef = useRef(null);
+  
+  function handleCellMouseEnter(e) {
+    timeoutRef.current = setTimeout(() => {
+      const pos = clampToViewport(e.clientX + 12, e.clientY + 12, 280, 120);
+      setTooltipPos(pos);
+      setShowTooltip(true);
+    }, 300);
+  }
+  
+  function handleCellMouseMove(e) {
+    if (showTooltip) {
+      const pos = clampToViewport(e.clientX + 12, e.clientY + 12, 280, 120);
+      setTooltipPos(pos);
+    }
+  }
+  
+  function handleCellMouseLeave() {
+    clearTimeout(timeoutRef.current);
+    setShowTooltip(false);
+  }
+  
+  return (
+    <td
+      onMouseEnter={handleCellMouseEnter}
+      onMouseMove={handleCellMouseMove}
+      onMouseLeave={handleCellMouseLeave}
+      style={{ cursor: 'pointer' }}
+    >
+      <span className="avail-date-text">{order.avail_date}</span>
+      {order.stockIcon && (
+        <span className="avail-date-icon" style={{ cursor: 'pointer' }}>
+          {order.stockIcon}
+        </span>
+      )}
+      
+      {showTooltip && (
+        <TooltipPortal>
+          <AvailDateTooltip order={order} n10dData={n10dData} position={tooltipPos} />
+        </TooltipPortal>
+      )}
+    </td>
+  );
+}
+```
+
+---
+
+### 5. AVAIL DATE ICON — ALIGN STATUS WITH N10D
+
+Fix instances where the icon shows a warning but the N10D status is Sufficient.
+
+```javascript
+function getAvailDateIcon(order, n10dData) {
+  const product = n10dData.find(
+    p => String(p.material_code_fg) === String(order.material_code_fg)
+  );
+  
+  if (!product) return null;
+  
+  const status = product.status;
+  
+  switch (status) {
+    case 'Critical':
+      return { icon: '⚠', color: '#dc2626' };    // Red warning
+    case 'Urgent':
+      return { icon: '⚠', color: '#ea580c' };     // Orange warning
+    case 'Monitor':
+      return { icon: '⚠', color: '#ca8a04' };     // Yellow warning
+    case 'Sufficient':
+      return { icon: '✅', color: '#16a34a' };     // Green check
+    default:
+      return null;
+  }
+}
+```
+
+**Critical rule:** If N10D status is "Sufficient" → show green ✅, NOT a warning ⚠. This fixes the bug where sufficient products incorrectly show warning icons.
+
+---
+
+### 6. SMART INSIGHT COLUMN — ORDER TABLE
+
+Add a new "Smart Insight" column between Completion Date and FPR Notes, under the NOTES header group.
+
+### TABLE HEADER
+
+```
+┌───────────────────────┬──────────────────────────────────────────────────────────┐
+│      SCHEDULING       │                        NOTES                             │
+├───────┬───────┬───────┼────────────────┬────────────┬───────────┬────────────────┤
+│ Start │ Start │ Avail │ Completion     │   Smart    │ FPR       │ Special        │
+│ Date  │ Time  │ Date  │ Date           │  Insight   │ Notes     │ Remarks        │
+```
+
+NOTES header must now span 4 columns:
+- Completion Date
+- Smart Insight (NEW)
+- FPR Notes
+- Special Remarks
+
+### COLUMN STYLING
+
+| Property | Value |
+|---|---|
+| Header text | "Smart Insight" |
+| Header icon | ✨ before text |
+| Column width | 200px |
+| Min width | 180px |
+| Max width | 250px |
+
+### CELL CONTENT — TRUNCATED TEXT
+
+```jsx
+function SmartInsightCell({ order }) {
+  const insight = getSmartInsight(order.material_code_fg);
+  const [showTooltip, setShowTooltip] = useState(false);
+  const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
+  const timeoutRef = useRef(null);
+  
+  function handleMouseEnter(e) {
+    timeoutRef.current = setTimeout(() => {
+      const pos = clampToViewport(e.clientX + 12, e.clientY + 12, 320, 100);
+      setTooltipPos(pos);
+      setShowTooltip(true);
+    }, 300);
+  }
+  
+  function handleMouseMove(e) {
+    if (showTooltip) {
+      const pos = clampToViewport(e.clientX + 12, e.clientY + 12, 320, 100);
+      setTooltipPos(pos);
+    }
+  }
+  
+  function handleMouseLeave() {
+    clearTimeout(timeoutRef.current);
+    setShowTooltip(false);
+  }
+  
+  return (
+    <td
+      className="smart-insight-cell"
+      onMouseEnter={handleMouseEnter}
+      onMouseMove={handleMouseMove}
+      onMouseLeave={handleMouseLeave}
+    >
+      <div className="smart-insight-truncated">
+        {insight}
+      </div>
+      
+      {showTooltip && (
+        <TooltipPortal>
+          <SmartInsightTooltip 
+            insight={insight} 
+            productName={order.item_description}
+            position={tooltipPos} 
+          />
+        </TooltipPortal>
+      )}
+    </td>
+  );
+}
+```
+
+### TRUNCATED CELL STYLING
+
+```css
+.smart-insight-cell {
+  cursor: default;
+  user-select: none;
+}
+
+.smart-insight-truncated {
+  font-size: 10px;
+  color: #6b7280;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-height: 28px;
+}
+```
+
+| Property | Value |
+|---|---|
+| Font size | 10px |
+| Color | Grey (#6b7280) |
+| Line clamp | 2 lines max |
+| Overflow | Ellipsis (...) |
+| Editable | ❌ No — read only |
+| Right-click | No context menu for this cell |
+| Max height | 28px (approx 2 lines) |
+
+### HOVER TOOLTIP — FULL INSIGHT
+
+```jsx
+function SmartInsightTooltip({ insight, productName, position }) {
+  return (
+    <div className="smart-insight-tooltip" style={{
+      position: 'fixed',
+      left: position.x,
+      top: position.y,
+      zIndex: 99999,
+      pointerEvents: 'none'
+    }}>
+      <div className="tooltip-header">
+        ✨ {productName}
+      </div>
+      <div className="tooltip-body">
+        {insight}
+      </div>
+    </div>
+  );
+}
+```
+
+### TOOLTIP STYLING
+
+```css
+.smart-insight-tooltip {
+  background: #1a1a1a;
+  color: #ffffff;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  max-width: 320px;
+  animation: tooltipFadeIn 0.15s ease;
+}
+
+.smart-insight-tooltip .tooltip-header {
+  padding: 10px 14px;
+  font-size: 12px;
+  font-weight: 700;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.smart-insight-tooltip .tooltip-body {
+  padding: 10px 14px;
+  font-size: 11px;
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.8);
+  line-height: 1.6;
+}
+```
+
+---
+
+### 7. NO INSIGHT STATE
+
+When no N10D data has been uploaded yet:
+
+**Cell content:**
+```
+No insight available
+```
+
+| Property | Value |
+|---|---|
+| Text | "No insight available" |
+| Font size | 10px |
+| Color | Light grey (#d1d5db) |
+| Font style | Italic |
+
+**After N10D upload but no match for this product:**
+```
+No stock data available.
+```
+
+---
+
+### 8. CACHE TRIGGER — "RE-APPLY TO EXISTING ORDERS"
+
+When user clicks "Re-apply to Existing Orders" in the N10D tab:
+
+```javascript
+async function handleReapplyToOrders() {
+  // 1. Recalculate all N10D statuses
+  const updatedProducts = recalculateN10DStatuses(n10dData, today);
+  
+  // 2. Regenerate AI insights and cache
+  await generateAndCacheInsights(updatedProducts, allOrders, today);
+  
+  // 3. Update avail date icons on order table
+  updateAvailDateIcons(allOrders, updatedProducts);
+  
+  // 4. Trigger re-render of Smart Insight column
+  triggerOrderTableRefresh();
+}
+```
+
+This single button:
+- ✅ Recalculates N10D statuses
+- ✅ Regenerates AI insights
+- ✅ Updates avail date icons
+- ✅ Refreshes Smart Insight column
+- ✅ Updates auto-sequence tooltip data
+
+---
+
+### 9. APPLY TO — SUMMARY
+
+| Component | Source | Trigger |
+|---|---|---|
+| N10D product tooltip — Smart Insight | AI generated in N10D tab | N10D upload / Re-apply |
+| Auto-Sequence tooltip — Smart Insight | Reads from cache | Same cache |
+| Smart Insight column in order table | Reads from cache | Same cache |
+| Avail Date icon + tooltip | N10D status data | Same cache |
+
+---
+
+### 10. VERIFICATION
+
+1. Upload N10D file
+   - ✅ AI insights generated for all products
+   - ✅ Cached in global store
+
+2. Open order table
+   - ✅ Smart Insight column shows truncated AI text
+   - ✅ Hover shows full insight in tooltip
+   - ✅ Cell is NOT editable
+   - ✅ Avail Date icons match N10D status (Sufficient = ✅, not ⚠)
+
+3. Open Auto-Sequence preview
+   - ✅ Hover tooltip shows same insight from cache
+
+4. Click "Re-apply to Existing Orders"
+   - ✅ All insights regenerate
+   - ✅ Smart Insight column updates
+   - ✅ Avail Date icons update
+   - ✅ Auto-Sequence tooltip updates
+
+5. Orders without N10D data
+   - ✅ Dated orders show deadline-based AI insight
+   - ✅ Other orders show "No stock data available"
+```

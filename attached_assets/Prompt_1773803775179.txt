@@ -1,0 +1,262 @@
+```
+Implement the following change to the NexFeed application:
+
+---
+
+## HIDEABLE COLUMNS — INDIVIDUAL COLUMN LEVEL
+
+Every individual column in the interactive table can be independently hidden and shown. This is NOT grouped by main header — each column is independently hideable.
+
+---
+
+### ALWAYS VISIBLE (CANNOT BE HIDDEN)
+
+| Column | Reason |
+|---|---|
+| Readiness (headless) | Core indicator |
+| Prio | Core ordering |
+| FPR | Primary identifier |
+| Status | Core workflow |
+| Drag handle | Core interaction |
+
+All other columns can be hidden.
+
+---
+
+### HOW TO HIDE A COLUMN
+
+**Step 1: Hover over any column header**
+- When the mouse hovers over a column header, a small "Hide" text appears.
+
+**"Hide" text behavior:**
+- Appears on hover after a short delay (~300ms) to avoid accidental triggers.
+- Position: Below the column header text, centered, OR as a small overlay in the top-right corner of the header cell.
+- Styling:
+  - Text: "Hide" in grey (#9ca3af), 10px, italic
+  - Background: Semi-transparent white (rgba(255,255,255,0.9))
+  - Border-radius: 3px
+  - Padding: 2px 6px
+  - Cursor: pointer
+- Disappears when mouse leaves the header area.
+
+**Step 2: Click "Hide"**
+- Clicking the "Hide" text hides that specific column.
+- The column width collapses to a thin indicator (same Excel-style sliver as before).
+
+**Example:**
+```
+┌──────┬──────┬─────────────┬──────┐
+│ Prio │ FPR  │ Item Desc   │ Form │    ← hovering over "Form"
+│      │      │             │ Hide │    ← "Hide" text appears
+└──────┴──────┴─────────────┴──────┘
+
+After clicking "Hide":
+
+┌──────┬──────┬─────────────┬┆┬──────┐
+│ Prio │ FPR  │ Item Desc   │┆│ ...  │
+└──────┴──────┴─────────────┴┆┴──────┘
+                              ↑
+                         Form hidden
+```
+
+---
+
+### HIDDEN COLUMN INDICATOR
+
+When a column is hidden, a thin vertical indicator appears in its place.
+
+**Indicator styling:**
+
+| Property | Value |
+|---|---|
+| Width | 6px |
+| Background | Transparent |
+| Border-left | 2px solid #e5e7eb |
+| Border-right | 2px solid #e5e7eb |
+| Height | Full table height (header to last row) |
+| Cursor on hover | col-resize (↔) |
+| Hover background | Light blue (#eff6ff) |
+| Hover border color | Blue (#3b82f6) |
+
+---
+
+### HOW TO SHOW A HIDDEN COLUMN
+
+**Step 1: Hover over the thin indicator**
+- Cursor changes to ↔ (col-resize).
+- The indicator highlights (light blue background, blue borders).
+- A small "Unhide" text appears above or near the indicator.
+
+**"Unhide" text behavior:**
+- Position: Small tooltip/popup above the indicator.
+- Content: "Unhide [Column Name]" — e.g., "Unhide Form", "Unhide Batch Size"
+- Styling:
+  - Text: "Unhide [Column Name]" in grey (#6b7280), 10px, italic
+  - Background: White (#ffffff)
+  - Border: 1px solid #e5e7eb
+  - Border-radius: 4px
+  - Padding: 4px 8px
+  - Box shadow: subtle
+  - Cursor: pointer
+
+**Step 2: Click "Unhide" or double-click the indicator**
+- The column expands back to its full width.
+- Smooth animation (~200ms).
+- The "Unhide" tooltip disappears.
+
+---
+
+### MULTIPLE ADJACENT HIDDEN COLUMNS
+
+When multiple adjacent columns are hidden:
+
+```
+┌──────┬──────┬─────────────┬┆┬┆┬┆┬──────┐
+│ Prio │ FPR  │ Item Desc   │┆│┆│┆│Status│
+└──────┴──────┴─────────────┴┆┴┆┴┆┴──────┘
+                              ↑  ↑  ↑
+                         Form BS Batches
+```
+
+- Each hidden column has its own independent indicator.
+- Each indicator shows its own "Unhide [Column Name]" tooltip on hover.
+- Each can be unhidden independently.
+
+**If many columns are hidden adjacently:**
+- The indicators are side by side (6px each).
+- Hovering over each one shows which column it represents.
+- The user can unhide them one by one.
+
+---
+
+### COLUMN HEADER HOVER STATE — DETAILED
+
+**For hideable columns:**
+
+Normal state (no hover):
+```
+┌────────────┐
+│ Form       │
+└────────────┘
+```
+
+Hover state (mouse over header):
+```
+┌────────────┐
+│ Form       │
+│     Hide   │   ← "Hide" text appears
+└────────────┘
+```
+
+- "Hide" appears as a small label within the header cell.
+- Position: bottom-right corner of the header cell, or centered below the header text.
+- Does not displace the header text — overlays slightly or sits below.
+
+**For non-hideable columns (Prio, FPR, Status, Readiness, Drag handle):**
+
+Hover state (mouse over header):
+```
+┌────────────┐
+│ Prio       │     ← no "Hide" text appears
+└────────────┘
+```
+
+- No "Hide" label appears. These columns cannot be hidden.
+- Normal hover state (no special indicator).
+
+---
+
+### ANIMATION
+
+**Hiding:**
+- Column width animates from full width to 6px (~200ms, ease-in-out).
+- Column content fades out during the first 100ms.
+- Adjacent columns smoothly shift to fill the space.
+
+**Unhiding:**
+- Indicator expands from 6px to full column width (~200ms, ease-in-out).
+- Column content fades in during the last 100ms.
+- Adjacent columns smoothly shift to make room.
+
+---
+
+### SESSION PERSISTENCE
+
+- Column visibility state is saved in localStorage.
+- Key: `nexfeed_hidden_columns`
+- Value: Array of hidden column identifiers, e.g., `["form", "batch_size", "threads", "sacks"]`
+- On page load, read the stored state and apply it.
+- If no stored state, ALL columns are visible (default).
+- Persists across page refreshes and sessions.
+- GLOBAL — same column visibility across all line tabs and feedmill tabs.
+
+---
+
+### FULL LIST OF HIDEABLE COLUMNS
+
+| Column | Hideable | Identifier |
+|---|---|---|
+| Readiness (headless) | ❌ | — |
+| Prio | ❌ | — |
+| Drag handle | ❌ | — |
+| FPR | ❌ | — |
+| Planned Order FG | ✅ | planned_fg |
+| Planned Order SFG | ✅ | planned_sfg |
+| Planned Order PMX | ✅ | planned_pmx |
+| Production Order FG1 | ✅ | prod_fg1 |
+| Production Order SFG1 | ✅ | prod_sfg1 |
+| Production Order SFGPMX | ✅ | prod_sfgpmx |
+| Material Code (SFG) | ✅ | mat_code_sfg |
+| Material Code (FG) | ✅ | mat_code_fg |
+| Item Description | ✅ | item_desc |
+| Form | ✅ | form |
+| Volume (MT) | ✅ | volume |
+| Batch Size | ✅ | batch_size |
+| Number of Batches | ✅ | num_batches |
+| Number of Bags | ✅ | num_bags |
+| Production Time | ✅ | prod_time |
+| HA Info | ✅ | ha_info |
+| HA Prep | ✅ | ha_prep |
+| Status | ❌ | — |
+| Start Date | ✅ | start_date |
+| Start Time | ✅ | start_time |
+| Avail Date | ✅ | avail_date |
+| Completion Date | ✅ | completion_date |
+| FPR Notes | ✅ | fpr_notes |
+| Special Remarks | ✅ | special_remarks |
+| Threads | ✅ | threads |
+| Sacks | ✅ | sacks |
+| Markings | ✅ | markings |
+| Tags | ✅ | tags |
+| End Date | ✅ | end_date |
+| History | ✅ | history |
+
+---
+
+### EDGE CASES
+
+**Edge case 1 — Hiding a column while editing a cell in it:**
+- Do NOT hide the column if any cell in it is currently being edited.
+- Show a toast: "Finish editing before hiding this column."
+
+**Edge case 2 — Export:**
+- When exporting the table to Excel, include ALL columns regardless of visibility.
+- Hidden columns appear in exports.
+
+**Edge case 3 — Sub-columns (Planned Order FG/SFG/PMX):**
+- Each sub-column is independently hideable.
+- If ALL sub-columns under a grouped header are hidden, the group header also collapses.
+- If at least one sub-column is visible, the group header remains.
+
+**Edge case 4 — Scrolling:**
+- Hidden column indicators scroll horizontally with the table.
+- They maintain their position relative to adjacent visible columns.
+
+---
+
+### DEFAULT STATE
+
+- ALL columns are VISIBLE by default.
+- No columns are hidden on first use.
+- Users actively choose to hide columns they don't need.
+```

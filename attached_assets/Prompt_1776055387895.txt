@@ -1,0 +1,452 @@
+```
+Implement the following changes to the Smart Combine feature:
+
+---
+
+## 1. SEPARATE EACH AI SECTION INTO ITS OWN CONTAINER
+
+Each AI section (Insertion Position, Scheduling Impact, Alerts) becomes its own card with the same look and feel as the Combined Production Summary card. Each has its own Refresh button.
+
+### UPDATED COMBINE GROUP COMPONENT
+
+```jsx
+function CombineGroup({ group, lineOrders, masterData, n10dData, changeoverRules }) {
+  const [insertionAnalysis, setInsertionAnalysis] = useState(null);
+  const [schedulingAnalysis, setSchedulingAnalysis] = useState(null);
+  const [alertsAnalysis, setAlertsAnalysis] = useState(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(true);
+  
+  useEffect(() => {
+    generateAllAnalyses();
+  }, []);
+  
+  async function generateAllAnalyses() {
+    setIsAnalyzing(true);
+    try {
+      const context = buildCombineAnalysisContext(group, lineOrders, masterData, n10dData, changeoverRules);
+      const prompt = buildCombineAnalysisPrompt(context);
+      const response = await callAI(prompt);
+      const parsed = parseCombineAnalysisResponse(response);
+      
+      setInsertionAnalysis(parsed.insertionPosition);
+      setSchedulingAnalysis(parsed.schedulingImpact);
+      setAlertsAnalysis(parsed.alerts);
+    } catch (error) {
+      console.error('Combine analysis failed:', error);
+      setInsertionAnalysis('Unable to determine. Review manually.');
+      setSchedulingAnalysis('Analysis unavailable.');
+      setAlertsAnalysis('Please verify scheduling impact before approving.');
+    } finally {
+      setIsAnalyzing(false);
+    }
+  }
+  
+  async function refreshSection(section) {
+    const context = buildCombineAnalysisContext(group, lineOrders, masterData, n10dData, changeoverRules);
+    const prompt = buildCombineAnalysisPrompt(context);
+    
+    if (section === 'insertion') setInsertionAnalysis(null);
+    if (section === 'scheduling') setSchedulingAnalysis(null);
+    if (section === 'alerts') setAlertsAnalysis(null);
+    
+    try {
+      const response = await callAI(prompt);
+      const parsed = parseCombineAnalysisResponse(response);
+      
+      if (section === 'insertion') setInsertionAnalysis(parsed.insertionPosition);
+      if (section === 'scheduling') setSchedulingAnalysis(parsed.schedulingImpact);
+      if (section === 'alerts') setAlertsAnalysis(parsed.alerts);
+    } catch (error) {
+      console.error(`Refresh ${section} failed:`, error);
+    }
+  }
+  
+  return (
+    <div className="combine-group">
+      {/* Order cards */}
+      {group.orders.map(order => (
+        <CombineOrderCard key={order.id} order={order} />
+      ))}
+      
+      {/* Combined volume label */}
+      <div className="combine-volume-label">
+        Combined Volume: {group.combinedVolume} MT
+      </div>
+      
+      {/* Card 1: Combined Production Summary + Changeover Savings */}
+      <div className="combine-card">
+        <div className="combine-card-header">
+          <span>📊 Combined Production Summary</span>
+        </div>
+        <div className="combine-card-body">
+          <div className="combine-card-row">
+            <span>Combined Volume</span>
+            <span className="combine-card-value">{group.combinedVolume} MT</span>
+          </div>
+          <div className="combine-card-row">
+            <span>Batch Size</span>
+            <span className="combine-card-value">{group.batchSize} MT</span>
+          </div>
+          <div className="combine-card-row">
+            <span>Number of Batches</span>
+            <span className="combine-card-value">{group.combinedBatches}</span>
+          </div>
+          <div className="combine-card-row">
+            <span>Total Bags</span>
+            <span className="combine-card-value">{group.combinedBags}</span>
+          </div>
+          <div className="combine-card-row">
+            <span>Production Time (separate)</span>
+            <span className="combine-card-value">{group.separateProductionTime}</span>
+          </div>
+          <div className="combine-card-row">
+            <span>Production Time (combined)</span>
+            <span className="combine-card-value">{group.combinedProductionTime}</span>
+          </div>
+        </div>
+        
+        {/* Changeover Savings — inside same card */}
+        <div className="combine-card-divider"></div>
+        <div className="combine-card-header combine-card-header-sub">
+          <span>⏱ Changeover Savings</span>
+        </div>
+        <div className="combine-card-body">
+          <div className="combine-card-row">
+            <span>Changeovers eliminated</span>
+            <span className="combine-card-value">{group.savingsCalculation}</span>
+          </div>
+          <div className="combine-card-row">
+            <span>Total time saved</span>
+            <span className="combine-card-value combine-card-value-success">✅ {group.totalSaved} saved</span>
+          </div>
+        </div>
+      </div>
+      
+      {/* Card 2: Insertion Position */}
+      <div className="combine-card">
+        <div className="combine-card-header">
+          <span>📍 Insertion Position</span>
+          <button 
+            className="combine-card-refresh"
+            onClick={() => refreshSection('insertion')}
+            title="Refresh analysis"
+          >
+            ↻ Refresh
+          </button>
+        </div>
+        <div className="combine-card-body combine-card-body-text">
+          {isAnalyzing && !insertionAnalysis ? (
+            <span className="combine-card-loading">Analyzing optimal position...</span>
+          ) : (
+            <span>{insertionAnalysis || 'Unable to determine.'}</span>
+          )}
+        </div>
+      </div>
+      
+      {/* Card 3: Scheduling Impact */}
+      <div className="combine-card">
+        <div className="combine-card-header">
+          <span>📊 Scheduling Impact</span>
+          <button 
+            className="combine-card-refresh"
+            onClick={() => refreshSection('scheduling')}
+            title="Refresh analysis"
+          >
+            ↻ Refresh
+          </button>
+        </div>
+        <div className="combine-card-body combine-card-body-text">
+          {isAnalyzing && !schedulingAnalysis ? (
+            <span className="combine-card-loading">Analyzing scheduling impact...</span>
+          ) : (
+            <span>{schedulingAnalysis || 'Unable to determine.'}</span>
+          )}
+        </div>
+      </div>
+      
+      {/* Card 4: Alerts */}
+      <div className="combine-card combine-card-alerts">
+        <div className="combine-card-header combine-card-header-alerts">
+          <span>⚠ Alerts</span>
+          <button 
+            className="combine-card-refresh"
+            onClick={() => refreshSection('alerts')}
+            title="Refresh analysis"
+          >
+            ↻ Refresh
+          </button>
+        </div>
+        <div className="combine-card-body combine-card-body-text">
+          {isAnalyzing && !alertsAnalysis ? (
+            <span className="combine-card-loading">Checking for alerts...</span>
+          ) : (
+            <CombineAlertsDisplay alerts={alertsAnalysis} />
+          )}
+        </div>
+      </div>
+      
+      {/* NO external alert cards — everything is inside Alerts card above */}
+      
+      {/* Actions */}
+      <div className="combine-group-actions">
+        <button 
+          className="combine-approve-btn"
+          onClick={() => handleApprove(group, { insertionPosition: insertionAnalysis })}
+          disabled={isAnalyzing}
+        >
+          Approve
+        </button>
+        <button 
+          className="combine-dismiss-btn"
+          onClick={() => handleDismiss(group)}
+        >
+          Dismiss
+        </button>
+      </div>
+    </div>
+  );
+}
+```
+
+### ALERTS DISPLAY — HANDLE MULTIPLE ALERTS
+
+```jsx
+function CombineAlertsDisplay({ alerts }) {
+  if (!alerts) return <span>No alerts.</span>;
+  
+  // Split by lines that start with ⚠ or bullet-like patterns
+  const alertLines = alerts.split('\n').filter(l => l.trim());
+  
+  if (alertLines.length === 0) {
+    return <span className="combine-alerts-none">No alerts — all orders remain on schedule.</span>;
+  }
+  
+  // Check if single "no alerts" message
+  const noAlerts = alertLines.length === 1 && 
+    alertLines[0].toLowerCase().includes('no alerts');
+  
+  if (noAlerts) {
+    return <span className="combine-alerts-none">{alertLines[0].replace(/^[⚠\s]+/, '').trim()}</span>;
+  }
+  
+  return (
+    <div className="combine-alerts-list">
+      {alertLines.map((line, index) => {
+        const cleaned = line.replace(/^[⚠•\-\s]+/, '').trim();
+        if (!cleaned) return null;
+        
+        return (
+          <div key={index} className="combine-alert-item">
+            <span className="combine-alert-item-icon">⚠</span>
+            <span className="combine-alert-item-text">{cleaned}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+```
+
+---
+
+## 2. STYLING — ALL CARDS MATCH COMBINED PRODUCTION SUMMARY
+
+```css
+/* Base card — same for all sections */
+.combine-card {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  overflow: hidden;
+  margin: 8px 0;
+}
+
+.combine-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #1a1a1a;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.combine-card-header-sub {
+  border-bottom: none;
+  padding-top: 8px;
+}
+
+.combine-card-body {
+  padding: 8px 14px;
+}
+
+.combine-card-body-text {
+  padding: 10px 14px;
+  font-size: 12px;
+  color: #374151;
+  line-height: 1.6;
+}
+
+.combine-card-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 0;
+  font-size: 12px;
+  color: #374151;
+}
+
+.combine-card-value {
+  font-weight: 600;
+  color: #1a1a1a;
+}
+
+.combine-card-value-success {
+  color: #16a34a;
+  font-weight: 600;
+}
+
+.combine-card-divider {
+  height: 1px;
+  background: #e5e7eb;
+  margin: 0 14px;
+}
+
+/* Refresh button — matches snip */
+.combine-card-refresh {
+  background: none;
+  border: none;
+  font-size: 11px;
+  color: #6b7280;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+.combine-card-refresh:hover {
+  color: #fd5108;
+  background: #fff7ed;
+}
+
+/* Loading state */
+.combine-card-loading {
+  font-size: 12px;
+  color: #9ca3af;
+  font-style: italic;
+}
+
+/* Alerts card — subtle warning border */
+.combine-card-alerts {
+  border-color: #fde68a;
+}
+
+.combine-card-header-alerts {
+  color: #92400e;
+}
+
+/* Alerts list */
+.combine-alerts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.combine-alert-item {
+  display: flex;
+  gap: 8px;
+  padding: 8px 10px;
+  background: #fffbeb;
+  border-radius: 6px;
+  border-left: 3px solid #f59e0b;
+}
+
+.combine-alert-item-icon {
+  color: #f59e0b;
+  font-size: 14px;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.combine-alert-item-text {
+  font-size: 12px;
+  color: #92400e;
+  line-height: 1.5;
+}
+
+.combine-alerts-none {
+  font-size: 12px;
+  color: #16a34a;
+  font-style: italic;
+}
+```
+
+---
+
+## 3. REMOVE ALL EXTERNAL ALERT ELEMENTS
+
+Search the entire Smart Combine component and remove:
+
+```jsx
+{/* REMOVE — external alert cards */}
+{group.alerts && group.alerts.map((alert, index) => (
+  <div key={index} className="combine-alert-card">...</div>
+))}
+
+{/* REMOVE — external volume ceiling warning */}
+{group.combinedVolume > 200 && (
+  <div className="combine-volume-warning">...</div>
+)}
+
+{/* REMOVE — old scheduling impact box */}
+<div className="scheduling-impact-box">...</div>
+```
+
+Remove associated CSS:
+
+```css
+/* REMOVE all of these */
+.combine-alert-card { }
+.combine-volume-warning { }
+.scheduling-impact-box { }
+```
+
+---
+
+## VERIFICATION
+
+### Layout — 4 separate containers
+1. ✅ Combined Production Summary + Changeover Savings = one card
+2. ✅ Insertion Position = separate card with Refresh button
+3. ✅ Scheduling Impact = separate card with Refresh button
+4. ✅ Alerts = separate card with Refresh button
+5. ✅ All 4 cards have the same border, padding, font size, and style
+
+### Look and feel
+6. ✅ Card headers: 12px, bold, dark text, border-bottom
+7. ✅ Card body text: 12px, color #374151, line-height 1.6
+8. ✅ Refresh buttons: 11px, grey, hover orange
+9. ✅ Summary rows: label left, value right, 12px
+10. ✅ Alerts card has subtle yellow border
+
+### Alerts consolidated
+11. ✅ No external yellow alert cards below the containers
+12. ✅ No external volume ceiling warning card
+13. ✅ No external scheduling impact box
+14. ✅ All delay warnings inside Alerts card
+15. ✅ Volume ceiling warning inside Alerts card
+16. ✅ Each alert has ⚠ icon and yellow-tinted background
+17. ✅ "No alerts — all orders remain on schedule" when clean
+
+### Refresh
+18. ✅ Each AI card can be refreshed independently
+19. ✅ Refresh re-calls AI and updates only that section
+20. ✅ Loading state shows while refreshing
+
+### No leftovers
+21. ✅ No `.combine-alert-card` CSS remaining
+22. ✅ No `.combine-volume-warning` CSS remaining
+23. ✅ No `.scheduling-impact-box` CSS remaining
+24. ✅ No inline alert rendering outside the Alerts card
+```

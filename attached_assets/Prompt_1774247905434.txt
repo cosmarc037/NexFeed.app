@@ -1,0 +1,123 @@
+```
+Implement the following fixes to the NexFeed application:
+
+---
+
+## FIX 1: AUTO-SEQUENCE PREVIEW — ONLY HIGHLIGHT ACTUALLY COMBINED ORDERS
+
+The auto-sequence preview is incorrectly applying blue highlight to orders that are NOT part of a combined group. Only orders that are ACTUALLY combined in the main interactive table should have blue highlights in the preview.
+
+### THE BUG
+
+Looking at the screenshot:
+- Prio 5 (Lead), 6 (Child), 7 (Child), 8 (Child) — these ARE a combined group ✅ should be blue
+- Prio 9 (Elite XP Startex, 32 MT) — NOT combined ❌ should NOT be blue
+- Prio 10 (Gallimax Pigeon Pellet) — NOT combined ❌ should NOT be blue
+
+But Prio 9 and 10 are showing blue highlights as if they are part of the combined group.
+
+### THE FIX
+
+When rendering rows in the auto-sequence preview:
+
+```javascript
+function shouldShowBlueHighlight(order) {
+  // ONLY apply blue highlight if the order has a group_id
+  // AND is actually part of a combined group (lead or child)
+  
+  if (order.group_id && (order.is_lead || order.is_child)) {
+    return true;  // blue highlight
+  }
+  
+  return false;  // white background, no highlight
+}
+```
+
+**Check the data, not the position.** The bug is likely caused by:
+- Applying blue highlight based on ROW POSITION (e.g., "rows 5-10 are blue") instead of checking each order's actual combined group status.
+- Or a CSS class bleeding from the combined block onto the next rows.
+
+**Fix the CSS/rendering:**
+- Blue tint (#e3f2fd) should ONLY be applied to rows where `order.group_id` is not null AND `order.is_lead === true` OR `order.is_child === true`.
+- The left blue border (3px solid #1976d2) should ONLY span from the lead row to the last child row — NOT extend to rows below.
+- Ensure the CSS class for blue highlighting is applied per-row based on the order's data, not based on adjacent row styling.
+
+### CORRECT RESULT
+
+```
+Prio 1:  Gallimax 3 Maintenance    | white bg      ← standalone
+Prio 2:  Salto Conditioner         | white bg      ← standalone
+Prio 3:  Elite XP Startex 80MT     | white bg      ← standalone
+Prio 4:  Elite XP Startex 80MT     | white bg      ← standalone
+Prio 5:  [Lead]  Elite XP Startex  | blue bg       ← combined group start
+Prio 6:  [Child] Elite XP Startex  | blue bg       ← combined
+Prio 7:  [Child] Elite XP Startex  | blue bg       ← combined
+Prio 8:  [Child] Elite XP Startex  | blue bg       ← combined group end
+Prio 9:  Elite XP Startex 32MT     | white bg      ← standalone, NOT blue
+Prio 10: Gallimax Pigeon Pellet    | white bg      ← standalone, NOT blue
+Prio 11: Gall 21 Chicken Layer     | white bg      ← standalone, NOT blue
+```
+
+---
+
+## FIX 2: COMBINED ORDERS — NO INDENT, USE DARKER BLUE FOR LEAD
+
+Remove the indentation on child orders and instead use a slightly darker blue background on the lead order to differentiate it from its children. This matches the behavior in the main interactive table.
+
+### REMOVE INDENT
+
+- ❌ Remove any left indentation/padding on child order rows.
+- Child rows should be aligned exactly the same as lead rows — same left edge, same padding.
+- The Lead/Child badges are sufficient to identify roles.
+
+### LEAD ORDER — DARKER BLUE
+
+| Order Role | Background Color |
+|---|---|
+| Lead | Slightly darker blue (#d0e8fc) |
+| Child | Standard light blue (#e3f2fd) |
+| Standalone | White (#ffffff) |
+
+**Visual difference:**
+- Lead row is noticeably darker blue — easy to spot as the "parent" of the group.
+- Child rows are lighter blue — clearly part of the group but subordinate to the lead.
+- The contrast between #d0e8fc (lead) and #e3f2fd (child) is subtle but visible.
+
+### LEFT BLUE BORDER
+
+| Order Role | Left Border |
+|---|---|
+| Lead | 3px solid #1565c0 (darker blue) |
+| Child | 3px solid #1976d2 (standard blue) |
+
+The lead's left border is slightly darker to further differentiate it.
+
+### VISUAL EXAMPLE
+
+```
+┌─ darker blue bg (#d0e8fc) ──────────────────────────────────┐
+│ ┃ Prio 5: [Lead]  Elite XP Startex | 40 MT | safety stocks  │  ← darker blue, darker border
+├─ light blue bg (#e3f2fd) ───────────────────────────────────┤
+│ ┃ Prio 6: [Child] Elite XP Startex | 20 MT | safety stocks  │  ← lighter blue
+├─ light blue bg (#e3f2fd) ───────────────────────────────────┤
+│ ┃ Prio 7: [Child] Elite XP Startex | 12 MT | safety stocks  │  ← lighter blue
+├─ light blue bg (#e3f2fd) ───────────────────────────────────┤
+│ ┃ Prio 8: [Child] Elite XP Startex | 8 MT  | safety stocks  │  ← lighter blue
+└──────────────────────────────────────────────────────────────┘
+┌─ white bg ──────────────────────────────────────────────────┐
+│   Prio 9:  Elite XP Startex | 32 MT | safety stocks         │  ← standalone, white
+└──────────────────────────────────────────────────────────────┘
+```
+
+### APPLY TO BOTH TABLES
+
+This lead = darker blue / child = lighter blue styling applies to:
+
+| Table | Apply? |
+|---|---|
+| Main interactive order table | ✅ Yes |
+| Auto-Sequence preview table | ✅ Yes |
+| Order History tables | ✅ Yes (if combined orders appear there) |
+
+**Ensure consistency** — the combined order styling should look IDENTICAL in the main table and the auto-sequence preview.
+```

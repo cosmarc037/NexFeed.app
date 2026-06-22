@@ -1,0 +1,82 @@
+```
+Implement the following change to the NexFeed application:
+
+---
+
+## FIX: TOAST NOTIFICATIONS — EXTEND AUTO-DISMISS TIMER
+
+Toast notifications are auto-closing too quickly, potentially before the user finishes reading. Extend the timer significantly and ensure users always have time to read.
+
+---
+
+### UPDATED AUTO-DISMISS TIMERS
+
+| Toast Type | Current Timer | Updated Timer |
+|---|---|---|
+| Success (green) — short message | ~3-4 seconds | 30 seconds |
+| Success (green) — long message (like SAP upload summary) | ~6 seconds | 60 seconds |
+| Warning (amber) — date violation, readiness, etc. | ~5-6 seconds | 60 seconds |
+| Error (red) | ~5 seconds | 60 seconds |
+| Info (blue) | ~4 seconds | 30 seconds |
+| Re-sort notification | ~4 seconds | 30 seconds |
+
+### SIMPLE RULE
+
+| Message Length | Auto-dismiss |
+|---|---|
+| Short (1-2 lines) | 30 seconds |
+| Medium (3-5 lines) | 60 seconds |
+| Long (6+ lines, lists, structured content) | 60 seconds |
+| Any warning or error | 60 seconds |
+
+---
+
+### CLOSE BUTTON ALWAYS AVAILABLE
+
+Every toast notification ALWAYS has a close (×) button in the top-right corner so the user can dismiss it manually at any time — before or after the timer.
+
+| Property | Value |
+|---|---|
+| Close button | × icon, top-right corner |
+| Close button color | Grey (#9ca3af) |
+| Close button hover | Dark grey (#374151) |
+| Close button size | 14px |
+| Cursor | Pointer |
+| Click | Immediately dismisses the toast |
+
+---
+
+### PAUSE TIMER ON HOVER
+
+When the user hovers their mouse over the toast notification, the auto-dismiss timer PAUSES. This ensures:
+
+- If the user is actively reading, the toast won't disappear.
+- When the mouse leaves the toast, the timer resumes from where it paused.
+- This is a safety net on top of the longer timers.
+
+```javascript
+// Pseudocode
+toast.onMouseEnter = () => {
+  pauseTimer();
+};
+
+toast.onMouseLeave = () => {
+  resumeTimer();
+};
+```
+
+---
+
+### APPLY TO ALL TOAST NOTIFICATIONS
+
+This applies to EVERY toast notification in the app:
+
+- SAP upload complete
+- Date violation warnings
+- Order re-sort notifications
+- Readiness warnings
+- Cut/combine/merge confirmations
+- Auto-sequence applied
+- File upload success/error
+- Any other toast in the app
+```

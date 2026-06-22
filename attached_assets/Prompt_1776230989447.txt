@@ -1,0 +1,597 @@
+```
+Fix two issues:
+1. AI insights should be generated once and cached — not regenerated when switching tabs
+2. Queue time calculation should use TOTAL MT on the line BEFORE the order is placed, not the order's own MT
+
+---
+
+## FIX 1: CACHE AI INSIGHTS — ONE-TIME GENERATION
+
+```jsx
+function PlantAutoSequencePreview({
+  originalSnapshot,
+  sequencedResults,
+  summaryStats,
+  placementLog,
+  allLines,
+  onApply,
+  onCancel,
+  onReanalyze,
+  onResetToOriginal
+}) {
+  const [activeTab, setActiveTab] = useState('summary');
+  
+  // AI insights generated ONCE and cached at the top level
+  const [aiExplanations, setAiExplanations] = useState(null);
+  const [isLoadingAI, setIsLoadingAI] = useState(true);
+  const [useFallback, setUseFallback] = useState(false);
+  
+  // Generate AI explanations ONCE on mount
+  useEffect(() => {
+    generateExplanations();
+  }, []); // Empty dependency — only on mount
+  
+  async function generateExplanations() {
+    setIsLoadingAI(true);
+    
+    if (placementLog.length === 0) {
+      setIsLoadingAI(false);
+      return;
+    }
+    
+    try {
+      const prompt = buildActionsPrompt(placementLog);
+      const response = await callAI(prompt);
+      const parsed = parseActionsResponse(response, placementLog);
+      
+      const coveredCount = Object.keys(parsed).length;
+      if (coveredCount >= placementLog.length * 0.5) {
+        setAiExplanations(parsed);
+      } else {
+        setUseFallback(true);
+      }
+    } catch (error) {
+      console.error('AI actions explanation failed:', error);
+      setUseFallback(true);
+    }
+    
+    setIsLoadingAI(false);
+  }
+  
+  async function handleRefreshInsights() {
+    setAiExplanations(null);
+    setUseFallback(false);
+    await generateExplanations();
+  }
+  
+  const activeLines = allLines.filter(line =>
+    (originalSnapshot[line]?.length || 0) > 0 ||
+    (sequencedResults[line]?.length || 0) > 0
+  );
+  
+  return (
+    <div className="auto-sequence-overlay">
+      <div className="auto-sequence-modal">
+        {/* Header */}
+        <div className="auto-sequence-header">
+          <div>
+            <h2>✨ Plant-Level Auto-Sequence</h2>
+            <span className="auto-sequence-subtitle">Cross-line combine & optimize — all feedmills, all lines</span>
+          </div>
+          <button className="auto-sequence-close" onClick={onCancel}>✕</button>
+        </div>
+        
+        {/* Stats */}
+        <div className="auto-sequence-stats">
+          {/* ... existing stats ... */}
+        </div>
+        
+        {/* Tabs */}
+        <div className="plant-preview-tabs">
+          <button
+            className={`plant-preview-tab ${activeTab === 'summary' ? 'active' : ''}`}
+            onClick={() => setActiveTab('summary')}
+          >
+            📊 All Lines Summary
+          </button>
+          {activeLines.map(line => (
+            <button
+              key={line}
+              className={`plant-preview-tab ${activeTab === line ? 'active' : ''}`}
+              onClick={() => setActiveTab(line)}
+            >
+              {line}
+            </button>
+          ))}
+        </div>
+        
+        {/* Tab Content */}
+        <div className="plant-preview-content">
+          {activeTab === 'summary' && (
+            <PlantSummaryTab
+              summaryStats={summaryStats}
+              placementLog={placementLog}
+              aiExplanations={aiExplanations}
+              isLoadingAI={isLoadingAI}
+              useFallback={useFallback}
+              onRefreshInsights={handleRefreshInsights}
+            />
+          )}
+          
+          {activeTab !== 'summary' && (
+            <PlantLineTab
+              line={activeTab}
+              originalOrders={originalSnapshot[activeTab] || []}
+              sequencedOrders={sequencedResults[activeTab] || []}
+            />
+          )}
+        </div>
+        
+        {/* Footer */}
+        <div className="auto-sequence-footer">
+          {/* ... existing footer ... */}
+        </div>
+      </div>
+    </div>
+  );
+}
+```
+
+### UPDATE PlantActionsTaken — RECEIVE CACHED DATA
+
+```jsx
+function PlantActionsTaken({ placementLog, aiExplanations, isLoadingAI, useFallback, onRefreshInsights }) {
+  // No longer generates its own AI — receives cached data from parent
+  
+  if (placementLog.length === 0) {
+    return (
+      <div className="plant-actions-section">
+        <div className="plant-actions-header">
+          <h3 className="plant-summary-title">📋 Actions Taken</h3>
+        </div>
+        <div className="plant-actions-empty">No actions taken — all orders remain on their original lines.</div>
+      </div>
+    );
+  }
+  
+  return (
+    <div className="plant-actions-section">
+      <div className="plant-actions-header">
+        <h3 className="plant-summary-title">📋 Actions Taken</h3>
+        <button className="plant-actions-refresh" onClick={onRefreshInsights}>
+          ↻ Refresh
+        </button>
+      </div>
+      
+      {isLoadingAI && (
+        <div className="plant-actions-loading">Analyzing actions...</div>
+      )}
+      
+      {!isLoadingAI && placementLog.map((entry, index) => {
+        const explanation = (!useFallback && aiExplanations && aiExplanations[index])
+          ? aiExplanations[index]
+          : generateFallbackExplanation(entry);
+        
+        return (
+          <div key={index} className="plant-action-card">
+            <div className="plant-action-header">
+              {/* ... existing header ... */}
+            </div>
+            <div className="plant-action-explanation">
+              {explanation}
+            </div>
+            {/* ... existing sub-orders ... */}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+```
+
+### UPDATE PlantSummaryTab — PASS THROUGH CACHED DATA
+
+```jsx
+function PlantSummaryTab({ summaryStats, placementLog, aiExplanations, isLoadingAI, useFallback, onRefreshInsights }) {
+  return (
+    <div className="plant-summary-tab">
+      {/* Per-line summary table */}
+      <div className="plant-summary-section">
+        <h3 className="plant-summary-title">📊 Per-Line Summary</h3>
+        {/* ... existing summary table ... */}
+      </div>
+      
+      {/* Actions Taken — receives cached AI data */}
+      <PlantActionsTaken
+        placementLog={placementLog}
+        aiExplanations={aiExplanations}
+        isLoadingAI={isLoadingAI}
+        useFallback={useFallback}
+        onRefreshInsights={onRefreshInsights}
+      />
+    </div>
+  );
+}
+```
+
+---
+
+## FIX 2: QUEUE TIME — USE TOTAL LINE MT BEFORE PLACEMENT
+
+The queue time must reflect the TOTAL MT already on the line BEFORE the current order is placed, not the order's own volume.
+
+```javascript
+function plantLevelCombineAndPlace(allOrders, masterData, n10dData, allLines) {
+  let workingOrders = allOrders
+    .filter(o => o.status !== 'Done' && o.status !== 'Cancel PO')
+    .map(o => ({ ...JSON.parse(JSON.stringify(o)), _originalLine: o.line, _movedFromLine: null }));
+  
+  // Track current MT per line — this is the running total
+  const lineTotalMT = {};
+  allLines.forEach(line => {
+    const lineOrders = workingOrders.filter(o => o.line === line);
+    lineTotalMT[line] = lineOrders.reduce((sum, o) => sum + (parseFloat(o.volume) || 0), 0);
+  });
+  
+  // Track orders per line
+  const lineOrdersMap = {};
+  allLines.forEach(line => {
+    lineOrdersMap[line] = workingOrders
+      .filter(o => o.line === line)
+      .sort((a, b) => a.prio - b.prio);
+  });
+  
+  // ... Step 1: Sort dated orders first ...
+  // ... Step 2: Group by Material Code + Formula Version ...
+  // ... Separate matched and non-matched ...
+  
+  const combinedOrders = [];
+  const placementLog = [];
+  const processedOrderIds = new Set();
+  
+  // Step 3: Process matched groups
+  Object.entries(matchedGroups).forEach(([key, orders]) => {
+    const eligibleLines = allLines.filter(line =>
+      canProduceOnLine(orders[0], line, masterData)
+    );
+    
+    if (eligibleLines.length === 0) {
+      orders.forEach(o => processedOrderIds.add(o.id));
+      return;
+    }
+    
+    // Sort orders by volume descending for greedy combine
+    const sortedByVolume = [...orders].sort((a, b) =>
+      (parseFloat(b.volume) || 0) - (parseFloat(a.volume) || 0)
+    );
+    
+    // Greedy combine up to 180 MT
+    const combineGroups = [];
+    const remaining = [...sortedByVolume];
+    
+    while (remaining.length > 0) {
+      const group = [remaining.shift()];
+      let groupVolume = parseFloat(group[0].volume) || 0;
+      
+      for (let i = remaining.length - 1; i >= 0; i--) {
+        const candidateVolume = parseFloat(remaining[i].volume) || 0;
+        if (groupVolume + candidateVolume <= MAX_COMBINE_MT) {
+          groupVolume += candidateVolume;
+          group.push(remaining.splice(i, 1)[0]);
+        }
+      }
+      
+      combineGroups.push({ orders: group, totalVolume: groupVolume });
+    }
+    
+    // Place each combine group on the best line
+    combineGroups.forEach(combineGroup => {
+      // IMPORTANT: Calculate queue time using CURRENT total MT on each line
+      // This is the total MT BEFORE this order is placed
+      const lineScores = eligibleLines.map(line => {
+        const currentTotalMT = lineTotalMT[line] || 0;
+        const runRate = getLineRunRate(line);
+        const queueTime = runRate > 0 ? currentTotalMT / runRate : Infinity;
+        const lineNumber = parseInt(line.match(/\d+/)?.[0] || '99');
+        
+        return { 
+          line, 
+          runRate, 
+          totalMTBefore: currentTotalMT, 
+          queueTimeBefore: queueTime, 
+          lineNumber 
+        };
+      });
+      
+      // Sort: lowest queue time, then lowest line number
+      lineScores.sort((a, b) => {
+        if (Math.abs(a.queueTimeBefore - b.queueTimeBefore) > 0.01) return a.queueTimeBefore - b.queueTimeBefore;
+        return a.lineNumber - b.lineNumber;
+      });
+      
+      const bestLine = lineScores[0].line;
+      
+      if (combineGroup.orders.length === 1) {
+        // Single order — just place on best line
+        const order = combineGroup.orders[0];
+        const orderVolume = parseFloat(order.volume) || 0;
+        
+        // Remove volume from original line
+        if (order.line !== bestLine) {
+          lineTotalMT[order.line] = (lineTotalMT[order.line] || 0) - orderVolume;
+          order._movedFromLine = order.line;
+          order.line = bestLine;
+        }
+        
+        // Volume stays on best line (it was already counted if same line)
+        // If moved, add to new line
+        if (order._movedFromLine) {
+          lineTotalMT[bestLine] = (lineTotalMT[bestLine] || 0) + orderVolume;
+          
+          lineOrdersMap[order._movedFromLine] = lineOrdersMap[order._movedFromLine]
+            .filter(o => o.id !== order.id);
+          lineOrdersMap[bestLine].push(order);
+        }
+        
+        processedOrderIds.add(order.id);
+        
+        // Log with AFTER values
+        const afterTotalMT = lineTotalMT[bestLine] || 0;
+        const afterQueueTime = afterTotalMT / getLineRunRate(bestLine);
+        
+        placementLog.push({
+          type: order._movedFromLine ? 'moved' : 'placed',
+          product: order.item_description,
+          materialCode: order.material_code_fg,
+          fromLine: order._movedFromLine,
+          toLine: bestLine,
+          volume: orderVolume,
+          fpr: order.fpr,
+          lineScores: lineScores.map(ls => ({
+            line: ls.line,
+            runRate: ls.runRate,
+            totalMTBefore: ls.totalMTBefore,
+            queueTimeBefore: ls.queueTimeBefore,
+            totalMTAfter: ls.line === bestLine ? afterTotalMT : ls.totalMTBefore,
+            queueTimeAfter: ls.line === bestLine ? afterQueueTime : ls.queueTimeBefore
+          })),
+          bestLineReason: {
+            line: bestLine,
+            runRate: lineScores[0].runRate,
+            queueTime: lineScores[0].queueTimeBefore,
+            totalMTBefore: lineScores[0].totalMTBefore
+          },
+          fromLineReason: order._movedFromLine ? {
+            line: order._movedFromLine,
+            queueTime: lineScores.find(ls => ls.line === order._movedFromLine)?.queueTimeBefore || 0,
+            runRate: getLineRunRate(order._movedFromLine)
+          } : null
+        });
+        
+      } else {
+        // Multiple orders — combine
+        const baseOrder = { ...combineGroup.orders[0] };
+        const combinedVolume = combineGroup.totalVolume;
+        
+        // Determine avail date
+        const datedInGroup = combineGroup.orders.filter(o => {
+          const avail = o.target_avail_date;
+          return avail && /^\d{4}-\d{2}-\d{2}/.test(avail) && !isNaN(Date.parse(avail));
+        }).sort((a, b) => new Date(a.target_avail_date) - new Date(b.target_avail_date));
+        
+        if (datedInGroup.length > 0) {
+          baseOrder.target_avail_date = datedInGroup[0].target_avail_date;
+        }
+        
+        // Remove all original orders' volumes from their original lines
+        combineGroup.orders.forEach(o => {
+          const origLine = o._originalLine;
+          const vol = parseFloat(o.volume) || 0;
+          lineTotalMT[origLine] = (lineTotalMT[origLine] || 0) - vol;
+          
+          processedOrderIds.add(o.id);
+          if (lineOrdersMap[origLine]) {
+            lineOrdersMap[origLine] = lineOrdersMap[origLine].filter(lo => lo.id !== o.id);
+          }
+        });
+        
+        // Add combined volume to best line
+        lineTotalMT[bestLine] = (lineTotalMT[bestLine] || 0) + combinedVolume;
+        
+        baseOrder.volume = combinedVolume;
+        baseOrder.line = bestLine;
+        baseOrder._isCombined = true;
+        baseOrder._combinedFrom = combineGroup.orders.map(o => ({
+          id: o.id,
+          line: o._originalLine,
+          fpr: o.fpr,
+          volume: o.volume,
+          item_description: o.item_description,
+          form: o.form,
+          material_code_fg: o.material_code_fg,
+          planned_order_fg: o.planned_order_fg,
+          planned_order_sfg: o.planned_order_sfg,
+          batch_size: o.batch_size,
+          batches: o.batches,
+          production_time: o.production_time,
+          target_avail_date: o.target_avail_date,
+          category: o.category
+        }));
+        baseOrder._movedFromLine = baseOrder._originalLine !== bestLine ? baseOrder._originalLine : null;
+        baseOrder._combinedFromLines = [...new Set(combineGroup.orders.map(o => o._originalLine))];
+        
+        // Recalculate batches, production time
+        const batchSize = parseFloat(baseOrder.batch_size) || 1;
+        baseOrder.batches = Math.ceil(combinedVolume / batchSize);
+        const fgWeight = parseFloat(baseOrder.fg_weight) || 1;
+        baseOrder.bags = baseOrder.batches * fgWeight * 20;
+        const runRate = parseFloat(baseOrder.run_rate) || 0;
+        baseOrder.production_time = runRate > 0 ? (combinedVolume / runRate).toFixed(2) : '0.00';
+        
+        lineOrdersMap[bestLine].push(baseOrder);
+        combinedOrders.push(baseOrder);
+        
+        // Log with correct before/after values
+        const afterTotalMT = lineTotalMT[bestLine] || 0;
+        const afterQueueTime = afterTotalMT / getLineRunRate(bestLine);
+        
+        const changeoversSaved = combineGroup.orders.length - 1;
+        const baseChangeover = getBaseChangeover(baseOrder.form, getDefaultChangeoverRules()?.baseChangeover);
+        
+        placementLog.push({
+          type: 'combined',
+          product: baseOrder.item_description,
+          materialCode: baseOrder.material_code_fg,
+          ordersCount: combineGroup.orders.length,
+          fromLines: [...new Set(combineGroup.orders.map(o => o._originalLine))],
+          toLine: bestLine,
+          totalVolume: combinedVolume,
+          individualVolumes: combineGroup.orders.map(o => ({
+            name: o.item_description,
+            volume: parseFloat(o.volume) || 0,
+            fromLine: o._originalLine,
+            fpr: o.fpr
+          })),
+          lineScores: lineScores.map(ls => ({
+            line: ls.line,
+            runRate: ls.runRate,
+            totalMTBefore: ls.totalMTBefore,
+            queueTimeBefore: ls.queueTimeBefore,
+            totalMTAfter: ls.line === bestLine ? afterTotalMT : ls.totalMTBefore,
+            queueTimeAfter: ls.line === bestLine ? afterQueueTime : ls.queueTimeBefore
+          })),
+          bestLineReason: {
+            line: bestLine,
+            runRate: lineScores[0].runRate,
+            queueTime: lineScores[0].queueTimeBefore,
+            totalMTBefore: lineScores[0].totalMTBefore,
+            totalMTAfter: afterTotalMT,
+            queueTimeAfter: afterQueueTime
+          },
+          changeoversSaved: changeoversSaved,
+          baseChangeover: baseChangeover,
+          timeSaved: changeoversSaved * baseChangeover
+        });
+      }
+    });
+  });
+  
+  // Step 4: Process non-matched orders — same fix
+  nonMatchedOrders.forEach(order => {
+    if (processedOrderIds.has(order.id)) return;
+    
+    const eligibleLines = allLines.filter(line =>
+      canProduceOnLine(order, line, masterData)
+    );
+    
+    if (eligibleLines.length === 0) {
+      processedOrderIds.add(order.id);
+      return;
+    }
+    
+    // Queue time using CURRENT total MT on line
+    const lineScores = eligibleLines.map(line => {
+      const currentTotalMT = lineTotalMT[line] || 0;
+      const runRate = getLineRunRate(line);
+      const queueTime = runRate > 0 ? currentTotalMT / runRate : Infinity;
+      const lineNumber = parseInt(line.match(/\d+/)?.[0] || '99');
+      
+      return { line, runRate, totalMTBefore: currentTotalMT, queueTimeBefore: queueTime, lineNumber };
+    });
+    
+    lineScores.sort((a, b) => {
+      if (Math.abs(a.queueTimeBefore - b.queueTimeBefore) > 0.01) return a.queueTimeBefore - b.queueTimeBefore;
+      return a.lineNumber - b.lineNumber;
+    });
+    
+    const bestLine = lineScores[0].line;
+    const orderVolume = parseFloat(order.volume) || 0;
+    
+    if (order.line !== bestLine) {
+      // Remove from original line
+      lineTotalMT[order.line] = (lineTotalMT[order.line] || 0) - orderVolume;
+      lineOrdersMap[order.line] = lineOrdersMap[order.line].filter(o => o.id !== order.id);
+      
+      order._movedFromLine = order.line;
+      order.line = bestLine;
+      
+      // Add to best line
+      lineTotalMT[bestLine] = (lineTotalMT[bestLine] || 0) + orderVolume;
+      lineOrdersMap[bestLine].push(order);
+      
+      const afterTotalMT = lineTotalMT[bestLine] || 0;
+      const afterQueueTime = afterTotalMT / getLineRunRate(bestLine);
+      
+      placementLog.push({
+        type: 'moved',
+        product: order.item_description,
+        materialCode: order.material_code_fg,
+        fromLine: order._movedFromLine,
+        toLine: bestLine,
+        volume: orderVolume,
+        fpr: order.fpr,
+        lineScores: lineScores.map(ls => ({
+          line: ls.line,
+          runRate: ls.runRate,
+          totalMTBefore: ls.totalMTBefore,
+          queueTimeBefore: ls.queueTimeBefore,
+          totalMTAfter: ls.line === bestLine ? afterTotalMT : ls.totalMTBefore,
+          queueTimeAfter: ls.line === bestLine ? afterQueueTime : ls.queueTimeBefore
+        })),
+        bestLineReason: {
+          line: bestLine,
+          runRate: lineScores[0].runRate,
+          queueTime: lineScores[0].queueTimeBefore,
+          totalMTBefore: lineScores[0].totalMTBefore
+        },
+        fromLineReason: {
+          line: order._movedFromLine,
+          queueTime: lineScores.find(ls => ls.line === order._movedFromLine)?.queueTimeBefore || 0,
+          runRate: getLineRunRate(order._movedFromLine)
+        }
+      });
+    }
+    
+    processedOrderIds.add(order.id);
+  });
+  
+  return { lineOrdersMap, combinedOrders, placementLog };
+}
+```
+
+---
+
+## VERIFICATION
+
+### AI insights cached
+1. ✅ Generated once on preview mount
+2. ✅ Switching between line tabs does NOT regenerate
+3. ✅ Switching back to "All Lines Summary" shows same insights instantly
+4. ✅ Only regenerates when user clicks "Refresh"
+5. ✅ AI state held at parent level, passed down as props
+
+### Queue time uses TOTAL line MT
+6. ✅ Queue time = Total MT already on line ÷ Line run rate
+7. ✅ NOT the order's own MT
+8. ✅ Example: Line 1 has orders 3 MT + 5 MT + 2 MT = 10 MT total → 10 ÷ 20 = 0.5 hrs
+9. ✅ Example: Line 3 has 400 MT → 400 ÷ 10 = 40 hrs
+
+### Running total updates after each placement
+10. ✅ lineTotalMT tracks current MT per line
+11. ✅ When order moved FROM a line → MT subtracted from original line
+12. ✅ When order placed ON a line → MT added to destination line
+13. ✅ When orders combined → all original volumes subtracted, combined volume added
+14. ✅ Next placement uses UPDATED totals
+
+### Placement log stores correct values
+15. ✅ totalMTBefore = total MT on line BEFORE this action
+16. ✅ queueTimeBefore = totalMTBefore ÷ runRate
+17. ✅ totalMTAfter = total MT on line AFTER this action
+18. ✅ queueTimeAfter = totalMTAfter ÷ runRate
+19. ✅ AI prompt and fallback show correct before/after numbers
+
+### No more 0.00 hrs queue time (unless line truly has 0 MT)
+20. ✅ First placement: queue time reflects existing orders on line
+21. ✅ Second placement: queue time includes first placement's volume
+22. ✅ Each subsequent placement sees accumulated volume
+```

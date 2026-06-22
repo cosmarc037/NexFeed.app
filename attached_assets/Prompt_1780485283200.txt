@@ -1,0 +1,220 @@
+Please investigate and fix the **sequence inconsistency issues** in the auto-sequence preview. The current output appears internally inconsistent because the visible row order, avail dates, estimated completion dates, protected-order logic, and sequence explanations are not all telling the same story.
+
+---
+
+## 1. MAKE SURE THE FINAL PREVIEW IS DRIVEN BY ONE CLEAR ORDERING BASIS
+
+The current sequence preview appears to be mixing multiple ordering influences without resolving them into one coherent final order.
+
+### Possible influences currently competing
+- AI rank
+- avail-date chronology
+- protected / pinned orders
+- grouping / changeover optimization
+- completion-feasibility logic
+- combined / moved entities
+
+### Goal
+The preview should represent one final resolved sequence, not a mixture of partially competing orderings.
+
+### Expected result
+The visible row order should reflect one clear final sequencing basis that is internally consistent.
+
+---
+
+## 2. FIX CASES WHERE AVAIL DATES DO NOT ALIGN WITH THE VISIBLE SEQUENCE
+
+There are cases where the visible row order does not appear to align cleanly with avail-date logic.
+
+### Current problem
+Rows with earlier avail dates may appear below rows with later avail dates in ways that are hard to justify from the final sequence.
+
+### Goal
+Ensure the final sequence either:
+- clearly follows chronological avail-date logic
+or
+- clearly explains why a different order is being used
+
+### Expected result
+The final table should no longer look inconsistent with its own avail-date assignments.
+
+---
+
+## 3. MAKE SURE ESTIMATED COMPLETION DATES MATCH THE SAME VISIBLE EXECUTION ORDER
+
+The estimated completion dates/times may not be aligning with the visible row sequence.
+
+### Current problem
+Some rows appear lower in the table even though their completion timing suggests a different internal execution order.
+
+### Goal
+The row order shown in the preview should match the same order used to compute estimated completion.
+
+### Expected result
+The visible row order and the estimated completion times should be based on the same final sequence.
+
+---
+
+## 4. REVIEW WHETHER TOO MANY ORDERS ARE BEING PROTECTED / PINNED
+
+The preview contains many notes such as:
+- protected critical order
+- protected urgent order
+- protected MTO order
+- protected monitor order
+
+### Concern
+If too many orders are being frozen/pinned, the AI may have too little flexibility and the resulting sequence may appear irrational or heavily constrained.
+
+### Goal
+Review whether protection logic is too broad or being applied more aggressively than intended.
+
+### Expected result
+Only the truly necessary orders should be protected, so the AI still has enough freedom to produce a meaningful sequence.
+
+---
+
+## 5. MAKE THE `SEQUENCE INSIGHT` TEXT MATCH THE ACTUAL FINAL PLACEMENT
+
+There are cases where the Sequence Insight text sounds reasonable in isolation, but does not seem to fully match the visible row placement.
+
+### Current problem
+The explanation text may be based on one internal interpretation while the displayed row order reflects another.
+
+### Goal
+Ensure that the explanation/insight shown for each row is generated from the same final resolved sequence the user is seeing.
+
+### Expected result
+The sequence insight should accurately explain the row’s actual final placement.
+
+---
+
+## 6. CLEANLY RE-INTEGRATE COMBINED / MOVED / CROSS-LINE ENTITIES INTO THE FINAL PREVIEW
+
+The preview includes:
+- newly combined entities
+- orders moved from other lines
+- repositioned rows
+
+### Concern
+These transformations may be distorting the visible final order if the table is not being fully normalized afterward.
+
+### Goal
+Make sure combined and moved entities are re-integrated cleanly into one coherent final sequence before rendering.
+
+### Expected result
+The final preview should look like one clean sequence, not a mixed transitional state.
+
+---
+
+## 7. HANDLE MISSING RATE / PRODUCTION-TIME DATA CONSISTENTLY DURING SEQUENCING
+
+Some rows show missing production-time basis such as:
+- `Production Time = —`
+- `Rate = —`
+
+### Concern
+If the AI is sequencing rows with incomplete production-time inputs, the resulting order may be less reliable or inconsistent.
+
+### Goal
+Review how orders with missing rate / missing production time are treated during sequencing and make sure they do not distort the final order unexpectedly.
+
+### Expected result
+Missing rate/time data should be handled consistently and transparently.
+
+---
+
+## 8. MAKE SURE THE FINAL TABLE, DATES, COMPLETION TIMES, AND INSIGHTS ALL SHARE THE SAME SOURCE OF TRUTH
+
+The main issue appears to be that multiple outputs are not aligned:
+- visible row order
+- avail dates
+- estimated completion times
+- protected status
+- sequence insight text
+
+### Goal
+All of these should come from the same final resolved schedule result.
+
+### Expected result
+The preview should tell one coherent story:
+- why this row is here
+- what date it has
+- when it completes
+- why it moved or stayed
+
+---
+
+## IMPORTANT
+
+Please investigate the sequence preview for internal inconsistency.
+
+Right now, it appears that:
+- rows are not always ordered by one clear final rule
+- avail dates and row placement do not always align
+- completion times may not match the same visible sequence
+- explanation text may not reflect the actual final row order
+- protected orders may be constraining too much of the lineup
+- combined/moved entities may not be fully normalized into the final sequence
+
+Please make the final preview internally consistent so the visible order, dates, timings, and explanations all reflect the same final resolved schedule.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log the final resolved sequence basis and consistency checks.
+
+```javascript
+console.debug('[Auto-Sequence Final Resolved Order]', {
+  strategyId,
+  finalEntityOrder: finalRows?.map(r => r.entityId || r.orderId),
+  finalAvailDates: finalRows?.map(r => r.availDate),
+  finalCompletionTimes: finalRows?.map(r => r.estimatedCompletion),
+});
+```
+
+```javascript
+console.debug('[Auto-Sequence Row Consistency Check]', {
+  entityId,
+  visibleRowIndex,
+  finalRank,
+  availDate,
+  estimatedCompletion,
+  protectedStatus,
+  sequenceInsight,
+});
+```
+
+```javascript
+console.debug('[Auto-Sequence Protection Review]', {
+  strategyId,
+  protectedOrders: finalRows?.filter(r => r.isProtected)?.map(r => ({
+    entityId: r.entityId || r.orderId,
+    reason: r.protectionReason,
+  })),
+});
+```
+
+```javascript
+console.debug('[Auto-Sequence Combined/Moved Entity Normalization]', {
+  strategyId,
+  combinedEntities,
+  movedEntities,
+  normalizedIntoFinalSequence: true,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Final preview is driven by one clear resolved sequence
+2. ✅ Avail dates align with the visible sequence or are clearly justified
+3. ✅ Estimated completion times match the same visible execution order
+4. ✅ Protected-order logic is reviewed for over-constraint
+5. ✅ Sequence Insight text matches actual final row placement
+6. ✅ Combined/moved entities are normalized cleanly into the final preview
+7. ✅ Missing rate/time data is handled consistently
+8. ✅ The preview becomes internally coherent and easier to trust
+9. ✅ No UI errors or console errors are introduced

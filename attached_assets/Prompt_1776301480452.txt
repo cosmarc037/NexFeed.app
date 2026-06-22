@@ -1,0 +1,198 @@
+```
+Add a downloadable Excel template for Future Dispatches:
+
+---
+
+## 1. TEMPLATE GENERATOR FUNCTION
+
+```javascript
+function downloadFutureDispatchesTemplate() {
+  // Generate the next 10 days starting from today
+  const today = new Date();
+  const dayColumns = [];
+  
+  for (let i = 0; i < 11; i++) {
+    const date = new Date(today);
+    date.setDate(today.getDate() + i);
+    
+    // Format as "Mon-DD" (e.g., "Apr-13")
+    const monthShort = date.toLocaleDateString('en-US', { month: 'short' });
+    const day = date.getDate().toString().padStart(2, '0');
+    dayColumns.push(`${monthShort}-${day}`);
+  }
+  
+  // Build headers
+  const headers = [
+    'Material Code',
+    'Category',
+    'Item Description',
+    'Due for Loading',
+    ...dayColumns,
+    'Inventory',
+    'Bal. to Produce'
+  ];
+  
+  // Sample data rows
+  const sampleData = [
+    [
+      '1000000000594',
+      'Gamefowl',
+      'Gall 21 Chicken Layer P (Breeder) 50Kg',
+      24.00,
+      ...generateSampleDailyValues(11, 'high'),
+      0.70,
+      23.30
+    ],
+    [
+      '1000000000219',
+      'Gamefowl',
+      'Gallimax 3 Maintenance (Natural) P, 50Kg',
+      46.30,
+      ...generateSampleDailyValues(11, 'medium'),
+      74.90,
+      0.00
+    ],
+    [
+      '1000000000241',
+      'Swine',
+      'Elite XP Startex, Mini-pellet 50kg',
+      12.50,
+      ...generateSampleDailyValues(11, 'low'),
+      85.20,
+      0.00
+    ],
+    [
+      '1000000000546',
+      'Gamefowl',
+      'Salto Conditioner P 1kg (Bundle)',
+      8.00,
+      ...generateSampleDailyValues(11, 'medium'),
+      15.30,
+      0.00
+    ],
+    [
+      '1000000000934',
+      'Gamefowl',
+      'Gallimax Pigeon Pellet, 50kg',
+      5.60,
+      ...generateSampleDailyValues(11, 'low'),
+      42.10,
+      0.00
+    ]
+  ];
+  
+  // Create workbook
+  const wb = XLSX.utils.book_new();
+  
+  // Combine headers and data
+  const wsData = [headers, ...sampleData];
+  const ws = XLSX.utils.aoa_to_sheet(wsData);
+  
+  // Set column widths
+  ws['!cols'] = [
+    { wch: 18 },  // Material Code
+    { wch: 12 },  // Category
+    { wch: 42 },  // Item Description
+    { wch: 14 },  // Due for Loading
+    ...dayColumns.map(() => ({ wch: 8 })),  // Day columns
+    { wch: 12 },  // Inventory
+    { wch: 14 },  // Bal. to Produce
+  ];
+  
+  XLSX.utils.book_append_sheet(wb, ws, 'Future Dispatches');
+  
+  // Generate filename with date
+  const dateStr = today.toISOString().split('T')[0];
+  XLSX.writeFile(wb, `Future_Dispatches_Template_${dateStr}.xlsx`);
+}
+
+function generateSampleDailyValues(count, level) {
+  const values = [];
+  for (let i = 0; i < count; i++) {
+    if (level === 'high') {
+      values.push(parseFloat((Math.random() * 4 + 1).toFixed(2)));
+    } else if (level === 'medium') {
+      values.push(parseFloat((Math.random() * 3).toFixed(2)));
+    } else {
+      values.push(parseFloat((Math.random() * 1.5).toFixed(2)));
+    }
+  }
+  return values;
+}
+```
+
+---
+
+## 2. ADD DOWNLOAD LINK BELOW UPLOAD AREA
+
+```jsx
+{/* In the Future Dispatches page — below the upload area */}
+<div className="fd-upload-section">
+  {/* Existing upload area */}
+  <div className="fd-upload-area">
+    {/* ... existing upload dropzone / button ... */}
+  </div>
+  
+  {/* Download template link — same style as master data */}
+  <div className="fd-template-link">
+    <a 
+      href="#" 
+      onClick={(e) => {
+        e.preventDefault();
+        downloadFutureDispatchesTemplate();
+      }}
+      className="fd-download-template"
+    >
+      Download Template
+    </a>
+  </div>
+</div>
+```
+
+---
+
+## 3. STYLING — MATCH MASTER DATA TEMPLATE LINK
+
+```css
+.fd-template-link {
+  margin-top: 8px;
+  text-align: center;
+}
+
+.fd-download-template {
+  font-size: 12px;
+  color: #ea580c;
+  text-decoration: none;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.fd-download-template:hover {
+  text-decoration: underline;
+  color: #c2410c;
+}
+```
+
+---
+
+## VERIFICATION
+
+### Template content
+1. ✅ Column: Material Code
+2. ✅ Column: Category
+3. ✅ Column: Item Description
+4. ✅ Column: Due for Loading
+5. ✅ Columns: 11 date columns dynamically generated from today (e.g., Apr-13, Apr-14, ...)
+6. ✅ Column: Inventory
+7. ✅ Column: Bal. to Produce
+8. ✅ 5 sample data rows with realistic values
+
+### Placement
+9. ✅ Download link below upload area
+10. ✅ Same style as master data "Download Template" link
+
+### File
+11. ✅ Downloads as .xlsx
+12. ✅ Filename includes date: Future_Dispatches_Template_2026-04-16.xlsx
+13. ✅ Column widths set for readability
+```

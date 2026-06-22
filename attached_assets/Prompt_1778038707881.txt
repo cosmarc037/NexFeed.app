@@ -1,0 +1,355 @@
+```
+Revisit and fix the "Total Hrs Before" and "Total Hrs After" columns in the per-line summary so they use the actual summed row-level production hours INCLUDING changeover, and add a tooltip that explains the hour breakdown.
+
+---
+
+## OBJECTIVE
+
+Currently, the per-line summary calculates Total Hrs Before / After using:
+
+```text
+Total Vol (MT) ÷ Line Run Rate (MT/hr)
+```
+
+This is only a throughput estimate and does not reflect the actual row-level hours shown in the order table.
+
+We want to replace that estimate-based calculation with the actual total occupied line time:
+
+## New rule:
+### Total Hrs Before / After =
+**sum of row-level production hours + row-level changeover hours**
+
+This should better reflect the actual time consumed on the line.
+
+At the same time, we want the user to still understand the breakdown.
+
+So for the visible hours in the summary:
+- show the total including changeover
+- add a tooltip on hover that explains:
+  - production hours only
+  - total changeover hours
+  - final total including changeover
+  - how much time was added by changeover
+
+---
+
+## PROBLEM TO FIX
+
+Current example:
+- Line 1 currently shows `4.85 hrs`
+- But that is only an estimate from `Total Vol ÷ Run Rate`
+- Actual order-level totals are:
+  - `3.86 hrs` production only
+  - `6.23 hrs` including changeover
+
+This makes the current summary misleading.
+
+We want the visible summary hours to reflect the actual total occupied line time, not a throughput estimate.
+
+---
+
+## REQUIRED CHANGE
+
+Replace the visible `Total Hrs Before` and `Total Hrs After` values with:
+
+```text
+sum of row production hours + sum of row changeover hours
+```
+
+And add a tooltip to explain the breakdown.
+
+---
+
+## 1. DEFINE HELPERS TO READ ROW-LEVEL HOURS
+
+### Production hours helper
+```javascript
+function getOrderProductionHours(order) {
+  const candidates = [
+    order.production_time_hours,
+    order.production_hours,
+    order.prod_hours,
+    order.productionTime,
+    order.production_time,
+    order._productionHours,
+  ];
+
+  for (const val of candidates) {
+    const parsed = parseFloat(val);
+    if (!Number.isNaN(parsed)) {
+      return parsed;
+    }
+  }
+
+  return 0;
+}
+```
+
+### Changeover hours helper
+```javascript
+function getOrderChangeoverHours(order) {
+  const candidates = [
+    order.changeover,
+    order._changeoverHrs,
+    order._changeover,
+    order.change_over,
+    order.changeover_hours,
+  ];
+
+  for (const val of candidates) {
+    const parsed = parseFloat(val);
+    if (!Number.isNaN(parsed)) {
+      return parsed;
+    }
+  }
+
+  return 0;
+}
+```
+
+---
+
+## 2. CALCULATE THE HOURS BREAKDOWN PER LINE
+
+Create a shared helper that returns:
+- production only
+- changeover only
+- total including changeover
+
+### Suggested helper:
+```javascript
+function calculateLineHoursBreakdown(orders) {
+  const productionHours = Number(
+    (orders || []).reduce((sum, order) => {
+      return sum + getOrderProductionHours(order);
+    }, 0).toFixed(2)
+  );
+
+  const changeoverHours = Number(
+    (orders || []).reduce((sum, order) => {
+      return sum + getOrderChangeoverHours(order);
+    }, 0).toFixed(2)
+  );
+
+  const totalHours = Number((productionHours + changeoverHours).toFixed(2));
+
+  return {
+    productionHours,
+    changeoverHours,
+    totalHours,
+  };
+}
+```
+
+---
+
+## 3. APPLY THIS TO BOTH BEFORE AND AFTER SUMMARY COLUMNS
+
+Use the exact rows shown per line.
+
+### Example:
+```javascript
+const beforeHours = calculateLineHoursBreakdown(beforeOrdersForLine);
+const afterHours = calculateLineHoursBreakdown(afterOrdersForLine);
+
+const totalHrsBefore = beforeHours.totalHours;
+const totalHrsAfter = afterHours.totalHours;
+```
+
+Where:
+- `beforeOrdersForLine` = exact visible rows in Before state
+- `afterOrdersForLine` = exact visible rows in After state
+
+Do not use the old `Total Vol ÷ Run Rate` estimate for the visible summary columns anymore.
+
+---
+
+## 4. STORE THE BREAKDOWN IN THE SUMMARY METRICS
+
+For each line summary, store the breakdown values for both before and after.
+
+### Example:
+```javascript
+lineSummary.beforeHours = {
+  productionHours: beforeHours.productionHours,
+  changeoverHours: beforeHours.changeoverHours,
+  totalHours: beforeHours.totalHours,
+};
+
+lineSummary.afterHours = {
+  productionHours: afterHours.productionHours,
+  changeoverHours: afterHours.changeoverHours,
+  totalHours: afterHours.totalHours,
+};
+```
+
+Visible columns:
+- `TOTAL HRS BEFORE` = `beforeHours.totalHours`
+- `TOTAL HRS AFTER` = `afterHours.totalHours`
+
+---
+
+## 5. ADD A TOOLTIP TO THE VISIBLE HOURS
+
+When users hover over the `Total Hrs Before` or `Total Hrs After` value, show a tooltip with the breakdown.
+
+### Tooltip should show:
+- hours without changeover
+- changeover hours added
+- final total with changeover
+
+### Example tooltip content:
+```text
+Production hours: 3.86 hrs
+Changeover added: 2.37 hrs
+Total hours: 6.23 hrs
+```
+
+Or more explanatory:
+```text
+Actual production hours: 3.86 hrs
+Additional changeover time: 2.37 hrs
+Displayed total: 6.23 hrs
+```
+
+This makes the visible number transparent and easier to understand.
+
+---
+
+## 6. UPDATE THE SUMMARY TABLE CELL RENDERING
+
+The visible cell should display:
+- total hours including changeover
+
+And on hover:
+- show the breakdown tooltip
+
+### Example JSX for Before:
+```jsx
+<Tooltip
+  content={
+    <>
+      <div>Production hours: {formatHours(lineSummary.beforeHours.productionHours)}</div>
+      <div>Changeover added: {formatHours(lineSummary.beforeHours.changeoverHours)}</div>
+      <div>Total hours: {formatHours(lineSummary.beforeHours.totalHours)}</div>
+    </>
+  }
+>
+  <span>{formatHours(lineSummary.beforeHours.totalHours)}</span>
+</Tooltip>
+```
+
+And similar for After.
+
+---
+
+## 7. KEEP THE OLD THROUGHPUT ESTIMATE INTERNAL ONLY IF STILL NEEDED
+
+If the old estimate:
+```text
+Total Vol ÷ Run Rate
+```
+is still needed internally for queue-time or balancing logic, it can remain internal.
+
+But it must no longer be used for the visible `Total Hrs Before` / `Total Hrs After` columns.
+
+If still stored, rename it clearly as:
+- `estimatedThroughputHours`
+- `queueEstimateHours`
+
+to avoid confusion with actual row-level totals.
+
+---
+
+## 8. ENSURE THE HOURS MATCH WHAT USERS SEE IN THE ROWS
+
+The summary should now match:
+- row Production Time totals
+- plus row CO totals
+
+So if users manually sum:
+- visible production time
+- visible changeover
+
+they should get the same value as:
+- Total Hrs Before / After
+
+This is the goal.
+
+---
+
+## 9. OPTIONAL: STYLE OR ICON FOR TOOLTIP DISCOVERABILITY
+
+If helpful, add a subtle indication that the hours value has a breakdown.
+
+Options:
+- tooltip on hover directly over the number
+- or small info icon beside the hours value
+
+Keep it lightweight and not visually noisy.
+
+---
+
+## 10. ADD DEBUG LOGGING TO VERIFY THE NEW TOTALS
+
+Temporarily log:
+
+```javascript
+console.debug('[Line Summary Hours Breakdown]', {
+  line,
+  beforeRows: (beforeOrdersForLine || []).map(order => ({
+    orderId: order.id,
+    productionHours: getOrderProductionHours(order),
+    changeoverHours: getOrderChangeoverHours(order),
+  })),
+  afterRows: (afterOrdersForLine || []).map(order => ({
+    orderId: order.id,
+    productionHours: getOrderProductionHours(order),
+    changeoverHours: getOrderChangeoverHours(order),
+  })),
+  beforeHours,
+  afterHours,
+});
+```
+
+This helps verify:
+- production hours are being summed correctly
+- changeover hours are being included
+- tooltip breakdown matches the actual totals
+
+---
+
+## 11. VERIFY AGAINST THE PROVIDED EXAMPLE
+
+If the actual row-level totals for Line 1 are:
+- Production only = `3.86 hrs`
+- Changeover = `2.37 hrs`
+- Total with changeover = `6.23 hrs`
+
+Then:
+- `Total Hrs Before` should display `6.23 hrs`
+- tooltip should show:
+  - Production hours: `3.86 hrs`
+  - Changeover added: `2.37 hrs`
+  - Total hours: `6.23 hrs`
+
+---
+
+## 12. VERIFICATION
+
+### Calculation
+1. ✅ Total Hrs Before now equals production hours + changeover hours
+2. ✅ Total Hrs After now equals production hours + changeover hours
+3. ✅ The old volume/run-rate estimate is no longer used for the visible summary columns
+
+### Tooltip
+4. ✅ Hovering the hours shows the breakdown
+5. ✅ Tooltip clearly shows:
+   - production hours only
+   - changeover added
+   - total hours
+6. ✅ Users can now understand why the visible total is higher than production-only time
+
+### Consistency
+7. ✅ Summary hours now match the actual row-level time values shown in the table
+8. ✅ Users can manually total row hours and get the same visible summary value

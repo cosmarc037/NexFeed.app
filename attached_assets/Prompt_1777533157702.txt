@@ -1,0 +1,421 @@
+```
+Update the AI strategy card metrics container to show the following five rows in this exact order:
+
+- Min. slack
+- MTS adjusted
+- Changeover time
+- Time-saved
+- Faithfulness
+
+---
+
+## OBJECTIVE
+
+Refine the strategy metrics box so it shows the most useful strategy comparison metrics in a clearer format.
+
+The visible metrics should now be:
+
+1. Min. slack
+2. MTS adjusted
+3. Changeover time
+4. Time-saved
+5. Faithfulness
+
+Remove the combined label:
+- "Changeover time (time-saved)"
+
+And instead split it into two separate rows:
+- Changeover time
+- Time-saved
+
+---
+
+## 1. DISPLAY FORMAT REQUIREMENT
+
+The visible card metrics must appear in this exact order:
+
+1. Min. slack
+2. MTS adjusted
+3. Changeover time
+4. Time-saved
+5. Faithfulness
+
+Do not combine Changeover time and Time-saved into one line.
+
+---
+
+## 2. METRIC DEFINITIONS
+
+### A. Min. slack
+Keep current logic.
+
+Display:
+- minimum slack under the strategy
+- formatted in hours
+
+Example:
+- `519.3 hr`
+
+Store:
+```javascript
+strategy.metrics.minSlackHours
+```
+
+---
+
+### B. MTS adjusted
+Keep current logic.
+
+Display:
+- adjusted MTS/flexible orders over total eligible
+
+Example:
+- `2 / 2`
+- `5 / 6`
+
+Store:
+```javascript
+strategy.metrics.mtsAdjusted
+strategy.metrics.mtsCount
+```
+
+---
+
+### C. Changeover time
+This is the actual total changeover hours for that strategy’s final After table.
+
+Definition:
+- sum of the final row CO values shown in the After table for that strategy
+
+### Helper:
+```javascript
+function getRowDisplayedChangeover(order) {
+  const candidates = [
+    order.changeover,
+    order._changeoverHrs,
+    order._changeover,
+    order.change_over,
+  ];
+
+  for (const val of candidates) {
+    const parsed = parseFloat(val);
+    if (!Number.isNaN(parsed)) return parsed;
+  }
+
+  return 0;
+}
+
+function calculateAfterTableTotalChangeover(lineOrders) {
+  return Number(
+    (lineOrders || []).reduce((sum, order) => {
+      return sum + getRowDisplayedChangeover(order);
+    }, 0).toFixed(2)
+  );
+}
+```
+
+Store:
+```javascript
+strategy.metrics.totalChangeoverHours
+```
+
+Display examples:
+- `1.7 hrs`
+- `4.66 hrs`
+
+Use the strategy’s own final After-table rows as source of truth.
+
+---
+
+### D. Time-saved
+This should be the signed delta compared to Standard.
+
+Definition:
+
+```javascript
+timeSavedDelta = strategy total changeover hours - standard total changeover hours
+```
+
+Important:
+- This is a delta, not a “saved/no savings” string
+- Keep the sign
+- Do not clamp
+- Do not replace with “no savings”
+
+Examples:
+- if Standard = `1.9 hrs` and Strategy = `1.7 hrs`
+  - delta = `1.7 - 1.9 = -0.2 hrs`
+  - display = `-0.2 hrs` → green
+
+- if Standard = `1.4 hrs` and Strategy = `1.7 hrs`
+  - delta = `1.7 - 1.4 = +0.3 hrs`
+  - display = `+0.3 hrs` → red
+
+So:
+- **negative delta = strategy saved time**
+- **positive delta = strategy increased changeover time**
+
+### Helper:
+```javascript
+function calculateTimeSavedDelta(standardOrders, strategyOrders) {
+  const standardCO = calculateAfterTableTotalChangeover(standardOrders);
+  const strategyCO = calculateAfterTableTotalChangeover(strategyOrders);
+
+  return {
+    standardCO: Number(standardCO.toFixed(2)),
+    strategyCO: Number(strategyCO.toFixed(2)),
+    deltaHours: Number((strategyCO - standardCO).toFixed(2)),
+  };
+}
+```
+
+Store:
+```javascript
+strategy.metrics.standardChangeoverHours
+strategy.metrics.timeSavedDeltaHours
+```
+
+For Standard:
+```javascript
+strategy.metrics.timeSavedDeltaHours = 0;
+```
+
+or show `—` in UI if preferred.
+
+---
+
+### E. Faithfulness
+Keep existing Faithfulness Score.
+
+Display as percentage.
+
+Examples:
+- `65.0%`
+- `55.0%`
+- `100.0%`
+
+Store:
+```javascript
+strategy.metrics.faithfulnessScore
+strategy.metrics.faithfulnessRating
+strategy.metrics.faithfulnessBreakdown
+```
+
+---
+
+## 3. CALCULATE CHANGEOVER TIME AND TIME-SAVED AFTER FINAL STRATEGY EXECUTION
+
+These metrics must be calculated only after:
+1. the strategy’s After table is fully built
+2. final order sequence is finalized
+3. final row changeovers are finalized
+
+Correct sequence:
+- build Standard After table → sum Standard CO
+- build AI strategy After table → sum AI CO
+- compute delta = AI CO − Standard CO
+- render metrics
+
+Do not use shared line-level placeholders or pre-strategy values.
+
+---
+
+## 4. STRATEGY METRICS DATA MODEL
+
+Each strategy should now store:
+
+```javascript
+strategy.metrics = {
+  minSlackHours: ...,
+  mtsAdjusted: ...,
+  mtsCount: ...,
+  totalChangeoverHours: ...,
+  standardChangeoverHours: ...,
+  timeSavedDeltaHours: ...,
+  faithfulnessScore: ...,
+  faithfulnessRating: ...,
+  faithfulnessBreakdown: ...,
+
+  // internal-only if still needed:
+  riskLevel: ...,
+  violations: ...,
+}
+```
+
+For Standard:
+```javascript
+strategy.metrics.totalChangeoverHours = standardCO;
+strategy.metrics.standardChangeoverHours = standardCO;
+strategy.metrics.timeSavedDeltaHours = 0;
+```
+
+---
+
+## 5. UPDATE THE CARD UI TO RENDER THE FIVE ROWS
+
+### Example JSX:
+```jsx
+<div className="strategy-metrics-box">
+  <div className="metric-row">
+    <span>Min. slack</span>
+    <strong>{formatHours(strategy.metrics.minSlackHours)}</strong>
+  </div>
+
+  <div className="metric-row">
+    <span>MTS adjusted</span>
+    <strong>{strategy.metrics.mtsAdjusted} / {strategy.metrics.mtsCount}</strong>
+  </div>
+
+  <div className="metric-row">
+    <span>Changeover time</span>
+    <strong>{formatHours(strategy.metrics.totalChangeoverHours)}</strong>
+  </div>
+
+  <div className="metric-row">
+    <span>Time-saved</span>
+    <strong className={getTimeSavedDeltaClass(strategy)}>
+      {strategy.id === 'standard'
+        ? '—'
+        : formatSignedHours(strategy.metrics.timeSavedDeltaHours)}
+    </strong>
+  </div>
+
+  <div className="metric-row">
+    <span>Faithfulness</span>
+    <strong>{formatFaithfulness(strategy.metrics.faithfulnessScore)}</strong>
+  </div>
+</div>
+```
+
+---
+
+## 6. FORMAT SIGNED TIME-SAVED CORRECTLY
+
+Create a formatter that always shows sign for AI strategies:
+
+```javascript
+function formatSignedHours(value) {
+  const num = parseFloat(value || 0) || 0;
+  const sign = num > 0 ? '+' : '';
+  return `${sign}${num.toFixed(2)} hrs`;
+}
+```
+
+Examples:
+- `+0.30 hrs`
+- `-0.20 hrs`
+- `0.00 hrs`
+
+If you prefer one decimal place:
+- `+0.3 hrs`
+- `-0.2 hrs`
+
+That is acceptable too, as long as formatting is consistent.
+
+---
+
+## 7. COLOR-CODE TIME-SAVED DELTA
+
+Important display rule:
+
+- **negative delta** = strategy saved time → show in **green**
+- **positive delta** = strategy increased changeover time → show in **red**
+- **zero** = neutral
+
+This is because:
+- negative means lower changeover time than Standard
+- positive means higher changeover time than Standard
+
+### Example helper:
+```javascript
+function getTimeSavedDeltaClass(strategy) {
+  if (strategy.id === 'standard') return 'metric-neutral';
+
+  const delta = parseFloat(strategy.metrics.timeSavedDeltaHours || 0) || 0;
+
+  if (delta < 0) return 'metric-good';   // green
+  if (delta > 0) return 'metric-bad';    // red
+  return 'metric-neutral';               // gray
+}
+```
+
+Suggested classes:
+- `metric-good` → green text
+- `metric-bad` → red text
+- `metric-neutral` → neutral gray
+
+---
+
+## 8. REMOVE THE OLD "NO SAVINGS" TEXT
+
+Do not display:
+- `no savings`
+- `saved`
+- combined parenthetical labels
+
+The new row must display only the signed delta value:
+- `-0.2 hrs`
+- `+0.3 hrs`
+- `0.0 hrs`
+
+This is clearer and more precise.
+
+---
+
+## 9. KEEP RISK LEVEL / VIOLATIONS INTERNAL ONLY
+
+Do not show:
+- Risk level
+- Violations
+
+in the visible metrics box.
+
+They may remain in internal calculations for:
+- recommendation gating
+- validation
+- debugging
+
+But not in the main visible card metrics.
+
+---
+
+## 10. UPDATE RECOMMENDATION / REASONING SUPPORT TEXT IF NEEDED
+
+If AI reasoning or other explanations mention changeover savings, update them to align with the new delta logic.
+
+Example:
+- “This strategy reduces total changeover time from 1.9 hrs in Standard to 1.7 hrs, resulting in a time-saved delta of -0.2 hrs.”
+
+Do not phrase it as “no savings” anymore.
+
+---
+
+## 11. VERIFICATION
+
+### Metrics display
+1. ✅ Visible card rows now show:
+   - Min. slack
+   - MTS adjusted
+   - Changeover time
+   - Time-saved
+   - Faithfulness
+2. ✅ The rows appear in that exact order
+3. ✅ Changeover time shows actual total CO hours for that strategy
+4. ✅ Time-saved shows signed delta vs Standard
+
+### Time-saved logic
+5. ✅ Formula used is:
+   `strategy total CO - standard total CO`
+6. ✅ Negative delta means time saved and is shown in green
+7. ✅ Positive delta means extra time and is shown in red
+8. ✅ Zero delta is neutral
+9. ✅ No more "no savings" text appears
+
+### Source of truth
+10. ✅ Standard CO total is summed from Standard After-table row CO values
+11. ✅ AI strategy CO total is summed from that strategy’s own After-table row CO values
+12. ✅ Metrics are no longer copied/shared incorrectly across all cards
+
+### UX
+13. ✅ Users can clearly see whether an AI strategy improved or worsened changeover time
+14. ✅ The metric box is cleaner and easier to compare

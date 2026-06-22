@@ -1,0 +1,186 @@
+```
+Implement the following fix to the NexFeed application:
+
+---
+
+## FIX: YELLOW BORDER — ONLY ON ORDERS THAT CAN ACTUALLY BE DIVERTED
+
+Currently, ALL orders on shutdown lines are getting the yellow/gold left border and "Line shutdown — right-click to divert" message. This is wrong. Only orders that ACTUALLY have alternative lines (run rate > 0 on other non-shutdown lines in the Knowledge Base) should get the yellow border.
+
+---
+
+### THE PROBLEM
+
+All orders on Line 1 and Line 2 show:
+- Yellow/gold left border
+- "⚠ Line shutdown — right-click to divert"
+
+Even if some of those products have NO run rate on any other line — meaning they CANNOT be diverted.
+
+---
+
+### THE FIX
+
+Before applying the yellow border and divert message, check the Knowledge Base for each order's material code to see if it has run rates on lines OUTSIDE the shutdown feedmill.
+
+```javascript
+function canOrderBeDiverted(order, shutdownLines, knowledgeBase) {
+  // Only check active orders on shutdown lines
+  if (!shutdownLines.includes(order.line)) return false;
+  if (order.status === 'Done' || order.status === 'Cancel PO') return false;
+  
+  // Find product in Knowledge Base
+  const product = knowledgeBase.find(
+    p => p.material_code_fg === order.material_code_fg
+  );
+  
+  // No product in KB = cannot divert
+  if (!product) return false;
+  
+  // Check run rates on ALL lines
+  const rateMap = {
+    'Line 1': parseFloat(product.l1_rate) || 0,
+    'Line 2': parseFloat(product.l2_rate) || 0,
+    'Line 3': parseFloat(product.l3_rate) || 0,
+    'Line 4': parseFloat(product.l4_rate) || 0,
+    'Line 5': parseFloat(product.l5_rate) || 0,
+    'Line 6': parseFloat(product.l6_rate) || 0,
+    'Line 7': parseFloat(product.l7_rate) || 0,
+  };
+  
+  // Find lines that are:
+  // 1. NOT in the shutdown feedmill
+  // 2. Have a run rate > 0 for this product
+  const availableLines = Object.entries(rateMap)
+    .filter(([line, rate]) => {
+      return rate > 0 && !shutdownLines.includes(line);
+    });
+  
+  // Can divert ONLY if there's at least one alternative line
+  return availableLines.length > 0;
+}
+```
+
+### APPLY TO EACH ORDER ROW
+
+```jsx
+function OrderRow({ order, shutdownLines, knowledgeBase }) {
+  const isOnShutdownLine = shutdownLines.includes(order.line);
+  const isDivertable = canOrderBeDiverted(order, shutdownLines, knowledgeBase);
+  const isBlocked = isOnShutdownLine && !isDivertable && 
+                    order.status !== 'Done' && order.status !== 'Cancel PO';
+  
+  return (
+    <tr className={`
+      ${isDivertable ? 'order-row-divertable' : ''}
+      ${isBlocked ? 'order-row-blocked' : ''}
+    `}>
+      {/* ... cells ... */}
+      
+      {/* Item Description cell */}
+      <td>
+        <div>{order.item_description}</div>
+        <div className="category-text">{order.category}</div>
+        
+        {/* ONLY show divert message if actually divertable */}
+        {isDivertable && (
+          <div className="divert-message">
+            ⚠ Line shutdown — right-click to divert
+          </div>
+        )}
+        
+        {/* Show blocked message if cannot divert */}
+        {isBlocked && (
+          <div className="blocked-message">
+            ⛔ Line shutdown — no alternative lines available
+          </div>
+        )}
+      </td>
+    </tr>
+  );
+}
+```
+
+### STYLING — DIVERTABLE ORDERS (HAS ALTERNATIVE LINES)
+
+```css
+.order-row-divertable {
+  border-left: 4px solid #eab308 !important;
+}
+
+.divert-message {
+  font-size: 10px;
+  color: #b45309;
+  font-weight: 400;
+  margin-top: 2px;
+}
+```
+
+| Property | Value |
+|---|---|
+| Left border | 4px solid gold (#eab308) |
+| Message | "⚠ Line shutdown — right-click to divert" |
+| Message color | Gold (#b45309) |
+| Message font | 10px |
+
+### STYLING — BLOCKED ORDERS (NO ALTERNATIVE LINES)
+
+```css
+.order-row-blocked {
+  background: #fef2f2;
+  opacity: 0.7;
+}
+
+.blocked-message {
+  font-size: 10px;
+  color: #991b1b;
+  font-weight: 400;
+  margin-top: 2px;
+}
+```
+
+| Property | Value |
+|---|---|
+| No yellow border | No left border |
+| Background | Very light red (#fef2f2) |
+| Opacity | 0.7 |
+| Message | "⛔ Line shutdown — no alternative lines available" |
+| Message color | Dark red (#991b1b) |
+| Message font | 10px |
+
+### STYLING — DONE/CANCELLED ORDERS ON SHUTDOWN LINES
+
+No special styling. These orders are already completed or cancelled — shutdown doesn't affect them.
+
+```css
+/* No changes for Done or Cancelled rows */
+```
+
+### STYLING — ORDERS NOT ON SHUTDOWN LINES
+
+No changes at all. Normal appearance.
+
+---
+
+### RIGHT-CLICK MENU — CONDITIONAL
+
+| Order state | "Divert order" in menu? |
+|---|---|
+| Divertable (yellow border) | ✅ Yes — visible and clickable |
+| Blocked (no alternatives) | ❌ No — not shown |
+| Not on shutdown line | ❌ No — not shown |
+| Done / Cancelled | ❌ No — not shown |
+
+---
+
+### VERIFICATION
+
+1. Shutdown Feedmill 1 (Line 1, Line 2)
+2. Check each order on Line 1 and Line 2:
+   - Look up material code in Knowledge Base
+   - Check L3, L4, L5, L6, L7 rates
+   - If ANY rate > 0 → yellow border + divert message ✅
+   - If ALL rates = 0 → no yellow border, light red bg + blocked message ✅
+   - If Done/Cancelled → no changes ✅
+3. Orders on Line 3, 4, 5, 6, 7 → completely unaffected ✅
+```

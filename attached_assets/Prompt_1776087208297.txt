@@ -1,0 +1,429 @@
+```
+Update the Scheduling Impact section to include three categories: earlier, later, and deadline misses:
+
+---
+
+## 1. UPDATE buildSchedulingImpactData — ADD DEADLINE MISS CHECK
+
+```javascript
+function buildSchedulingImpactData(group, lineOrders) {
+  const combiningOrders = group.orders;
+  const combiningIds = combiningOrders.map(o => o.id);
+  const line = group.line;
+  
+  const currentLineOrders = lineOrders
+    .filter(o => o.line === line && o.status !== 'Done' && o.status !== 'Cancel PO')
+    .sort((a, b) => a.prio - b.prio);
+  
+  // Pass 1 — Before (current schedule)
+  const beforeStart = {};
+  let runningTime = 0;
+  
+  currentLineOrders.forEach(order => {
+    beforeStart[order.id] = runningTime;
+    const vol = parseFloat(order.volume) || 0;
+    const rate = parseFloat(order.run_rate) || 0;
+    const prodHrs = rate > 0 ? vol / rate : 0;
+    const co = order._changeoverTotal ?? parseFloat(order.changeover) ?? 0;
+    runningTime += prodHrs + co;
+  });
+  
+  // Pass 2 — After (combined schedule)
+  const afterStart = {};
+  runningTime = 0;
+  let combinedDone = false;
+  
+  const combinedVolume = combiningOrders.reduce((s, o) => s + (parseFloat(o.volume) || 0), 0);
+  const combinedRate = parseFloat(combiningOrders[0].run_rate) || 0;
+  const combinedProdHrs = combinedRate > 0 ? combinedVolume / combinedRate : 0;
+  const combinedCO = combiningOrders[0]._changeoverTotal ?? parseFloat(combiningOrders[0].changeover) ?? 0;
+  
+  // Determine lead order
+  const datedOrders = combiningOrders.filter(o => {
+    const avail = o.target_avail_date;
+    return avail && /^\d{4}-\d{2}-\d{2}/.test(avail) && !isNaN(Date.parse(avail));
+  });
+  
+  let leadOrderId;
+  if (datedOrders.length > 0) {
+    const earliest = datedOrders.sort((a, b) =>
+      new Date(a.target_avail_date) - new Date(b.target_avail_date)
+    )[0];
+    leadOrderId = earliest.id;
+  } else {
+    leadOrderId = combiningOrders.sort((a, b) => a.prio - b.prio)[0].id;
+  }
+  
+  // Store production times for completion calculation
+  const orderProdTimes = {};
+  
+  currentLineOrders.forEach(order => {
+    const vol = parseFloat(order.volume) || 0;
+    const rate = parseFloat(order.run_rate) || 0;
+    const prodHrs = rate > 0 ? vol / rate : 0;
+    const co = order._changeoverTotal ?? parseFloat(order.changeover) ?? 0;
+    
+    orderProdTimes[order.id] = { prodHrs, co };
+    
+    if (combiningIds.includes(order.id)) {
+      if (order.id === leadOrderId && !combinedDone) {
+        afterStart[order.id] = runningTime;
+        runningTime += combinedProdHrs + combinedCO;
+        combinedDone = true;
+      }
+      return;
+    }
+    
+    afterStart[order.id] = runningTime;
+    runningTime += prodHrs + co;
+  });
+  
+  // Get lead order's start date for projecting real completion times
+  const leadOrder = currentLineOrders.find(o => o.id === leadOrderId);
+  const leadStartDate = leadOrder?.start_date 
+    ? new Date(leadOrder.start_date) 
+    : new Date();
+  
+  // Calculate shifts and deadline misses
+  const earlierOrders = [];
+  const laterOrders = [];
+  const deadlineMisses = [];
+  
+  currentLineOrders.forEach(order => {
+    if (combiningIds.includes(order.id)) return;
+    if (beforeStart[order.id] === undefined || afterStart[order.id] === undefined) return;
+    
+    const shiftHrs = beforeStart[order.id] - afterStart[order.id];
+    // Positive = earlier, Negative = later
+    
+    const prodTime = orderProdTimes[order.id]?.prodHrs || 0;
+    
+    // Check deadline miss — project new completion time
+    const targetAvail = order.target_avail_date;
+    const isDated = targetAvail && /^\d{4}-\d{2}-\d{2}/.test(targetAvail) && !isNaN(Date.parse(targetAvail));
+    
+    let deadlineMiss = null;
+    
+    if (isDated) {
+      const availDateObj = new Date(targetAvail);
+      const newStartHrs = afterStart[order.id];
+      const newCompletionMs = leadStartDate.getTime() + ((newStartHrs + prodTime) * 60 * 60 * 1000);
+      const newCompletionDate = new Date(newCompletionMs);
+      
+      if (newCompletionDate > availDateObj) {
+        const delayMs = newCompletionDate.getTime() - availDateObj.getTime();
+        const delayDays = Math.ceil(delayMs / (1000 * 60 * 60 * 24));
+        
+        const availDisplay = availDateObj.toLocaleDateString('en-US', {
+          year: 'numeric', month: 'long', day: 'numeric'
+        });
+        const completionDisplay = newCompletionDate.toLocaleDateString('en-US', {
+          year: 'numeric', month: 'long', day: 'numeric'
+        });
+        
+        deadlineMiss = {
+          prio: order.prio,
+          name: order.item_description,
+          availDate: availDisplay,
+          newCompletion: completionDisplay,
+          delayDays: delayDays
+        };
+        
+        deadlineMisses.push(deadlineMiss);
+      }
+    }
+    
+    // Time shift entries
+    if (Math.abs(shiftHrs) < 0.01) return;
+    
+    const entry = {
+      prio: order.prio,
+      name: order.item_description,
+      shiftHrs: Math.abs(shiftHrs),
+      shiftFormatted: formatTimeShift(Math.abs(shiftHrs)),
+      hasDeadlineMiss: deadlineMiss !== null
+    };
+    
+    if (shiftHrs > 0) {
+      earlierOrders.push(entry);
+    } else {
+      laterOrders.push(entry);
+    }
+  });
+  
+  // Sort
+  laterOrders.sort((a, b) => b.shiftHrs - a.shiftHrs);
+  earlierOrders.sort((a, b) => b.shiftHrs - a.shiftHrs);
+  deadlineMisses.sort((a, b) => b.delayDays - a.delayDays);
+  
+  return { earlierOrders, laterOrders, deadlineMisses };
+}
+```
+
+---
+
+## 2. UPDATE AI NOTE PROMPT — INCLUDE DEADLINE MISSES
+
+```javascript
+function buildSchedulingImpactNotePrompt(context, impactData) {
+  const hasEarlier = impactData.earlierOrders.length > 0;
+  const hasLater = impactData.laterOrders.length > 0;
+  const hasDeadlineMisses = impactData.deadlineMisses.length > 0;
+  
+  if (!hasEarlier && !hasLater && !hasDeadlineMisses) {
+    return null;
+  }
+  
+  return `
+You are a production scheduling advisor. Provide a brief analysis of the scheduling impact from combining orders on ${context.line}.
+
+Orders starting later:
+${hasLater
+  ? impactData.laterOrders.map(o => `- Prio ${o.prio}: ${o.name} — ${o.shiftFormatted} later`).join('\n')
+  : 'None'}
+
+Orders starting earlier:
+${hasEarlier
+  ? impactData.earlierOrders.map(o => `- Prio ${o.prio}: ${o.name} — ${o.shiftFormatted} earlier`).join('\n')
+  : 'None'}
+
+Orders at risk of missing avail date:
+${hasDeadlineMisses
+  ? impactData.deadlineMisses.map(o => `- Prio ${o.prio}: ${o.name} — new completion ${o.newCompletion} exceeds avail date ${o.availDate} by ~${o.delayDays} days`).join('\n')
+  : 'None'}
+
+Product context:
+${[...impactData.laterOrders, ...impactData.earlierOrders].map(o => {
+  const lineOrder = context.lineContext.find(lo => lo.prio === o.prio);
+  return lineOrder ? `- ${o.name}: N10D status ${lineOrder.n10dStatus}, Avail: ${lineOrder.availDate}` : '';
+}).filter(Boolean).join('\n')}
+
+RESPONSE RULES:
+- Write 3-5 sentences analyzing the significance of the impact.
+- Each sentence on its OWN LINE.
+- If there are NO delayed orders and NO deadline misses, be POSITIVE — mention the time savings benefit.
+- If there ARE delayed orders or deadline misses, highlight the concern and which orders are most at risk.
+- If orders start earlier but still miss their avail date, note that the time savings alone don't resolve the deadline issue.
+- Do NOT list individual orders again — the bullet lists above already show them.
+- Do NOT use markdown formatting.
+- Do NOT mention delays if the calculated data shows zero delayed orders and zero deadline misses.
+- Keep each sentence concise.
+  `;
+}
+```
+
+---
+
+## 3. UPDATED DISPLAY COMPONENT
+
+```jsx
+function SchedulingImpactCard({ group, lineOrders, context }) {
+  const [impactData, setImpactData] = useState(null);
+  const [aiNote, setAiNote] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+  
+  // Use selectedOrderKey to re-trigger on order changes
+  const selectedOrderKey = group.orders.map(o => o.id).sort().join('|');
+  
+  useEffect(() => {
+    generateImpact();
+  }, [selectedOrderKey]);
+  
+  async function generateImpact() {
+    setIsLoading(true);
+    setImpactData(null);
+    setAiNote(null);
+    
+    const data = buildSchedulingImpactData(group, lineOrders);
+    setImpactData(data);
+    
+    const hasAny = data.earlierOrders.length > 0 || 
+                   data.laterOrders.length > 0 || 
+                   data.deadlineMisses.length > 0;
+    
+    if (hasAny) {
+      try {
+        const prompt = buildSchedulingImpactNotePrompt(context, data);
+        if (prompt) {
+          const response = await callAI(prompt);
+          const cleaned = cleanSchedulingNote(response);
+          setAiNote(cleaned);
+        }
+      } catch (error) {
+        console.error('AI note failed:', error);
+        setAiNote(null);
+      }
+    }
+    
+    setIsLoading(false);
+  }
+  
+  async function handleRefresh() {
+    setAiNote(null);
+    await generateImpact();
+  }
+  
+  const hasNoImpact = impactData &&
+    impactData.earlierOrders.length === 0 &&
+    impactData.laterOrders.length === 0 &&
+    impactData.deadlineMisses.length === 0;
+  
+  return (
+    <div className="combine-card">
+      <div className="combine-card-header">
+        <span>📊 Scheduling Impact</span>
+        <button
+          className="combine-card-refresh"
+          onClick={handleRefresh}
+          title="Refresh analysis"
+        >
+          ↻ Refresh
+        </button>
+      </div>
+      
+      <div className="combine-card-body combine-card-body-text">
+        {isLoading && !impactData && (
+          <span className="combine-card-loading">Analyzing scheduling impact...</span>
+        )}
+        
+        {hasNoImpact && (
+          <span className="scheduling-no-impact">
+            No scheduling impact — all orders remain on their current schedule.
+          </span>
+        )}
+        
+        {/* Orders starting later */}
+        {impactData && impactData.laterOrders.length > 0 && (
+          <div className="scheduling-impact-section">
+            <div className="scheduling-impact-label scheduling-impact-delayed">
+              Orders starting later:
+            </div>
+            {impactData.laterOrders.map((order, index) => (
+              <div key={index} className="scheduling-impact-item scheduling-impact-item-delayed">
+                <span className="scheduling-impact-bullet">⚠</span>
+                <span className="scheduling-impact-text">
+                  Prio {order.prio}: {order.name} — starts <strong>{order.shiftFormatted} later</strong>
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+        
+        {/* Orders starting earlier */}
+        {impactData && impactData.earlierOrders.length > 0 && (
+          <div className="scheduling-impact-section">
+            <div className="scheduling-impact-label scheduling-impact-faster">
+              Orders starting earlier:
+            </div>
+            {impactData.earlierOrders.map((order, index) => (
+              <div key={index} className="scheduling-impact-item scheduling-impact-item-faster">
+                <span className="scheduling-impact-bullet">✅</span>
+                <span className="scheduling-impact-text">
+                  Prio {order.prio}: {order.name} — starts <strong>{order.shiftFormatted} earlier</strong>
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+        
+        {/* Deadline misses */}
+        {impactData && impactData.deadlineMisses.length > 0 && (
+          <div className="scheduling-impact-section">
+            <div className="scheduling-impact-label scheduling-impact-deadline">
+              Orders at risk of missing avail date:
+            </div>
+            {impactData.deadlineMisses.map((order, index) => (
+              <div key={index} className="scheduling-impact-item scheduling-impact-item-deadline">
+                <span className="scheduling-impact-bullet">⛔</span>
+                <span className="scheduling-impact-text">
+                  Prio {order.prio}: {order.name} — new completion <strong>{order.newCompletion}</strong> exceeds avail date <strong>{order.availDate}</strong> (~{order.delayDays} day{order.delayDays !== 1 ? 's' : ''} late)
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+        
+        {/* AI note */}
+        {aiNote && (
+          <div className="scheduling-impact-ai-note">
+            {aiNote.map((sentence, index) => (
+              <p key={index} className="scheduling-impact-ai-sentence">
+                {sentence}
+              </p>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+## 4. STYLING FOR DEADLINE MISSES
+
+```css
+/* Deadline miss label */
+.scheduling-impact-deadline {
+  color: #dc2626;
+  font-weight: 700;
+}
+
+/* Deadline miss item */
+.scheduling-impact-item-deadline {
+  display: flex;
+  gap: 6px;
+  padding: 4px 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.scheduling-impact-item-deadline .scheduling-impact-bullet {
+  color: #dc2626;
+  flex-shrink: 0;
+}
+
+.scheduling-impact-item-deadline .scheduling-impact-text {
+  color: #374151;
+}
+
+.scheduling-impact-item-deadline .scheduling-impact-text strong {
+  color: #dc2626;
+  font-weight: 600;
+}
+```
+
+---
+
+## VERIFICATION
+
+### Three categories
+1. ✅ "Orders starting later:" with ⚠ bullets — orders that start later due to combined block
+2. ✅ "Orders starting earlier:" with ✅ bullets — orders that benefit from eliminated changeovers
+3. ✅ "Orders at risk of missing avail date:" with ⛔ bullets — orders whose new completion exceeds avail date
+4. ✅ "No scheduling impact" when all three categories are empty
+
+### Deadline miss calculation
+5. ✅ Projects new completion = lead start date + afterStart hours + production hours
+6. ✅ Compares against target_avail_date (ISO format)
+7. ✅ Only checks dated orders (non-dated orders cannot have deadline misses)
+8. ✅ Shows avail date, new completion date, and delay in days
+
+### An order can appear in BOTH lists
+9. ✅ An order can start earlier BUT still miss its avail date → shows in "earlier" AND "deadline miss"
+10. ✅ An order can start later AND miss its avail date → shows in "later" AND "deadline miss"
+
+### AI note alignment
+11. ✅ If zero later orders AND zero deadline misses → AI note is positive
+12. ✅ If there ARE later orders or deadline misses → AI note highlights concerns
+13. ✅ AI receives all three categories as context
+14. ✅ AI does not mention delays when there are none
+15. ✅ AI does not repeat the individual order list
+
+### Display
+16. ✅ Later orders: red label, ⚠ icon, "X hrs Y min later" in red bold
+17. ✅ Earlier orders: green label, ✅ icon, "X hrs Y min earlier" in green bold
+18. ✅ Deadline misses: dark red label, ⛔ icon, dates and delay days in red bold
+19. ✅ AI note at bottom with separator, grey italic
+```

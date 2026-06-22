@@ -1,0 +1,452 @@
+```
+Fix the following issues in the shutdown dialog:
+
+---
+
+## FIX 1: SHUTDOWN DIALOG AI — CLEAN OUTPUT FORMAT
+
+The AI response is outputting raw markdown headers like "### SECTION 1 — ANALYSIS:" which display as plain text. Fix the prompt to produce clean, readable output without section markers.
+
+### UPDATED PROMPT
+
+```javascript
+function buildShutdownDialogPrompt(context) {
+  return `
+You are a production planning advisor for a feed manufacturing plant.
+A planner is about to shut down ${context.target} (${context.feedmill}).
+Provide a clear impact analysis.
+
+SHUTDOWN TARGET: ${context.target}
+FEEDMILL: ${context.feedmill}
+
+AFFECTED ORDERS (${context.affectedOrders.length} orders, ${context.totalVolume} MT):
+${context.affectedOrders.map(o => `
+Prio ${o.prio}: ${o.name}
+  Volume: ${o.volume} MT | Form: ${o.form} | FPR: ${o.fpr || 'N/A'}
+  N10D Status: ${o.n10dStatus || 'N/A'}
+  DFL: ${o.dfl || 'N/A'} MT | Inventory: ${o.inventory || 'N/A'} MT
+  Avail Date: ${o.availDate || 'N/A'}
+  Production Time: ${o.productionHours} hrs (Rate: ${o.runRate} MT/hr)
+  Can divert to partner line (${o.partnerLines.join(', ') || 'none'}): ${o.canDivertWithin ? 'Yes' : 'No'}
+  Can divert outside feedmill: ${o.canDivertOutside ? `Yes (${o.outsideLines.join(', ')})` : 'No'}
+`).join('\n')}
+
+PARTNER LINE STATUS:
+${context.partnerLines.length > 0
+  ? context.partnerLines.map(l => `${l}: ${context.partnerLineLoad[l]} orders, ${context.partnerLineVolume[l]} MT currently loaded`).join('\n')
+  : 'No partner lines available — all lines in feedmill are affected'}
+
+LINES OUTSIDE FEEDMILL (available):
+${context.outsideAvailableLines.length > 0
+  ? context.outsideAvailableLines.map(l => `${l} (${context.outsideLineLoad[l]} orders, ${context.outsideLineVolume[l]} MT)`).join(', ')
+  : 'None identified with matching run rates'}
+
+RESPONSE RULES:
+- Start with a 2-3 sentence impact summary: how many orders halted, total volume, which are most at risk
+- Then list each affected order as a bullet point with: name, volume, N10D status, production time, and your recommendation (divert to where, or wait for resume)
+- Prioritize Critical and Urgent orders first in the list
+- For orders that can go to the partner line, recommend that as primary option
+- For orders that can also go outside the feedmill, mention those as alternatives
+- For orders with no run rate on partner line, note they can still move since lines in the same feedmill are generally compatible
+- Include a partner line capacity note at the end — warn if diverting everything would overload it
+- Estimate total delay if orders are NOT diverted
+- Use full month names for dates
+- Do NOT use markdown formatting (no #, ##, ###, **, etc.)
+- Do NOT use section labels like "SECTION 1" or "ANALYSIS:"
+- Just write clean paragraphs and bullet points using - or • characters
+- Keep it specific with product names, volumes, and times
+
+EXAMPLE OUTPUT FORMAT:
+
+Shutting down Line 1 will halt 10 orders totaling 371 MT. The most critical impact is on Gall 21 Chicken Layer (39 MT, Critical status) which risks stockout if not diverted. Elite XP Startex (80 MT) is the only order with confirmed run rates on lines outside FM1.
+
+Affected orders:
+
+• Gall 21 Chicken Layer P (Breeder) 50Kg — 39 MT, Critical. Production time: 2.01 hrs. Recommend diverting to Line 2 immediately to prevent stockout. DFL (24.0 MT) already exceeds inventory (0.7 MT).
+
+• Gallimax 3 Maintenance (Natural) P, 50Kg — 80 MT, Urgent. Production time: 4.12 hrs. Recommend diverting to Line 2. Stock breach expected within 3 days.
+
+• Elite XP Startex, Mini-pellet 50kg — 80 MT, Sufficient. Production time: 4.19 hrs. Can divert to Line 3 (rate: 10 MT/hr) or Line 4 (rate: 10 MT/hr) as alternatives outside FM1, or to Line 2 within FM1.
+
+• Salto Conditioner P 1kg (Bundle) — 3 MT, Sufficient. Production time: 0.16 hrs. Recommend diverting to Line 2. No urgency but quick to produce.
+
+Partner line capacity: Line 2 currently has 9 orders (408 MT). Diverting all 9 partner-only orders would add 291 MT, bringing Line 2 to approximately 699 MT. Monitor for potential overload.
+
+If orders are not diverted, the total halted production time is approximately 19.7 hours. Critical and Urgent products should be diverted within the day to avoid stock issues.
+  `;
+}
+```
+
+---
+
+## FIX 2: SHUTDOWN DIALOG — CORRECT CONTEXT BUILDER
+
+The context being passed to the AI is missing run rate data and available lines. Fix the context builder to properly identify which orders can go where.
+
+```javascript
+function buildShutdownDialogContext(target, targetType, feedmill) {
+  const allOrders = getAllOrders();
+  const masterData = getMasterData();
+  const n10dData = getN10DProducts();
+  const changeoverRules = getDefaultChangeoverRules();
+  
+  // Determine affected lines
+  const affectedLines = targetType === 'feedmill'
+    ? FEEDMILL_LINE_MAP[feedmill]
+    : [target];
+  
+  // Determine all shutdown lines (including previously shutdown ones)
+  const allShutdownLines = [
+    ...affectedLines,
+    ...Object.entries(lineShutdowns)
+      .filter(([line, info]) => info.isShutdown)
+      .map(([line]) => line)
+  ];
+  const uniqueShutdownLines = [...new Set(allShutdownLines)];
+  
+  // Get feedmill's lines
+  const feedmillLines = FEEDMILL_LINE_MAP[feedmill];
+  
+  // Partner lines — in same feedmill, NOT shutdown
+  const partnerLines = feedmillLines.filter(
+    l => !affectedLines.includes(l) && !uniqueShutdownLines.includes(l)
+  );
+  
+  // Outside feedmill lines — NOT shutdown
+  const allLines = Object.keys(LINE_TO_FEEDMILL_MAP);
+  const outsideAvailableLines = allLines.filter(
+    l => !feedmillLines.includes(l) && !uniqueShutdownLines.includes(l)
+  );
+  
+  // Get affected orders
+  const affectedOrdersRaw = allOrders.filter(o =>
+    affectedLines.includes(o.line) &&
+    o.status !== 'Done' &&
+    o.status !== 'Cancel PO'
+  );
+  
+  // Partner line load
+  const partnerLineLoad = {};
+  const partnerLineVolume = {};
+  partnerLines.forEach(pl => {
+    const plOrders = allOrders.filter(o =>
+      o.line === pl && o.status !== 'Done' && o.status !== 'Cancel PO'
+    );
+    partnerLineLoad[pl] = plOrders.length;
+    partnerLineVolume[pl] = plOrders.reduce((s, o) => s + (parseFloat(o.volume) || 0), 0).toFixed(0);
+  });
+  
+  // Outside line load
+  const outsideLineLoad = {};
+  const outsideLineVolume = {};
+  outsideAvailableLines.forEach(ol => {
+    const olOrders = allOrders.filter(o =>
+      o.line === ol && o.status !== 'Done' && o.status !== 'Cancel PO'
+    );
+    outsideLineLoad[ol] = olOrders.length;
+    outsideLineVolume[ol] = olOrders.reduce((s, o) => s + (parseFloat(o.volume) || 0), 0).toFixed(0);
+  });
+  
+  // Build detailed order info
+  const affectedOrders = affectedOrdersRaw.map(o => {
+    // Get master data for this product
+    const md = masterData.find(
+      m => String(m.fgMaterialCode) === String(o.material_code_fg)
+    );
+    
+    // Build run rate map from master data
+    const lineRateMap = {};
+    if (md) {
+      lineRateMap['Line 1'] = parseFloat(md.l1Rate) || 0;
+      lineRateMap['Line 2'] = parseFloat(md.l2Rate) || 0;
+      lineRateMap['Line 3'] = parseFloat(md.l3Rate) || 0;
+      lineRateMap['Line 4'] = parseFloat(md.l4Rate) || 0;
+      lineRateMap['Line 5'] = parseFloat(md.l5Rate) || 0;
+      lineRateMap['Line 6'] = parseFloat(md.l6Rate) || 0;
+      lineRateMap['Line 7'] = parseFloat(md.l7Rate) || 0;
+    }
+    
+    // Which outside lines have run rate > 0 for this product
+    const outsideLines = outsideAvailableLines.filter(l => lineRateMap[l] > 0);
+    const canDivertOutside = outsideLines.length > 0;
+    
+    // Partner lines — always available (same feedmill lines are compatible)
+    const canDivertWithin = partnerLines.length > 0;
+    
+    // N10D data
+    const n10dProduct = n10dData?.find(
+      p => String(p.material_code_fg) === String(o.material_code_fg)
+    );
+    const n10dStatus = n10dProduct ? getProductStatus(
+      n10dProduct.due_for_loading,
+      n10dProduct.inventory,
+      getDailyColumns(),
+      n10dProduct,
+      new Date()
+    ) : null;
+    
+    // Production time
+    const volume = parseFloat(o.volume) || 0;
+    const runRate = parseFloat(o.run_rate) || 0;
+    const productionHours = runRate > 0 ? (volume / runRate).toFixed(2) : '0.00';
+    
+    return {
+      prio: o.prio,
+      name: o.item_description,
+      fpr: o.fpr,
+      volume: o.volume,
+      form: o.form,
+      status: o.status,
+      line: o.line,
+      availDate: o.avail_date,
+      completionDate: o.completion_date,
+      n10dStatus: n10dStatus,
+      dfl: n10dProduct?.due_for_loading || null,
+      inventory: n10dProduct?.inventory || null,
+      runRate: runRate,
+      productionHours: productionHours,
+      canDivertWithin: canDivertWithin,
+      canDivertOutside: canDivertOutside,
+      partnerLines: partnerLines,
+      outsideLines: outsideLines.map(l => `${l} (rate: ${lineRateMap[l]} MT/hr)`),
+      lineRateMap: lineRateMap
+    };
+  });
+  
+  // Sort: Critical first, then Urgent, then by prio
+  const statusOrder = { 'Critical': 0, 'Urgent': 1, 'Monitor': 2, 'Sufficient': 3 };
+  affectedOrders.sort((a, b) => {
+    const aOrder = statusOrder[a.n10dStatus] ?? 4;
+    const bOrder = statusOrder[b.n10dStatus] ?? 4;
+    if (aOrder !== bOrder) return aOrder - bOrder;
+    return a.prio - b.prio;
+  });
+  
+  // Total volume and production time
+  const totalVolume = affectedOrders.reduce((s, o) => s + (parseFloat(o.volume) || 0), 0).toFixed(0);
+  const totalProductionHours = affectedOrders.reduce((s, o) => s + (parseFloat(o.productionHours) || 0), 0).toFixed(1);
+  
+  return {
+    target,
+    targetType,
+    feedmill,
+    affectedLines,
+    affectedOrders,
+    totalVolume,
+    totalProductionHours,
+    partnerLines,
+    partnerLineLoad,
+    partnerLineVolume,
+    outsideAvailableLines,
+    outsideLineLoad,
+    outsideLineVolume
+  };
+}
+```
+
+---
+
+## FIX 3: RESPONSE PARSER — STRIP LEFTOVER MARKDOWN
+
+Even with the updated prompt, add a safety parser to clean any remaining markdown:
+
+```javascript
+function parseShutdownDialogResponse(response) {
+  let cleaned = response;
+  
+  // Remove markdown headers
+  cleaned = cleaned.replace(/#{1,6}\s*/g, '');
+  
+  // Remove section labels
+  cleaned = cleaned.replace(/SECTION\s*\d+\s*[—\-:]\s*(ANALYSIS|DIVERSIONS|IMPACT)[:\s]*/gi, '');
+  
+  // Remove bold markers
+  cleaned = cleaned.replace(/\*\*/g, '');
+  
+  // Remove any remaining markdown formatting
+  cleaned = cleaned.replace(/\*([^*]+)\*/g, '$1');
+  cleaned = cleaned.replace(/_([^_]+)_/g, '$1');
+  
+  // Clean up excessive whitespace
+  cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
+  
+  return cleaned.trim();
+}
+```
+
+### USE IN SHUTDOWN DIALOG
+
+```javascript
+async function generateShutdownAnalysis() {
+  setIsAnalyzing(true);
+  
+  try {
+    const context = buildShutdownDialogContext(target, targetType, feedmill);
+    const prompt = buildShutdownDialogPrompt(context);
+    const response = await callAI(prompt);
+    
+    // Clean the response
+    const cleanedAnalysis = parseShutdownDialogResponse(response);
+    
+    setAnalysis(cleanedAnalysis);
+  } catch (error) {
+    console.error('Shutdown analysis failed:', error);
+    setAnalysis('Unable to generate analysis. You can still proceed with the shutdown.');
+  } finally {
+    setIsAnalyzing(false);
+  }
+}
+```
+
+---
+
+## FIX 4: DISPLAY THE ANALYSIS WITH PROPER FORMATTING
+
+Render the analysis text with bullet points properly:
+
+```jsx
+function ShutdownAnalysisDisplay({ analysis }) {
+  if (!analysis) return null;
+  
+  const lines = analysis.split('\n').filter(l => l.trim());
+  
+  return (
+    <div className="shutdown-analysis-content">
+      {lines.map((line, index) => {
+        const trimmed = line.trim();
+        
+        // Bullet point line
+        if (trimmed.startsWith('•') || trimmed.startsWith('-')) {
+          const text = trimmed.replace(/^[•\-]\s*/, '');
+          return (
+            <div key={index} className="shutdown-analysis-bullet">
+              <span className="shutdown-bullet-dot">•</span>
+              <span className="shutdown-bullet-text">{text}</span>
+            </div>
+          );
+        }
+        
+        // Numbered line
+        const numberedMatch = trimmed.match(/^(\d+)\.\s*(.*)/);
+        if (numberedMatch) {
+          return (
+            <div key={index} className="shutdown-analysis-numbered">
+              <span className="shutdown-number">{numberedMatch[1]}.</span>
+              <span className="shutdown-numbered-text">{numberedMatch[2]}</span>
+            </div>
+          );
+        }
+        
+        // Section-like headers (e.g., "Affected orders:", "Partner line capacity:")
+        if (trimmed.endsWith(':') && trimmed.length < 60) {
+          return (
+            <div key={index} className="shutdown-analysis-subheader">
+              {trimmed}
+            </div>
+          );
+        }
+        
+        // Regular paragraph
+        return (
+          <p key={index} className="shutdown-analysis-paragraph">
+            {trimmed}
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+```
+
+### STYLING
+
+```css
+.shutdown-analysis-content {
+  font-size: 12px;
+  color: #374151;
+  line-height: 1.7;
+}
+
+.shutdown-analysis-paragraph {
+  margin: 0 0 10px 0;
+}
+
+.shutdown-analysis-subheader {
+  font-size: 12px;
+  font-weight: 700;
+  color: #1a1a1a;
+  margin: 14px 0 6px 0;
+}
+
+.shutdown-analysis-bullet {
+  display: flex;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.shutdown-analysis-bullet:last-child {
+  border-bottom: none;
+}
+
+.shutdown-bullet-dot {
+  color: #fd5108;
+  font-size: 14px;
+  flex-shrink: 0;
+  margin-top: -1px;
+}
+
+.shutdown-bullet-text {
+  font-size: 12px;
+  color: #374151;
+  line-height: 1.6;
+}
+
+.shutdown-analysis-numbered {
+  display: flex;
+  gap: 6px;
+  padding: 4px 0;
+}
+
+.shutdown-number {
+  font-weight: 700;
+  color: #fd5108;
+  min-width: 16px;
+}
+
+.shutdown-numbered-text {
+  font-size: 12px;
+  color: #374151;
+  line-height: 1.6;
+}
+```
+
+---
+
+## VERIFICATION
+
+### Clean output
+1. ✅ No "### SECTION 1" or "### SECTION 2" visible in dialog
+2. ✅ No markdown markers (**, ##, etc.) visible
+3. ✅ Clean paragraphs and bullet points render properly
+4. ✅ Bullet points have orange dot and proper indentation
+5. ✅ Sub-headers (like "Affected orders:") are bold
+
+### Correct context
+6. ✅ AI correctly identifies orders that can go to partner line
+7. ✅ AI correctly identifies orders that can go outside feedmill
+8. ✅ AI uses actual run rates from master data
+9. ✅ AI knows partner line current load (order count and volume)
+10. ✅ AI knows outside line availability
+
+### Content quality
+11. ✅ Impact summary mentions total orders, total volume, most critical
+12. ✅ Each affected order listed with volume, N10D status, production time
+13. ✅ Critical and Urgent orders listed first
+14. ✅ Specific diversion recommendations per order
+15. ✅ Partner line recommended as primary option
+16. ✅ Outside feedmill lines mentioned as alternatives where available
+17. ✅ Partner line capacity warning included
+18. ✅ Total delay estimate if orders not diverted
+19. ✅ Orders with no run rate on partner line noted as still movable
+```

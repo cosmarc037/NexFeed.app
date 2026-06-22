@@ -1,0 +1,231 @@
+Please update the **order combination guardrails** so that a **generated order** and its **source order** are never considered eligible for combination under any circumstance.
+
+---
+
+## 1. ADD A HARD GUARDRAIL: GENERATED ORDERS MUST NEVER COMBINE WITH SOURCE ORDERS
+
+Please add an explicit rule that:
+
+- a **generated order**
+- and a **source order**
+
+must **never** be considered for combination.
+
+### Important
+This should be a hard guardrail, regardless of:
+- line placement
+- diversion
+- auto-sequence movement
+- matching material codes
+- same queue
+- same feedmill
+- same destination line
+
+### Expected result
+A generated order must not combine with a source order in any workflow.
+
+---
+
+## 2. APPLY THIS EVEN IF THE GENERATED ORDER IS MOVED TO A LINE WHERE THE SOURCE ORDER EXISTS
+
+This is especially important for generated orders related to **Line 6 / Line 7** behavior.
+
+### Concern
+If a generated order is moved or diverted in a way that places it on the same line as its source order, there is a risk that the app may incorrectly consider them combinable.
+
+### New rule
+Even if:
+- the generated order and source order end up on the same line
+- or become adjacent in the sequence
+- or otherwise match combination criteria
+
+they must still **never** be combined.
+
+### Expected result
+Generated and source orders remain permanently combination-ineligible with each other.
+
+---
+
+## 3. DO NOT RELY ONLY ON MATERIAL-CODE MATCHING TO PREVENT THIS
+
+Please do not rely only on:
+- FG material code mismatch
+- SFG material code mismatch
+- or other indirect criteria
+
+to stop this from happening.
+
+### Important
+This should be blocked by an explicit business-rule guardrail, not by coincidence.
+
+### Expected result
+Even if a generated order and source order somehow appear compatible on material fields, the app must still explicitly reject the combination.
+
+---
+
+## 4. APPLY THIS TO BOTH AUTO-COMBINE AND MANUAL COMBINE LOGIC
+
+Please enforce this guardrail in:
+- auto-combine logic
+- plant-level auto-sequence combine scan
+- manual combine actions
+- any helper/shared combine eligibility logic
+
+### Expected result
+There should be no path in the app where a generated order can be combined with its source order.
+
+---
+
+## 5. TREAT GENERATED VS SOURCE AS DIFFERENT ORDER CLASSES FOR COMBINATION ELIGIBILITY
+
+Please explicitly treat:
+- generated orders
+- source orders
+
+as different non-combinable order classes.
+
+### Rule
+If one candidate is:
+- generated
+
+and the other candidate is:
+- source / original non-generated order
+
+then:
+- `canCombine = false`
+
+### Expected result
+The combine logic should reject mixed-type pairing between generated and source orders before other matching logic proceeds.
+
+---
+
+## 6. PRESERVE VALID GENERATED-TO-GENERATED COMBINATION RULES
+
+Please keep the existing rule that:
+- generated orders may combine with **other generated orders**
+when allowed by the updated generated-order combination rules (e.g. SFG material code match and other valid conditions)
+
+### Important
+This request is **not** to disable all generated-order combining.
+
+It is only to prevent:
+- **generated + source** combinations
+
+### Expected result
+Valid generated-to-generated combinations still work normally.
+
+---
+
+## 7. PRESERVE VALID SOURCE-TO-SOURCE COMBINATION RULES
+
+Please also preserve the app’s normal combination behavior for:
+- source-to-source / normal-to-normal orders
+
+as long as they meet their existing combination rules.
+
+### Expected result
+This change should only block mixed pairing between:
+- generated
+- and source
+
+It should not break normal valid combinations within the same order class.
+
+---
+
+## 8. IF GENERATED ORDER LINKS TO A SOURCE ORDER, USE THAT RELATIONSHIP AS A BLOCKER
+
+If the app has a direct relationship or metadata indicating that a generated order came from a specific source order, please use that linkage explicitly as a combination blocker.
+
+### Strongest blocker
+If:
+- Order A is the source of Generated Order B
+
+then:
+- Order A and Generated Order B must never combine
+
+### Recommended broader blocker
+If helpful, you may also block any generated-order-to-source-order combination generally, not just exact linked pairs.
+
+### Expected result
+The source/generated relationship itself should act as a hard exclusion for combination eligibility.
+
+---
+
+## 9. UPDATE DEBUG / COMBINATION REASONING TO SHOW THIS BLOCK WHEN RELEVANT
+
+Please make sure debug logs clearly show when a combination attempt or eligibility scan was blocked because one order is generated and the other is a source order.
+
+### Goal
+Make it easy to verify that this guardrail is actively preventing the combination.
+
+---
+
+## IMPORTANT
+
+Please enforce this hard rule:
+
+> A generated order and a source order must never be combined.
+
+This must remain true:
+- even if they end up on the same line
+- even if they become adjacent
+- even if diversion or auto-sequence movement puts them together
+- even if material-code matching would otherwise suggest compatibility
+
+This should apply across all combine logic in the app.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log generated/source combination blocking.
+
+```javascript
+console.debug('[Combine Guardrail - Generated vs Source]', {
+  orderAId,
+  orderBId,
+  orderAType,
+  orderBType,
+  isGeneratedSourceMix:
+    (orderAType === 'generated' && orderBType === 'source') ||
+    (orderAType === 'source' && orderBType === 'generated'),
+  canCombine: false,
+  blockedReason: 'generated_and_source_orders_cannot_combine',
+});
+```
+
+```javascript
+console.debug('[Combine Eligibility Scan]', {
+  orderAId,
+  orderBId,
+  sameLine,
+  sameSequenceArea,
+  generatedSourceRelationshipDetected,
+  blockedByGeneratedSourceGuardrail,
+});
+```
+
+```javascript
+console.debug('[Manual/Auto Combine Rejected]', {
+  orderAId,
+  orderBId,
+  combineAttemptType, // 'manual' | 'auto'
+  rejected: true,
+  reason: 'generated_source_combination_forbidden',
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ A generated order can never be combined with a source order
+2. ✅ This remains true even if both orders are placed on the same line
+3. ✅ This remains true even if the generated order is diverted or moved onto the source order’s line
+4. ✅ Auto-combine logic rejects generated-to-source combinations
+5. ✅ Manual combine logic rejects generated-to-source combinations
+6. ✅ Plant-level auto-sequence combine scans reject generated-to-source combinations
+7. ✅ Valid generated-to-generated combinations still work when otherwise eligible
+8. ✅ Valid source-to-source combinations still work when otherwise eligible
+9. ✅ Debug logs clearly show when the generated/source guardrail blocked a combination
+10. ✅ No UI errors or console errors are introduced

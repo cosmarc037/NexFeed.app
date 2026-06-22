@@ -1,0 +1,581 @@
+```
+Add before table combined order display, child status tracking, per-child uncombine, and cut order memory:
+
+---
+
+## 1. BEFORE TABLE — SHOW EXISTING COMBINED ORDERS
+
+```jsx
+function PlantBeforeRow({ order, allOrders }) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  
+  // Check if this is an existing combined lead
+  const isLead = !order.parent_id && order.original_order_ids && order.original_order_ids.length > 0;
+  const childOrders = isLead 
+    ? allOrders.filter(o => String(o.parent_id) === String(order.id))
+    : [];
+  
+  // Get effective volume
+  const displayVolume = isLead && order.volume_override 
+    ? order.volume_override 
+    : order.volume || order.total_volume_mt;
+  
+  return (
+    <>
+      <tr className={`auto-sequence-row-before ${isLead ? 'as-row-combined-before' : ''}`}>
+        <td className="as-col-prio">
+          <span className="as-prio-badge">{order.priority_seq || '—'}</span>
+        </td>
+        <td className="as-col-fpr">{order.fpr}</td>
+        <td className="as-col-planned">
+          <div>{order.planned_order_fg || '—'}</div>
+          <div className="as-sub-text">{order.planned_order_sfg || '—'}</div>
+        </td>
+        <td className="as-col-material">{order.material_code_fg}</td>
+        <td className="as-col-desc">
+          <div className="as-desc-with-movement">
+            {isLead && childOrders.length > 0 && (
+              <button
+                className="as-combined-toggle"
+                onClick={() => setIsExpanded(!isExpanded)}
+                title={`${childOrders.length} orders combined`}
+              >
+                🔗
+              </button>
+            )}
+            <div className="as-desc-content">
+              <span className="as-desc-main">{order.item_description}</span>
+              <div className="as-sub-text">{order.category}</div>
+              {isLead && childOrders.length > 0 && (
+                <div className="as-combined-label">
+                  {childOrders.length} orders combined
+                </div>
+              )}
+            </div>
+          </div>
+        </td>
+        <td className="as-col-form">{order.form}</td>
+        <td className="as-col-volume"><strong>{displayVolume}</strong> MT</td>
+        <td className="as-col-batch">{order.batch_size}</td>
+        <td className="as-col-batches">{order.batches}</td>
+        <td className="as-col-prod">
+          <div><strong>{formatProductionTime(order.production_time)}</strong></div>
+          <div className="as-sub-text">CO: {formatProductionTime(order.changeover || 0)}</div>
+        </td>
+        <td className="as-col-start-date">{order.start_date ? formatDate(order.start_date) : '—'}</td>
+        <td className="as-col-start-time">{order.start_time || '—'}</td>
+        <td className="as-col-avail">{formatAvailDate(order.target_avail_date)}</td>
+        <td className="as-col-completion">{order.completion_date || '—'}</td>
+      </tr>
+      
+      {/* Child rows */}
+      {isExpanded && childOrders.map((child, index) => (
+        <tr key={`before-child-${child.id}`} className="as-row-combined-sub">
+          <td className="as-col-prio"></td>
+          <td className="as-col-fpr"><span className="as-sub-fpr">{child.fpr}</span></td>
+          <td className="as-col-planned">
+            <div className="as-sub-text">{child.planned_order_fg || '—'}</div>
+            <div className="as-sub-text">{child.planned_order_sfg || '—'}</div>
+          </td>
+          <td className="as-col-material"><span className="as-sub-text">{child.material_code_fg}</span></td>
+          <td className="as-col-desc">
+            <div className="as-sub-text-dark">{child.item_description}</div>
+            <div className="as-sub-text">{child.status || '—'}</div>
+          </td>
+          <td className="as-col-form"><span className="as-sub-text">{child.form}</span></td>
+          <td className="as-col-volume"><span className="as-sub-text">{child.volume || child.total_volume_mt} MT</span></td>
+          <td className="as-col-batch"><span className="as-sub-text">{child.batch_size || '—'}</span></td>
+          <td className="as-col-batches"><span className="as-sub-text">{child.batches || '—'}</span></td>
+          <td className="as-col-prod"><span className="as-sub-text">{child.production_time ? formatProductionTime(child.production_time) : '—'}</span></td>
+          <td className="as-col-start-date"><span className="as-sub-text">—</span></td>
+          <td className="as-col-start-time"><span className="as-sub-text">—</span></td>
+          <td className="as-col-avail"><span className="as-sub-text">{formatAvailDate(child.target_avail_date)}</span></td>
+          <td className="as-col-completion"><span className="as-sub-text">—</span></td>
+        </tr>
+      ))}
+    </>
+  );
+}
+```
+
+---
+
+## 2. UPDATE BEFORE TABLE TO USE PlantBeforeRow
+
+```jsx
+// In PlantLineTab — the Before table:
+<table className="auto-sequence-table auto-sequence-table-before">
+  <thead>
+    <tr>
+      <th className="as-col-prio">Prio</th>
+      <th className="as-col-fpr">FPR</th>
+      <th className="as-col-planned">Planned Order</th>
+      <th className="as-col-material">Material Code (FG)</th>
+      <th className="as-col-desc">Item Description</th>
+      <th className="as-col-form">Form</th>
+      <th className="as-col-volume">Volume (MT)</th>
+      <th className="as-col-batch">Batch Size</th>
+      <th className="as-col-batches">Batches</th>
+      <th className="as-col-prod">Production Time</th>
+      <th className="as-col-start-date">Start Date</th>
+      <th className="as-col-start-time">Start Time</th>
+      <th className="as-col-avail">Avail Date</th>
+      <th className="as-col-completion">Estimated Completion Date</th>
+    </tr>
+  </thead>
+  <tbody>
+    {originalOrders
+      .filter(o => !o.parent_id) // Only show top-level (leads + standalone)
+      .map(order => (
+        <PlantBeforeRow
+          key={order.id}
+          order={order}
+          allOrders={originalOrders}
+        />
+      ))
+    }
+  </tbody>
+</table>
+```
+
+---
+
+## 3. STORE ORIGINAL STATUS ON EACH CHILD — pre_combine_status
+
+When combining, save each child's current status before changing it:
+
+```javascript
+// In applySequencedResultsToDB — when updating children:
+for (const sub of order._combinedFrom) {
+  const childId = sub.id;
+  
+  // Find the child's current status from DB
+  const currentOrders = queryClient.getQueryData(["orders"]) || [];
+  const currentChild = currentOrders.find(o => String(o.id) === String(childId));
+  const originalStatus = currentChild?.status || sub.status || 'Plotted';
+  
+  // Also preserve cut order metadata
+  const cutOrderMetadata = {
+    pre_combine_status: originalStatus,
+    pre_combine_line: currentChild?.feedmill_line || sub.line,
+    pre_combine_prio: currentChild?.priority_seq || null,
+    // Cut order fields
+    pre_combine_partner_id: currentChild?.cut_partner_id || currentChild?.split_from_id || null,
+    pre_combine_original_volume: currentChild?.original_volume || currentChild?.volume || sub.volume,
+  };
+  
+  try {
+    await updateOrderMutation.mutateAsync({
+      id: childId,
+      data: {
+        parent_id: newLeadId,
+        feedmill_line: line,
+        priority_seq: null,
+        status: 'Combined with other PO',
+        // Store original metadata for uncombine
+        pre_combine_status: cutOrderMetadata.pre_combine_status,
+        pre_combine_line: cutOrderMetadata.pre_combine_line,
+        pre_combine_prio: cutOrderMetadata.pre_combine_prio,
+        pre_combine_partner_id: cutOrderMetadata.pre_combine_partner_id,
+        pre_combine_original_volume: cutOrderMetadata.pre_combine_original_volume,
+      }
+    });
+    console.log(`    [Child] ${childId}: status="${originalStatus}" → "Combined with other PO", parent_id=${newLeadId}`);
+  } catch (error) {
+    console.error(`    [Error] Child ${childId}:`, error);
+  }
+}
+```
+
+---
+
+## 4. UNCOMBINE — REVERT TO ORIGINAL STATUS
+
+```javascript
+async function handleUncombineOrder(leadOrder) {
+  try {
+    // Get all children
+    const currentOrders = queryClient.getQueryData(["orders"]) || [];
+    const children = currentOrders.filter(o => String(o.parent_id) === String(leadOrder.id));
+    
+    // Revert each child to original status
+    for (const child of children) {
+      const revertStatus = child.pre_combine_status || 'Plotted';
+      const revertLine = child.pre_combine_line || child.feedmill_line;
+      
+      await updateOrderMutation.mutateAsync({
+        id: child.id,
+        data: {
+          parent_id: null,
+          status: revertStatus,
+          feedmill_line: revertLine,
+          // Clear combine metadata
+          pre_combine_status: null,
+          pre_combine_line: null,
+          pre_combine_prio: null,
+          // Keep cut order metadata intact for merge back
+          // pre_combine_partner_id stays — so merge back still works
+        }
+      });
+      console.log(`  [Uncombine] ${child.id}: status="${revertStatus}", line=${revertLine}`);
+    }
+    
+    // Delete the lead order (it was generated)
+    await deleteOrderMutation.mutateAsync(leadOrder.id);
+    console.log(`  [Deleted lead] ${leadOrder.id}`);
+    
+    await queryClient.invalidateQueries({ queryKey: ["orders"] });
+    toast.success('Order uncombined. Original statuses restored.');
+    
+  } catch (error) {
+    console.error('Uncombine error:', error);
+    toast.error(`Uncombine failed: ${error.message}`);
+  }
+}
+```
+
+---
+
+## 5. PER-CHILD UNCOMBINE — REMOVE SPECIFIC CHILD FROM COMBINED GROUP
+
+### In the After table, add ✕ per each child row:
+
+```jsx
+// In PlantAfterRow — expanded sub-orders:
+{isExpanded && subOrders.map((subOrder, subIndex) => {
+  const cameFromDifferentLine = subOrder.line && normalizeLine(subOrder.line) !== normalizeLine(order.line);
+  
+  return (
+    <tr key={`sub-${order.id}-${subIndex}`} className="as-row-combined-sub">
+      <td className="as-col-drag"></td>
+      <td className="as-col-prio"></td>
+      <td className="as-col-fpr"><span className="as-sub-fpr">{subOrder.fpr}</span></td>
+      <td className="as-col-planned">
+        <div className="as-sub-text">{subOrder.planned_order_fg || '—'}</div>
+        <div className="as-sub-text">{subOrder.planned_order_sfg || '—'}</div>
+      </td>
+      <td className="as-col-material"><span className="as-sub-text">{subOrder.material_code_fg || '—'}</span></td>
+      <td className="as-col-desc">
+        <div className="as-sub-desc">
+          {cameFromDifferentLine && (
+            <span className="as-line-badge as-line-badge-small">
+              {getLineShortName(subOrder.line)}
+            </span>
+          )}
+          <div className="as-sub-desc-row">
+            <span className="as-sub-text-dark">{subOrder.item_description || order.item_description}</span>
+            {/* Per-child uncombine button */}
+            {onRemoveChildFromCombine && (
+              <button
+                className="as-child-remove-btn"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRemoveChildFromCombine(order, subOrder);
+                }}
+                title="Remove this order from the combined group"
+              >
+                ✕
+              </button>
+            )}
+          </div>
+          <div className="as-sub-text">{subOrder.status || '—'}</div>
+        </div>
+      </td>
+      <td className="as-col-form"><span className="as-sub-text">{subOrder.form || order.form}</span></td>
+      <td className="as-col-volume"><span className="as-sub-text">{subOrder.volume} MT</span></td>
+      <td className="as-col-batch"><span className="as-sub-text">{subOrder.batch_size || '—'}</span></td>
+      <td className="as-col-batches"><span className="as-sub-text">{subOrder.batches || '—'}</span></td>
+      <td className="as-col-prod"><span className="as-sub-text">{subOrder.production_time ? formatProductionTime(subOrder.production_time) : '—'}</span></td>
+      <td className="as-col-start-date"><span className="as-sub-text">—</span></td>
+      <td className="as-col-start-time"><span className="as-sub-text">—</span></td>
+      <td className="as-col-avail"><span className="as-sub-text">{formatAvailDate(subOrder.target_avail_date) || '—'}</span></td>
+      <td className="as-col-completion"><span className="as-sub-text">—</span></td>
+      <td className="as-col-insight"></td>
+    </tr>
+  );
+})}
+```
+
+---
+
+## 6. HANDLE REMOVE CHILD FROM COMBINED GROUP
+
+```javascript
+function handleRemoveChildFromCombine(line, combinedOrder, childToRemove) {
+  const currentLineOrders = [...(sequencedResults[line] || [])];
+  const combinedIndex = currentLineOrders.findIndex(o => o.id === combinedOrder.id);
+  if (combinedIndex === -1) return;
+  
+  const remainingChildren = combinedOrder._combinedFrom.filter(
+    sub => String(sub.id) !== String(childToRemove.id)
+  );
+  
+  if (remainingChildren.length < 2) {
+    // Only 1 child left — uncombine entirely
+    handleUncombineSingle(line, combinedOrder);
+    return;
+  }
+  
+  // Recalculate combined volume without the removed child
+  const newTotalVolume = remainingChildren.reduce(
+    (sum, sub) => sum + (parseFloat(sub.volume) || 0), 0
+  );
+  
+  // Update the combined order
+  const updatedCombined = {
+    ...combinedOrder,
+    volume: newTotalVolume,
+    total_volume_mt: newTotalVolume,
+    _combinedFrom: remainingChildren,
+    batches: Math.ceil(newTotalVolume / (parseFloat(combinedOrder.batch_size) || 1)),
+  };
+  
+  currentLineOrders[combinedIndex] = updatedCombined;
+  
+  // Create standalone order from the removed child
+  const removedOrder = {
+    ...childToRemove,
+    id: childToRemove.id,
+    feedmill_line: line,
+    line: line,
+    volume: childToRemove.volume,
+    total_volume_mt: childToRemove.volume,
+    _isCombined: false,
+    _combinedFrom: null,
+    _combinedFromLines: null,
+    _movement: 'uncombined',
+    status: childToRemove.pre_combine_status || childToRemove.status || 'Plotted',
+  };
+  
+  // Insert after the combined order
+  currentLineOrders.splice(combinedIndex + 1, 0, removedOrder);
+  
+  // Re-sequence
+  const sequenced = runAutoSequence(currentLineOrders, changeoverRules, masterData, n10dData);
+  const withChangeovers = calculatePreviewChangeovers(sequenced, changeoverRules);
+  
+  const originalLineOrders = originalSnapshot[line] || [];
+  const withMovement = withChangeovers.map((order, index) => {
+    const newPrio = index + 1;
+    const originalIndex = originalLineOrders.findIndex(o => o.id === order.id);
+    let movement = 'same';
+    let movementDelta = 0;
+    
+    if (originalIndex >= 0) {
+      const originalPrio = originalIndex + 1;
+      movementDelta = originalPrio - newPrio;
+      if (movementDelta > 0) movement = 'up';
+      else if (movementDelta < 0) movement = 'down';
+    } else {
+      movement = 'new_to_line';
+    }
+    
+    return {
+      ...order,
+      prio: newPrio,
+      _originalPrio: originalIndex >= 0 ? originalIndex + 1 : -1,
+      _movement: movement,
+      _movementDelta: Math.abs(movementDelta),
+    };
+  });
+  
+  const updatedResults = { ...sequencedResults };
+  updatedResults[line] = withMovement;
+  setSequencedResults(updatedResults);
+  
+  // Update log
+  const updatedLog = placementLog.filter(entry => {
+    if (entry.type !== 'combined') return true;
+    if (entry.product === combinedOrder.item_description && entry.toLine === line) {
+      return false;
+    }
+    return true;
+  });
+  
+  // Add updated log entry for remaining combined
+  if (remainingChildren.length >= 2) {
+    updatedLog.push({
+      type: 'combined',
+      product: updatedCombined.item_description,
+      materialCode: updatedCombined.material_code_fg,
+      ordersCount: remainingChildren.length,
+      toLine: line,
+      totalVolume: newTotalVolume,
+      individualVolumes: remainingChildren.map(s => ({
+        id: s.id, name: s.item_description, volume: s.volume, fromLine: s.line, fpr: s.fpr,
+      })),
+    });
+  }
+  
+  setPlacementLog(updatedLog);
+  
+  // Invalidate insights
+  invalidateLineCache(line);
+  
+  // Recalculate stats
+  const allCombined = [];
+  Object.values(updatedResults).forEach(orders => {
+    orders.filter(o => o._isCombined).forEach(o => allCombined.push(o));
+  });
+  const stats = calculatePlantSummary(originalSnapshot, updatedResults, allCombined, updatedLog, allLines);
+  setSummaryStats(stats);
+}
+```
+
+---
+
+## 7. PASS HANDLERS DOWN THE COMPONENT CHAIN
+
+```jsx
+// PlantAutoSequencePreview → PlantLineTab
+<PlantLineTab
+  line={activeTab}
+  originalOrders={originalSnapshot[activeTab] || []}
+  allOriginalOrders={allOriginalOrders}  // Pass all orders for before table child lookup
+  sequencedOrders={sequencedResults[activeTab] || []}
+  placementLog={placementLog}
+  onUncombineSingle={(combinedOrder) => handleUncombineSingle(activeTab, combinedOrder)}
+  onRemoveChildFromCombine={(combinedOrder, child) => handleRemoveChildFromCombine(activeTab, combinedOrder, child)}
+  // ... other props ...
+/>
+
+// PlantLineTab → PlantAfterRow
+<PlantAfterRow
+  key={order.id}
+  order={order}
+  onUncombineSingle={onUncombineSingle}
+  onRemoveChildFromCombine={onRemoveChildFromCombine 
+    ? (child) => onRemoveChildFromCombine(order, child)
+    : null
+  }
+  insight={rowInsights?.[order.prio] || null}
+  isLoadingInsight={isLoadingRowInsights}
+/>
+
+// PlantAfterRow uses onRemoveChildFromCombine per child row
+```
+
+---
+
+## 8. STYLING
+
+```css
+/* Before table combined row */
+.as-row-combined-before {
+  background: #eff6ff;
+}
+
+/* Per-child remove button */
+.as-sub-desc-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.as-child-remove-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: none;
+  background: none;
+  color: #d1d5db;
+  font-size: 9px;
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+  transition: all 0.15s;
+}
+
+.as-child-remove-btn:hover {
+  background: #fef2f2;
+  color: #dc2626;
+}
+```
+
+---
+
+## 9. UPDATE APPLY — STATUS RULES
+
+```javascript
+// In applySequencedResultsToDB:
+
+// Lead order (newly created):
+const newLead = await createOrderMutation.mutateAsync({
+  data: {
+    // ... existing fields ...
+    status: 'Planned',  // Lead always Planned
+  }
+});
+
+// Child orders:
+for (const sub of order._combinedFrom) {
+  const currentChild = currentOrders.find(o => String(o.id) === String(sub.id));
+  const originalStatus = currentChild?.status || sub.status || 'Plotted';
+  
+  await updateOrderMutation.mutateAsync({
+    id: sub.id,
+    data: {
+      parent_id: newLeadId,
+      feedmill_line: line,
+      priority_seq: null,
+      status: 'Combined with other PO',
+      pre_combine_status: originalStatus,
+      pre_combine_line: currentChild?.feedmill_line || sub.line,
+      pre_combine_prio: currentChild?.priority_seq || null,
+      pre_combine_partner_id: currentChild?.cut_partner_id || currentChild?.split_from_id || null,
+      pre_combine_original_volume: currentChild?.original_volume || parseFloat(currentChild?.volume || sub.volume),
+    }
+  });
+}
+
+// Regular (non-combined) orders:
+await updateOrderMutation.mutateAsync({
+  id: order.id,
+  data: {
+    // ... existing fields ...
+    status: 'Planned',
+  }
+});
+```
+
+---
+
+## VERIFICATION
+
+### Before table shows existing combined orders
+1. ✅ Existing leads shown with 🔗 icon
+2. ✅ Expandable to see children
+3. ✅ Combined volume displayed on lead
+4. ✅ Child rows show original volume
+5. ✅ Child orders filtered from main list (only leads + standalone shown)
+6. ✅ Blue highlight on combined rows
+
+### Status handling
+7. ✅ Lead: status = "Planned"
+8. ✅ Children: status = "Combined with other PO"
+9. ✅ Regular orders: status = "Planned"
+10. ✅ pre_combine_status saved on each child
+
+### Uncombine reverts status
+11. ✅ Whole uncombine (✕ on lead): all children revert to pre_combine_status
+12. ✅ Lead deleted from DB
+13. ✅ Children get parent_id = null
+14. ✅ Cut order metadata preserved (partner_id, original_volume)
+
+### Per-child uncombine
+15. ✅ ✕ button on each child row in expanded view
+16. ✅ Removing 1 child from 3+ group → group stays combined with reduced volume
+17. ✅ Removing 1 child from 2-child group → uncombines entirely
+18. ✅ Removed child becomes standalone order
+19. ✅ Line re-sequences after removal
+20. ✅ Insights invalidated
+
+### Cut order preservation
+21. ✅ pre_combine_partner_id saved (for merge back)
+22. ✅ pre_combine_original_volume saved
+23. ✅ On uncombine, partner_id still intact → merge back works
+24. ✅ Cut order reverts to original status (e.g., "Cut")
+```

@@ -1,0 +1,311 @@
+```
+Fix: N10D data only applies when auto-sequence is triggered and approved:
+
+---
+
+## 1. REMOVE THE AUTOMATIC N10D UPDATE ON UPLOAD
+
+Delete or disable the `handleN10DUpload` function that was auto-updating orders. Instead:
+
+```javascript
+// In Future Dispatches upload handler:
+
+async function handleN10DDataUpload(newN10DData) {
+  try {
+    // Step 1: Save new N10D data to DB (don't apply to orders yet)
+    await saveN10DDataMutation.mutateAsync({
+      data: newN10DData,
+      timestamp: new Date().toISOString()
+    });
+    
+    // Step 2: Invalidate cache so next auto-sequence uses fresh data
+    queryClient.invalidateQueries({ queryKey: ["n10d-data"] });
+    
+    // Step 3: Show message to user
+    toast.success(`N10D data uploaded (${newN10DData.length} items). Click Auto-Sequence to apply changes.`);
+    
+  } catch (error) {
+    console.error('N10D upload error:', error);
+    toast.error(`N10D upload failed: ${error.message}`);
+  }
+}
+
+// REMOVE the old handleN10DUpload that was auto-updating orders
+```
+
+---
+
+## 2. TRACK WHICH ORDERS WILL BE AFFECTED BY NEW N10D
+
+When new N10D is uploaded, just flag which orders COULD be affected (for preview purposes):
+
+```javascript
+// In the N10D data store/state:
+
+const [n10dData, setN10DData] = useState([]);
+const [previousN10DData, setPreviousN10DData] = useState([]);
+const [n10dHasChanged, setN10DHashChanged] = useState(false);
+
+function handleN10DUpload(newN10DData) {
+  // Store old data
+  setPreviousN10DData(n10dData);
+  
+  // Update new data
+  setN10DData(newN10DData);
+  
+  // Flag that N10D has changed (so auto-sequence preview will show differences)
+  setN10DHashChanged(true);
+  
+  toast.success('N10D data updated. Click Auto-Sequence to apply new dates.');
+}
+```
+
+---
+
+## 3. UPDATE preSortOrders — USE LATEST N10D DATA, NOT DB DATES
+
+When auto-sequence runs, always recalculate N10D dates from the current N10D data (not from stored order dates):
+
+```javascript
+function preSortOrders(orders, n10dData, masterData) {
+  return orders.map(order => {
+    const materialCode = String(order.material_code_fg || '').trim();
+    
+    // ALWAYS skip hard SAP dates (never override these)
+    if (order.date_source === 'hard_date' && order.target_avail_date && /^\d{4}-\d{2}-\d{2}/.test(String(order.target_avail_date))) {
+      return {
+        ...order,
+        _category: 'A',
+        _sortDate: new Date(order.target_avail_date),
+        _dateSource: 'hard_date',
+      };
+    }
+    
+    // For N10D orders: RECALCULATE from current N10D data (don't use old stored dates)
+    if (order.date_source === 'n10d' || order.date_source === 'none') {
+      if (n10dData && n10dData.length > 0 && materialCode) {
+        const n10dEntry = n10dData.find(n =>
+          String(n.material_code || n.material_code_fg || '').trim() === materialCode
+        );
+        
+        if (n10dEntry) {
+          const inferredDate = n10dEntry.inferred_target_date || n10dEntry.target_date;
+          const status = String(n10dEntry.status || n10dEntry.stock_status || '').trim();
+          
+          if (inferredDate && /^\d{4}-\d{2}-\d{2}/.test(inferredDate)) {
+            // NEW DATE FROM N10D — use it
+            return {
+              ...order,
+              _category: status === 'Critical' ? 'C' : status === 'Urgent' ? 'B' : 'D',
+              _sortDate: new Date(inferredDate),
+              _n10dStatus: status,
+              _availDateDisplay: status,
+              _dateSource: 'n10d',
+              _resolvedDate: inferredDate,  // For display in preview
+              inferred_target_date: inferredDate,
+              inferred_target_label: status,
+              target_avail_date: inferredDate,  // Will be saved only if user approves
+              _freshFromN10D: true,  // Flag that this is fresh from latest N10D
+            };
+          }
+          
+          // Status-only (no date)
+          if (status === 'Critical' || status === 'Urgent') {
+            return {
+              ...order,
+              _category: status === 'Critical' ? 'C' : 'B',
+              _n10dStatus: status,
+              _availDateDisplay: status,
+              _dateSource: 'n10d',
+              inferred_target_label: status,
+            };
+          }
+        }
+      }
+    }
+    
+    // Fallback
+    return {
+      ...order,
+      _category: 'E',
+      _dateSource: 'none',
+    };
+  });
+}
+```
+
+---
+
+## 4. UPDATE AUTO-SEQUENCE PREVIEW — SHOW BEFORE/AFTER DATES
+
+In the preview, show which orders have new dates from the updated N10D:
+
+```jsx
+// In PlantAutoSequencePreview — Before table
+
+function PlantBeforeRow({ order, allOrders }) {
+  const isLead = !order.parent_id && order.original_order_ids?.length > 0;
+  const childOrders = isLead 
+    ? allOrders.filter(o => String(o.parent_id) === String(order.id))
+    : [];
+  
+  // Check if this order will have a different date in the preview
+  const displayVolume = isLead && order.volume_override 
+    ? order.volume_override 
+    : order.volume || order.total_volume_mt;
+  
+  return (
+    <tr className={`auto-sequence-row-before ${isLead ? 'as-row-combined-before' : ''}`}>
+      <td className="as-col-prio">
+        <span className="as-prio-badge">{order.priority_seq || '—'}</span>
+      </td>
+      <td className="as-col-fpr">{order.fpr}</td>
+      <td className="as-col-planned">
+        <div>{order.planned_order_fg || '—'}</div>
+        <div className="as-sub-text">{order.planned_order_sfg || '—'}</div>
+      </td>
+      <td className="as-col-material">{order.material_code_fg}</td>
+      <td className="as-col-desc">
+        <span className="as-desc-main">{order.item_description}</span>
+        <div className="as-sub-text">{order.category}</div>
+      </td>
+      <td className="as-col-form">{order.form}</td>
+      <td className="as-col-volume"><strong>{displayVolume}</strong> MT</td>
+      
+      {/* Show avail date in BEFORE table */}
+      <td className="as-col-avail">
+        {order.target_avail_date && /^\d{4}-\d{2}-\d{2}/.test(String(order.target_avail_date)) ? (
+          <>
+            <span>{formatDate(order.target_avail_date)}</span>
+            {order.inferred_target_label && (
+              <div className="as-sub-text">{order.inferred_target_label}</div>
+            )}
+          </>
+        ) : (
+          <span className="as-sub-text">{order.inferred_target_label || '—'}</span>
+        )}
+      </td>
+    </tr>
+  );
+}
+```
+
+---
+
+## 5. UPDATE applySequencedResultsToDB — ONLY SAVE WHEN USER APPROVES
+
+Only save N10D dates to DB when user clicks "Apply to Schedule":
+
+```javascript
+async function applySequencedResultsToDB(sequencedResults) {
+  for (const [line, lineOrders] of Object.entries(sequencedResults)) {
+    let prioCounter = 1;
+    
+    for (const order of lineOrders) {
+      if (order.status === 'In Production' || order.status === 'On-going') continue;
+      
+      if (order._isCombined && order._combinedFrom) {
+        // Handle combined orders...
+      } else {
+        // Regular order
+        const updateData = {
+          feedmill_line: line,
+          priority_seq: prioCounter,
+          status: 'Planned',
+          parent_id: null,
+          
+          // Only save N10D dates if they came fresh from latest N10D data
+          // (indicated by _freshFromN10D flag)
+          ...(order._freshFromN10D && {
+            date_source: 'n10d',
+            inferred_target_date: order.inferred_target_date,
+            inferred_target_label: order.inferred_target_label,
+            target_avail_date: order.target_avail_date,
+            last_n10d_update: new Date().toISOString(),
+            has_manual_override: false,
+            manual_edit_date: null,
+          }),
+        };
+        
+        try {
+          await updateOrderMutation.mutateAsync({
+            id: order.id,
+            data: updateData
+          });
+        } catch (error) {
+          console.error(`Update order ${order.id}:`, error);
+        }
+        
+        prioCounter++;
+      }
+    }
+  }
+  
+  await queryClient.invalidateQueries({ queryKey: ["orders"] });
+  setN10DHashChanged(false);  // Clear flag after applying
+}
+```
+
+---
+
+## 6. UPDATE ORDER TABLE — DON'T SHOW AUTO-UPDATED DATES
+
+Orders should keep their current dates until auto-sequence is approved:
+
+```jsx
+// In OrderTable.jsx — render avail date
+
+function renderAvailDate(order) {
+  return (
+    <div className="avail-date-cell">
+      {order.target_avail_date && /^\d{4}-\d{2}-\d{2}/.test(String(order.target_avail_date)) ? (
+        <>
+          <span className="avail-date-value">
+            {formatDate(order.target_avail_date)}
+          </span>
+          {order.inferred_target_label && (
+            <span className="avail-date-label">
+              {order.inferred_target_label}
+            </span>
+          )}
+        </>
+      ) : (
+        <span className="avail-date-label">
+          {order.inferred_target_label || order.target_avail_date || '—'}
+        </span>
+      )}
+    </div>
+  );
+}
+```
+
+---
+
+## VERIFICATION
+
+### N10D upload flow
+1. ✅ User uploads new N10D → stored in DB
+2. ✅ Orders in table NOT automatically updated
+3. ✅ Toast says: "N10D data updated. Click Auto-Sequence to apply changes."
+4. ✅ No automatic date changes to existing orders
+
+### Auto-sequence preview
+5. ✅ User clicks Auto-Sequence (All)
+6. ✅ preSortOrders recalculates ALL orders using LATEST N10D data
+7. ✅ Preview shows new dates (e.g., Gallimax: May 5 → April 11)
+8. ✅ Before table shows old dates, After table shows new dates
+
+### User approval
+9. ✅ User reviews changes in preview
+10. ✅ User clicks "Apply to Schedule"
+11. ✅ Only then are the new dates saved to DB
+12. ✅ Order table now shows updated dates
+
+### Example scenario
+- Gallimax was May 5 after first auto-sequence
+- New N10D uploaded → table still shows May 5
+- User clicks Auto-Sequence → preview shows April 11
+- User approves → table now shows April 11
+- Done ✓
+
+```

@@ -1,0 +1,415 @@
+```
+Display relevant actions per line tab:
+
+---
+
+## 1. FILTER ACTIONS PER LINE
+
+```javascript
+function getActionsForLine(placementLog, line) {
+  return placementLog.filter(entry => {
+    // Show if this line is the destination
+    if (entry.toLine === line) return true;
+    
+    // Show if this line is the source (order moved away)
+    if (entry.type === 'moved' && entry.fromLine === line) return true;
+    
+    // Show if any sub-order in a combined group came from this line
+    if (entry.type === 'combined' && entry.fromLines && entry.fromLines.includes(line)) return true;
+    
+    return false;
+  });
+}
+```
+
+---
+
+## 2. UPDATE PlantLineTab — ADD ACTIONS SECTION
+
+```jsx
+function PlantLineTab({ 
+  line, 
+  originalOrders, 
+  sequencedOrders, 
+  placementLog,
+  aiExplanations,
+  isLoadingAI,
+  useFallback
+}) {
+  const movedCount = sequencedOrders.filter(o => o._movement !== 'same').length;
+  const newFromOtherLines = sequencedOrders.filter(o => o._movement === 'new_to_line').length;
+  const combinedCount = sequencedOrders.filter(o => o._isCombined).length;
+  
+  // Get actions relevant to this line
+  const lineActions = getActionsForLine(placementLog, line);
+  
+  return (
+    <div className="plant-line-tab">
+      {/* Line stats */}
+      <div className="auto-sequence-stats" style={{ padding: '12px 24px' }}>
+        <StatBadge label="Before" value={originalOrders.length} />
+        <StatBadge label="After" value={sequencedOrders.length} />
+        {newFromOtherLines > 0 && (
+          <StatBadge label="From Other Lines" value={newFromOtherLines} color="blue" />
+        )}
+        <StatBadge label="Orders Moved" value={movedCount} color="orange" />
+        {combinedCount > 0 && (
+          <StatBadge label="Combined Groups" value={combinedCount} color="green" />
+        )}
+      </div>
+      
+      {/* Actions for this line — collapsible */}
+      {lineActions.length > 0 && (
+        <LineActions
+          line={line}
+          actions={lineActions}
+          placementLog={placementLog}
+          aiExplanations={aiExplanations}
+          isLoadingAI={isLoadingAI}
+          useFallback={useFallback}
+        />
+      )}
+      
+      {/* Before and After comparison */}
+      <div className="auto-sequence-comparison">
+        <div className="auto-sequence-comparison-container">
+          <div className="auto-sequence-comparison-scroll">
+            {/* ... existing Before and After tables ... */}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+## 3. LINE ACTIONS COMPONENT
+
+```jsx
+function LineActions({ line, actions, placementLog, aiExplanations, isLoadingAI, useFallback }) {
+  const [isExpanded, setIsExpanded] = useState(true);
+  
+  return (
+    <div className="line-actions-section">
+      <div className="line-actions-header" onClick={() => setIsExpanded(!isExpanded)}>
+        <span className="line-actions-title">
+          📋 Actions on {line}
+          <span className="line-actions-count">{actions.length}</span>
+        </span>
+        <span className="line-actions-toggle">
+          {isExpanded ? '▲ Collapse' : '▼ Expand'}
+        </span>
+      </div>
+      
+      {isExpanded && (
+        <div className="line-actions-body">
+          {isLoadingAI && (
+            <div className="plant-actions-loading">Analyzing actions...</div>
+          )}
+          
+          {!isLoadingAI && actions.map((entry, actionIdx) => {
+            // Find the global index of this action in the full placementLog
+            const globalIndex = placementLog.findIndex(p => p === entry);
+            
+            const explanation = (!useFallback && aiExplanations && aiExplanations[globalIndex])
+              ? aiExplanations[globalIndex]
+              : generateFallbackExplanation(entry);
+            
+            const isAI = !useFallback && aiExplanations && aiExplanations[globalIndex];
+            
+            // Determine the relationship to this line
+            const isDestination = entry.toLine === line;
+            const isSource = (entry.type === 'moved' && entry.fromLine === line) ||
+                             (entry.type === 'combined' && entry.fromLines?.includes(line) && entry.toLine !== line);
+            
+            const toScore = entry.lineScores?.find(ls => ls.line === entry.toLine);
+            
+            return (
+              <div key={actionIdx} className={`plant-action-card ${isSource && !isDestination ? 'plant-action-card-source' : ''}`}>
+                {/* Relationship tag */}
+                <div className="line-action-relationship">
+                  {isDestination && isSource && (
+                    <span className="line-action-tag line-action-tag-both">Combined in place</span>
+                  )}
+                  {isDestination && !isSource && (
+                    <span className="line-action-tag line-action-tag-incoming">Incoming</span>
+                  )}
+                  {isSource && !isDestination && (
+                    <span className="line-action-tag line-action-tag-outgoing">Outgoing</span>
+                  )}
+                </div>
+                
+                {/* Header */}
+                <div className="plant-action-header">
+                  {entry.type === 'combined' ? (
+                    <>
+                      <span className="plant-action-icon">🔗</span>
+                      <span className="plant-action-title">
+                        Combined <strong>{entry.ordersCount}</strong> orders of <strong>{entry.product}</strong> ({entry.totalVolume} MT)
+                        {entry.fromLines.every(l => l === entry.toLine)
+                          ? ` in place on ${entry.toLine}`
+                          : ` from ${[...new Set(entry.fromLines)].map(l => getLineShortName(l)).join(', ')} → ${entry.toLine}`
+                        }
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="plant-action-icon">↗</span>
+                      <span className="plant-action-title">
+                        Moved <strong>{entry.product}</strong> ({entry.volume} MT) {getLineShortName(entry.fromLine)} → {entry.toLine}
+                      </span>
+                    </>
+                  )}
+                  {isAI && <span className="plant-action-ai-tag">AI</span>}
+                </div>
+                
+                {/* Explanation */}
+                <div className="plant-action-explanation">
+                  {explanation}
+                </div>
+                
+                {/* Bottom badges */}
+                <div className="plant-action-badges">
+                  {toScore && (
+                    <span className="plant-action-mt-badge plant-action-mt-increase">
+                      {getLineShortName(entry.toLine)} {toScore.totalMTBefore.toFixed(1)} MT → {toScore.totalMTAfter.toFixed(1)} MT
+                      <span className="plant-action-mt-diff">
+                        (+{(toScore.totalMTAfter - toScore.totalMTBefore).toFixed(1)} MT)
+                      </span>
+                    </span>
+                  )}
+                  
+                  {entry.type === 'combined' && entry.individualVolumes && (
+                    entry.individualVolumes.map((iv, subIdx) => (
+                      <span key={subIdx} className="plant-action-sub-chip">
+                        {getLineShortName(iv.fromLine)} · {iv.volume} MT
+                      </span>
+                    ))
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+```
+
+---
+
+## 4. PASS DATA DOWN FROM PARENT
+
+```jsx
+function PlantAutoSequencePreview({
+  originalSnapshot,
+  sequencedResults,
+  summaryStats,
+  placementLog,
+  allLines,
+  onApply,
+  onCancel,
+  onReanalyze,
+  onResetToOriginal
+}) {
+  const [activeTab, setActiveTab] = useState('summary');
+  
+  // AI insights — cached at top level
+  const [aiExplanations, setAiExplanations] = useState(null);
+  const [isLoadingAI, setIsLoadingAI] = useState(true);
+  const [useFallback, setUseFallback] = useState(false);
+  
+  useEffect(() => {
+    generateExplanations();
+  }, []);
+  
+  // ... existing AI generation code ...
+  
+  return (
+    <div className="auto-sequence-overlay">
+      <div className="auto-sequence-modal">
+        {/* ... header, stats, tabs ... */}
+        
+        <div className="plant-preview-content">
+          {activeTab === 'summary' && (
+            <PlantSummaryTab
+              summaryStats={summaryStats}
+              placementLog={placementLog}
+              aiExplanations={aiExplanations}
+              isLoadingAI={isLoadingAI}
+              useFallback={useFallback}
+              onRefreshInsights={handleRefreshInsights}
+            />
+          )}
+          
+          {activeTab !== 'summary' && (
+            <PlantLineTab
+              line={activeTab}
+              originalOrders={originalSnapshot[activeTab] || []}
+              sequencedOrders={sequencedResults[activeTab] || []}
+              placementLog={placementLog}
+              aiExplanations={aiExplanations}
+              isLoadingAI={isLoadingAI}
+              useFallback={useFallback}
+            />
+          )}
+        </div>
+        
+        {/* ... footer ... */}
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+## 5. STYLING
+
+```css
+/* Line actions section */
+.line-actions-section {
+  margin: 0 24px 12px 24px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.line-actions-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 16px;
+  background: #f9fafb;
+  cursor: pointer;
+  user-select: none;
+}
+
+.line-actions-header:hover {
+  background: #f3f4f6;
+}
+
+.line-actions-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #1a1a1a;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.line-actions-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 700;
+  background: #e5e7eb;
+  color: #374151;
+}
+
+.line-actions-toggle {
+  font-size: 11px;
+  color: #6b7280;
+  font-weight: 500;
+}
+
+.line-actions-body {
+  padding: 12px 16px;
+  border-top: 1px solid #e5e7eb;
+}
+
+/* Relationship tags */
+.line-action-relationship {
+  margin-bottom: 6px;
+}
+
+.line-action-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.line-action-tag-incoming {
+  background: #f0fdf4;
+  color: #16a34a;
+  border: 1px solid #bbf7d0;
+}
+
+.line-action-tag-outgoing {
+  background: #fef2f2;
+  color: #dc2626;
+  border: 1px solid #fecaca;
+}
+
+.line-action-tag-both {
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: 1px solid #bfdbfe;
+}
+
+/* Source card — subtle red left border */
+.plant-action-card-source {
+  border-left: 3px solid #fecaca;
+}
+
+/* Existing styles remain unchanged */
+.plant-action-card {
+  background: #f9fafb;
+  border: 1px solid #f3f4f6;
+  border-radius: 8px;
+  padding: 14px 16px;
+  margin-bottom: 10px;
+}
+
+.plant-action-card:last-child {
+  margin-bottom: 0;
+}
+```
+
+---
+
+## VERIFICATION
+
+### Actions shown per line
+1. ✅ Line 3 tab shows only actions relevant to Line 3
+2. ✅ If order combined ON Line 3 → shown
+3. ✅ If order moved TO Line 3 → shown with "Incoming" tag
+4. ✅ If order moved FROM Line 3 → shown with "Outgoing" tag
+5. ✅ If combined in place on Line 3 → shown with "Combined in place" tag
+6. ✅ Lines with no actions → no actions section shown
+
+### Same AI explanations — cached, not regenerated
+7. ✅ Uses same aiExplanations from parent
+8. ✅ No new AI calls when switching tabs
+9. ✅ Global index used to match explanation to action
+
+### Collapsible
+10. ✅ Section is collapsible (expanded by default)
+11. ✅ Header shows "Actions on Line 3" with count badge
+12. ✅ Click to collapse/expand
+
+### Relationship context
+13. ✅ "Incoming" green tag — order moved/combined here
+14. ✅ "Outgoing" red tag — order moved away from this line
+15. ✅ "Combined in place" blue tag — orders already here, combined
+16. ✅ Outgoing cards have subtle red left border
+
+### Layout
+17. ✅ Actions section between stats and comparison tables
+18. ✅ Same card styling as All Lines Summary
+19. ✅ Same explanation format (plain text, no bold)
+20. ✅ Same badges at bottom (MT change + sub-orders)
+```

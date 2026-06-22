@@ -1,0 +1,179 @@
+Please fix the **Divert Order insertion-position mismatch** so that the **modal summary, impact-analysis writeup, and final applied diversion** all use the **same exact insertion position**.
+
+---
+
+## 1. USE ONE SINGLE SOURCE OF TRUTH FOR DIVERT INSERTION POSITION
+
+There is currently a mismatch in the **Divert Order** flow where different parts of the UI are showing different insertion positions for the same target line.
+
+### Current issue example
+For the same selected destination line, the modal may show:
+- **Insertion Position: Priority 2**
+
+but the narrative writeup says:
+- **Priority 7**
+
+and after confirmation, the order is actually inserted at:
+- **Priority 5**
+
+### Required rule
+There must be only **one final reviewed insertion position** for the selected diversion target line.
+
+### Expected result
+The same insertion position must be used consistently in:
+- the insertion-position summary
+- the impact-analysis narrative
+- the final applied diversion in the schedule
+
+---
+
+## 2. MAKE THE `INSERTION POSITION` SUMMARY MATCH THE IMPACT-ANALYSIS WRITEUP
+
+Please ensure the insertion summary and the detailed writeup are generated from the same reviewed insertion result.
+
+### Expected result
+If the modal says:
+- `Priority 2`
+
+then the writeup should also say:
+- `Priority 2`
+
+### Goal
+Avoid internal contradiction within the same modal.
+
+---
+
+## 3. MAKE THE FINAL APPLIED DIVERSION MATCH THE REVIEWED MODAL POSITION
+
+Please ensure that once the user confirms the diversion, the final inserted order lands at the same priority that was reviewed in the modal.
+
+### Expected result
+If the modal says:
+- `Priority 2`
+
+then after confirmation the diverted order must actually appear at:
+- `Prio 2`
+
+### Goal
+The user should be able to trust that the reviewed diversion placement is the one that gets applied.
+
+---
+
+## 4. DO NOT LET DIFFERENT PARTS OF THE DIVERT FLOW RECALCULATE DIFFERENT SLOTS
+
+Please check whether:
+- the insertion-position summary
+- the impact-analysis explanation
+- and the final apply step
+
+are each recalculating insertion position independently.
+
+### Important
+They should all use the same final reviewed placement result.
+
+### Expected result
+No more drift between:
+- summary position
+- writeup position
+- applied position
+
+---
+
+## 5. REVIEW FOR OFF-BY-N OR STALE-SNAPSHOT ISSUES IN DIVERT INSERTION
+
+Since the example shows three different positions (`2`, `7`, and `5`), please review whether the mismatch is caused by:
+- stale line snapshot data
+- recomputation after line selection
+- one-based vs zero-based conversion
+- row shifting after insertion
+- summary using one dataset while writeup/apply uses another
+
+### Expected result
+The final selected target-line insertion position remains stable from review to apply.
+
+---
+
+## 6. APPLY THIS TO THE DIVERT ORDER FLOW ACROSS ALL LINES / FEEDMILLS
+
+Please ensure this fix applies consistently for **Divert Order** across:
+- `Line 1` to `Line 7`
+- `FM1`
+- `FM2`
+- `FM3`
+- `PMX`
+
+### Expected result
+The diversion modal becomes internally consistent and the final applied result matches the reviewed insertion position everywhere.
+
+---
+
+## IMPORTANT
+
+Please enforce this rule for **Divert Order**:
+
+> The insertion position shown in the modal, the position described in the impact-analysis writeup, and the final applied diversion position must all be the same.
+
+If the modal says:
+- `Priority 2`
+
+then:
+- the writeup must also say `Priority 2`
+- and the diverted order must actually be inserted at `Prio 2`
+
+No more mismatches like:
+- summary = `2`
+- writeup = `7`
+- actual = `5`
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log reviewed vs written vs applied diversion insertion position.
+
+```javascript
+console.debug('[Divert Order Insertion Position Consistency]', {
+  orderId,
+  targetLine,
+  modalSummaryPriority,
+  writeupPriority,
+  finalAppliedPriority,
+  allMatch:
+    modalSummaryPriority === writeupPriority &&
+    writeupPriority === finalAppliedPriority,
+});
+```
+
+```javascript
+console.debug('[Divert Order Insertion Source Of Truth]', {
+  orderId,
+  targetLine,
+  summaryUsesSharedInsertionResult: true,
+  writeupUsesSharedInsertionResult: true,
+  applyUsesSharedInsertionResult: true,
+});
+```
+
+```javascript
+console.debug('[Divert Order Priority Drift]', {
+  orderId,
+  targetLine,
+  modalSummaryPriority,
+  writeupPriority,
+  finalAppliedPriority,
+  driftFromSummaryToWriteup: writeupPriority - modalSummaryPriority,
+  driftFromSummaryToApply: finalAppliedPriority - modalSummaryPriority,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Divert modal summary shows the correct reviewed insertion position
+2. ✅ Impact-analysis writeup shows the same insertion position
+3. ✅ Final applied diversion matches the reviewed modal position
+4. ✅ No contradictory insertion positions appear in the same modal
+5. ✅ No drift occurs between review and apply
+6. ✅ The fix works across all lines/feedmills
+7. ✅ No UI errors or console errors are introduced

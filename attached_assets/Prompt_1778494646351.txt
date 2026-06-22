@@ -1,0 +1,208 @@
+```
+Please improve the **Orders at risk** logic and simplify its UI presentation in the auto-sequence preview cards.
+
+---
+
+## OBJECTIVE
+
+Right now, the Orders at risk indicator is too coarse and can label orders as `High` even when they are only due today, not actually overdue yet.
+
+We want to improve the risk severity logic and simplify the visual presentation.
+
+---
+
+## REQUIRED RISK SEVERITY LOGIC
+
+Update the overall risk label on each strategy card so it follows this priority order:
+
+### High
+If the proposed sequence contains **at least one overdue / past-due order**, the card should show:
+- `High`
+
+### Moderate
+If there are **no overdue orders**, but there is **at least one order due today / requiring same-day production attention**, the card should show:
+- `Moderate`
+
+### Low
+If there are:
+- no overdue orders
+- and no due-today orders
+
+then show:
+- `Low`
+
+---
+
+## PRIORITY RULE
+
+The severity must resolve in this order:
+
+1. **High** if any overdue orders exist
+2. else **Moderate** if any due-today orders exist
+3. else **Low**
+
+So if both overdue and due-today orders exist, the overall label must still be:
+- `High`
+
+This is required.
+
+---
+
+## WHAT “DUE TODAY” MEANS
+
+Use the app’s current scheduling date / context to determine whether an order is due today.
+
+Example:
+- if today is `May 11`
+- and the relevant order date is also `May 11`
+- then it should be treated as `due today`
+- not as `High`, unless it is already truly overdue by the app’s timing logic
+
+This should prevent same-day orders from being overstated as past due when they are not yet actually overdue.
+
+---
+
+## KEEP THE RISK COUNT
+
+Continue showing the numeric count of orders at risk.
+
+Examples:
+- `2 | High`
+- `3 | High`
+- `0 | Low`
+- `2 | Moderate`
+
+The count should still represent the number of orders at risk under the strategy.
+
+Use the app’s existing at-risk counting logic, but apply the new severity categorization on top of it.
+
+---
+
+## UI CHANGE — REMOVE THE BADGE / PILL
+
+Remove the current pill/badge style for Orders at risk.
+
+Do not render it as a colored chip/badge anymore.
+
+Instead, display it as simple inline text in this format:
+
+- `2 | High`
+- `0 | Low`
+- `2 | Moderate`
+
+This should be cleaner and simpler in the card.
+
+---
+
+## COLOR RULES
+
+Keep the count in normal/default text color.
+
+Only color the risk label:
+
+- `High` = red
+- `Moderate` = amber/orange
+- `Low` = green (or your existing low/safe success color)
+
+### Example
+- `2 | High` → only `High` is red
+- `2 | Moderate` → only `Moderate` is amber/orange
+- `0 | Low` → only `Low` is green
+
+Do not color the count.
+
+---
+
+## APPLY TO ALL STRATEGY CARDS
+
+This behavior should apply consistently to:
+- Standard Sequence
+- all AI-generated strategy cards
+
+So users can compare risk levels across all strategies using the same logic and visual style.
+
+---
+
+## ALIGN WITH TABLE / ACTUAL DEADLINE STATE
+
+Make sure the risk severity aligns with what the table actually shows.
+
+For example:
+- if orders are truly past due → `High`
+- if orders are due today but not overdue → `Moderate`
+- if neither applies → `Low`
+
+The card and the preview table should tell the same story.
+
+---
+
+## EXAMPLES
+
+### Example 1
+- 2 overdue orders
+Result:
+- `2 | High`
+
+### Example 2
+- 2 due-today orders
+- 0 overdue orders
+Result:
+- `2 | Moderate`
+
+### Example 3
+- 0 overdue
+- 0 due-today
+Result:
+- `0 | Low`
+
+### Example 4
+- 1 overdue
+- 3 due-today
+Result:
+- `4 | High`
+
+Because High dominates if any overdue order exists.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log:
+
+```javascript
+console.debug('[Orders At Risk Severity]', {
+  strategyId,
+  title: strategy.title,
+  atRiskCount,
+  overdueCount,
+  dueTodayCount,
+  resolvedSeverity,
+});
+```
+
+This helps verify:
+- overdue vs due-today are being separated correctly
+- the final severity is resolved in the right priority order
+- the displayed count/label matches the actual state
+
+---
+
+## VERIFICATION
+
+1. ✅ Orders at risk now uses three severity levels: High, Moderate, Low
+2. ✅ High is used only when there is at least one overdue/past-due order
+3. ✅ Moderate is used when there are no overdue orders but there is at least one due-today order
+4. ✅ Low is used when there are no overdue and no due-today orders
+5. ✅ Severity priority is correct:
+   - High > Moderate > Low
+6. ✅ Same-day due orders are no longer incorrectly shown as High unless actually overdue
+7. ✅ The risk count is still displayed
+8. ✅ The badge/pill UI is removed
+9. ✅ Orders at risk now displays in inline text format such as:
+   - `2 | High`
+   - `2 | Moderate`
+   - `0 | Low`
+10. ✅ Only the severity label is color-coded; the count remains neutral
+11. ✅ The new logic applies to Standard and all AI strategy cards
+12. ✅ The card risk display aligns with the actual date/risk state in the preview table
+```

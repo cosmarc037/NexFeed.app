@@ -1,0 +1,336 @@
+```
+Implement the following fix to the NexFeed application:
+
+---
+
+## FIX: ADD NEW ORDER — IMPACT ANALYSIS AI PROMPT
+
+The AI Impact Analysis is generating incorrect outputs:
+- Fractional priorities like "3.5"
+- Wrong insertion positions (not comparing dates correctly)
+- Incorrect risk assessments
+- Wrong downstream shift calculations
+
+Fix the AI prompt and the insertion logic.
+
+---
+
+### ISSUE 1: FRACTIONAL PRIORITIES
+
+**Current (wrong):**
+```
+The new order will be inserted as Priority 3.5
+```
+
+**Fix:** There is no such thing as a fractional priority. The new order gets a whole number priority, and all orders below it shift down by 1.
+
+---
+
+### ISSUE 2: WRONG INSERTION POSITION
+
+**Current (wrong):**
+```
+The new order for "Classic Hog Growex" will be inserted between 
+"Salto Conditioner" (Mar 22) and "Gallimax Pigeon Pellet" (Mar 28),
+due to its availability date of March 20.
+```
+
+March 20 is BEFORE March 22, so the order should be inserted BEFORE Salto Conditioner, not after it.
+
+**Fix:** The insertion position must be determined by strict chronological comparison:
+
+```javascript
+function findInsertionPosition(newOrder, existingOrders) {
+  const newDate = parseDate(newOrder.avail_date);
+  
+  // If the new order has no date (prio replenish, safety stocks)
+  // Insert at the bottom of active orders
+  if (!newDate) {
+    const lastActiveIndex = existingOrders.findLastIndex(
+      o => o.status !== 'Done' && o.status !== 'Cancel PO'
+    );
+    return lastActiveIndex + 1;
+  }
+  
+  // If the new order has a date, find the correct chronological position
+  for (let i = 0; i < existingOrders.length; i++) {
+    const order = existingOrders[i];
+    const orderDate = parseDate(order.avail_date);
+    
+    // Skip non-dated orders (they sit below dated orders)
+    if (!orderDate) continue;
+    
+    // Skip Done/Cancelled orders
+    if (order.status === 'Done' || order.status === 'Cancel PO') continue;
+    
+    // Insert BEFORE the first order with a date AFTER the new order's date
+    if (orderDate > newDate) {
+      return i;
+    }
+  }
+  
+  // If no order has a later date, insert after the last dated order
+  const lastDatedIndex = existingOrders.findLastIndex(
+    o => parseDate(o.avail_date) !== null && o.status !== 'Done' && o.status !== 'Cancel PO'
+  );
+  return lastDatedIndex + 1;
+}
+```
+
+**Example with correct logic:**
+
+Current orders:
+```
+Prio 1: Gallimax 3 Maintenance | Mar 19
+Prio 2: Salto Conditioner      | Mar 22
+Prio 3: Gallimax Pigeon Pellet | Mar 28
+Prio 4: Elite XP Startex       | Mar 28
+...
+```
+
+New order: Classic Hog Growex | Mar 20
+
+Step-by-step comparison:
+- Compare Mar 20 with Prio 1 (Mar 19): Mar 19 < Mar 20, skip
+- Compare Mar 20 with Prio 2 (Mar 22): Mar 22 > Mar 20, INSERT HERE
+
+Result: New order goes to Prio 2. Everything from old Prio 2 shifts down.
+
+```
+Prio 1: Gallimax 3 Maintenance | Mar 19  (unchanged)
+Prio 2: Classic Hog Growex     | Mar 20  ← NEW ORDER
+Prio 3: Salto Conditioner      | Mar 22  (was Prio 2, shifted +1)
+Prio 4: Gallimax Pigeon Pellet | Mar 28  (was Prio 3, shifted +1)
+Prio 5: Elite XP Startex       | Mar 28  (was Prio 4, shifted +1)
+...
+```
+
+---
+
+### ISSUE 3: INCORRECT RISK ASSESSMENT
+
+**Current (wrong):**
+```
+Salto Conditioner is at risk of missing its March 22 deadline 
+due to the added production time.
+```
+
+Adding ~0.57 hours (34 minutes) of production time before Salto Conditioner does NOT put it at risk of missing March 22. The risk assessment must actually calculate whether the added time pushes any order past its deadline.
+
+**Fix — Risk assessment logic:**
+
+```javascript
+function assessDeadlineRisk(existingOrders, newOrder, insertPosition) {
+  const newProductionHours = newOrder.production_time + newOrder.changeover;
+  const riskyOrders = [];
+  
+  // For each order AFTER the insertion point
+  for (let i = insertPosition; i < existingOrders.length; i++) {
+    const order = existingOrders[i];
+    const deadline = parseDate(order.avail_date) || parseDate(order.target_date);
+    
+    if (!deadline) continue; // no deadline to miss
+    
+    // Check if the order already has a completion date
+    if (order.completion_date) {
+      const currentCompletion = new Date(order.completion_date);
+      const newCompletion = new Date(currentCompletion.getTime() + newProductionHours * 60 * 60 * 1000);
+      
+      // If new completion exceeds deadline
+      if (newCompletion > deadline) {
+        riskyOrders.push({
+          order: order,
+          deadline: deadline,
+          currentCompletion: currentCompletion,
+          newCompletion: newCompletion,
+          delayHours: newProductionHours
+        });
+      }
+    }
+  }
+  
+  return riskyOrders;
+}
+```
+
+**Risk should only be flagged when:**
+- An order's projected completion date (after adding the new order's production time) exceeds its deadline/avail date
+- The delay is significant enough to actually cause a miss
+
+**Risk should NOT be flagged when:**
+- Adding 34 minutes to an order that has days of buffer before its deadline
+- Orders without deadlines
+
+---
+
+### ISSUE 4: WRONG DOWNSTREAM EFFECTS
+
+The AI must correctly describe which orders shift and by how many positions.
+
+**Fix:** The downstream description must reference the ACTUAL insertion position:
+
+```
+Correct: "Orders at Prio 2 and below shift down by 1 position."
+Wrong:   "Orders at Prio 3 shift to Prio 4" (when insertion is at Prio 2)
+```
+
+---
+
+### UPDATED AI PROMPT
+
+When generating the Impact Analysis, send the AI this corrected context:
+
+```
+Generate an impact analysis for adding a new order. Use ONLY the 
+data provided — do not guess or hallucinate positions.
+
+RULES:
+1. Priority numbers are ALWAYS whole numbers (1, 2, 3...). 
+   NEVER use fractional priorities like "3.5".
+2. Insertion position is determined by STRICT chronological 
+   comparison of dates:
+   - Compare the new order's avail date against each existing 
+     order's avail date
+   - Insert BEFORE the first existing order with a LATER date
+   - Example: New order Mar 20 goes BEFORE Mar 22, not after it
+3. All orders at and below the insertion point shift down by 1
+4. Risk assessment must be based on ACTUAL calculations:
+   - Only flag a risk if adding the production time (+changeover) 
+     would push an order's completion PAST its deadline
+   - If an order has days of buffer, it is NOT at risk
+   - If no start dates are set, say "completion dates cannot be 
+     calculated without start dates"
+5. Use product names and dates, not technical jargon
+6. Format dates as "March 20" not "2026-03-20"
+
+NEW ORDER:
+- Product: [name]
+- Volume: [X MT]
+- Production Time: [X hrs]
+- Changeover: [X hrs]
+- Total time added: [X hrs]
+- Avail Date: [date]
+- Line: [X]
+
+CURRENT ORDERS (in priority sequence):
+[list each order with: Prio, Product Name, Volume, Avail Date, 
+ Start Date (if set), Completion Date (if set)]
+
+INSERTION POSITION CALCULATION:
+- New order date: [date]
+- Compare against each existing order date chronologically
+- Determined insertion: Prio [X]
+- Orders shifting: Prio [X] through [Y] shift to Prio [X+1] through [Y+1]
+
+RISK CALCULATION:
+- Time added to downstream: [X hrs]
+- For each downstream order with a deadline:
+  - [Order]: Current completion [X], New completion [X + delay], 
+    Deadline [X] → AT RISK / NOT AT RISK
+```
+
+---
+
+### CORRECT AI OUTPUT EXAMPLE
+
+For the Classic Hog Growex (Mar 20) being added to the table:
+
+```
+🤖 Impact Analysis
+
+📍 Insertion Position
+Classic Hog Growex (8 MT) will be inserted at Priority 2, 
+between Gallimax 3 Maintenance (March 19) and Salto 
+Conditioner (March 22), based on its availability date 
+of March 20.
+
+⏱ Production Impact
+Adding this order introduces approximately 0.57 hours 
+of production time (0.40 hours production + 0.17 hours 
+changeover) to Line 1.
+
+⚠ Downstream Effects
+Orders currently at Priority 2 and below will shift 
+down by 1 position:
+• Salto Conditioner (Mar 22): Prio 2 → Prio 3
+• Gallimax Pigeon Pellet (Mar 28): Prio 3 → Prio 4
+• Elite XP Startex 80MT: Prio 4 → Prio 5
+• Elite XP Startex 80MT: Prio 5 → Prio 6
+• Elite XP Startex 32MT: Prio 6 → Prio 7
+• Elite XP Startex 20MT: Prio 7 → Prio 8
+• Elite XP Startex 12MT: Prio 8 → Prio 9
+• Elite XP Startex 8MT: Prio 9 → Prio 10
+• Gall 21 Chicken Layer: Prio 10 → Prio 11
+
+📅 Deadline Risk
+No orders are at risk of missing their deadlines. The 
+added 0.57 hours is minimal and Salto Conditioner 
+(next deadline: March 22) has sufficient buffer — over 
+2 days of margin remain.
+
+Note: Exact completion dates cannot be calculated until 
+start dates are set.
+```
+
+---
+
+### EDGE CASES THE AI MUST HANDLE
+
+**Edge case 1 — New order date is before ALL existing orders:**
+```
+New order: Mar 15
+Existing: Mar 19, Mar 22, Mar 28
+
+Result: Insert at Prio 1. All orders shift down.
+```
+
+**Edge case 2 — New order date is after ALL existing dated orders:**
+```
+New order: Mar 30
+Existing: Mar 19, Mar 22, Mar 28
+
+Result: Insert after the last dated order (after Mar 28).
+```
+
+**Edge case 3 — New order date equals an existing order's date:**
+```
+New order: Mar 22
+Existing: Mar 19, Mar 22, Mar 28
+
+Result: Insert AFTER orders with the same date (or based on 
+fulfillment percentage tiebreaker if both are from N10D).
+```
+
+**Edge case 4 — New order is non-dated (prio replenish, safety stocks):**
+```
+New order: prio replenish
+Existing: Mar 19, Mar 22, Mar 28, safety stocks, safety stocks
+
+Result: Insert at the bottom of active orders, after all dated 
+orders, among other non-dated orders.
+```
+
+**Edge case 5 — No start dates set on any order:**
+```
+AI should say: "Completion dates cannot be calculated until 
+start dates are set. Once a start date is configured for 
+Priority 1, all downstream completion dates will cascade 
+automatically."
+```
+
+**Edge case 6 — Actual risk detected:**
+```
+New order adds 8 hours of production.
+Existing Prio 3 has deadline Mar 20, current completion Mar 19 11:00 PM.
+New completion: Mar 20 7:00 AM → still within deadline ✅
+
+Existing Prio 4 has deadline Mar 20, current completion Mar 20 3:00 AM.
+New completion: Mar 20 11:00 AM → PAST deadline ❌
+
+AI output: "⚠ Elite XP Startex (Prio 4) is at risk of missing 
+its March 20 deadline. Current estimated completion is March 20, 
+3:00 AM. With the added 8 hours, the new estimated completion 
+is March 20, 11:00 AM — exceeding the deadline by approximately 
+11 hours."
+```
+```

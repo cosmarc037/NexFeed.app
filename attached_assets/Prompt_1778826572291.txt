@@ -1,0 +1,99 @@
+Please add another dependency rule for Powermix-generated orders:
+
+If the **Line 5 source order** is set to:
+- `Cancelled`
+- or `Cancel PO`
+
+then the linked generated order should also automatically be set to the corresponding cancelled status.
+
+---
+
+## REQUIRED RULE
+
+When a source order in Line 5 / Powermix is changed to:
+- `Cancelled`
+- `Cancel PO`
+
+the linked generated order must also be automatically cancelled.
+
+### Purpose
+The generated order only exists because it was created from the Line 5 source order.
+If the source order is cancelled, then there is no longer any need to produce the generated order.
+
+So the generated order should not remain active.
+
+---
+
+## EXPECTED BEHAVIOR
+
+### If source Line 5 order = `Cancelled`
+Then linked generated order should also become:
+- `Cancelled`
+
+### If source Line 5 order = `Cancel PO`
+Then linked generated order should also become:
+- `Cancel PO`
+
+If the app uses a normalized cancellation status internally, that is acceptable, but the generated order must clearly become cancelled as well.
+
+---
+
+## SCOPE
+
+This rule applies only to:
+- Line 5 / Powermix source orders
+- that have linked generated split orders
+
+Do not apply this propagation to unrelated orders.
+
+---
+
+## IMPORTANT
+
+This should be automatic propagation, not just a warning.
+
+The app should immediately update the linked generated order’s status once the source order is cancelled.
+
+---
+
+## PRESERVE OTHER STATUS RULES
+
+Keep the previously agreed status rules intact:
+- source Line 5 order cannot move to `On-going` / `Done` unless generated order is already `On-going` / `Done`
+- generated order cannot move to `On-going` / `Done` unless its prior order is already `On-going` / `Done`
+- generated order cannot revert to not-started if source Line 5 order is already `On-going` / `Done`
+
+This new cancellation rule should coexist with those rules.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log:
+
+```javascript
+console.debug('[Powermix Source Cancellation Propagation]', {
+  sourceOrderId,
+  sourceStatus,
+  generatedOrderId,
+  propagatedGeneratedStatus,
+});
+```
+
+```javascript
+console.debug('[Powermix Generated Order Auto-Cancelled]', {
+  generatedOrderId,
+  sourceOrderId,
+  reason: 'source_line5_cancelled',
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ If source Line 5 order is set to `Cancelled`, linked generated order is automatically set to `Cancelled`
+2. ✅ If source Line 5 order is set to `Cancel PO`, linked generated order is automatically set to `Cancel PO`
+3. ✅ Generated order does not remain active after source cancellation
+4. ✅ Rule applies only to linked Powermix-generated orders
+5. ✅ Existing Powermix status dependency rules remain intact

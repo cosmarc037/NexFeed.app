@@ -1,0 +1,341 @@
+```
+Implement the following changes to the NexFeed application:
+
+---
+
+## 1. STATUS COLUMN — REMOVE "COMBINED WITH OTHER PO" FROM MANUAL DROPDOWN
+
+Remove "Combined with other PO" from the status dropdown that users manually interact with. This status should ONLY be assigned automatically when orders are combined through the Smart Combine feature.
+
+**How it works:**
+
+- When orders are NOT combined, the dropdown shows:
+  ```
+  Plotted, Hold, Cut, In production, On-going batching, 
+  On-going pelleting, On-going bagging, Done, Cancel PO
+  ```
+  "Combined with other PO" is NOT in this list.
+
+- When orders ARE combined via Smart Combine:
+  - Status automatically changes to "Combined with other PO"
+  - The combined order dropdown shows:
+    ```
+    Uncombine, Combined with other PO (disabled/current), Hold, 
+    In production, On-going batching, On-going pelleting, 
+    On-going bagging, Done
+    ```
+  - "Combined with other PO" appears in the combined dropdown as a disabled/current indicator — users cannot re-select it but it shows the current state.
+
+- When orders are UNCOMBINED:
+  - Status resets to "Plotted"
+  - Dropdown reverts to the full standalone list (without "Combined with other PO")
+  - The only way to get "Combined with other PO" back is to re-combine via Smart Combine
+
+**Summary:**
+- ❌ Users can NEVER manually select "Combined with other PO"
+- ✅ Smart Combine auto-assigns it when orders are combined
+- ✅ Uncombine removes it and resets to "Plotted"
+
+---
+
+## 2. "IN PRODUCTION" — READINESS CHECK WARNING
+
+When a user sets an order's status to "In Production" (or any production-related status) but the order's readiness check is NOT a green check, show a warning dialog before proceeding.
+
+### TRIGGER
+
+- User selects "In production", "On-going batching", "On-going pelleting", or "On-going bagging" from the status dropdown.
+- Before the status changes, the app checks the readiness indicator for that order.
+- If readiness = green check ✅ → status changes immediately, no dialog.
+- If readiness ≠ green check (yellow, red, grey, or no check) → warning dialog appears.
+
+### WARNING DIALOG
+
+```
+╔══════════════════════════════════════════════════════╗
+║  ⚠ Order Not Ready                                   ║
+║                                                       ║
+║  This order has not passed its readiness check.       ║
+║  Some details may be missing or incomplete.           ║
+║                                                       ║
+║  Line:        1                                       ║
+║  FPR:         260309                                  ║
+║  Item:        Gallimax 3 Maintenance (Natural) P, 50Kg║
+║  Volume:      80 MT                                   ║
+║                                                       ║
+║  Missing or incomplete:                               ║
+║  ┌────────────────────────────────────────────────┐   ║
+║  │ • Production Order FG1 — not set               │   ║
+║  │ • Production Order SFG1 — not set              │   ║
+║  │ • HA Info — not confirmed                      │   ║
+║  └────────────────────────────────────────────────┘   ║
+║                                                       ║
+║  Do you want to proceed with production anyway?       ║
+║                                                       ║
+║       [Cancel Production]    [Proceed Anyway]         ║
+╚══════════════════════════════════════════════════════╝
+```
+
+### DIALOG DETAILS
+
+**Header:**
+- "⚠ Order Not Ready" — 16px, font-weight 600, dark text (#1a1a1a)
+- ⚠ icon in amber (#f59e0b)
+
+**Order details:**
+
+| Label | Styling |
+|---|---|
+| Line: | 12px, grey (#6b7280) label, dark text (#1a1a1a) value |
+| FPR: | 12px, grey label, bold dark text value |
+| Item: | 12px, grey label, grey text value (#a1a8b3) |
+| Volume: | 12px, grey label, dark text value |
+
+**Missing/incomplete section:**
+- Light amber background (#fef3c7)
+- Border: 1px solid #fcd34d
+- Border-radius: 6px
+- Padding: 10px 12px
+- Bullet list of ALL fields causing the readiness check to fail
+- Text: 11px, dark amber (#92400e)
+
+**The list dynamically shows whatever is missing based on the readiness check:**
+- If Production Order FG1 is empty → "Production Order FG1 — not set"
+- If Production Order SFG1 is empty → "Production Order SFG1 — not set"
+- If Production Order SFGPMX is empty → "Production Order SFGPMX — not set"
+- If HA Info is not confirmed → "HA Info — not confirmed"
+- If HA Prep is not confirmed → "HA Prep — not confirmed"
+- If Material Code is missing → "Material Code (FG) — not set"
+- If Batch Size is missing → "Batch Size — not set"
+- If any other field the readiness check evaluates is missing → list it
+- Only show fields that are ACTUALLY missing — not the full checklist
+
+**Buttons:**
+
+| Button | Styling | Behavior |
+|---|---|---|
+| Cancel Production | Grey outlined. Border: 1px solid #d1d5db. Text: grey (#374151), 12px. | Closes dialog. Status reverts to previous value. No change. |
+| Proceed Anyway | Amber filled (#f59e0b). Text: white, 12px, font-weight 600. Hover: darker amber (#d97706). | Status changes to the selected production status despite readiness issues. Dialog closes. |
+
+---
+
+## 3. "HOLD" STATUS — GREY OUT THE ORDER ROW
+
+When an order's status is set to "Hold", the row should be visually greyed out to indicate it's paused, but the order stays in its current position and remains fully editable.
+
+### STANDALONE ORDER ON HOLD
+
+| Property | Value |
+|---|---|
+| Row background | Light grey tint (#f5f5f5) |
+| All text color | Light grey (#c0c7d0) |
+| Opacity | 0.7 |
+| Position | STAYS in current position (does NOT move) |
+| Draggable | ✅ Yes, user can still reorder |
+| Editable | ✅ Yes, user can edit all fields (start date, notes, etc.) |
+| Prio number | ✅ KEEPS its Prio number |
+| Scheduling cascade | ✅ Included in cascade (still takes up production time) |
+
+### COMBINED ORDER ON HOLD (LEAD CONTROLS ALL)
+
+When the lead order of a combined group is set to "Hold", all children sync to Hold.
+
+**Lead row:**
+
+| Property | Value |
+|---|---|
+| Row background | KEEP blue tint (#e3f2fd) — do NOT remove or replace |
+| Text color | Greyed out (#c0c7d0) |
+| Blue left border (3px solid #1976d2) | ✅ REMAINS |
+| Lead badge | ✅ Remains visible but greyed out text |
+| Visual result | Blue background + greyed-out text |
+
+**Child rows (auto-synced to Hold):**
+
+| Property | Value |
+|---|---|
+| Row background | KEEP blue tint (#e3f2fd) — do NOT remove or replace |
+| Text color | Greyed out (#c0c7d0) |
+| Blue left border | ✅ REMAINS |
+| Child badge | ✅ Remains visible but greyed out text |
+| Visual result | Blue background + greyed-out text |
+
+**Key rules for combined + Hold:**
+- The blue combined highlight is NEVER removed by Hold status
+- The blue left border bracket is NEVER removed by Hold status
+- ONLY the text/font color changes to grey — backgrounds stay blue
+- Lead/Child badges remain visible with greyed text
+- The "Hold" status badge shows in amber/yellow on all rows
+- When status changes FROM Hold back to another status:
+  - Text returns to normal dark colors
+  - Blue tint remains (still combined)
+  - Everything looks normal again
+
+### VISUAL EXAMPLE — STANDALONE ON HOLD
+
+```
+Prio 1: Order A | Plotted          ← normal
+Prio 2: Order B | Hold             ← grey tint bg, grey text, still numbered
+Prio 3: Order C | Plotted          ← normal
+```
+
+### VISUAL EXAMPLE — COMBINED ORDER ON HOLD
+
+```
+Prio 3: [Lead]  FPR: 260311 | Hold | 40 MT    ← blue bg + grey text
+Prio 4: [Child] FPR: 260309 | Hold | 8 MT     ← blue bg + grey text
+Prio 5: [Child] FPR: 260309 | Hold | 12 MT    ← blue bg + grey text
+```
+
+### REVERTING FROM HOLD
+
+When the user changes status from "Hold" to any other active status:
+- Grey text is removed — text returns to normal dark colors
+- Row background returns to normal:
+  - Standalone: white background
+  - Combined: blue tint (#e3f2fd) remains
+- Opacity returns to 1.0
+- No position change — order stays where it is
+
+---
+
+## 4. "DONE" STATUS — BLANK PRIO AND RENUMBER ACTIVE ORDERS
+
+When an order's status is set to "Done", its Prio number becomes blank, and all remaining active orders renumber starting from 1.
+
+### BEHAVIOR WHEN ORDER IS SET TO "DONE"
+
+1. The Done order moves to the top of the table (existing behavior).
+2. The Done order's Prio column becomes **BLANK** — empty cell, no number.
+3. All remaining ACTIVE orders are **renumbered starting from Prio 1**.
+
+### EXAMPLE — SINGLE ORDER DONE
+
+**Before:**
+```
+Prio 1: Order A | Plotted
+Prio 2: Order B | In production
+Prio 3: Order C | Plotted        ← user sets to "Done"
+Prio 4: Order D | Plotted
+Prio 5: Order E | Plotted
+```
+
+**After:**
+```
+(blank): Order C | Done           ← moved to top, Prio BLANK
+Prio 1:  Order A | Plotted        ← renumbered from 1
+Prio 2:  Order B | In production
+Prio 3:  Order D | Plotted
+Prio 4:  Order E | Plotted
+```
+
+### EXAMPLE — MULTIPLE DONE ORDERS
+
+```
+(blank): Order F | Done           ← most recent Done, blank Prio
+(blank): Order C | Done           ← previous Done, blank Prio
+Prio 1:  Order A | Plotted        ← first active order
+Prio 2:  Order B | In production
+Prio 3:  Order D | Plotted
+Prio 4:  Order E | Plotted
+```
+
+### CANCELLED ORDERS — ALSO BLANK PRIO
+
+Cancelled orders at the bottom also have blank Prio:
+
+```
+(blank): Order F | Done           ← top, blank
+(blank): Order C | Done           ← top, blank
+Prio 1:  Order A | Plotted
+Prio 2:  Order B | In production
+Prio 3:  Order D | Plotted
+(blank): Order G | Cancel PO      ← bottom, blank
+```
+
+### HOLD ORDERS — KEEP PRIO NUMBER
+
+Orders on "Hold" KEEP their Prio number because they are still active (just paused):
+
+```
+(blank): Order F | Done
+Prio 1:  Order A | Plotted
+Prio 2:  Order B | Hold           ← keeps Prio 2, greyed out
+Prio 3:  Order D | Plotted
+Prio 4:  Order E | Plotted
+```
+
+### PRIO DISPLAY RULES
+
+| Status | Prio Display |
+|---|---|
+| Done | Blank (empty cell) |
+| Cancel PO | Blank (empty cell) |
+| Hold | Numbered (keeps position) |
+| Plotted | Numbered |
+| Cut | Numbered |
+| In production | Numbered |
+| On-going batching | Numbered |
+| On-going pelleting | Numbered |
+| On-going bagging | Numbered |
+| Combined with other PO | Numbered |
+
+### REVERTING FROM "DONE" BACK TO ACTIVE
+
+When a user changes an order's status FROM "Done" back to any active status:
+
+1. The order moves FROM the Done section at the top back to its **previous position** in the active section.
+2. The order receives its previous Prio number (or the nearest available if positions shifted).
+3. All active orders renumber to accommodate.
+
+**Example — Revert:**
+
+**Current (Order C is Done):**
+```
+(blank): Order C | Done
+Prio 1:  Order A | Plotted
+Prio 2:  Order B | In production
+Prio 3:  Order D | Plotted
+```
+
+**User reverts Order C from Done to Plotted (previously was Prio 3):**
+```
+Prio 1:  Order A | Plotted
+Prio 2:  Order B | In production
+Prio 3:  Order C | Plotted        ← returned to previous position
+Prio 4:  Order D | Plotted
+```
+
+**Implementation:**
+- Store the order's previous Prio position when it's set to Done.
+- Field: `previous_prio` — set when status changes to Done, cleared when status changes away from Done.
+- On revert: place the order back at `previous_prio` position (or at the end of active orders if the position no longer exists).
+
+### RENUMBERING TRIGGER
+
+Prio renumbering runs after ANY of these events:
+- Order set to Done
+- Order set to Cancel PO
+- Order reverted from Done to active
+- Order reverted from Cancel PO to active
+- Drag-and-drop reorder
+- Combine / Uncombine
+- Cut / Merge back
+- Auto-Sequence applied
+- Any order addition or deletion
+
+### COMBINED ORDERS AND "DONE"
+
+When a combined group's lead is set to Done:
+- The ENTIRE block (lead + all children) moves to the top.
+- ALL orders in the block get blank Prio.
+- Active orders below renumber from 1.
+
+```
+(blank): [Lead]  Order B | Done      ← blank
+(blank): [Child] Order B-1 | Done   ← blank
+(blank): [Child] Order B-2 | Done   ← blank
+Prio 1:  Order A | Plotted           ← renumbered
+Prio 2:  Order D | Plotted
+```
+```

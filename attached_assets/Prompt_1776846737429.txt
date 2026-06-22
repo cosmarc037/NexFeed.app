@@ -1,0 +1,476 @@
+```
+Add "Apply Profitability (Margin)" toggle button to the auto-sequence (All) preview:
+
+---
+
+## 1. ADD THE BUTTON — UPPER RIGHT, ALIGNED WITH STAT CARDS
+
+```jsx
+function PlantAutoSequencePreview({ ... }) {
+  // ... existing state ...
+  
+  const [isProfitabilityApplied, setIsProfitabilityApplied] = useState(false);
+  const [preMarginResults, setPreMarginResults] = useState(null); // Store for reverting
+  
+  async function handleToggleProfitability() {
+    if (isProfitabilityApplied) {
+      // Revert to original chronological sort
+      setSequencedResults(preMarginResults);
+      setIsProfitabilityApplied(false);
+      
+      // Invalidate all line insight caches
+      allLines.forEach(line => invalidateLineCache(line));
+      
+      return;
+    }
+    
+    // Save current results for reverting
+    setPreMarginResults(JSON.parse(JSON.stringify(sequencedResults)));
+    
+    // Re-sort all lines with margin consideration
+    const marginResults = {};
+    
+    allLines.forEach(line => {
+      const lineOrders = sequencedResults[line] || [];
+      if (lineOrders.length === 0) {
+        marginResults[line] = [];
+        return;
+      }
+      
+      // Enrich with margin data from master data
+      const enrichedWithMargin = lineOrders.map(order => {
+        const materialCode = String(order.material_code_fg || '').trim();
+        const mdEntry = masterData.find(md => 
+          String(md.material_code_fg || '').trim() === materialCode
+        );
+        
+        return {
+          ...order,
+          _margin: mdEntry ? parseFloat(mdEntry.margin) || 0 : 0,
+          _cost: mdEntry ? parseFloat(mdEntry.pricing_php || mdEntry.cost) || 0 : 0,
+          _hasMarginData: mdEntry && mdEntry.margin != null && mdEntry.margin !== '',
+        };
+      });
+      
+      // Re-sort with margin as tertiary criteria
+      const sorted = sortWithMargin(enrichedWithMargin);
+      
+      // Recalculate changeovers after re-sort
+      calculatePreviewChangeovers(sorted, changeoverRules);
+      
+      // Reassign prio and movement
+      const originalLineOrders = originalSnapshot[line] || [];
+      sorted.forEach((order, index) => {
+        order.prio = index + 1;
+        
+        const originalIndex = originalLineOrders.findIndex(o => o.id === order.id);
+        if (originalIndex >= 0) {
+          const originalPrio = originalIndex + 1;
+          const delta = originalPrio - order.prio;
+          order._originalPrio = originalPrio;
+          order._movement = delta > 0 ? 'up' : delta < 0 ? 'down' : 'same';
+          order._movementDelta = Math.abs(delta);
+        } else if (order._movement !== 'new_to_line') {
+          order._movement = order._movedFromLine ? 'new_to_line' : 'same';
+        }
+      });
+      
+      marginResults[line] = sorted;
+    });
+    
+    setSequencedResults(marginResults);
+    setIsProfitabilityApplied(true);
+    
+    // Invalidate all line insight caches — insights need to reflect new sort
+    allLines.forEach(line => invalidateLineCache(line));
+  }
+  
+  // ... rest of component ...
+  
+  return (
+    <div className="auto-sequence-overlay">
+      <div className="auto-sequence-modal">
+        {/* Header */}
+        <div className="auto-sequence-header">
+          <div>
+            <h2>{title}</h2>
+            <span className="auto-sequence-subtitle">{subtitle}</span>
+          </div>
+          <button className="auto-sequence-close" onClick={onCancel} disabled={isApplying}>✕</button>
+        </div>
+        
+        {/* Stats + Profitability button — same row */}
+        <div className="auto-sequence-stats-row">
+          <div className="auto-sequence-stats">
+            <StatBadge label="Orders Before" value={summaryStats.totalOrdersBefore} />
+            <StatBadge label="After Combine" value={summaryStats.totalOrdersAfter} />
+            {summaryStats.ordersCombined > 0 && (
+              <StatBadge label="Combined Groups" value={summaryStats.ordersCombined} color="green" />
+            )}
+            {summaryStats.ordersMovedBetweenLines > 0 && (
+              <StatBadge label="Lines Affected" value={summaryStats.ordersMovedBetweenLines} color="red" />
+            )}
+            {!summaryStats.hasChanges && (
+              <StatBadge label="Status" value="No Changes" color="gray" />
+            )}
+          </div>
+          
+          {/* Profitability button — upper right */}
+          <button
+            className={`btn-profitability ${isProfitabilityApplied ? 'btn-profitability-active' : ''}`}
+            onClick={handleToggleProfitability}
+            disabled={isApplying}
+            title={isProfitabilityApplied 
+              ? 'Click to revert to chronological sorting' 
+              : 'Re-sort orders by product margin — higher margin = higher priority'
+            }
+          >
+            {isProfitabilityApplied ? (
+              <>💰 Profitability Applied</>
+            ) : (
+              <>💰 Apply Profitability (Margin)</>
+            )}
+          </button>
+        </div>
+        
+        {/* Profitability info banner — show when active */}
+        {isProfitabilityApplied && (
+          <div className="profitability-banner">
+            <span className="profitability-banner-icon">💰</span>
+            <div className="profitability-banner-content">
+              <span className="profitability-banner-title">Profitability optimization active</span>
+              <span className="profitability-banner-text">
+                Orders are sorted by: Avail Date → N10D Target Date → Product Margin (higher margin prioritized). 
+                Click the button again to revert to chronological sorting only.
+              </span>
+            </div>
+          </div>
+        )}
+        
+        {/* ... rest of preview (tabs, tables, footer) unchanged ... */}
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+## 2. SORTING FUNCTION WITH MARGIN
+
+```javascript
+function sortWithMargin(orders) {
+  // Sorting criteria:
+  // 1. Category C (Critical/Urgent non-dated) — always at the top
+  // 2. Category A (dated) — by avail date, THEN by margin within same date
+  // 3. Category B (N10D targeted) — by inferred date, THEN by margin within same date
+  // 4. Category D (stock sufficient) — by margin (higher first), then by date
+  // 5. Category E (no data) — by margin (higher first)
+  
+  const catC = orders.filter(o => o._category === 'C')
+    .sort((a, b) => {
+      if (a._n10dStatus === 'Critical' && b._n10dStatus !== 'Critical') return -1;
+      if (a._n10dStatus !== 'Critical' && b._n10dStatus === 'Critical') return 1;
+      // Same urgency — higher margin first
+      return (b._margin || 0) - (a._margin || 0);
+    });
+  
+  const catA = orders.filter(o => o._category === 'A')
+    .sort((a, b) => {
+      // First by date
+      const dateA = a._sortDate || new Date(a.target_avail_date);
+      const dateB = b._sortDate || new Date(b.target_avail_date);
+      const dateDiff = dateA - dateB;
+      
+      // If same date — higher margin first
+      if (isSameDay(dateA, dateB)) {
+        return (b._margin || 0) - (a._margin || 0);
+      }
+      
+      return dateDiff;
+    });
+  
+  const catB = orders.filter(o => o._category === 'B')
+    .sort((a, b) => {
+      const dateA = a._sortDate || new Date(a._targetDate);
+      const dateB = b._sortDate || new Date(b._targetDate);
+      const dateDiff = dateA - dateB;
+      
+      if (isSameDay(dateA, dateB)) {
+        return (b._margin || 0) - (a._margin || 0);
+      }
+      
+      return dateDiff;
+    });
+  
+  const catD = orders.filter(o => o._category === 'D')
+    .sort((a, b) => {
+      // For stock sufficient: margin first, then date
+      const marginDiff = (b._margin || 0) - (a._margin || 0);
+      if (Math.abs(marginDiff) > 0.01) return marginDiff;
+      
+      // Same margin — by date if available
+      const dateA = a._sortDate || new Date('2099-12-31');
+      const dateB = b._sortDate || new Date('2099-12-31');
+      return dateA - dateB;
+    });
+  
+  const catE = orders.filter(o => o._category === 'E')
+    .sort((a, b) => {
+      // No N10D data: margin first, then by avail date if exists
+      const marginDiff = (b._margin || 0) - (a._margin || 0);
+      if (Math.abs(marginDiff) > 0.01) return marginDiff;
+      
+      const dateA = a._sortDate || new Date('2099-12-31');
+      const dateB = b._sortDate || new Date('2099-12-31');
+      return dateA - dateB;
+    });
+  
+  const sorted = [...catC, ...catA, ...catB, ...catD, ...catE];
+  
+  sorted.forEach((order, index) => {
+    order.prio = index + 1;
+    order.priority_seq = index + 1;
+  });
+  
+  return sorted;
+}
+
+function isSameDay(dateA, dateB) {
+  if (!dateA || !dateB) return false;
+  return dateA.getFullYear() === dateB.getFullYear() &&
+         dateA.getMonth() === dateB.getMonth() &&
+         dateA.getDate() === dateB.getDate();
+}
+```
+
+---
+
+## 3. SHOW MARGIN IN THE AFTER TABLE — NEW COLUMN OR BADGE
+
+```jsx
+// In PlantAfterRow — add margin indicator when profitability is active
+
+// Add after volume column or in the insight column area:
+{order._hasMarginData && isProfitabilityApplied && (
+  <span className="as-margin-badge" title={`Cost: ₱${order._cost?.toLocaleString() || '—'}`}>
+    {order._margin.toFixed(1)}%
+  </span>
+)}
+```
+
+Or add a dedicated Margin column when profitability is active:
+
+```jsx
+// In the After table thead — conditionally show margin column
+{isProfitabilityApplied && (
+  <th className="as-col-margin">Margin</th>
+)}
+
+// In the After table tbody
+{isProfitabilityApplied && (
+  <td className="as-col-margin">
+    {order._hasMarginData ? (
+      <span className={`as-margin-value ${getMarginClass(order._margin)}`}>
+        {order._margin.toFixed(1)}%
+      </span>
+    ) : (
+      <span className="as-margin-empty">—</span>
+    )}
+  </td>
+)}
+
+function getMarginClass(margin) {
+  if (margin >= 20) return 'as-margin-high';
+  if (margin >= 15) return 'as-margin-medium';
+  if (margin >= 10) return 'as-margin-low';
+  return 'as-margin-very-low';
+}
+```
+
+---
+
+## 4. STYLING
+
+```css
+/* Stats row — flex between stats and profitability button */
+.auto-sequence-stats-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+  margin-bottom: 16px;
+}
+
+/* Profitability button */
+.btn-profitability {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #374151;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.btn-profitability:hover {
+  border-color: #f59e0b;
+  background: #fffbeb;
+  color: #92400e;
+}
+
+.btn-profitability-active {
+  border-color: #f59e0b;
+  background: #fef3c7;
+  color: #92400e;
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.2);
+}
+
+.btn-profitability:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Profitability banner */
+.profitability-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 16px;
+  margin: 0 24px 12px;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 8px;
+}
+
+.profitability-banner-icon {
+  font-size: 16px;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.profitability-banner-content {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.profitability-banner-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #92400e;
+}
+
+.profitability-banner-text {
+  font-size: 11px;
+  color: #a16207;
+  line-height: 1.5;
+}
+
+/* Margin column */
+.as-col-margin {
+  min-width: 70px;
+  max-width: 80px;
+  text-align: center;
+  padding: 6px 8px;
+}
+
+.as-margin-value {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.as-margin-high {
+  color: #16a34a;
+  background: #f0fdf4;
+}
+
+.as-margin-medium {
+  color: #ea580c;
+  background: #fff7ed;
+}
+
+.as-margin-low {
+  color: #dc2626;
+  background: #fef2f2;
+}
+
+.as-margin-very-low {
+  color: #991b1b;
+  background: #fef2f2;
+}
+
+.as-margin-empty {
+  color: #d1d5db;
+  font-size: 11px;
+}
+```
+
+---
+
+## 5. PASS isProfitabilityApplied TO CHILD COMPONENTS
+
+```jsx
+// PlantAutoSequencePreview → PlantLineTab
+<PlantLineTab
+  line={activeTab}
+  // ... existing props ...
+  isProfitabilityApplied={isProfitabilityApplied}
+/>
+
+// PlantLineTab → PlantAfterRow
+<PlantAfterRow
+  key={order.id}
+  order={order}
+  // ... existing props ...
+  isProfitabilityApplied={isProfitabilityApplied}
+/>
+```
+
+---
+
+## VERIFICATION
+
+### Button placement and behavior
+1. ✅ Button in upper right, aligned with stat cards
+2. ✅ Shows "💰 Apply Profitability (Margin)" when inactive
+3. ✅ Shows "💰 Profitability Applied" when active (highlighted)
+4. ✅ Toggle: click to apply, click again to revert
+5. ✅ Disabled while applying to schedule
+
+### Sorting criteria
+6. ✅ Avail Date first (chronological)
+7. ✅ N10D Target Date second
+8. ✅ Product Margin third (higher margin = higher priority)
+9. ✅ Within same date: higher margin comes first
+10. ✅ Stock sufficient (Category D): margin first, then date
+11. ✅ No data (Category E): margin first, then date
+12. ✅ Critical/Urgent: still at top, margin as tiebreaker
+
+### Revert
+13. ✅ Pre-margin results saved before applying
+14. ✅ Clicking button again restores original chronological sort
+15. ✅ Line insight caches invalidated on toggle
+
+### Margin display
+16. ✅ Margin column shown in After table when profitability is active
+17. ✅ Color-coded: ≥20% green, ≥15% orange, ≥10% red, <10% dark red
+18. ✅ Orders with no margin data show "—"
+19. ✅ Info banner explains the sorting criteria
+
+### Combined orders
+20. ✅ Combined orders use same margin as children (same material code)
+21. ✅ Margin looked up from master data by material_code_fg
+
+### Changeovers recalculated
+22. ✅ After re-sorting by margin, changeovers recalculated
+23. ✅ Last order on line still has 0 changeover
+```

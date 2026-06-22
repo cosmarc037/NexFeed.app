@@ -1,0 +1,260 @@
+```
+Fix the Insertion Position AI prompt to always align with the actual insertion logic:
+
+---
+
+## FIX: INSERTION POSITION — DETERMINISTIC POSITION + AI EXPLANATION
+
+The insertion position is always deterministic:
+- Dated orders → position of earliest avail date
+- Non-dated orders → position of lowest prio number
+
+The AI must ALWAYS state this exact position. It only adds context and explanation around it.
+
+### CALCULATE THE POSITION BEFORE CALLING AI
+
+```javascript
+function getInsertionPrio(combiningOrders) {
+  // Check for dated orders
+  const datedOrders = combiningOrders.filter(o => {
+    const avail = o.target_avail_date;
+    return avail && /^\d{4}-\d{2}-\d{2}/.test(avail) && !isNaN(Date.parse(avail));
+  });
+  
+  if (datedOrders.length > 0) {
+    // Dated → position of earliest avail date
+    const earliest = datedOrders.sort((a, b) =>
+      new Date(a.target_avail_date) - new Date(b.target_avail_date)
+    )[0];
+    return {
+      prio: earliest.prio,
+      reason: 'dated',
+      availDate: earliest.target_avail_date,
+      orderName: earliest.item_description
+    };
+  }
+  
+  // Non-dated → lowest prio number
+  const lowest = combiningOrders.sort((a, b) => a.prio - b.prio)[0];
+  return {
+    prio: lowest.prio,
+    reason: 'lowest_prio',
+    availDate: null,
+    orderName: lowest.item_description
+  };
+}
+```
+
+### UPDATED AI PROMPT — TELL AI THE EXACT POSITION
+
+```javascript
+function buildCombineAnalysisPrompt(context) {
+  // ... existing alertsContext ...
+
+  const insertion = context.insertionResult;
+  
+  let insertionInstruction;
+  if (insertion.reason === 'dated') {
+    const formattedDate = new Date(insertion.availDate).toLocaleDateString('en-US', {
+      year: 'numeric', month: 'long', day: 'numeric'
+    });
+    insertionInstruction = `
+INSERTION POSITION — YOU MUST STATE PRIORITY ${insertion.prio}:
+The combined order will be inserted at Priority ${insertion.prio}.
+This is because the order with the earliest avail date (${formattedDate}) is "${insertion.orderName}", currently at Priority ${insertion.prio}.
+Rule: For dated orders, the combined order always takes the position of the order with the earliest avail date.
+You MUST state "Priority ${insertion.prio}" as the insertion position. Do not suggest any other position.
+Explain the reasoning naturally — mention the avail date, the product name, and why this position makes sense.`;
+  } else {
+    insertionInstruction = `
+INSERTION POSITION — YOU MUST STATE PRIORITY ${insertion.prio}:
+The combined order will be inserted at Priority ${insertion.prio}.
+This is because "${insertion.orderName}" has the lowest priority number (${insertion.prio}) among the orders being combined.
+Rule: For non-dated orders, the combined order always takes the position of the lowest priority number.
+You MUST state "Priority ${insertion.prio}" as the insertion position. Do not suggest any other position.
+Explain the reasoning naturally — mention why this position is appropriate given the current sequence and stock status.`;
+  }
+
+  return `
+You are a production scheduling advisor for a feed manufacturing plant.
+The planner is considering combining orders on ${context.line}.
+
+ORDERS BEING COMBINED:
+${context.combiningOrders.map(o => `  Prio ${o.prio}: ${o.name} | ${o.volume} MT | Avail: ${o.availDate} (${o.isDated ? 'DATED' : 'NON-DATED'}) | Form: ${o.form}`).join('\n')}
+
+COMBINED ORDER AFTER MERGE:
+  Total Volume: ${context.combinedVolume} MT
+  Form: ${context.combinedForm}
+  Production Time: ${context.combinedProductionHours} hrs
+  Base Changeover: ${context.baseChangeover} hrs
+  Avail Date: ${context.combinedAvailDisplay} (${context.availDateType === 'dated' ? 'DATED' : 'NON-DATED'})
+  Future Dispatches Status: ${context.n10dStatus || 'N/A'}
+  DFL: ${context.n10dDfl || 'N/A'} MT | Inventory: ${context.n10dInventory || 'N/A'} MT
+
+ORDERS REMOVED AFTER MERGE: Priority ${context.removedPrios.join(', Priority ')}
+(These slots are eliminated and all orders below shift up to fill the gaps)
+
+CURRENT LINE SEQUENCE (${context.line}, ${context.totalOrdersOnLine} orders):
+${context.lineContext.map(o => `  Prio ${o.prio}: ${o.name} | ${o.volume} MT | Prod: ${o.prodHours} hrs | CO: ${o.changeover} hrs | Avail: ${o.availDate} (${o.isDated ? 'DATED' : 'NON-DATED'}) | N10D: ${o.n10dStatus} | Completion: ${o.completionDate}${o.isBeingCombined ? ' ← BEING COMBINED' : ''}`).join('\n')}
+
+${insertionInstruction}
+
+${context.alertsContext || ''}
+
+IMPORTANT:
+- You MUST state Priority ${insertion.prio} as the insertion position. No other number.
+- Do not invent priority numbers that don't exist in the current sequence.
+- Explain why this position is correct in 2-3 natural sentences.
+- Reference the specific product name, avail date, or prio logic.
+- Do not use markdown formatting.
+
+RESPOND IN THIS FORMAT:
+
+Insertion Position:
+${insertion.prio}. [Your 2-3 sentence explanation of why Priority ${insertion.prio} is the correct position.]
+  `;
+}
+```
+
+### UPDATE CONTEXT BUILDER — INCLUDE INSERTION RESULT
+
+```javascript
+function buildCombineAnalysisContext(group, lineOrders, masterData, n10dData, changeoverRules) {
+  // ... existing context building ...
+  
+  const combiningOrders = group.orders;
+  
+  // Calculate deterministic insertion position
+  const insertionResult = getInsertionPrio(combiningOrders);
+  
+  // ... rest of existing context ...
+  
+  return {
+    // ... existing fields ...
+    insertionResult,
+    removedPrios: combiningOrders
+      .map(o => o.prio)
+      .filter(p => p !== insertionResult.prio)
+      .sort((a, b) => a - b)
+  };
+}
+```
+
+### UPDATE APPROVE HANDLER — USE SAME DETERMINISTIC LOGIC
+
+```javascript
+function handleApprove(group, analysis) {
+  const combiningOrders = group.orders;
+  
+  // Use the SAME deterministic logic as the AI prompt
+  const insertion = getInsertionPrio(combiningOrders);
+  const insertionPrio = insertion.prio;
+  
+  // Determine avail date
+  const datedOrders = combiningOrders.filter(o => {
+    const avail = o.target_avail_date;
+    return avail && /^\d{4}-\d{2}-\d{2}/.test(avail) && !isNaN(Date.parse(avail));
+  });
+  
+  const combinedAvailDate = datedOrders.length > 0
+    ? datedOrders.sort((a, b) => new Date(a.target_avail_date) - new Date(b.target_avail_date))[0].target_avail_date
+    : combiningOrders[0].target_avail_date;
+  
+  // Create combined order
+  const combinedVolume = combiningOrders.reduce((s, o) => s + (parseFloat(o.volume) || 0), 0);
+  const baseOrder = { ...combiningOrders.find(o => o.prio === insertionPrio) || combiningOrders[0] };
+  
+  baseOrder.volume = combinedVolume;
+  baseOrder.target_avail_date = combinedAvailDate;
+  baseOrder.prio = insertionPrio;
+  baseOrder.batches = Math.ceil(combinedVolume / (parseFloat(baseOrder.batch_size) || 1));
+  baseOrder.bags = baseOrder.batches * (parseFloat(baseOrder.fg_weight) || 1) * 20;
+  
+  const runRate = parseFloat(baseOrder.run_rate) || 0;
+  baseOrder.production_time = runRate > 0 ? (combinedVolume / runRate).toFixed(2) : '0.00';
+  baseOrder._isCombined = true;
+  baseOrder._combinedFrom = combiningOrders.map(o => o.id);
+  
+  // Remove originals and insert combined
+  const orderIdsToRemove = combiningOrders.map(o => o.id);
+  let updatedOrders = allOrders.filter(o => !orderIdsToRemove.includes(o.id));
+  updatedOrders.push(baseOrder);
+  
+  // Re-sort and reassign prios
+  const lineOrders = updatedOrders
+    .filter(o => o.line === group.line)
+    .sort((a, b) => {
+      if (a.id === baseOrder.id) return insertionPrio - 0.5 - b.prio;
+      if (b.id === baseOrder.id) return a.prio - (insertionPrio - 0.5);
+      return a.prio - b.prio;
+    });
+  
+  lineOrders.forEach((o, idx) => {
+    o.prio = idx + 1;
+  });
+  
+  // Recalculate
+  recalculateAllChangeovers(updatedOrders, getDefaultChangeoverRules());
+  recalculateCompletionDates(updatedOrders);
+  
+  setAllOrders(updatedOrders);
+  showNotification('success', `Orders combined: ${baseOrder.item_description} (${combinedVolume} MT) at Priority ${insertionPrio}.`);
+}
+```
+
+### PARSE — STILL EXTRACT PRIO FROM AI RESPONSE AS VALIDATION
+
+```javascript
+function parseRecommendedPrio(insertionText, group) {
+  // The AI should always match the deterministic prio
+  // This is just a validation check
+  const insertion = getInsertionPrio(group.orders);
+  
+  if (insertionText) {
+    const patterns = [
+      /^(\d+)\./,
+      /[Pp]riority\s*(\d+)/,
+      /[Pp]rio\s*(\d+)/,
+    ];
+    
+    for (const pattern of patterns) {
+      const match = insertionText.match(pattern);
+      if (match) {
+        const aiPrio = parseInt(match[1], 10);
+        if (aiPrio !== insertion.prio) {
+          console.warn(`AI suggested Prio ${aiPrio} but deterministic logic says Prio ${insertion.prio}. Using deterministic.`);
+        }
+      }
+    }
+  }
+  
+  // Always return the deterministic result
+  return insertion.prio;
+}
+```
+
+---
+
+## VERIFICATION
+
+### Deterministic position
+1. ✅ Dated: Prio 1 (Mar 19) + Prio 2 (Mar 22) → always Prio 1
+2. ✅ Non-dated: Prio 3 + Prio 5 → always Prio 3
+3. ✅ Mixed: Prio 4 (dated Apr 2) + Prio 7 (non-dated) → always Prio 4
+4. ✅ Three orders: Prio 2, 6, 9 (all non-dated) → always Prio 2
+
+### AI alignment
+5. ✅ AI prompt explicitly states "YOU MUST STATE PRIORITY X"
+6. ✅ AI response always starts with the correct prio number
+7. ✅ AI adds natural explanation around the deterministic position
+8. ✅ If AI somehow states wrong prio, approve handler ignores it and uses deterministic
+
+### Approve handler alignment
+9. ✅ Uses getInsertionPrio() — same function as the prompt
+10. ✅ Never reads prio from AI response for actual insertion
+11. ✅ AI insight and actual insertion always match
+
+### Refresh
+12. ✅ Refresh regenerates AI explanation but position stays the same
+13. ✅ Different wording each refresh but same prio number
+```

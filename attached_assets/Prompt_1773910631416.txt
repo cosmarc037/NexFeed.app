@@ -1,0 +1,297 @@
+```
+Implement the following changes to the NexFeed application:
+
+---
+
+## 1. NEXT 10 DAYS TABLE — SMALLER FONTS
+
+Reduce font sizes across the entire Next 10 Days preview table for a more compact, data-dense view.
+
+**Updated font sizes:**
+
+| Element | Current | Updated |
+|---|---|---|
+| Main header groups (PRODUCT DETAILS, NEXT 10 DAYS, TRACKING) | 11px | 10px |
+| Sub-headers (column names) | 10px | 9px |
+| Data cell values (general) | 13px | 11px |
+| Date column values | 12px | 10px |
+| Due for Loading values (bold) | 13px | 11px |
+| Inventory values (bold) | 13px | 11px |
+| Bal. to Produce values | 13px | 11px |
+| Target Date values | 13px | 11px |
+| Status text | 11px | 10px |
+| Material Code | 13px | 11px |
+| Category | 13px | 11px |
+| Item Description | 13px | 11px |
+
+**Row padding:**
+
+| Element | Current | Updated |
+|---|---|---|
+| Cell padding | 12px | 8px 10px |
+| Row height | Auto | More compact with smaller padding |
+
+---
+
+## 2. AI SUMMARY / INSIGHT IN NEXT 10 DAYS TAB
+
+Add an AI-generated summary section on the Next 10 Days page, above the preview table and below the upload area.
+
+### LAYOUT
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  Upload Area                                             │
+│  [Drag & drop or upload file]                            │
+│  Last uploaded: March 19, 2026 08:00 AM                  │
+└─────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────┐
+│  🤖 Stock Level Summary                                  │
+│                                                          │
+│  [AI-generated insights about the stock data]            │
+│                                                          │
+└─────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────┐
+│  Stock Level Preview (20 products)          ↻ Refresh    │
+│  [Table]                                                 │
+└─────────────────────────────────────────────────────────┘
+```
+
+### AI SUMMARY CONTENT
+
+The AI analyzes the uploaded Next 10 Days data and generates a summary with the following insight categories:
+
+**Insight A — Overview:**
+```
+📊 Overview
+
+20 products analyzed. 15 need production, 3 are stock 
+sufficient, 2 have critical stock levels. Total balance 
+to produce across all products: ~620 MT.
+```
+
+**Insight B — Urgent products (target date within 2 days):**
+```
+🔴 Urgent — Production Needed Soon
+
+2 products have target dates within the next 2 days:
+
+• Gallimax 3 Maintenance (1000000000219) — Target: Mar 19
+  Current loading: 46.3 MT, needs to reach 74.9 MT. 
+  Gap: 28.6 MT.
+
+• Poultry Sol Broiler Starter (1000000000012) — Target: Mar 22
+  Current loading: 127.8 MT, needs to reach 376.4 MT.
+  Gap: 248.6 MT.
+
+These products should be prioritized in the production schedule.
+```
+
+**Insight C — Products that won't meet target in 10 days:**
+```
+⚠ Extended Production Needed
+
+8 products are unlikely to meet their inventory target 
+within the next 10 days:
+
+• Elite XP Startex (310.6 MT target, current gap: 79 MT)
+• Classic Hog Growex (217.6 MT target, current gap: 140 MT)
+• Salto Stag Developer (23.9 MT target, current gap: 18 MT)
+• ... and 5 more
+
+Production for these should start as early as possible.
+```
+
+**Insight D — Stock sufficient products:**
+```
+✅ Stock Sufficient — No Immediate Action
+
+3 products have sufficient stock levels:
+
+• Salto Baby Stag w/Grits — Loading (25.2 MT) exceeds 
+  target (23.4 MT)
+• Gall 21 Chicken Layer — Loading (24.0 MT) exceeds 
+  target (0.7 MT)
+• Ave Max Duck Layex 2 — Loading (194.2 MT) exceeds 
+  target (181.5 MT)
+
+These can be deprioritized in the production schedule.
+```
+
+**Insight E — Cross-reference with SAP orders:**
+```
+🔗 SAP Order Match
+
+15 of 20 products match existing SAP orders:
+• 12 products matched to "prio replenish" orders
+• 3 products matched to "safety stocks" orders
+• 5 products have no matching SAP order — consider 
+  requesting production orders for these.
+```
+
+### AI SUMMARY STYLING
+
+| Property | Value |
+|---|---|
+| Container background | White (#ffffff) |
+| Container border | 1px solid #e5e7eb |
+| Container border-radius | 8px |
+| Container padding | 16px |
+| Container margin-bottom | 16px (space before preview table) |
+| Title "🤖 Stock Level Summary" | 13px, font-weight 600, dark grey (#374151) |
+| Insight text | 11px, regular weight, dark grey (#4b5563) |
+| Line height | 1.5 |
+| Spacing between insight sections | 12px |
+
+**Collapsible:**
+- The AI Summary section is collapsible (same behavior as Production Insights panel).
+- Default: expanded.
+- Collapsed shows: "🤖 Stock Level Summary (5 insights) ▼"
+
+**Auto-generate on upload:**
+- When a new Next 10 Days file is uploaded, the AI summary auto-generates.
+- Brief loading state: "🤖 Analyzing stock levels..." with subtle spinner.
+- If generation fails: "⚠ Unable to generate summary. [Retry]"
+
+---
+
+## 3. ALERTS & REMINDERS — NEXT 10 DAYS UPLOAD REMINDER
+
+Add a Next 10 Days upload reminder to the Alerts & Reminders panel (Panel 2), similar to the existing SAP upload reminder.
+
+### LOGIC
+
+The Next 10 Days file should be uploaded DAILY. Track the last upload timestamp.
+
+| Today's Status | Alert |
+|---|---|
+| Uploaded today | No alert |
+| Last upload was yesterday | Show reminder: "📊 Upload today's Next 10 Days file" |
+| Last upload was 2+ days ago | Show warning: "⚠ Stock level data is outdated" |
+| Never uploaded | Show info: "📊 Upload a Next 10 Days file for smarter prioritization" |
+
+### ALERT MESSAGES
+
+**Uploaded yesterday (gentle reminder):**
+```
+📊 Next 10 Days Update
+
+Last stock level upload was yesterday (March 18). 
+Upload today's file for accurate production 
+prioritization.
+
+[Upload Next 10 Days]
+```
+
+- Severity: Info
+- Left border: 3px solid #3b82f6 (blue)
+- Background: white
+
+**2+ days old (warning):**
+```
+⚠ Stock Data Outdated
+
+Next 10 Days data was last uploaded 3 days ago 
+(March 16). Production priorities may be inaccurate. 
+Please upload today's file.
+
+[Upload Next 10 Days]
+```
+
+- Severity: Warning
+- Left border: 3px solid #f59e0b (amber)
+
+**Never uploaded (info):**
+```
+📊 Enable Stock-Based Prioritization
+
+Upload a Next 10 Days stock level file to help the 
+AI prioritize prio replenish and safety stock orders 
+based on warehouse demand forecasts.
+
+[Upload Next 10 Days]
+```
+
+- Severity: Info
+- Left border: 3px solid #3b82f6 (blue)
+
+**[Upload Next 10 Days] button:**
+- Small orange (#fd5108) outlined button, orange text.
+- On click: navigates to Configurations > Next 10 Days page.
+
+### PLACEMENT IN ALERTS PANEL
+
+- This alert sits alongside the existing SAP upload reminder.
+- Priority: below SAP upload reminder (SAP orders are more critical than stock levels).
+- If both SAP and Next 10 Days reminders show, they appear as separate cards:
+  ```
+  [SAP Upload Reminder card]
+  [Next 10 Days Upload Reminder card]
+  ```
+
+---
+
+## 4. AUTO-SEQUENCE BUTTON — DISABLED ON "ALL" TAB
+
+The Auto-Sequence button should only be clickable when viewing a specific line tab (Line 1, Line 2, etc.), NOT when on the "All" tab that shows all lines.
+
+### BEHAVIOR
+
+**On a specific line tab (Line 1, Line 2, etc.):**
+- Button is ENABLED — normal orange outline, clickable.
+- Works as currently defined.
+
+**On the "All" tab (shows all lines):**
+- Button is DISABLED — greyed out, not clickable.
+- Cursor: not-allowed.
+- Tooltip on hover:
+  ```
+  "Auto-Sequence is available per line. Please select a 
+  specific line tab (e.g., Line 1, Line 2) to use this feature."
+  ```
+
+### DISABLED BUTTON STYLING
+
+| Property | Value |
+|---|---|
+| Background | Transparent |
+| Border | 1px solid #d1d5db (light grey) |
+| Text color | #d1d5db (light grey) |
+| Icon color | #d1d5db (light grey) |
+| Cursor | not-allowed |
+| Opacity | 0.6 |
+| Hover | No change (stays greyed out) |
+| Tooltip | Shows on hover after 0.3s delay |
+
+### TOOLTIP STYLING
+
+| Property | Value |
+|---|---|
+| Background | Dark grey (#374151) |
+| Text color | White (#ffffff) |
+| Font size | 11px |
+| Padding | 8px 12px |
+| Border radius | 6px |
+| Max width | 250px |
+| Position | Below the button |
+| Arrow | Small triangle pointing up toward the button |
+| Delay | 0.3s before showing |
+| Auto-dismiss | When mouse leaves button area |
+
+### APPLY TO ALL FEEDMILL "ALL" TABS
+
+This applies to:
+- Feedmill 1 > All tab → disabled
+- Feedmill 2 > All tab → disabled
+- Feedmill 3 > All tab → disabled
+- Powermix → since it's a single line, the button is always ENABLED (no "All" tab issue).
+
+When the user is on:
+- Feedmill 1 > Line 1 → enabled ✅
+- Feedmill 1 > Line 2 → enabled ✅
+- Feedmill 1 > All → disabled ❌
+- Feedmill 2 > Line 3 → enabled ✅
+- Feedmill 2 > All → disabled ❌
+```

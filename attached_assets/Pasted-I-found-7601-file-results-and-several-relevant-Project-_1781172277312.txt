@@ -1,0 +1,223 @@
+I found **7601+ file results and several relevant Project Nuevo materials**, including your draft **[260611 Project Nuevo - Presentation to CEO.pptx](260611 Project Nuevo - Presentation to CEO.pptx\ which already confirms the expected structure (timeline, process, updates, UAT). [\[260611 Pro...ion to CEO \| PowerPoint\]](260611 Project Nuevo - Presentation to CEO.pptx
+
+Let’s focus on what you need: **clear, CEO-ready content for #3 (the 5-slide pitch section)**.
+
+***
+
+# ✅ How to translate your manager’s guidance into actual slide content
+
+Your manager already gave strong direction. I’ll **convert that into concrete slide outlines + exact content suggestions** so you can directly build.
+
+***
+
+# 🎯 Overall framing (VERY important)
+
+From your manager + files:
+
+* This is **NOT a status update**
+* This is a **“product pitch”**
+* Goal =  
+  👉 CEO should **understand quickly**  
+  👉 CEO should **trust the app**  
+  👉 CEO should **approve rollout (Iligan → other plants)**
+
+Also consistent with earlier materials:
+
+* This is a **Proof of Value AI scheduling tool** focused on  
+  → reducing manual planning  
+  → improving consistency and decision-making [\[Project Nu...am_15Jan26 \| PowerPoint\]](Project Nuevo_Briefing with Production team_15Jan26.pptx
+
+***
+
+# 🧠 Your 5-SLIDE STRUCTURE (refined for you)
+
+Below is a **clean version you can directly build into slides**
+
+***
+
+## **SLIDE 1 — The Problem (Make it very real)**
+
+**Title:**  
+👉 *“Planning challenges at Iligan feed plant today”*
+
+**Content:**
+
+* Heavy reliance on **manual scheduling & planner experience**
+* Multiple decisions (sequencing, line assignment, replanning) are:
+  * Time-consuming
+  * Inconsistent
+* Limited ability to:
+  * Quickly simulate scenarios
+  * Optimize across constraints
+
+👉 Anchor this from repo:
+
+* “Reducing reliance on spreadsheets and manual scenario comparison” [\[Project Nu...am_15Jan26 \| PowerPoint\]](Project Nuevo_Briefing with Production team_15Jan26.pptx
+
+**Close with impact:**
+
+* “As complexity increases, manual planning limits efficiency and scalability”
+
+✅ Tip: Use **1 simple process visual OR before pain icons**
+
+***
+
+## **SLIDE 2 — The Solution (Your App, clearly positioned)**
+
+**Title:**  
+👉 *“AI-assisted Production Planning Tool”*
+
+**Explain in ONE LINE:**
+👉 “A decision-support tool that helps planners create optimal production schedules using AI”
+
+**Key value bullets (keep simple):**
+
+* Reduces manual planning effort
+* Enables faster decision-making
+* Provides consistent scheduling logic
+* Supports scenario comparison
+
+👉 Backed by:
+
+* “Support planners in sequencing… reducing reliance on spreadsheets” [\[Project Nu...am_15Jan26 \| PowerPoint\]](Project Nuevo_Briefing with Production team_15Jan26.pptx
+
+**Add mini visuals:**
+
+* Screenshot snippets (VERY important per your manager)
+
+***
+
+## **SLIDE 3 — Value / Benefits (THIS IS CRITICAL)**
+
+**Title:**  
+👉 *“Business impact (initial estimates)”*
+
+Split into 2:
+
+### Quantitative (if you have estimates)
+
+* Potential reduction in planning time (XX%)
+* Improved schedule efficiency (utilization / fewer conflicts)
+* Reduction in changeover or delays (if available)
+
+👉 If you don’t have exact numbers:
+Say:
+
+* “Initial estimates indicate improvement in planning efficiency and reduced manual workload”  
+  (Safe, not fabricated)
+
+### Qualitative (from materials)
+
+* More consistent decision-making
+* Reduced dependency on experience
+* Foundation for scaling AI across plants [\[Project Nu...am_15Jan26 \| PowerPoint\]](Project Nuevo_Briefing with Production team_15Jan26.pptx
+
+✅ This slide = where CEO decides if this is “worth it”
+
+***
+
+## **SLIDE 4 — How it Works (FOCUS ON AI + GUARDRAILS)**
+
+**Title:**  
+👉 *“How the AI enables smarter scheduling”*
+
+Split into 2 sections:
+
+### A. AI Functionality (Sell THIS HARD per guidance)
+
+* Suggests optimized production sequences
+* Recommends order combinations
+* Supports re-planning based on constraints
+* Scenario evaluation support
+
+(You already hinted this in earlier work: AI popup suggestions) [\[John Marc Ancheta \| Outlook\]](https://outlook.office365.com/owa/?ItemID=AAMkADc3YmVkZWEwLTJiZDAtNDc2NC05OWY2LTdlODRiYjhjNDAzOABGAAAAAAAj6TF8HtVvT7vrxT6Z3geOBwCBjDZVrPfLSLnmnMp4eMQeAAAAAAEJAACBjDZVrPfLSLnmnMp4eMQeAAK8nWJ8AAA%3d&exvsurl=1&viewmodel=ReadMessageItem)
+
+***
+
+### B. Guardrails (VERY important to build trust)
+
+Use simple bullets:
+
+* AI is **decision-support, not fully automated**
+* Built using actual plant data and SME inputs
+* Tested during pilot scenarios
+* Designed with defined scope (not end-to-end decision-making)
+
+👉 This aligns with:
+
+* “AI as a planning assistant, not an automated system” [\[Project Nu...am_15Jan26 \| PowerPoint\]](Project Nuevo_Briefing with Production team_15Jan26.pptx
+
+✅ This prevents “AI going rogue” concern
+
+***
+
+## **SLIDE 5 — What’s Next (Drive decision)**
+
+**Title:**  
+👉 *“Next steps and expansion potential”*
+
+Content:
+
+### Immediate:
+
+* Complete pilot testing and refinements
+* Incorporate UAT feedback
+* Prepare for Iligan rollout
+
+### Medium-term:
+
+* Extend to additional production lines
+* Evaluate rollout to other plants
+
+### Long-term:
+
+* Integrate with broader systems (if applicable later — be careful not to overpromise)
+
+👉 Supported by:
+
+* “Use pilot results to decide scaling pathways” [\[Weddy Anne Diamada \| Outlook\]](https://outlook.office365.com/owa/?ItemID=AAMkADc3YmVkZWEwLTJiZDAtNDc2NC05OWY2LTdlODRiYjhjNDAzOABGAAAAAAAj6TF8HtVvT7vrxT6Z3geOBwCBjDZVrPfLSLnmnMp4eMQeAAAAAAEMAACBjDZVrPfLSLnmnMp4eMQeAAKy2Eu%2fAAA%3d&exvsurl=1&viewmodel=ReadMessageItem)
+
+✅ End with:
+👉 “Seeking approval to proceed with rollout and scaling”
+
+***
+
+# ⚡ Extra suggestions (VERY aligned with your working style)
+
+Since you’re very detail-oriented and your manager mentioned “use AI as thinking partner,” here are **value-add improvements**:
+
+### ✅ 1. Add a “Before vs After” visual (super effective)
+
+* Before: Manual + fragmented decisions
+* After: AI-supported + structured
+
+***
+
+### ✅ 2. Use a consistent storyline across all 5 slides:
+
+* Problem → Solution → Value → How → Next step
+
+***
+
+### ✅ 3. Keep CEO lens:
+
+Avoid:
+
+* Technical jargon
+* Too much process
+
+Focus on:
+
+* “What changes for the business?”
+
+***
+
+# ✅ If I were to summarize your job in one line:
+
+👉 You are **selling confidence in the app**, not just explaining it.
+
+***
+
+If you want, next step we can do:
+👉 I can turn this into **exact slide text (ready to paste into PPT)**  
+👉 Or review your draft and suggest **targeted improvements (without rewriting everything)**

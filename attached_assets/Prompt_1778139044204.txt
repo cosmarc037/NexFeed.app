@@ -1,0 +1,312 @@
+```
+Revisit and improve the AI-powered date suggestion logic so AI strategies actually move dates when the strategy says it will advance or defer orders, instead of only changing the date color while keeping the same effective date.
+
+---
+
+## OBJECTIVE
+
+There is still a mismatch between the AI strategy behavior and the actual dates shown in the After table.
+
+We already defined the intended AI date rules:
+
+- If **Critical**, it should be scheduled for **TODAY**
+- If **Monitor** or **Urgent**, the order can be **advanced**, but must not go beyond its target date
+- If **Sufficient**, the order can be **advanced** or pushed **beyond its target date up to 14 days**
+
+However, based on the current result:
+- some rows only change color but keep the same actual date
+- some dates are not meaningfully advanced even when the strategy says it is advancing orders
+- Sufficient orders rarely or never appear to be pushed beyond their target date
+- the AI is not effectively using available empty days on the line when suggesting dates
+
+This means the AI date-placement logic still needs improvement.
+
+---
+
+## PROBLEM TO FIX
+
+The AI strategy says it will:
+- advance orders
+- optimize dates
+- use flexibility
+
+But in the actual After table:
+- many dates remain unchanged
+- some rows only get a different color/indicator
+- Sufficient orders are not meaningfully deferred even when there appears to be room
+- the app does not seem to actively look for better available dates on the line calendar
+
+So the strategy text and the actual schedule are not fully aligned.
+
+---
+
+## REQUIRED BEHAVIOR
+
+When an AI strategy says it will advance or optimize dates, it should actually assign a better date where possible, subject to the rules below:
+
+### Date rules
+1. **Critical**
+   - must be placed on **TODAY** for production if feasible
+2. **Urgent** / **Monitor**
+   - may be advanced earlier
+   - but must not go beyond their target/allowed date
+3. **Sufficient**
+   - may be advanced earlier
+   - or deferred later
+   - may go beyond target date by up to **14 days**
+   - should be used as flexible filler to improve the overall schedule
+
+Additionally:
+- the AI should actively look for open/low-load dates on the line
+- if a date has no lineup or low load, that date should be considered a strong candidate
+- the chosen date should not just be cosmetically re-labeled; the actual scheduled date must change if the strategy claims a move
+
+---
+
+## 1. SEPARATE DATE COLOR / STATUS DISPLAY FROM ACTUAL DATE ASSIGNMENT
+
+Currently, some rows appear to get only a new visual status/color without a real date move.
+
+Fix this by ensuring that:
+- date classification/color is only derived after the actual scheduled date is finalized
+- the AI strategy cannot claim date advancement unless `scheduled_date` actually changed
+
+### Rule:
+Do not treat a color/status change as a date move.
+
+A date move only counts if:
+```javascript
+newScheduledDate !== previousScheduledDate
+```
+
+---
+
+## 2. BUILD A REAL DATE CANDIDATE SEARCH FOR EACH ORDER
+
+For each order, the AI/date engine should evaluate candidate production dates instead of keeping the same date by default.
+
+### Candidate search should consider:
+- today
+- earlier valid open days
+- target date
+- intermediate dates between today and target date
+- for Sufficient orders: dates beyond target date up to +14 days
+- current lineup/load on each date
+- line capacity/load balance
+- changeover impact
+- order urgency class (Critical/Urgent/Monitor/Sufficient)
+
+The engine should not just accept the current date unless it is truly already the best valid choice.
+
+---
+
+## 3. ENFORCE THE FUTURE DISPATCH DATE RULES DURING CANDIDATE EVALUATION
+
+### Critical
+For Critical orders:
+- strongly force/snap candidate date to TODAY where feasible
+- do not leave them at later dates unless impossible because of a hard constraint
+- if not placed today, capture and explain the blocking reason
+
+### Urgent / Monitor
+For Urgent and Monitor orders:
+- allow advancing earlier
+- but do not place them later than their target date
+- choose the earliest beneficial date that improves sequence/load without violating constraints
+
+### Sufficient
+For Sufficient orders:
+- allow both advancement and postponement
+- allow moving beyond target date up to +14 days
+- use them to fill open slots or relieve crowded earlier days
+- if the line has empty future days, these orders should be considered for placement there
+
+---
+
+## 4. MAKE THE AI DATE ENGINE ACTUALLY LOOK FOR EMPTY OR LOW-LOAD DAYS
+
+This is a key improvement.
+
+The date suggestion engine should inspect the line calendar/day buckets and detect:
+- dates with no lineup
+- dates with low total assigned hours
+- dates with lower changeover impact
+- dates with enough capacity to absorb the order
+
+If a better date exists:
+- the order should actually be assigned to that date
+- not just keep the old date with a changed visual cue
+
+### Example heuristic:
+```javascript
+function rankCandidateDates(order, candidateDates, lineSchedule) {
+  return candidateDates
+    .map(date => ({
+      date,
+      loadHours: getLineLoadForDate(lineSchedule, date),
+      changeoverPenalty: estimateDateInsertionChangeover(order, date),
+      withinRuleWindow: isDateAllowedForOrder(order, date),
+    }))
+    .filter(x => x.withinRuleWindow)
+    .sort(bestDateComparator);
+}
+```
+
+The AI or scheduling logic should use this to choose an actual new date.
+
+---
+
+## 5. IF THE STRATEGY SAYS "ADVANCE", PREFER REAL DATE ADVANCEMENT WHEN VALID
+
+If an AI strategy specifically says it is:
+- advancing orders
+- compressing windows
+- pulling work earlier
+
+then the resulting After table should show actual earlier dates where valid.
+
+Do not keep the same date unless:
+- no better earlier slot exists
+- or a hard constraint blocks movement
+
+If the date remains unchanged, the reasoning should explain why.
+
+---
+
+## 6. USE DEFERRAL MORE INTENTIONALLY FOR SUFFICIENT ORDERS
+
+Right now, it appears most suggestions are biased toward advancement only.
+
+Improve this by allowing Sufficient orders to move later when beneficial, up to +14 days beyond target date.
+
+The engine should use Sufficient orders as flexible load shifters to:
+- free earlier dates for Critical/Urgent/Monitor orders
+- reduce congestion
+- create cleaner sequencing
+- exploit empty later dates
+
+If no Sufficient orders are ever being deferred, the logic is likely too conservative.
+
+---
+
+## 7. DO NOT KEEP THE ORIGINAL DATE UNLESS IT IS ACTUALLY THE BEST OPTION
+
+The current behavior suggests that many orders simply keep their original date.
+
+Change the selection logic so the original/current date is just one candidate among others, not the default winner.
+
+The current date should only remain if it truly scores best after evaluating:
+- urgency rule
+- allowed date window
+- available lineup slots
+- capacity/load
+- changeover
+- strategy intent
+
+---
+
+## 8. ADD REASONS WHEN A DATE COULD NOT BE MOVED
+
+If an order stays on the same date despite an AI strategy that aims to move dates, capture why.
+
+Possible reasons:
+- no earlier valid slot with enough capacity
+- target date boundary prevents later move
+- Critical/Urgent/Monitor rule window restriction
+- protected order / MTO / manual constraint
+- moving it would worsen changeover too much
+- line eligibility issue
+
+This should help the AI reasoning and improve trust.
+
+---
+
+## 9. UPDATE THE AI REASONING / INSIGHTS TO MATCH REAL DATE MOVES
+
+If the AI moved a date:
+- the insight should explicitly reflect that real move
+
+Example:
+- `Advanced from May 18 to May 9 to use an earlier open slot and reduce stockout risk.`
+
+If the AI kept the date:
+- the insight should explain why it stayed
+
+Example:
+- `Retained at May 18 because no earlier valid slot was available within the protected window.`
+
+Do not generate language that implies advancement if the date did not actually change.
+
+---
+
+## 10. ADD A POST-SCHEDULING VALIDATION STEP
+
+After an AI-powered sequence is built, validate:
+- how many eligible orders actually changed dates
+- how many only changed color but not date
+- how many Sufficient orders were deferred when beneficial
+- whether the resulting dates align with the strategy’s stated intent
+
+If the strategy claims to advance or optimize dates but almost no actual dates moved, flag that as low faithfulness or re-run date placement.
+
+### Example metrics:
+```javascript
+{
+  actualDateMoves: countOfOrdersWithChangedDate,
+  colorOnlyChanges: countOfOrdersWithSameDateDifferentVisualState,
+  sufficientDeferred: countOfSufficientOrdersMovedBeyondTarget,
+  advancedOrders: countOfOrdersMovedEarlier,
+}
+```
+
+---
+
+## 11. ADD DEBUG LOGGING TO TRACE DATE CHOICE
+
+Temporarily log:
+
+```javascript
+console.debug('[AI Date Suggestion]', {
+  orderId: order.id,
+  item: order.item_description,
+  status: order.futureDispatchStatus,
+  originalDate,
+  chosenDate,
+  targetDate,
+  allowedWindow: {
+    earliest: allowedStart,
+    latest: allowedEnd,
+  },
+  candidateDates: rankedCandidates,
+  moved: chosenDate !== originalDate,
+});
+```
+
+This will help verify:
+- whether the engine truly evaluated alternatives
+- why some orders were not moved
+- whether Sufficient orders are ever actually deferred
+
+---
+
+## 12. VERIFY AGAINST THE CURRENT ISSUE
+
+Expected improvements:
+- If an order is marked as advanced by AI, the actual date should move earlier where valid
+- If a date remains the same, the app should not imply it was meaningfully advanced
+- Sufficient orders should sometimes move later (up to +14 days) when beneficial
+- empty or low-load dates should be actively used as candidate dates
+- AI date changes should be real scheduling changes, not just visual/color changes
+
+---
+
+## 13. VERIFICATION
+
+1. ✅ Critical orders are pushed to TODAY where feasible
+2. ✅ Urgent/Monitor orders can be advanced but never pushed beyond target date
+3. ✅ Sufficient orders can be advanced or moved beyond target date up to 14 days
+4. ✅ AI actively evaluates empty/low-load dates instead of keeping the current date by default
+5. ✅ If the strategy says it advances dates, the After table shows actual changed dates
+6. ✅ Date colors/statuses reflect the actual chosen date, not the other way around
+7. ✅ The AI reasoning now matches whether the date truly moved or stayed
+8. ✅ Sufficient orders are meaningfully used as flexible load-shifting candidates

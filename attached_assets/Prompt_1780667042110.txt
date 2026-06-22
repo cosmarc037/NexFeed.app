@@ -1,0 +1,265 @@
+Please revisit the **AI-powered sequencing strategy generation**, specifically the relationship between the **THREE-DIMENSION ANALYSIS** and the **actual final proposed sequence**, because they currently appear too easy to drift apart.
+
+The current behavior suggests that the AI can:
+- describe one strategic emphasis in the 3D analysis
+- but generate a final sequence that does not materially reflect that emphasis
+- or produce measured results that do not support the claimed priority
+
+This creates a disconnect where the analysis feels like a theoretical explanation, while the actual sequence and metrics tell a different story.
+
+---
+
+## 1. ENSURE THE 3D ANALYSIS IS DERIVED FROM THE FINAL SEQUENCE, NOT JUST INITIAL INTENT
+
+Please review whether the AI is currently treating the **3D analysis** as an early conceptual framing instead of a description of what the final sequence actually does.
+
+### Current concern
+The AI may:
+- identify a theoretical opportunity
+- declare it as PRIMARY in the 3D analysis
+- then produce a final sequence where that priority is weakly reflected or not realized at all
+
+For example:
+- the AI says **changeover reduction is primary**
+- but the final sequence shows little or no meaningful regrouping
+- and the measured result shows **0.00 hr time-saved**
+
+### Goal
+Make the 3D analysis reflect the **actual verified behavior of the final sequence**, not just the AI’s initial planning idea.
+
+### Expected result
+If the final sequence does not materially execute a claimed priority, that dimension should not be presented as PRIMARY in the final 3D analysis.
+
+---
+
+## 2. ADD A VERIFICATION STEP BETWEEN STRATEGY INTENT AND FINAL 3D LABELING
+
+Please add or strengthen a verification step after the AI generates the final sequence.
+
+### Current concern
+The AI may be:
+- naming a primary strategic emphasis too early
+- before the final sequence has been fully constructed and evaluated
+
+This makes it possible for the final explanation to overstate what the sequence actually achieved.
+
+### Goal
+Require the AI to:
+1. identify candidate strategic opportunities
+2. generate the feasible sequence
+3. compare the final sequence to baseline / measured outcome
+4. only then assign the final 3D labels and explanation
+
+### Expected result
+The final 3D analysis should be the **post-verification explanation** of the sequence, not a pre-committed narrative that survives even when the final outcome doesn’t support it.
+
+---
+
+## 3. DO NOT LET THE AI CLAIM A PRIMARY DIMENSION WITHOUT ACTUAL SEQUENCE EVIDENCE
+
+Please tighten the prompt so the AI cannot label a dimension as PRIMARY unless the final sequence clearly contains concrete decisions in support of that dimension.
+
+### Current concern
+The AI can currently say things like:
+- changeover reduction is primary
+- MTS advancement is primary
+- profitability is primary
+
+even when the actual order moves or date placements do not strongly demonstrate that.
+
+### Goal
+Require direct sequence evidence for each claimed primary emphasis.
+
+### Expected result
+Examples:
+- **Changeover reduction** should only be PRIMARY if the final sequence materially groups compatible orders or avoids costly transitions
+- **MTS advancement** should only be PRIMARY if the final sequence materially advances eligible orders earlier
+- **Profitability** should only be PRIMARY if the final sequence materially favors higher-margin feasible options
+
+If those actions are not clearly present in the final sequence, the dimension should not be labeled as PRIMARY.
+
+---
+
+## 4. DO NOT PRESENT UNREALIZED OPPORTUNITIES AS IF THEY WERE ACHIEVED STRATEGIES
+
+Please make the AI explicitly distinguish between:
+- identified opportunity
+- attempted action
+- realized outcome
+
+### Current concern
+The AI may correctly notice that a line has a strong theoretical changeover opportunity, but if constraints prevent the final sequence from realizing that opportunity, the 3D analysis can still read as if the strategy actually achieved it.
+
+That is misleading.
+
+### Goal
+Make the AI speak plainly when a strategy theme was identified but not actually realized.
+
+### Expected result
+If the AI identifies a promising changeover opportunity but the final verified result is unchanged, it should say something like:
+- opportunity identified but not realized
+- attempted clustering, but no net savings achieved
+- constrained by date / line / monitor limits
+
+It should **not** present that dimension as the defining successful priority of the strategy.
+
+---
+
+## 5. MAKE THE TITLE, SUMMARY, 3D ANALYSIS, AND METRICS ALL TELL THE SAME STORY
+
+Please review the full strategy card output so that all components align:
+- title
+- summary
+- key details
+- what this line shows
+- why this strategy fits this line
+- 3D analysis
+- actual result / verification note
+
+### Current concern
+Different parts of the card may currently describe different realities:
+- title suggests one strategic theme
+- 3D analysis suggests another
+- metrics show little or no result
+- actual-result block contradicts the narrative
+
+### Goal
+Make the strategy card feel internally consistent.
+
+### Expected result
+Users should not have to reconcile conflicting signals across different parts of the same strategy card.
+
+If the actual result is neutral, the title and explanation should not sound like a strong optimization success.
+
+---
+
+## 6. MAKE THE FINAL 3D LABELS OUTCOME-BASED, NOT JUST OPPORTUNITY-BASED
+
+Please review whether the AI is currently choosing PRIMARY / SECONDARY / DEPRIORITIZED labels based too much on **theoretical line opportunities** instead of **actual final-sequence behavior**.
+
+### Current concern
+A dimension may be labeled HIGH / PRIMARY simply because it looked like the strongest lever in principle, even if the final feasible sequence did not actually realize it.
+
+### Goal
+Make final 3D labels reflect what the final sequence actually did.
+
+### Expected result
+The final labels should be assigned only after checking:
+- actual order re-sequencing
+- actual suggested dates
+- actual measured deltas versus baseline
+- actual risk introduced or avoided
+- actual realized improvements
+
+---
+
+## 7. PRESERVE THE AI’S ABILITY TO IDENTIFY OPPORTUNITIES, BUT DO NOT CONFUSE OPPORTUNITY WITH OUTCOME
+
+This is not a request to remove strategic diagnosis.
+
+### Important
+The AI should still be allowed to identify:
+- changeover opportunities
+- advancement opportunities
+- profitability opportunities
+- tradeoffs across the line
+
+### But
+Those opportunities should not automatically become the final 3D story unless the resulting sequence actually reflects them.
+
+### Goal
+Preserve good strategic analysis while ensuring the final user-facing explanation is grounded in the verified sequence.
+
+### Expected result
+The AI can still say:
+- “there was a potential changeover reduction opportunity”
+
+But if the sequence did not realize it, it should not say:
+- “changeover reduction is the primary achieved strategy”
+
+---
+
+## 8. REQUIRE A FINAL CONSISTENCY CHECK BEFORE RETURNING EACH STRATEGY
+
+Please add a final consistency check for each generated AI strategy.
+
+### Goal
+Before returning the strategy card, verify:
+- does the final sequence actually reflect the claimed primary dimension?
+- do the measured metrics support the explanation?
+- does the actual result confirm or contradict the claimed emphasis?
+- does the title overstate what happened?
+
+### Expected result
+If inconsistency is detected, revise:
+- title
+- summary
+- 3D labels
+- explanation text
+
+so they match the actual sequence outcome.
+
+---
+
+## IMPORTANT
+
+Please revisit the AI strategy generation so that the **THREE-DIMENSION ANALYSIS** and the **final actual sequence** feel tightly connected.
+
+The AI should not:
+- claim changeover reduction is primary when no meaningful changeover improvement was realized
+- claim MTS advancement is primary when orders were not materially advanced
+- claim profitability is primary when the sequence does not actually demonstrate margin-aware prioritization
+
+The final strategy explanation should describe what the sequence **actually did**, not just what the AI initially thought might be a good idea.
+
+If a strategic opportunity was identified but not realized, that should be stated clearly and honestly.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log strategy consistency between 3D analysis and final sequence outcome.
+
+```javascript
+console.debug('[AI Strategy Consistency Check]', {
+  line,
+  strategyTitle,
+  claimedPrimaryDimension,
+  finalSequenceSupportsPrimaryDimension: true,
+  measuredOutcomeSupportsPrimaryDimension: true,
+  titleMatchesActualOutcome: true,
+});
+```
+
+```javascript
+console.debug('[AI Strategy Unrealized Opportunity Review]', {
+  line,
+  strategyTitle,
+  identifiedOpportunity,
+  attemptedAction,
+  realizedOutcome,
+  opportunityNotRealized: false,
+});
+```
+
+```javascript
+console.debug('[AI 3D Analysis Verification]', {
+  line,
+  strategyTitle,
+  initialPrimaryHypothesis,
+  finalPrimaryAfterVerification,
+  labelsAdjustedAfterSequenceReview: false,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ The 3D analysis is reviewed for drift from the final generated sequence
+2. ✅ A verification step is added before final 3D labels are assigned
+3. ✅ PRIMARY labels require actual sequence evidence and measured support
+4. ✅ Unrealized opportunities are no longer presented as achieved strategy outcomes
+5. ✅ The title, summary, 3D analysis, and metrics tell the same story
+6. ✅ Final strategy explanations reflect verified sequence behavior rather than initial intent
+7. ✅ No UI errors or console errors are introduced

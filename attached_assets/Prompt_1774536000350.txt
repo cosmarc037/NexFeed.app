@@ -1,0 +1,398 @@
+```
+Implement the following changes to the NexFeed application:
+
+---
+
+## COMBINED ORDERS — COLLAPSIBLE BLOCK WITH SMART INSERTION
+
+Revert the current behavior where child orders are placed at the bottom of the table. Instead, combined orders should form a collapsible block where the lead order and children always stick together.
+
+---
+
+### 1. LEAD ORDER AND CHILD ORDERS — COLLAPSIBLE BLOCK
+
+When orders are combined:
+- A lead order is generated at the optimal position (see Section 2)
+- Child orders are nested UNDER the lead order
+- Children are collapsed by default — completely hidden
+- A dropdown arrow (▼/▶) AFTER the Item Description text expands/collapses children
+- Children do NOT have priority numbers
+- Children always move with the lead order
+
+### LEAD ORDER DISPLAY
+
+The lead order looks like a normal order row with:
+- Combined total volume
+- A small arrow (▶/▼) after the item description text
+- No "(Combined: X orders)" subtitle
+
+### COLLAPSED STATE (DEFAULT)
+
+```
+┌──────┬────────┬──────────────────────────────────────────────┬──────────┐
+│ Prio │ FPR    │ Item Description                              │ Volume   │
+├──────┼────────┼──────────────────────────────────────────────┼──────────┤
+│  2   │ 260325 │ Elite XP Startex, Mini-pellet 50kg ▶          │ 132 MT   │
+│      │        │ Hogs                                          │          │
+├──────┼────────┼──────────────────────────────────────────────┼──────────┤
+│  3   │ 260325 │ Gallimax Pigeon Pellet, 50kg                  │ 24 MT    │
+│      │        │ Gamefowl                                      │          │
+└──────┴────────┴──────────────────────────────────────────────┴──────────┘
+```
+
+- ▶ arrow after item description indicates collapsed children
+- Children completely hidden — no rows visible
+- Priority numbering skips children (Prio 2 → Prio 3, no gaps)
+- Lead order looks like a normal order except for the small arrow
+
+### EXPANDED STATE
+
+```
+┌──────┬────────┬──────────────────────────────────────────────┬──────────┐
+│ Prio │ FPR    │ Item Description                              │ Volume   │
+├──────┼────────┼──────────────────────────────────────────────┼──────────┤
+│  2   │ 260325 │ Elite XP Startex, Mini-pellet 50kg ▼          │ 132 MT   │
+│      │        │ Hogs                                          │          │
+├──────┼────────┼──────────────────────────────────────────────┼──────────┤
+│      │ 260325 │   Elite XP Startex, Mini-pellet 50kg          │ 80 MT    │
+│      │        │   Hogs                                        │          │
+├──────┼────────┼──────────────────────────────────────────────┼──────────┤
+│      │ 260325 │   Elite XP Startex, Mini-pellet 50kg          │ 32 MT    │
+│      │        │   Hogs                                        │          │
+├──────┼────────┼──────────────────────────────────────────────┼──────────┤
+│      │ 260325 │   Elite XP Startex, Mini-pellet 50kg          │ 20 MT    │
+│      │        │   Hogs                                        │          │
+├──────┼────────┼──────────────────────────────────────────────┼──────────┤
+│  3   │ 260325 │ Gallimax Pigeon Pellet, 50kg                  │ 24 MT    │
+│      │        │ Gamefowl                                      │          │
+└──────┴────────┴──────────────────────────────────────────────┴──────────┘
+```
+
+- ▼ arrow indicates expanded
+- Child rows have NO Prio number
+- Child rows have lighter background (greyed out)
+- Child rows are not selectable / not draggable / not editable
+
+### DROPDOWN ARROW STYLING
+
+| Property | Value |
+|---|---|
+| Icon | ▶ (collapsed) / ▼ (expanded) |
+| Position | Inline, AFTER the item description text |
+| Margin-left | 8px |
+| Size | 10px |
+| Color | Grey (#6b7280) |
+| Hover color | Dark text (#1a1a1a) |
+| Cursor | Pointer |
+| Vertical align | Middle |
+
+```css
+.combine-toggle-arrow {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 8px;
+  font-size: 10px;
+  color: #6b7280;
+  cursor: pointer;
+  transition: color 0.15s ease;
+  user-select: none;
+}
+
+.combine-toggle-arrow:hover {
+  color: #1a1a1a;
+}
+```
+
+### CHILD ROW STYLING
+
+| Property | Value |
+|---|---|
+| Background | Light grey (#f9fafb) |
+| Text color | Grey (#9ca3af) |
+| Font weight | 400 |
+| Opacity | 0.7 |
+| Cursor | Default |
+| Draggable | ❌ No |
+| Editable | ❌ No |
+| Right-click menu | ❌ No |
+| Prio column | Blank |
+| Left border | 3px solid #e5e7eb |
+
+---
+
+### 2. SMART INSERTION — AI IMPACT ASSESSMENT
+
+When combining orders, the app must determine the optimal position for the lead order WITHOUT causing delays to downstream orders.
+
+### LOGIC
+
+```javascript
+function findOptimalLeadPosition(childOrders, allOrders) {
+  // Get the highest priority (smallest number) among child orders
+  const highestChildPrio = Math.min(...childOrders.map(o => o.prio));
+  
+  // Calculate total production time of lead order
+  const totalVolume = childOrders.reduce((sum, o) => sum + o.volume, 0);
+  const leadProductionTime = totalVolume / childOrders[0].run_rate;
+  const leadChangeover = childOrders[0].changeover;
+  const totalLeadTime = leadProductionTime + leadChangeover;
+  
+  // Remove child orders from the table temporarily
+  const remainingOrders = allOrders.filter(
+    o => !childOrders.includes(o)
+  );
+  
+  // Try inserting at the highest child's position first
+  let bestPosition = highestChildPrio;
+  let impact = calculateDownstreamImpact(remainingOrders, bestPosition, totalLeadTime);
+  
+  // If insertion causes delay, find better position
+  if (impact.hasDelay) {
+    for (let pos = highestChildPrio + 1; pos <= remainingOrders.length; pos++) {
+      impact = calculateDownstreamImpact(remainingOrders, pos, totalLeadTime);
+      if (!impact.hasDelay) {
+        bestPosition = pos;
+        break;
+      }
+    }
+  }
+  
+  return {
+    suggestedPosition: bestPosition,
+    originalPosition: highestChildPrio,
+    impact: impact
+  };
+}
+
+function calculateDownstreamImpact(orders, insertPosition, addedTime) {
+  const delayedOrders = [];
+  
+  for (let i = insertPosition - 1; i < orders.length; i++) {
+    const order = orders[i];
+    const deadline = parseDate(order.avail_date) || parseDate(order.target_date);
+    
+    if (!deadline) continue;
+    
+    if (order.completion_date) {
+      const currentCompletion = new Date(order.completion_date);
+      const newCompletion = new Date(currentCompletion.getTime() + addedTime * 3600000);
+      
+      if (newCompletion > deadline) {
+        delayedOrders.push({
+          order: order,
+          deadline: deadline,
+          delay: addedTime
+        });
+      }
+    }
+  }
+  
+  return {
+    hasDelay: delayedOrders.length > 0,
+    delayedOrders: delayedOrders,
+    totalAffected: delayedOrders.length
+  };
+}
+```
+
+### SHOW IN SMART COMBINE PANEL
+
+The insertion assessment shows in the Smart Combine panel:
+
+```
+┌─ Smart Combine Panel ────────────────────────────────────┐
+│                                                          │
+│  📦 Combined Production Summary                          │
+│  Total Volume: 132 MT                                    │
+│  Total Batches: 33                                       │
+│  Total Production Time: 6.93 hrs                         │
+│  Changeover: 0.17 hrs                                    │
+│  Total Time: 7.10 hrs                                    │
+│                                                          │
+│  ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─                │
+│                                                          │
+│  📍 Scheduling Impact                                     │
+│                                                          │
+│  ✅ Lead order can be inserted at Priority 3 without      │
+│  causing delays to downstream orders.                    │
+│                                                          │
+│  ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─                │
+│                                                          │
+│  🤖 AI Analysis                                          │
+│  Combining these 3 Elite XP Startex orders reduces       │
+│  changeover time from 0.51 hrs (3 × 0.17) to 0.17 hrs,  │
+│  saving 0.34 hours...                                    │
+│                                                          │
+└──────────────────────────────────────────────────────────┘
+```
+
+### SCHEDULING IMPACT — SCENARIOS
+
+**Scenario A — No delay:**
+```
+📍 Scheduling Impact
+
+✅ Lead order can be inserted at Priority 3 without 
+causing delays to downstream orders. All subsequent 
+orders remain within their deadline windows.
+```
+- Green container (#f0fdf4, border #bbf7d0)
+
+**Scenario B — Delay detected, alternative found:**
+```
+📍 Scheduling Impact
+
+⚠ Inserting at Priority 3 would delay "Gallimax 
+Pigeon Pellet" (target: March 28) by approximately 
+7.1 hours.
+
+💡 Suggested: Insert at Priority 5 where the lead 
+order fits without affecting deadlines.
+```
+- Amber container (#fffbeb, border #fcd34d)
+
+**Scenario C — Delay detected, no better position:**
+```
+📍 Scheduling Impact
+
+⚠ Inserting at Priority 3 would delay "Gallimax 
+Pigeon Pellet" (target: March 28) by approximately 
+7.1 hours. No alternative position avoids all delays.
+
+Consider adjusting downstream deadlines or splitting 
+the combine into smaller groups.
+```
+- Amber container
+
+**Scenario D — No start dates set:**
+```
+📍 Scheduling Impact
+
+ℹ No start dates are set — exact completion dates 
+cannot be calculated. The lead order will be placed 
+at Priority 3 based on the highest priority child order.
+```
+- Blue container (#eff6ff, border #bfdbfe)
+
+---
+
+### 3. DRAG AND DROP — COMBINED ORDERS MOVE TOGETHER
+
+When dragging a lead order:
+- All hidden children move with it
+- The entire block repositions together
+- Priority numbers recalculate
+
+### WARNING ON DRAG
+
+When a combined lead order is dragged to a position that would cause delays:
+
+```
+┌──────────────────────────────────────────────────────────┐
+│ ⚠ Moving this combined order (132 MT, 7.10 hrs) to      │
+│ Priority 2 may cause a delay to:                         │
+│                                                          │
+│ • Salto Conditioner (target: March 22) — delayed by     │
+│   approximately 7.1 hours                                │
+│                                                          │
+│ Consider moving it back or adjusting the schedule.       │
+│                                                          │
+│                    [Move anyway]    [Cancel move]         │
+└──────────────────────────────────────────────────────────┘
+```
+
+| Property | Value |
+|---|---|
+| Container | Amber (#fffbeb, border #fcd34d) |
+| Position | Floating near the drop position |
+| Auto-dismiss | After 8 seconds if no action |
+| "Move anyway" | Grey outlined button |
+| "Cancel move" | Orange filled button |
+
+### LOGIC ON DRAG
+
+```javascript
+function onLeadOrderDrop(leadOrder, newPosition) {
+  const totalLeadTime = leadOrder.production_time + leadOrder.changeover;
+  const impact = calculateDownstreamImpact(orders, newPosition, totalLeadTime);
+  
+  if (impact.hasDelay) {
+    showDragWarning(impact);
+  } else {
+    moveLeadOrder(leadOrder, newPosition);
+  }
+}
+```
+
+---
+
+### 4. UNCOMBINE — RESTORE TO RECALCULATED POSITIONS
+
+When user uncombines orders:
+1. Lead order is removed
+2. Child orders are restored as individual orders
+3. Positions are recalculated based on their avail dates and current table state
+4. Priority numbers recalculate for the entire table
+
+```javascript
+function uncombineOrders(leadOrder) {
+  const children = leadOrder.children;
+  
+  removeOrder(leadOrder);
+  
+  children.forEach(child => {
+    child.isCombinedChild = false;
+    child.combinedGroupId = null;
+    child.status = child.originalStatus;
+    
+    const insertPosition = calculateInsertionIndex(child, currentOrders);
+    currentOrders.splice(insertPosition, 0, child);
+  });
+  
+  renumberPriorities(currentOrders);
+}
+```
+
+---
+
+### 5. LEAD ORDER — COMBINED TOTALS
+
+| Field | Value |
+|---|---|
+| Volume | Sum of all child volumes (e.g., 80 + 32 + 20 = 132 MT) |
+| Batches | Sum of all child batches |
+| Bags | Sum of all child bags |
+| Production Time | Recalculated: Total Volume ÷ Run Rate + Changeover |
+| Batch Size | Same as children (same product) |
+| Item Description | Same product name, with ▶/▼ arrow after the text |
+
+---
+
+### 6. PRIORITY NUMBERING — CHILDREN DON'T COUNT
+
+```javascript
+function renumberPriorities(orders) {
+  let prioCounter = 1;
+  
+  orders.forEach(order => {
+    if (order.isCombinedChild) {
+      order.prio = null;
+    } else {
+      order.prio = prioCounter;
+      prioCounter++;
+    }
+  });
+}
+```
+
+**Example:**
+```
+Prio 1: Salto Conditioner (3 MT)
+Prio 2: Elite XP Startex (132 MT) ▶
+           [child] Elite XP Startex 80 MT     ← hidden, no prio
+           [child] Elite XP Startex 32 MT     ← hidden, no prio
+           [child] Elite XP Startex 20 MT     ← hidden, no prio
+Prio 3: Gallimax Pigeon Pellet (24 MT)
+Prio 4: Gallimax 3 Maintenance (80 MT)
+```
+```

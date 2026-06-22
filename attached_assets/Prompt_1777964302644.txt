@@ -1,0 +1,370 @@
+```
+Fix the auto-sequence queue-time reasoning so the "Actions Taken" insight uses the true pre-move line loads and explains line eligibility context, especially when an order is moved to a line because that is the only eligible/valid production line from master data.
+
+---
+
+## OBJECTIVE
+
+The current "Actions Taken" insight is misleading because it appears to calculate the source line queue time AFTER the move has already happened.
+
+Example issue:
+- An order is moved from Line 2 to Line 4
+- The insight says:
+  `The queue time on L2 was 0.0 MT ÷ 20 MT/hr = 0.00 hrs before moving`
+- But that cannot be correct, because the order was still on Line 2 before the move
+
+This means the source-line load is being evaluated after mutation, not from the actual pre-move state.
+
+Additionally, the insight is missing an important business explanation:
+- sometimes an order is moved to another line not because queue time is lower
+- but because master data / historical run rate shows that the destination is the only eligible production line for that order
+
+The Actions Taken insight must explain that clearly.
+
+---
+
+## PROBLEM SUMMARY
+
+Example context:
+- Line 1:
+  - Salto Conditioner P 1kg (Bundle) = 3 MT
+  - Salto Conditioner P 1kg (Bundle) = 6 MT
+- Line 2:
+  - Salto - Chick Booster Crumble 1x25 kg = 4 MT
+- Line 4:
+  - Poultry Sol PLB C 50KG-SFPI = 8 MT
+  - Poultry Sol Chick Starter Breeder Cr50kg = 2 MT
+
+After auto-sequence:
+- Line 1:
+  - [Combined] Salto Conditioner P 1kg (Bundle) = 9 MT
+- Line 2:
+  - None
+- Line 4:
+  - Poultry Sol PLB C 50KG-SFPI = 8 MT
+  - Poultry Sol Chick Starter Breeder Cr50kg = 2 MT
+  - Salto - Chick Booster Crumble 1x25 kg = 2 MT
+
+The current insight says:
+- Line 2 queue before moving = 0.0 MT ÷ 20 MT/hr = 0.00 hrs
+
+This is wrong because:
+- that is clearly the post-move state
+- not the pre-move state
+
+And it also does not explain that:
+- the order could only be produced on Line 4 based on master data / historical run rate eligibility
+
+---
+
+## REQUIRED FIXES
+
+### Fix 1: Use the true pre-move line state
+Queue-time reasoning must be calculated from the state of the lines BEFORE the move is applied.
+
+### Fix 2: Preserve the post-move state separately
+After-move queue times should also be computed, but they must be labeled as AFTER the move.
+
+### Fix 3: Include line eligibility explanation
+If the destination line is selected because the order is only eligible there (or source line is not eligible), explicitly say that in the insight.
+
+### Fix 4: Improve explanation hierarchy
+If a move is driven by line eligibility, that should be stated before discussing queue balancing.
+
+---
+
+## 1. TAKE A SNAPSHOT OF LINE LOADS BEFORE APPLYING ANY MOVE
+
+Before moving an order between lines, capture the current orders assigned to each line.
+
+### Create a helper like:
+```javascript
+function snapshotLineLoads(ordersByLine) {
+  const snapshot = {};
+
+  Object.entries(ordersByLine || {}).forEach(([line, orders]) => {
+    snapshot[line] = [...(orders || [])];
+  });
+
+  return snapshot;
+}
+```
+
+Whenever evaluating a move:
+- capture `preMoveOrdersByLine`
+- calculate queue metrics from that snapshot
+- only then apply the move
+
+Do not generate the reasoning text from already-mutated line data.
+
+---
+
+## 2. CALCULATE PRE-MOVE AND POST-MOVE LOADS SEPARATELY
+
+### Helpers
+```javascript
+function getOrderVolumeMT(order) {
+  const candidates = [
+    order.volume_override,
+    order.volume,
+    order.total_volume_mt,
+    order.volume_mt,
+  ];
+
+  for (const val of candidates) {
+    const parsed = parseFloat(val);
+    if (!Number.isNaN(parsed)) return parsed;
+  }
+
+  return 0;
+}
+
+function calculateLineTotalMT(orders) {
+  return Number(
+    (orders || []).reduce((sum, order) => {
+      return sum + getOrderVolumeMT(order);
+    }, 0).toFixed(2)
+  );
+}
+
+function calculateQueueTimeHours(totalMT, runRate) {
+  const mt = parseFloat(totalMT) || 0;
+  const rr = parseFloat(runRate) || 0;
+
+  if (rr <= 0) return 0;
+
+  return Number((mt / rr).toFixed(2));
+}
+```
+
+### Required logic
+For a move from `sourceLine` to `targetLine`:
+
+```javascript
+const movedMT = getOrderVolumeMT(orderToMove);
+
+const sourceBeforeOrders = preMoveOrdersByLine[sourceLine] || [];
+const targetBeforeOrders = preMoveOrdersByLine[targetLine] || [];
+
+const sourceBeforeMT = calculateLineTotalMT(sourceBeforeOrders);
+const targetBeforeMT = calculateLineTotalMT(targetBeforeOrders);
+
+const sourceAfterMT = Number((sourceBeforeMT - movedMT).toFixed(2));
+const targetAfterMT = Number((targetBeforeMT + movedMT).toFixed(2));
+
+const sourceRunRate = getLineRunRate(sourceLine);
+const targetRunRate = getLineRunRate(targetLine);
+
+const sourceBeforeQueue = calculateQueueTimeHours(sourceBeforeMT, sourceRunRate);
+const sourceAfterQueue = calculateQueueTimeHours(sourceAfterMT, sourceRunRate);
+const targetBeforeQueue = calculateQueueTimeHours(targetBeforeMT, targetRunRate);
+const targetAfterQueue = calculateQueueTimeHours(targetAfterMT, targetRunRate);
+```
+
+Important:
+- `sourceBeforeMT` must include the moved order if it was still on the source line at that time
+- do NOT compute it after the order has already been removed
+
+---
+
+## 3. IF AN ORDER IS SPLIT / PARTIALLY MOVED, USE THE ACTUAL MOVED MT
+
+In your example:
+- original order on Line 2 = 4 MT
+- after move, 2 MT is shown on Line 4
+
+That means the move reasoning should use the actual moved amount, not blindly use the original full line state in a misleading way.
+
+If the move action is partial:
+- use the actual moved volume for before/after delta
+- but the sourceBeforeMT must still come from the true pre-move source state
+
+Example:
+- Line 2 before move = 4 MT
+- 2 MT moved
+- Line 2 after move = 2 MT
+- not 0 MT, unless the full 4 MT was moved
+
+Make sure partial move behavior is reflected correctly in the explanation.
+
+---
+
+## 4. ADD LINE ELIGIBILITY / MASTER DATA CONTEXT TO THE INSIGHT
+
+If the move happened because the destination line is the only valid/eligible production line from master data / historical run rate, this must be explicitly stated.
+
+### Build a helper like:
+```javascript
+function resolveEligibleLinesForOrder(order, masterData) {
+  // return array of valid lines from master data / historical run rate mapping
+}
+```
+
+Or reuse the actual helper already used by the line-placement engine.
+
+Then when generating reasoning:
+- check whether the source line is eligible
+- check whether the destination line is eligible
+- check whether destination is the only eligible line
+
+### Example logic:
+```javascript
+const eligibleLines = resolveEligibleLinesForOrder(orderToMove, masterData);
+const normalizedEligible = eligibleLines.map(normalizeLineKey);
+
+const sourceEligible = normalizedEligible.includes(normalizeLineKey(sourceLine));
+const targetEligible = normalizedEligible.includes(normalizeLineKey(targetLine));
+const onlyTargetEligible = targetEligible && normalizedEligible.length === 1;
+```
+
+---
+
+## 5. PRIORITIZE ELIGIBILITY EXPLANATION IN THE INSIGHT
+
+If the destination line is the only eligible line, the reasoning should lead with that.
+
+### Example preferred explanation:
+```text
+The 2.0 MT order of Salto - Chick Booster Crumble 1x25 kg was moved from L2 to L4 because L4 is the only eligible production line for this item based on master data / historical run-rate mapping. Before the move, L2 had 4.0 MT queued, equivalent to 0.20 hrs at 20 MT/hr. L4 had 10.0 MT queued, equivalent to 1.00 hr at 10 MT/hr, and after receiving the order it increased to 12.0 MT or 1.20 hrs. Although the destination queue time increased, the move was necessary because L4 is the valid production line for this product.
+```
+
+This is much better than implying queue time alone justified the move.
+
+---
+
+## 6. IF MULTIPLE LINES ARE ELIGIBLE, THEN EXPLAIN QUEUE / CHANGEOVER TRADEOFF
+
+If the destination is not the only eligible line, then the reasoning can say something like:
+- lower queue time
+- lower expected changeover burden
+- better line balancing
+- more compatible material grouping
+
+But if only one line is eligible, that should be the main explanation.
+
+### Explanation priority:
+1. line eligibility / valid production line
+2. queue time comparison
+3. changeover / balancing rationale
+
+---
+
+## 7. UPDATE THE ACTIONS TAKEN TEXT TEMPLATE
+
+Replace the generic template that currently says:
+- source queue before move = 0.0 MT if source was already emptied
+
+Use a template that clearly separates:
+- pre-move source load
+- pre-move destination load
+- post-move destination load
+- optional post-move source load
+- line eligibility explanation if applicable
+
+### Example template
+```javascript
+function buildMoveInsight({
+  order,
+  movedMT,
+  sourceLine,
+  targetLine,
+  sourceBeforeMT,
+  sourceAfterMT,
+  targetBeforeMT,
+  targetAfterMT,
+  sourceRunRate,
+  targetRunRate,
+  sourceBeforeQueue,
+  sourceAfterQueue,
+  targetBeforeQueue,
+  targetAfterQueue,
+  onlyTargetEligible,
+  targetOnlyReason,
+}) {
+  if (onlyTargetEligible) {
+    return `The ${movedMT.toFixed(1)} MT order of ${order.item_description} was moved from ${sourceLine} to ${targetLine} because ${targetLine} is the only eligible production line for this item based on master data / historical run-rate mapping. Before the move, ${sourceLine} had ${sourceBeforeMT.toFixed(1)} MT queued (${sourceBeforeMT.toFixed(1)} MT ÷ ${sourceRunRate} MT/hr = ${sourceBeforeQueue.toFixed(2)} hrs), while ${targetLine} had ${targetBeforeMT.toFixed(1)} MT queued (${targetBeforeMT.toFixed(1)} MT ÷ ${targetRunRate} MT/hr = ${targetBeforeQueue.toFixed(2)} hrs). After the move, ${targetLine} increased to ${targetAfterMT.toFixed(1)} MT or ${targetAfterQueue.toFixed(2)} hrs.`;
+  }
+
+  return `The ${movedMT.toFixed(1)} MT order of ${order.item_description} was moved from ${sourceLine} to ${targetLine}. Before the move, ${sourceLine} had ${sourceBeforeMT.toFixed(1)} MT queued (${sourceBeforeQueue.toFixed(2)} hrs), while ${targetLine} had ${targetBeforeMT.toFixed(1)} MT queued (${targetBeforeQueue.toFixed(2)} hrs). After the move, ${sourceLine} changed to ${sourceAfterMT.toFixed(1)} MT (${sourceAfterQueue.toFixed(2)} hrs) and ${targetLine} changed to ${targetAfterMT.toFixed(1)} MT (${targetAfterQueue.toFixed(2)} hrs). The move was selected based on line eligibility, queue impact, and sequencing practicality.`;
+}
+```
+
+---
+
+## 8. NORMALIZE LINE KEYS DURING ELIGIBILITY + LOAD LOOKUP
+
+To prevent lookup bugs, use a shared normalization helper for:
+- ordersByLine keys
+- eligible line keys
+- sourceLine / targetLine comparisons
+
+```javascript
+function normalizeLineKey(line) {
+  return String(line || '')
+    .trim()
+    .toLowerCase()
+    .replace(/^line\s*/, 'l')
+    .replace(/[^a-z0-9]/g, '');
+}
+```
+
+Use this consistently.
+
+---
+
+## 9. ADD DEBUG LOGGING TO VERIFY PRE-MOVE STATE IS USED
+
+Temporarily log:
+
+```javascript
+console.debug('[Auto-sequence Move Insight]', {
+  orderId: orderToMove.id,
+  item: orderToMove.item_description,
+  sourceLine,
+  targetLine,
+  movedMT,
+  sourceBeforeMT,
+  sourceAfterMT,
+  targetBeforeMT,
+  targetAfterMT,
+  sourceRunRate,
+  targetRunRate,
+  sourceBeforeQueue,
+  sourceAfterQueue,
+  targetBeforeQueue,
+  targetAfterQueue,
+  eligibleLines,
+  sourceEligible,
+  targetEligible,
+  onlyTargetEligible,
+});
+```
+
+This will help confirm:
+- sourceBeforeMT is no longer zero incorrectly
+- pre-move values are captured before mutation
+- eligibility logic is being read correctly
+
+---
+
+## 10. VERIFICATION
+
+### Queue-time correctness
+1. ✅ Source line queue time uses true pre-move line load
+2. ✅ Destination line queue time uses true pre-move line load
+3. ✅ Post-move values are computed separately and labeled correctly
+4. ✅ Source line no longer incorrectly shows 0.00 MT "before moving" unless it was truly empty
+
+### Eligibility explanation
+5. ✅ If destination is the only eligible production line, the insight explicitly says so
+6. ✅ Queue-time explanation is not misleading when eligibility is the real reason for the move
+7. ✅ Master data / historical run-rate line eligibility is incorporated into the insight
+
+### Partial moves
+8. ✅ If only part of an order volume is moved, the reasoning uses the actual moved MT
+9. ✅ Source before/after MT reflects partial movement correctly
+
+### UX clarity
+10. ✅ Actions Taken explanation now gives business-meaningful context
+11. ✅ Users can understand why an order was moved even if destination queue time is higher
+12. ✅ The explanation no longer implies queue time alone decided the move when eligibility was the true driver

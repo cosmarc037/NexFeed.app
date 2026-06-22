@@ -1,0 +1,417 @@
+```
+Improve the AI strategy generation and execution for changeover-focused sequencing by giving the AI explicit access to the actual Changeover Rules tab and requiring it to optimize based on those real transition penalties, while still respecting date constraints.
+
+---
+
+## OBJECTIVE
+
+After comparing the Standard Sequence and the third AI-powered strategy, the AI-powered strategy is not effectively reducing changeover even though its description says it clusters flexible orders to reduce costly red/yellow and diameter-change transitions.
+
+In the actual resulting table, the sequence still creates expensive transitions and ends up with worse total changeover than the Standard Sequence.
+
+We need to improve:
+1. how the AI is prompted
+2. how the AI strategy is applied to the final table
+
+so that changeover-focused AI strategies actually use the real Changeover Rules from the app and produce a line-up that meaningfully lowers total changeover.
+
+---
+
+## CORE ISSUE
+
+The AI currently seems to reason only at a high level, such as:
+- cluster by color
+- cluster by diameter
+- cluster flexible orders
+
+But it does not appear to be using the real changeover penalty rules deeply enough.
+
+It needs to understand:
+- which transitions are expensive
+- which transitions are cheaper
+- that direction matters
+- that multiple rules can stack
+- that form/fillmill-specific values may apply
+
+Without this, the AI may produce a sequence that sounds reasonable but still performs worse than the Standard Sequence.
+
+---
+
+## CHANGEOVER RULES FROM THE APP (SOURCE OF TRUTH)
+
+Use the actual Changeover Rules tab as the real rule set.
+
+These are configured as additional changeover times based on product transitions. The additions are calculated automatically based on the following order’s properties, and multiple conditions can stack. Powermix (Line 5) is not affected by these rules.
+
+### Rules shown in the app
+
+1. **Change Pellet Diameter (4mm → 3mm)**
+- Reason: Change Die
+- FM1 = 1.5 hrs
+- FM2 = 1.0 hrs
+- FM3 = 1.0 hrs
+
+2. **Change Color: Yellow → Brown**
+- Reason: Cleaning
+- FM1 = 0.33 hrs
+- FM2 = 0.33 hrs
+- FM3 = 0.33 hrs
+
+3. **Change Color: Red → Any**
+- Reason: Flushing and Cleaning
+- FM1 = 1.0 hrs
+- FM2 = 1.0 hrs
+- FM3 = 1.0 hrs
+
+4. **Change Color: Green → Any**
+- Reason: Flushing and Cleaning
+- FM1 = 1.0 hrs
+- FM2 = 1.0 hrs
+- FM3 = 1.0 hrs
+
+5. **Change Color: Any → Red/Green**
+- Reason: Cleaning
+- FM1 = 0.5 hrs
+- FM2 = 0.5 hrs
+- FM3 = 0.5 hrs
+
+6. **Change Category (Different Category)**
+- Reason: Cleaning
+- FM1 = 0.33 hrs
+- FM2 = 0.33 hrs
+- FM3 = 0.33 hrs
+
+Important:
+- these are additional changeover rules
+- they stack if multiple conditions are triggered
+- they are based on the following order’s properties
+- Powermix (Line 5) is excluded
+
+---
+
+## REQUIRED IMPROVEMENT
+
+For changeover-focused AI strategies:
+- provide the AI with the actual current line-up of orders
+- provide the AI with the real Changeover Rules above
+- tell the AI that penalties can stack
+- tell the AI that some transitions are directional
+- have the AI minimize the total resulting transition cost while preserving valid date ordering and hard constraints
+
+The AI should not just “group similar orders” in a general sense.
+It should reason using the actual penalty structure.
+
+---
+
+## 1. INCLUDE THE REAL CHANGEOVER RULES TAB IN THE AI INPUT
+
+When generating changeover-focused AI strategies, provide the AI with the real changeover rules in structured form.
+
+### Example structure to send:
+```json
+{
+  "changeoverRules": {
+    "notes": [
+      "Additional changeover times are based on the following order's properties.",
+      "Multiple conditions can stack.",
+      "Powermix (Line 5) is not affected."
+    ],
+    "diameterTransitions": [
+      {
+        "from": "4mm",
+        "to": "3mm",
+        "reason": "Change Die",
+        "fm1": 1.5,
+        "fm2": 1.0,
+        "fm3": 1.0
+      }
+    ],
+    "colorTransitions": [
+      {
+        "from": "Yellow",
+        "to": "Brown",
+        "reason": "Cleaning",
+        "fm1": 0.33,
+        "fm2": 0.33,
+        "fm3": 0.33
+      },
+      {
+        "from": "Red",
+        "to": "Any",
+        "reason": "Flushing and Cleaning",
+        "fm1": 1.0,
+        "fm2": 1.0,
+        "fm3": 1.0
+      },
+      {
+        "from": "Green",
+        "to": "Any",
+        "reason": "Flushing and Cleaning",
+        "fm1": 1.0,
+        "fm2": 1.0,
+        "fm3": 1.0
+      },
+      {
+        "from": "Any",
+        "to": "Red/Green",
+        "reason": "Cleaning",
+        "fm1": 0.5,
+        "fm2": 0.5,
+        "fm3": 0.5
+      }
+    ],
+    "categoryTransitions": [
+      {
+        "rule": "Different Category",
+        "reason": "Cleaning",
+        "fm1": 0.33,
+        "fm2": 0.33,
+        "fm3": 0.33
+      }
+    ]
+  }
+}
+```
+
+Use the actual feedmill/line mapping so the AI knows which FM rule applies to the current line.
+
+---
+
+## 2. TELL THE AI THAT MULTIPLE CHANGEOVER CONDITIONS CAN STACK
+
+This is critical.
+
+The AI must know that a transition can trigger multiple penalties at once.
+
+Example:
+- a change from one order to the next might trigger:
+  - diameter change
+  - color rule
+  - category rule
+
+and these should all be considered additive.
+
+The AI should therefore seek a sequence that minimizes total stacked transition penalties across adjacent rows.
+
+---
+
+## 3. PROVIDE THE AI WITH THE ACTUAL CURRENT LINE-UP OF ORDERS
+
+For the line being analyzed, provide the AI with the actual lineup in order, including:
+- current position
+- item description
+- material code
+- line/feedmill
+- color
+- pellet diameter
+- category
+- form
+- volume
+- production time
+- availability date
+- Future Dispatches / urgency status
+- MTO protection / flexibility
+- whether the order is movable
+- current adjacent changeover if available
+
+This allows the AI to reason about:
+- where the expensive transitions currently are
+- which orders can move
+- what clusterings are both valid and beneficial
+
+---
+
+## 4. EXPLICITLY INSTRUCT THE AI TO MINIMIZE TOTAL ADJACENT CHANGEOVER COST
+
+Update the prompt so the AI is not just asked to “reduce changeover” vaguely.
+
+It should be told to:
+- evaluate adjacent order transitions
+- use the real changeover rules
+- minimize total resulting changeover cost across the final sequence
+- respect hard date and eligibility constraints
+- cluster compatible orders where it lowers stacked transition penalties
+
+### Important prompt guidance
+Tell the AI:
+- a good sequence is not just one that groups by similarity
+- it must also avoid expensive directional transitions like:
+  - Red → Any
+  - Green → Any
+  - 4mm → 3mm
+  - different-category breaks
+- and should exploit cheaper transitions like:
+  - Yellow → Brown (0.33)
+  - where appropriate, Any → Red/Green (0.5) may be preferable to Red/Green → Any (1.0)
+
+---
+
+## 5. TELL THE AI THAT DIRECTION MATTERS
+
+The rules are directional.
+
+Examples:
+- **Red → Any** = 1.0 hr
+- **Any → Red/Green** = 0.5 hr
+
+That means:
+- putting Red in the middle of a run may be worse than placing it at the start or end
+- similarly for Green
+- 4mm → 3mm is penalized, so 3mm → 4mm may behave differently if no separate penalty exists
+
+The AI must take transition direction into account, not just product similarity.
+
+---
+
+## 6. PRESERVE HARD DATE CONSTRAINTS WHILE OPTIMIZING WITHIN THE SAFE WINDOW
+
+The AI must still respect:
+- avail dates
+- Future Dispatches protection
+- MTO constraints
+- line eligibility
+- any hard sequencing rules
+
+But within those allowable windows, it should reorder flexible orders to minimize stacked changeover penalties.
+
+So the optimization target should be:
+- valid sequence first
+- lowest realistic transition cost second
+
+Not the reverse.
+
+---
+
+## 7. HAVE THE AI PROPOSE CONCRETE CLUSTERING / ORDER BLOCKS
+
+The AI should not only output a high-level narrative.
+It should reason in terms of actual adjacency:
+- which orders should be kept together
+- which orders should move earlier/later
+- where Red/Green orders should sit to reduce expensive outgoing transitions
+- how to keep same-diameter and same-category blocks together
+
+This makes the strategy more executable.
+
+---
+
+## 8. IMPROVE THE EXECUTION LAYER SO IT ACTUALLY APPLIES THE AI’S GROUPING INTENT
+
+Even if the AI proposes a good low-changeover structure, the final result will still underperform if the execution layer only applies it loosely.
+
+Update the execution logic so that:
+- AI-recommended adjacency is preserved more strongly
+- compatible clusters remain intact where valid
+- the final table more faithfully reflects the intended changeover-saving order
+
+This should improve:
+- total changeover
+- time-saved
+- faithfulness
+
+---
+
+## 9. EVALUATE THE FINAL SEQUENCE USING THE SAME CHANGEOVER ENGINE THE APP USES
+
+After the AI proposes a candidate ordering:
+- run the ordering through the app’s actual changeover engine
+- compute the real total changeover from the Changeover Rules
+- compare against the baseline / Standard Sequence
+- reject, regenerate, or downgrade changeover-focused strategies that do not actually improve or justify the tradeoff
+
+This ensures strategy claims align with measured results.
+
+---
+
+## 10. UPDATE THE AI PROMPT TO USE THE ACTUAL RULES IN ITS REASONING
+
+Include explicit instruction like:
+
+```text
+Use the provided Changeover Rules to minimize total adjacent transition cost. The rules are directional and can stack. For example:
+- Red → Any adds 1.0 hr
+- Green → Any adds 1.0 hr
+- Any → Red/Green adds 0.5 hr
+- Yellow → Brown adds 0.33 hr
+- 4mm → 3mm adds 1.5 hr in FM1, 1.0 hr in FM2/FM3
+- Different category adds 0.33 hr
+Build a sequence that reduces the total resulting changeover while respecting hard date and eligibility constraints.
+```
+
+Also tell the AI:
+- do not simply separate colors generically
+- consider where high-penalty colors like Red/Green should be placed
+- minimize repeated expensive transitions
+
+---
+
+## 11. ACCOUNT FOR FEEDMILL-SPECIFIC VALUES
+
+Because the Changeover Rules differ by FM1, FM2, and FM3:
+- the AI must know which feedmill / line it is optimizing
+- and use the correct penalties for that specific line
+
+Do not give it only generic values if the line belongs to FM1 vs FM2/FM3.
+
+---
+
+## 12. ADD DEBUG LOGGING FOR THE RULES AND THE FINAL RESULT
+
+Temporarily log what the AI receives:
+
+```javascript
+console.debug('[AI Changeover Strategy Context]', {
+  lineId,
+  feedmill,
+  lineup: lineOrders.map((order, index) => ({
+    position: index + 1,
+    orderId: order.id,
+    item: order.item_description,
+    color: order.color,
+    diameter: order.diameter,
+    category: order.category,
+    form: order.form,
+    availDate: order.avail_date,
+    movable: order.movable,
+  })),
+  changeoverRulesForThisFeedmill,
+});
+```
+
+And after applying:
+```javascript
+console.debug('[AI Changeover Strategy Result]', {
+  lineId,
+  feedmill,
+  finalLineup: finalOrders.map((order, index) => ({
+    position: index + 1,
+    orderId: order.id,
+    item: order.item_description,
+    color: order.color,
+    diameter: order.diameter,
+    category: order.category,
+    resultingCO: order.changeover,
+  })),
+  baselineChangeover,
+  finalChangeover,
+  faithfulness,
+});
+```
+
+This will help verify that:
+- the AI had the real changeover rules
+- the final sequence actually reflects them
+
+---
+
+## 13. VERIFICATION
+
+1. ✅ The AI receives the real Changeover Rules from the app
+2. ✅ The AI knows that penalties are directional and can stack
+3. ✅ The AI uses the correct feedmill-specific values (FM1 / FM2 / FM3)
+4. ✅ The AI sees the actual line-up and movable constraints
+5. ✅ Changeover-focused strategies now optimize total adjacent transition cost, not just vague similarity grouping
+6. ✅ Final AI-powered sequences more clearly cluster orders in a way that lowers real measured changeover
+7. ✅ Changeover-focused AI strategies perform more competitively versus Standard Sequence
+8. ✅ Faithfulness improves because the applied table better reflects the AI’s intended clustering logic
+```

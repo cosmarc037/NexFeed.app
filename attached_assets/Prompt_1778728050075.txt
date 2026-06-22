@@ -1,0 +1,184 @@
+Please update the Powermix-generated order behavior with the following UX and logic corrections.
+
+These changes apply to orders auto-created from Line 5 / Powermix logic.
+
+---
+
+## 1. MOVE THE SPLIT EXPLANATION OUT OF VOLUME COLUMN AND INTO FPR NOTES
+
+Please remove the split explanation text from the Volume (MT) column for Powermix-generated orders.
+
+The app should no longer show text like:
+- `Original: 56.7 MT`
+- `(81% of 70 MT)`
+
+under the volume value for generated Powermix rows.
+
+### Required behavior
+Keep the Volume (MT) column clean and only show the final displayed MT there.
+
+Instead, place the explanation in the **FPR Notes** column.
+
+### Recommended note format
+For generated orders created from Line 5, populate FPR Notes with a descriptive note such as:
+
+**Created from Line 5 order, producing 81% of [product name] from 70 MT source volume.**
+
+Use the actual:
+- percentage
+- product name
+- exact quantity basis used in the split
+
+### Example
+If the generated row is for Salto Stag Developer and the exact quantity basis used was 70 MT, then the note can say:
+
+**Created from Line 5 order, producing 81% of Salto Stag Developer from 70 MT source volume.**
+
+You may slightly improve wording if needed, but the meaning must stay clear.
+
+---
+
+## 2. KEEP VOLUME COLUMN CLEAN
+
+For generated Powermix rows:
+- show only the final Volume (MT)
+- do not show the split helper text under Volume anymore
+- do not show `Original: xx MT` there for this Powermix explanation
+
+The split explanation now belongs in FPR Notes instead.
+
+---
+
+## 3. BATCH SIZE LOOKUP MUST USE MATERIAL CODE AGAINST POWERMIX SPLIT TAB
+
+Clarification:
+The app should use the relevant **material code** as the lookup key so it can resolve the correct batch size from the **Powermix Split** tab.
+
+The problem is not that material code is being used.
+The problem is that the batch size still appears to be resolved from the wrong source (such as Master Data or another fallback), instead of from the matched Powermix Split rule.
+
+### Required behavior
+For Powermix-applicable orders:
+- use the relevant material code to find the matching Powermix Split rule
+- once matched, use the **Batch Size from Powermix Split**
+- do not override it with Master Data batch size if a valid Powermix Split match exists
+
+### Goal
+Material code should be the lookup key.
+Powermix Split should be the source of truth for batch size in this feature.
+
+### Example
+If the matched Powermix Split rule says:
+- material code maps to batch size = 2
+
+then the generated order should use:
+- Batch Size = 2
+
+even if Master Data for that material shows batch size = 1
+
+This same logic should also apply to the relevant Line 5 Powermix context where batch size needs to align with the Powermix Split rule.
+
+---
+
+## 4. SPLIT VOLUME MUST USE THE EXACT QUANTITY BASIS ACTUALLY USED BY THE APP
+
+Problem:
+There are still cases where the generated split volume appears to be calculated from the raw source quantity instead of the exact quantity basis actually used by the app.
+
+### Required behavior
+The split calculation must use the **exact quantity basis actually chosen by the app for the split**.
+
+That same exact quantity basis must also be used in the FPR Notes text.
+
+### Important consistency rule
+Do not allow this mismatch:
+- split math uses one quantity
+- FPR note references another quantity
+
+If the app used 70 MT for the split, then:
+- the split math must use 70 MT
+- the FPR note must say `from 70 MT source volume`
+
+If the app used 72 MT for the split, then:
+- the split math must use 72 MT
+- the FPR note must say `from 72 MT source volume`
+
+The calculation basis and note basis must match exactly.
+
+Please audit the current split calculation path because it appears the app may still be using the wrong source quantity in some cases.
+
+---
+
+## 5. KEEP PREVIOUS POWERMIX LOGIC INTACT
+
+Please preserve the previously required behaviors:
+- Material Code (FG) remains the original FG from the Line 5 source order
+- Material Code (SFG) uses the mapped SFG from Powermix Split
+- generated orders remain visually identifiable
+- generated orders remain linked to the source Line 5 order
+- status remains `Plotted`
+- source avail date is inherited properly
+- planned order FG/SFG is copied from the exact source Line 5 order
+- run-rate fallback to Line 5 still applies when target-line run-rate is missing
+- config tab remains named `Powermix Split`
+- config tab remains positioned between `Changeover Rules` and `Master Data`
+
+These should remain intact while making the updates above.
+
+---
+
+## 6. DEBUG LOGGING
+
+Temporarily log:
+
+### FPR note generation
+```javascript
+console.debug('[Powermix FPR Note Generation]', {
+  sourceOrderId,
+  generatedOrderId,
+  productName,
+  percentage,
+  exactQtyBasisUsedForSplit,
+  renderedFprNote,
+});
+```
+
+### Batch source resolution
+```javascript
+console.debug('[Powermix Batch Source Resolution]', {
+  sourceOrderId,
+  materialCodeUsedForLookup,
+  matchedRuleId,
+  masterDataBatchSize,
+  powermixSplitBatchSize,
+  appliedBatchSize,
+  batchSourceUsed, // expected: 'powermix_split'
+});
+```
+
+### Split quantity basis
+```javascript
+console.debug('[Powermix Split Quantity Basis]', {
+  sourceOrderId,
+  rawSourceQty,
+  appAdjustedQty,
+  exactQtyBasisUsedForSplit,
+  percentage,
+  generatedQty,
+});
+```
+
+---
+
+## 7. VERIFICATION
+
+1. ✅ Powermix split explanation is no longer shown under the Volume (MT) column
+2. ✅ Volume column shows only the final displayed MT for generated rows
+3. ✅ FPR Notes contains a descriptive split note for generated orders
+4. ✅ The FPR note includes the correct percentage, product name, and exact quantity basis used
+5. ✅ App uses material code to match the correct Powermix Split row
+6. ✅ Batch size is sourced from the matched Powermix Split row
+7. ✅ Master Data batch size does not override Powermix Split batch size for this feature
+8. ✅ Split quantity calculation uses the exact app-used basis, not an unintended raw source value
+9. ✅ The quantity used in calculation and the quantity referenced in the FPR note match exactly
+10. ✅ Previously fixed FG/SFG mapping, planned-order copy, run-rate fallback, plotted status, and source linkage remain correct

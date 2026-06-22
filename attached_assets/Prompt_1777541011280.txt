@@ -1,0 +1,318 @@
+```
+Add a per-line "Refresh" action in the Auto-Sequence AI strategy area so users can re-analyze only the currently viewed line and get new AI-generated sequencing strategies without affecting the other lines.
+
+---
+
+## OBJECTIVE
+
+Allow users to refresh and re-analyze AI sequencing strategies for a single line only.
+
+Example:
+- user is viewing Line 1
+- clicks `Refresh`
+- only Line 1 is re-analyzed by AI
+- only Line 1 gets new AI-generated strategies
+- other lines remain unchanged
+
+This should behave as a line-level AI strategy refresh, not a full plant-wide rerun.
+
+---
+
+## 1. ADD A CLICKABLE "REFRESH" ACTION IN THE LINE HEADER
+
+In the line-level strategy header, place a clickable refresh text beside:
+
+`Select how to sequence Line 1`
+
+Desired visual format:
+```text
+Select how to sequence Line 1 | Refresh
+```
+
+Where:
+- `Refresh` is clickable
+- it appears inline to the right of the current text
+- it applies only to the current active line
+
+### Example JSX structure:
+```jsx
+<div className="line-strategy-header-actions">
+  <span className="line-strategy-header-label">
+    {`Select how to sequence ${activeLineLabel}`}
+  </span>
+  <span className="line-strategy-header-separator">|</span>
+  <button
+    type="button"
+    className="line-strategy-refresh-btn"
+    onClick={() => refreshLineStrategies(activeLineId)}
+  >
+    Refresh
+  </button>
+</div>
+```
+
+---
+
+## 2. REFRESH ONLY THE CURRENT LINE
+
+When the user clicks Refresh on a line:
+- only regenerate AI strategies for that line
+- do not affect the strategies of any other line
+- do not reset selections for other lines
+- do not re-run the full plant-level sequence unless explicitly intended elsewhere
+
+### Important:
+This is NOT a full plant-wide auto-sequence rerun.
+
+It should use the existing current line baseline after:
+- combination
+- line placement
+- N10D assignment
+
+Then regenerate only:
+- AI Option 1 for that line
+- AI Option 2 for that line
+- metrics for that line
+- recommendation for that line
+- row insights for that line
+- selected After preview for that line
+
+---
+
+## 3. KEEP STANDARD SEQUENCE AS THE SAME BASELINE FOR THAT LINE
+
+When refreshing a specific line:
+- Standard Sequence should remain the same baseline for that line unless the line’s baseline data itself has changed
+- only the two AI-generated strategies should be regenerated
+
+This means:
+- refresh should regenerate AI strategy analysis
+- not rebuild the standard rule-based sequence unless needed for consistency from current line data
+
+---
+
+## 4. CREATE A LINE-LEVEL REFRESH FUNCTION
+
+Add a function like:
+
+```javascript
+async function refreshLineStrategies(lineId) {
+  // regenerate AI strategies only for this line
+}
+```
+
+### Expected flow:
+1. get current line baseline orders
+2. get current standard sequence for that line
+3. rebuild the AI prompt using latest line data
+4. call AI to generate 2 new strategies for that line
+5. validate and apply those strategies
+6. recompute metrics
+7. recompute faithfulness
+8. recompute recommendation for this line only
+9. update the UI state only for this line
+
+---
+
+## 5. DO NOT TOUCH OTHER LINES
+
+Refreshing one line must not:
+- regenerate AI strategies for other lines
+- change selected strategy on other lines
+- alter other lines’ After tables
+- wipe out previously generated AI results on other lines
+
+The state update must be scoped to the target line only.
+
+Example:
+```javascript
+setLineStrategyState(prev => ({
+  ...prev,
+  [lineId]: {
+    ...prev[lineId],
+    strategies: refreshedStrategies,
+    selectedStrategyId: refreshedDefaultSelection,
+    lastRefreshedAt: new Date().toISOString(),
+  }
+}));
+```
+
+---
+
+## 6. REFRESH SHOULD RE-GENERATE NEW AI STRATEGIES, NOT JUST REUSE THE OLD ONES
+
+The refresh action should trigger a genuine new AI re-analysis for that line.
+
+That means:
+- new strategy names are allowed
+- new strategy descriptions are allowed
+- new sequencing outputs are allowed
+- recommendation can change
+- selected default AI option can change
+
+This gives the user a way to request a fresh AI take on that specific line.
+
+---
+
+## 7. RECOMPUTE FULL STRATEGY OUTPUT FOR THAT LINE
+
+When refreshing a line, recompute for the new AI strategies:
+- strategy names
+- strategy descriptions
+- AI reasoning
+- execution intent
+- final After table
+- row-level sequence insights
+- Min. slack
+- MTS adjusted
+- Changeover time
+- Time-saved
+- Faithfulness
+- Recommended badge
+
+All of these should be updated only for that line.
+
+---
+
+## 8. SELECTED STRATEGY BEHAVIOR AFTER REFRESH
+
+After refreshing a line, use one of these behaviors:
+
+### Preferred behavior
+- automatically select the newly recommended AI strategy for that refreshed line
+
+OR
+
+### Acceptable alternative
+- preserve the user’s previous selected slot if still available (e.g. ai_option_1), but update it with the refreshed content
+
+Recommended approach:
+- after refresh, auto-select the newly recommended AI option for that line
+- if neither AI option is recommended, preserve a safe default selection
+
+Make sure only that line’s selected strategy changes.
+
+---
+
+## 9. ADD LOADING STATE FOR REFRESH
+
+When the user clicks Refresh:
+- show a loading state only for that line
+- disable repeated clicking while refresh is in progress
+- do not block interaction with other lines
+
+### Example behavior:
+- `Refresh` becomes `Refreshing...`
+- or shows spinner
+- only in the active/current line header
+
+### Example:
+```jsx
+<button
+  type="button"
+  className="line-strategy-refresh-btn"
+  onClick={() => refreshLineStrategies(activeLineId)}
+  disabled={isRefreshingLine === activeLineId}
+>
+  {isRefreshingLine === activeLineId ? 'Refreshing...' : 'Refresh'}
+</button>
+```
+
+---
+
+## 10. OPTIONAL: TRACK LAST REFRESH TIME
+
+Optionally store:
+```javascript
+lastRefreshedAt
+```
+
+per line strategy state, for debugging or future UI use.
+
+Example:
+```javascript
+lineStrategyState[lineId].lastRefreshedAt
+```
+
+This is optional but useful.
+
+---
+
+## 11. ENSURE REFRESHED STRATEGIES STILL FOLLOW ALL EXISTING RULES
+
+The refreshed AI strategies for that line must still:
+- evaluate changeovers
+- evaluate MTS advancement opportunities
+- evaluate profitability
+- choose primary / secondary / deprioritized factors
+- reflect actual line conditions
+- respect hard rules
+- update the After table faithfully
+
+Refreshing should not weaken the quality controls.
+
+---
+
+## 12. UPDATE HEADER UI STYLING
+
+Style the right-side header area so it reads naturally as:
+
+```text
+Select how to sequence Line 1 | Refresh
+```
+
+Suggested structure:
+- the main line text remains subtle/secondary as it is now
+- `Refresh` should look clickable
+- use underline or link-style hover
+- do not make it overly button-like unless needed
+
+### Suggested CSS idea:
+```css
+.line-strategy-header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  font-size: 14px;
+  color: #6b7280;
+}
+
+.line-strategy-refresh-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  color: #7c3aed;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.line-strategy-refresh-btn:hover {
+  text-decoration: underline;
+}
+```
+
+---
+
+## 13. VERIFICATION
+
+### Functional behavior
+1. ✅ A clickable `Refresh` appears beside `Select how to sequence Line X`
+2. ✅ Clicking Refresh re-analyzes only the current line
+3. ✅ Other lines remain unchanged
+4. ✅ Only the current line gets new AI strategy cards
+5. ✅ Only the current line’s metrics / insights / recommendation update
+
+### Strategy behavior
+6. ✅ Refresh produces a genuine new AI re-analysis, not just a UI rerender
+7. ✅ New strategy names/descriptions may appear for that line
+8. ✅ New After table result is computed for that line
+9. ✅ Row-level insights update for that line only
+
+### UX behavior
+10. ✅ Refresh shows a loading state only on the current line
+11. ✅ Other lines remain interactive
+12. ✅ The line header now reads like:
+    `Select how to sequence Line 1 | Refresh`
+13. ✅ The refreshed line auto-selects its new recommended AI option or uses a safe fallback

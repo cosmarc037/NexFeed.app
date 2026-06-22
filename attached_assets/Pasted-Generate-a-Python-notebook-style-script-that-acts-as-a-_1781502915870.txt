@@ -1,0 +1,111 @@
+Generate a Python notebook-style script that acts as a Pipeline Inspector, providing visibility into how the application processes data through real execution. 
+
+ 
+
+OBJECTIVE 
+
+Create a diagnostic tool that executes actual application flows and displays a structured, stage-by-stage trace. The goal is transparency into data transformation, not reimplementation. 
+
+ 
+
+CORE PRINCIPLES 
+
+ 
+
+Use real application behavior 
+
+- Execute actual routes, services, or execution paths 
+
+- Leverage any existing tracing, logging, or instrumentation 
+
+- Surface observable input/output from real execution 
+
+- Prefer authenticity over completeness 
+
+ 
+
+Stay read-only 
+
+- Ensure no data is modified during inspection 
+
+- Confirm read-only status at the end of execution 
+
+ 
+
+Be adaptive 
+
+- Inspect the codebase to understand the actual architecture 
+
+- Discover pipeline stages dynamically. Do not assume or invent them 
+
+- Adapt the inspection approach based on what the application actually provides 
+
+ 
+
+WHAT TO CAPTURE (when available) 
+
+ 
+
+For each detected pipeline stage: 
+
+- Stage name and description 
+
+- Timing/duration 
+
+- Input and output data 
+
+- Relevant metadata (tokens, attempts, model info, etc.) 
+
+ 
+
+If an LLM step exists: 
+
+- Trigger point (when data is sent) 
+
+- Exact prompt/payload sent to the LLM 
+
+- Raw LLM response (before any post-processing) 
+
+- Post-processed output (if different) 
+
+- Token usage (input, output, total) and latency 
+
+- Any reasoning metadata (scores, confidence, explanations) — only if actually present 
+
+ 
+
+NOTEBOOK STRUCTURE 
+
+ 
+
+Use clear section headers. Suggested flow: 
+
+1. Title / Overview — What this notebook does and how it works 
+
+2. Pipeline Discovery — Dynamically list detected stages 
+
+3. Configuration — Endpoint, entry point, and input payload 
+
+4. Helper Functions — Pretty-print and formatting utilities 
+
+5. Execution — Run the actual application flow 
+
+6. Stage-by-Stage Trace — Detailed breakdown per stage 
+
+7. Results Summary — Final outputs and observations 
+
+8. Token & Timing Roll-up — Aggregated metrics (if available) 
+
+9. Read-Only Confirmation — Explicit statement that no data was modified 
+
+ 
+
+OUTPUT FORMAT 
+
+- Return a notebook 
+
+ 
+
+FLEXIBILITY NOTE 
+
+You have an autonomy to determine the best inspection approach based on what you find in the codebase.

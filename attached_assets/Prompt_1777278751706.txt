@@ -1,0 +1,449 @@
+```
+Fix: Ensure AI-suggested dates are applied, then resort chronologically:
+
+---
+
+## 1. FIX THE AI STRATEGY SORTING — APPLY DATES THEN SORT
+
+```javascript
+async function generateAIStrategy(ordersByLine, n10dData, masterData, changeoverRules, options) {
+  const { withProfitability } = options;
+  
+  // Enrich orders with margin data
+  const enrichedByLine = {};
+  for (const [line, orders] of Object.entries(ordersByLine)) {
+    enrichedByLine[line] = orders.map(order => {
+      const materialCode = String(order.material_code_fg || '').trim();
+      const mdEntry = masterData.find(md =>
+        String(md.material_code_fg || '').trim() === materialCode
+      );
+      return {
+        ...order,
+        _margin: mdEntry ? (parseFloat(mdEntry.margin) || 0) : 0,
+      };
+    });
+  }
+  
+  // Call AI to get date suggestions
+  const prompt = buildAIPrompt(enrichedByLine, withProfitability);
+  
+  let aiResult = { strategy: {}, reasoning: '', dateAdjustments: [] };
+  
+  try {
+    const response = await callAzureOpenAI(prompt);
+    aiResult = parseAIResponse(response);
+  } catch (error) {
+    console.error('AI strategy generation failed:', error);
+  }
+  
+  // CRITICAL: Apply AI's date suggestions to orders
+  const result = {};
+  
+  for (const [line, orders] of Object.entries(enrichedByLine)) {
+    const aiLineStrategy = aiResult.strategy?.[line] || [];
+    
+    // Create map of AI suggestions by order ID
+    const aiSuggestionMap = new Map();
+    for (const aiOrder of aiLineStrategy) {
+      aiSuggestionMap.set(String(aiOrder.order_id), {
+        suggestedDate: aiOrder.suggested_start_date,
+        reasoning: aiOrder.reasoning,
+      });
+    }
+    
+    // Apply AI suggestions to orders
+    const ordersWithAISuggestions = orders.map(order => {
+      const aiSuggestion = aiSuggestionMap.get(String(order.id));
+      
+      if (aiSuggestion && aiSuggestion.suggestedDate) {
+        // Validate the suggestion
+        const validation = validateAISuggestedDate(order, aiSuggestion.suggestedDate);
+        
+        if (validation.isValid) {
+          return {
+            ...order,
+            target_avail_date: aiSuggestion.suggestedDate,  // APPLY the new date
+            _aiSuggestedDate: aiSuggestion.suggestedDate,
+            _originalAvailDate: order.target_avail_date,  // Keep original for display
+            _aiReasoning: aiSuggestion.reasoning,
+            _dateAdjustedByAI: true,
+          };
+        }
+      }
+      
+      return order;
+    });
+    
+    // CRITICAL: SORT CHRONOLOGICALLY by the (possibly AI-adjusted) target_avail_date
+    const sorted = sortOrdersChronologically(ordersWithAISuggestions);
+    
+    // Assign priorities
+    sorted.forEach((o, i) => {
+      o.prio = i + 1;
+    });
+    
+    result[line] = sorted;
+  }
+  
+  return {
+    id: withProfitability ? 'ai_profit' : 'ai_balanced',
+    name: withProfitability ? 'AI Profit-Optimized' : 'AI Balanced',
+    theme: withProfitability ? 'AI-Powered (Profit-Optimized)' : 'AI-Powered (Balanced)',
+    description: withProfitability 
+      ? 'AI sequences orders to maximize profitability while respecting MTO deadlines' 
+      : 'AI intelligently repositions MTS orders within safe windows to improve flow',
+    icon: withProfitability ? '💰' : '🤖',
+    color: withProfitability ? 'green' : 'purple',
+    orders: result,
+    metrics: calculateStrategyMetrics(result, enrichedByLine),
+    aiReasoning: aiResult.reasoning || '',
+    dateAdjustments: aiResult.dateAdjustments || [],
+    isAIRecommended: false,
+  };
+}
+
+function validateAISuggestedDate(order, suggestedDate) {
+  if (!suggestedDate) return { isValid: true };
+  
+  const isMTO = isMTOOrder(order);
+  
+  // MTO orders: never change
+  if (isMTO) {
+    return { isValid: false, reason: 'MTO orders cannot have dates changed by AI' };
+  }
+  
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const buffer2Days = new Date(today);
+  buffer2Days.setDate(buffer2Days.getDate() + 2);
+  
+  const suggestedDateObj = new Date(suggestedDate);
+  
+  // Can't suggest before today+2
+  if (suggestedDateObj < buffer2Days) {
+    return { isValid: false, reason: `Suggested date before buffer (today+2)` };
+  }
+  
+  // Get effective ceiling (N10D threshold or hard avail date)
+  const effectiveCeiling = getEffectiveAvailDateCeiling(order);
+  
+  if (effectiveCeiling) {
+    const ceilingDateObj = new Date(effectiveCeiling);
+    ceilingDateObj.setHours(23, 59, 59, 999);
+    
+    if (suggestedDateObj > ceilingDateObj) {
+      return { isValid: false, reason: `Suggested date exceeds N10D threshold` };
+    }
+  }
+  
+  return { isValid: true };
+}
+
+function sortOrdersChronologically(orders) {
+  return [...orders].sort((a, b) => {
+    // Extract the effective avail date (either original or AI-suggested)
+    const dateA = a.target_avail_date;
+    const dateB = b.target_avail_date;
+    
+    // Both are real dates
+    if (dateA && dateB && /^\d{4}-\d{2}-\d{2}/.test(String(dateA)) && /^\d{4}-\d{2}-\d{2}/.test(String(dateB))) {
+      const timeA = new Date(dateA).getTime();
+      const timeB = new Date(dateB).getTime();
+      if (timeA !== timeB) return timeA - timeB;
+    }
+    
+    // One is a real date, one is a string label — real dates come first
+    const isADate = /^\d{4}-\d{2}-\d{2}/.test(String(dateA));
+    const isBDate = /^\d{4}-\d{2}-\d{2}/.test(String(dateB));
+    
+    if (isADate && !isBDate) return -1;
+    if (!isADate && isBDate) return 1;
+    
+    // Both are labels — sort by N10D urgency
+    const categoryA = getCategoryPriority(a._dateCategory || categorizeOrder(a));
+    const categoryB = getCategoryPriority(b._dateCategory || categorizeOrder(b));
+    
+    if (categoryA !== categoryB) return categoryA - categoryB;
+    
+    // Same category — maintain original order
+    return 0;
+  });
+}
+
+function categorizeOrder(order) {
+  const n10dStatus = order._n10dStatus || order.inferred_target_label || '';
+  
+  if (n10dStatus === 'Critical') return 'critical';
+  if (n10dStatus === 'Urgent' || n10dStatus === 'prio replenish') return 'urgent';
+  if (n10dStatus === 'Monitor' || n10dStatus === 'monitor') return 'monitor';
+  return 'sufficient';
+}
+
+function getCategoryPriority(category) {
+  const priorities = {
+    'critical': 0,
+    'urgent': 1,
+    'monitor': 2,
+    'sufficient': 3,
+  };
+  return priorities[category] || 99;
+}
+
+function getEffectiveAvailDateCeiling(order) {
+  // If order already has a real date, use it as ceiling
+  if (order.target_avail_date && /^\d{4}-\d{2}-\d{2}/.test(String(order.target_avail_date))) {
+    return order.target_avail_date;
+  }
+  
+  // Otherwise, infer from N10D
+  if (order.inferred_target_date && /^\d{4}-\d{2}-\d{2}/.test(String(order.inferred_target_date))) {
+    return order.inferred_target_date;
+  }
+  
+  // Fallback: today + 30 days
+  const today = new Date();
+  today.setDate(today.getDate() + 30);
+  return today.toISOString().split('T')[0];
+}
+
+function isMTOOrder(order) {
+  // MTO = has hard contractual avail date (not N10D inferred)
+  if (!order.target_avail_date) return false;
+  
+  const dateStr = String(order.target_avail_date);
+  
+  // If it's a real date AND not sourced from N10D
+  if (/^\d{4}-\d{2}-\d{2}/.test(dateStr) && !order._dateSourceIsN10D) {
+    return true;
+  }
+  
+  return false;
+}
+```
+
+---
+
+## 2. IMPROVE AI PROMPT — ENSURE DISTINCT STRATEGIES
+
+```javascript
+function buildAIPrompt(ordersByLine, withProfitability) {
+  const allOrders = Object.values(ordersByLine).flat();
+  
+  const orderDetails = allOrders.map(o => ({
+    id: o.id,
+    description: o.item_description,
+    volume: o.volume || o.total_volume_mt,
+    current_date: o.target_avail_date,
+    n10d_status: o._n10dStatus || 'unknown',
+    is_mto: isMTOOrder(o),
+    is_critical: o._n10dStatus === 'Critical',
+    margin: o._margin || 0,
+    n10d_days_remaining: calculateN10DDaysRemaining(o),
+  }));
+  
+  return `You are an AI production scheduler specializing in ${withProfitability ? 'profit optimization' : 'balanced flow management'}.
+
+## CURRENT ORDERS (${allOrders.length} total):
+${JSON.stringify(orderDetails, null, 2)}
+
+## STRATEGY TYPE: ${withProfitability ? 'PROFIT-OPTIMIZED' : 'BALANCED'}
+
+${withProfitability ? `
+### PROFIT OPTIMIZATION RULES:
+1. **High-margin orders** (margin > average): Suggest EARLY production dates (close to today+2)
+   - Capture profit sooner
+   - Prioritize production capacity for high-margin items
+2. **Low-margin orders** (margin < average): Suggest LATE production dates (close to their N10D deadline)
+   - Use as "filler" production when high-margin work isn't available
+   - Maximize capacity utilization without sacrificing profit
+3. **Margin tiers example**: 
+   - Top 20% margin → earliest safe slot
+   - Middle 60% margin → mid-window
+   - Bottom 20% margin → latest safe slot (before red)
+` : `
+### BALANCED FLOW RULES:
+1. Spread production evenly across the window (not front-loaded, not all at deadline)
+2. Build safety buffer — suggest dates 40% into the safe window (not 100%)
+3. Group same-family materials to minimize changeovers
+4. Balance line utilization — don't overload one line
+`}
+
+## NON-NEGOTIABLE RULES (ALWAYS ENFORCED):
+1. **MTO orders (is_mto: true)**: NEVER change current_date — they have contractual deadlines
+2. **Critical orders (is_critical: true)**: MUST be produced TODAY/ASAP (suggest today or tomorrow)
+3. **N10D threshold**: NEVER suggest a date that crosses the red threshold (use n10d_days_remaining)
+4. **Minimum buffer**: Never suggest before today+2
+
+## SAFE PRODUCTION WINDOW FOR EACH MTS ORDER:
+- Earliest: today + 2 days
+- Latest: current_date (the N10D threshold)
+- **Your job**: Pick the BEST date within this window based on strategy (profit vs balanced)
+
+## CRITICAL INSTRUCTIONS:
+- Do NOT return the current_date unchanged unless absolutely unavoidable
+- If profit-optimized: high-margin orders get EARLIER dates, low-margin get LATER
+- If balanced: spread dates across the window, aim for 40-50% into the window
+- Every order in the response MUST have a suggested_start_date
+- Include clear reasoning for each suggestion (1 sentence)
+
+## RESPONSE FORMAT (VALID JSON ONLY):
+{
+  "strategy": {
+    "line_1": [
+      {
+        "order_id": "xxx",
+        "current_date": "2026-05-11",
+        "suggested_start_date": "2026-04-29",
+        "reasoning": "High-margin (8.2%) — advanced to capture profit while respecting 2-day buffer"
+      }
+    ]
+  },
+  "reasoning": "Overall strategy explanation",
+  "dateAdjustments": [
+    { "order_id": "xxx", "original": "2026-05-11", "new": "2026-04-29", "reason": "..." }
+  ]
+}
+
+Return ONLY valid JSON. No markdown, no explanation outside JSON.`;
+}
+
+function calculateN10DDaysRemaining(order) {
+  if (!order.target_avail_date || !/^\d{4}-\d{2}-\d{2}/.test(String(order.target_avail_date))) {
+    return 999;  // Unknown — very far away
+  }
+  
+  const deadline = new Date(order.target_avail_date);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  
+  const daysRemaining = Math.ceil((deadline - today) / (1000 * 60 * 60 * 24));
+  return Math.max(0, daysRemaining);
+}
+```
+
+---
+
+## 3. UPDATE DISPLAY TO SHOW ORIGINAL → AI-SUGGESTED WITH STRIKETHROUGH
+
+```jsx
+// In the Avail Date cell of the preview table
+
+function renderAvailDateCell(order) {
+  const isAISuggested = order._dateAdjustedByAI;
+  const originalDate = order._originalAvailDate;
+  const currentDate = order.target_avail_date;
+  
+  // If AI changed it, show both with strikethrough on original
+  if (isAISuggested && originalDate !== currentDate) {
+    return (
+      <div className="avail-date-ai-adjusted">
+        <span className="avail-date-original" title={`Original: ${formatDate(originalDate)}`}>
+          {formatDate(originalDate)}
+        </span>
+        <span className="avail-date-arrow">→</span>
+        <span className="avail-date-ai" title={order._aiReasoning}>
+          ✨ {formatDate(currentDate)}
+        </span>
+      </div>
+    );
+  }
+  
+  // Standard display (no AI change)
+  if (currentDate && /^\d{4}-\d{2}-\d{2}/.test(String(currentDate))) {
+    return (
+      <span className="avail-date-value">
+        {formatDate(currentDate)}
+      </span>
+    );
+  }
+  
+  // N10D label
+  if (order.inferred_target_label) {
+    return (
+      <span className="avail-date-label">
+        {order.inferred_target_label}
+      </span>
+    );
+  }
+  
+  return <span>—</span>;
+}
+```
+
+Styling:
+
+```css
+.avail-date-ai-adjusted {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+}
+
+.avail-date-original {
+  text-decoration: line-through;
+  color: #9ca3af;
+  opacity: 0.7;
+}
+
+.avail-date-arrow {
+  color: #d1d5db;
+  font-weight: 700;
+}
+
+.avail-date-ai {
+  color: #7c3aed;  /* Purple */
+  font-weight: 600;
+  font-style: italic;
+}
+
+.avail-date-ai::before {
+  content: '✨ ';
+}
+
+.dark-mode .avail-date-original {
+  color: #6b7280;
+}
+
+.dark-mode .avail-date-ai {
+  color: #c4b5fd;
+}
+```
+
+---
+
+## VERIFICATION
+
+### AI Date Suggestions Applied
+1. ✅ AI Balanced shows different dates from Standard (purple with ✨)
+2. ✅ AI Profit-Optimized shows different dates from Balanced
+3. ✅ High-margin orders in Profit strategy have EARLIER dates
+4. ✅ Low-margin orders in Profit strategy have LATER dates
+5. ✅ Original dates shown with strikethrough for comparison
+
+### Chronological Sorting
+6. ✅ All orders sorted by avail_date chronologically (ascending)
+7. ✅ MTO orders appear in correct chronological position (not last!)
+8. ✅ Real dates come before N10D status labels
+9. ✅ Within same category, original order preserved
+
+### Example from snips (corrected):
+- Row 1: 27 Apr 2026 (MTO, hard date) — comes first ✓
+- Row 2: 02 May 2026 (AI suggested, was 11 May) 
+- Row 3-6: 06 May 2026 (AI suggested, was 12-14 May)
+- Row 7-8: 14 May 2026 (AI suggested, was 14 May)
+- Row 9: 27 Apr 2026 (MTO) — should NOT be last!
+
+### Non-negotiable rules
+10. ✅ MTO dates never changed
+11. ✅ Critical orders suggested for today/tomorrow
+12. ✅ No dates before today+2 buffer
+13. ✅ No dates beyond N10D red threshold
+```
+
+The key fixes:
+1. **Apply AI dates BEFORE sorting** (not after)
+2. **Sort chronologically after applying AI dates**
+3. **Improve AI prompt** to differentiate strategies clearly
+4. **Display original→AI with strikethrough** for transparency
+5. **Ensure MTO orders appear in chronological position** (not misplaced at end)

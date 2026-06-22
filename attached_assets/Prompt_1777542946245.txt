@@ -1,0 +1,308 @@
+```
+Add a per-line loading overlay when the user clicks Refresh so the currently refreshing line appears grayed out / opaque with a loading indicator, while all other lines remain fully usable.
+
+---
+
+## OBJECTIVE
+
+When the user clicks `Refresh` for a specific line in the AI Auto-Sequence preview:
+
+- only that line should show a loading state
+- the line’s preview area should appear visually busy/in-progress
+- other lines should remain unaffected and interactive
+
+This is a per-line refresh indicator, not a full-screen blocking loader.
+
+---
+
+## 1. APPLY LOADING STATE PER LINE ONLY
+
+Track refresh/loading state by line ID, not globally.
+
+Example state:
+```javascript
+const [refreshingLines, setRefreshingLines] = useState({});
+```
+
+Or:
+```javascript
+const [refreshingLineIds, setRefreshingLineIds] = useState(new Set());
+```
+
+When refreshing Line 2:
+- mark only `line_2` as loading
+- do not block Line 1, Line 3, etc.
+
+Example:
+```javascript
+setRefreshingLines(prev => ({
+  ...prev,
+  [lineId]: true,
+}));
+```
+
+And clear it when the refresh finishes.
+
+---
+
+## 2. SHOW A LOADING OVERLAY ON THE CURRENT LINE’S CONTENT AREA
+
+When a line is refreshing, visually overlay only that line’s main content area, including:
+- AI strategy cards
+- Before / After preview tables
+- line-specific strategy preview section
+
+Do not block:
+- line tabs
+- other line content
+- global navigation
+
+### Desired effect:
+- line content looks slightly gray / opaque / disabled
+- spinner/loading icon appears on top
+- optional text:
+  - `Refreshing AI strategies...`
+  - or `Re-analyzing Line 2...`
+
+---
+
+## 3. RECOMMENDED OVERLAY STRUCTURE
+
+Wrap the line-specific panel in a container like:
+
+```jsx
+<div className="line-sequencing-panel">
+  {isRefreshing && (
+    <div className="line-refresh-overlay">
+      <div className="line-refresh-overlay-content">
+        <div className="line-refresh-spinner" />
+        <div className="line-refresh-text">
+          Refreshing AI strategies...
+        </div>
+      </div>
+    </div>
+  )}
+
+  {/* existing line strategy cards + before/after tables */}
+</div>
+```
+
+Where:
+- `isRefreshing` applies only to the active/current rendered line
+- the overlay sits above the line content only
+
+---
+
+## 4. STYLE THE LINE PANEL AS OPAQUE / GRAYED OUT DURING REFRESH
+
+The line content underneath the overlay should appear visually inactive.
+
+### Example CSS:
+```css
+.line-sequencing-panel {
+  position: relative;
+}
+
+.line-sequencing-panel.is-refreshing {
+  pointer-events: none; /* only for that panel content */
+}
+
+.line-refresh-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(255, 255, 255, 0.60);
+  backdrop-filter: blur(1px);
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+}
+
+.line-refresh-overlay-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 18px 24px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+}
+
+.line-refresh-text {
+  font-size: 14px;
+  font-weight: 600;
+  color: #4b5563;
+}
+```
+
+This creates:
+- a semi-opaque gray/white overlay
+- visible loading state
+- content still visible underneath, but clearly “busy”
+
+---
+
+## 5. ADD A SPINNER / LOADING ICON
+
+Use a simple spinner, animated icon, or existing loading component.
+
+### Example CSS spinner:
+```css
+.line-refresh-spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid #e5e7eb;
+  border-top-color: #7c3aed;
+  border-radius: 50%;
+  animation: line-refresh-spin 0.8s linear infinite;
+}
+
+@keyframes line-refresh-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+```
+
+---
+
+## 6. DISABLE INTERACTION ONLY INSIDE THE REFRESHING LINE PANEL
+
+When a line is refreshing:
+- do not allow interactions inside that line’s cards / preview
+- but still allow the user to click:
+  - other line tabs
+  - other line views
+  - other non-refreshing content
+
+So:
+- apply pointer-events blocking only to the refreshing line panel
+- do not globally disable the page
+
+### Important:
+Users must still be able to navigate to another line while one line is refreshing.
+
+---
+
+## 7. KEEP OTHER LINES FULLY USABLE
+
+If Line 2 is refreshing:
+- user can click Line 1, Line 3, etc.
+- those lines should render normally
+- those lines should not show any loading overlay
+- they should remain fully interactive
+
+If the user returns to Line 2 before the refresh completes:
+- they should still see the loading overlay for Line 2
+
+Once refresh completes:
+- remove the overlay for Line 2
+- show the refreshed strategy cards and preview
+
+---
+
+## 8. UPDATE THE REFRESH BUTTON STATE TOO
+
+While the active line is refreshing:
+- change `Refresh` text to `Refreshing...`
+- or disable the button
+
+Example:
+```jsx
+<button
+  type="button"
+  className="line-strategy-refresh-btn"
+  onClick={() => refreshLineStrategies(activeLineId)}
+  disabled={isRefreshingLine}
+>
+  {isRefreshingLine ? 'Refreshing...' : 'Refresh'}
+</button>
+```
+
+Only disable the refresh button for that specific line.
+
+---
+
+## 9. KEEP THE OVERLAY SCOPED TO THE LINE PREVIEW REGION
+
+The loading overlay should cover:
+- strategy cards
+- before/after preview area
+- line-level AI reasoning area if visible
+
+But should not cover:
+- global top navbar
+- other lines
+- entire modal/page unless the entire modal only shows one line at a time
+
+If the modal only shows one active line at a time, then the overlay may cover the main line content area of that active tab only — still keeping other tabs clickable.
+
+---
+
+## 10. OPTIONAL: SHOW LINE NAME IN LOADING TEXT
+
+Optional but recommended:
+- `Refreshing Line 2 AI strategies...`
+or
+- `Re-analyzing Line 2...`
+
+Example:
+```jsx
+<div className="line-refresh-text">
+  {`Refreshing ${activeLineLabel} AI strategies...`}
+</div>
+```
+
+This gives users better context.
+
+---
+
+## 11. CLEAN STATE HANDLING
+
+Recommended flow:
+1. user clicks Refresh on active line
+2. mark that line as refreshing
+3. render overlay for that line panel
+4. regenerate AI strategies only for that line
+5. update line strategy state
+6. clear refreshing state for that line
+7. remove overlay
+
+Make sure failed refresh also clears loading state.
+
+Example:
+```javascript
+async function refreshLineStrategies(lineId) {
+  try {
+    setRefreshingLines(prev => ({ ...prev, [lineId]: true }));
+    await regenerateStrategiesForLine(lineId);
+  } finally {
+    setRefreshingLines(prev => ({ ...prev, [lineId]: false }));
+  }
+}
+```
+
+---
+
+## 12. VERIFICATION
+
+### UX behavior
+1. ✅ Clicking Refresh grays out / overlays only the current line’s sequencing panel
+2. ✅ A loading spinner/icon is shown while refresh is in progress
+3. ✅ The loading indicator is clearly visible but does not hide the entire app
+4. ✅ The refreshing line looks busy/in-progress
+
+### Interaction behavior
+5. ✅ Only the refreshing line panel is non-interactive
+6. ✅ Other lines remain clickable and viewable
+7. ✅ User can switch to another line while one line is refreshing
+8. ✅ Returning to the refreshing line still shows its loading state until complete
+
+### Refresh behavior
+9. ✅ Only the targeted line is re-analyzed
+10. ✅ Other lines’ strategies and selections remain unchanged
+11. ✅ Overlay disappears once refresh completes
+12. ✅ Refresh button updates to a loading state for that line

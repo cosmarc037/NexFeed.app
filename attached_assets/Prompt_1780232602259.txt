@@ -1,0 +1,113 @@
+Please update the **Suggested Pre-orders** table in the **Fulfillment (Demo)** workspace so that clicking the **Item Description** will navigate to the corresponding **source order**.
+
+---
+
+## 1. MAKE THE ITEM DESCRIPTION IN THE SUGGESTED PRE-ORDER TABLE CLICKABLE
+
+Please make the **Item Description** field in each Suggested Pre-order row clickable.
+
+### Goal
+Allow users to quickly trace a suggested pre-order back to the original/source order that triggered it.
+
+### Expected result
+The item description in the suggested pre-order table should behave like a link or interactive target.
+
+---
+
+## 2. LINK EACH SUGGESTED PRE-ORDER TO ITS CORRESPONDING SOURCE ORDER
+
+Each suggested pre-order should maintain a reference to the original/source order that caused the pre-order suggestion to be generated.
+
+### Expected behavior
+When the user clicks the suggested pre-order’s Item Description:
+- the app should locate the linked source order
+- and navigate to that source order in the demo order table
+
+### Expected result
+The user can quickly inspect the source order without manually searching for it.
+
+---
+
+## 3. SCROLL TO THE SOURCE ORDER IN THE DEMO ORDER TABLE
+
+Once the source order is identified, please automatically scroll the demo order table to bring that order into view.
+
+### Goal
+The navigation should be immediate and useful, not just internally linked.
+
+### Expected result
+The source order becomes visible in the current demo feedmill/order table after clicking the suggestion’s Item Description.
+
+---
+
+## 4. HIGHLIGHT OR FOCUS THE SOURCE ORDER AFTER NAVIGATION IF POSSIBLE
+
+If possible, please add a temporary visual focus/highlight effect to the source order row after navigating to it.
+
+### Goal
+Help the user quickly identify which row is the linked source order.
+
+### Suggested behavior
+After the scroll/navigation:
+- briefly highlight the row
+- or apply a temporary focus style
+- or otherwise make it visually clear which row was targeted
+
+### Expected result
+Users can easily spot the linked source order once the app navigates to it.
+
+---
+
+## 5. APPLY THIS TO THE FULFILLMENT (DEMO) SUGGESTED PRE-ORDERS TABLE ONLY
+
+This linking behavior should apply specifically to the **Suggested Pre-orders** table in the **Fulfillment (Demo)** workspace.
+
+### Expected result
+Users reviewing demo replenishment suggestions can quickly jump back to the source order context.
+
+---
+
+## IMPORTANT
+
+Please add a clickable link behavior to the **Item Description** in the **Suggested Pre-orders** table so that clicking it:
+
+- navigates to the corresponding source order
+- scrolls that source order into view
+- and ideally highlights/focuses it temporarily
+
+This should make it easier to inspect the order that triggered the suggested pre-order.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log suggested-order-to-source-order navigation.
+
+```javascript
+console.debug('[Demo Suggested Pre-Order Source Link]', {
+  suggestionId,
+  sourceOrderId,
+  itemDescriptionClicked: true,
+  sourceOrderFound: true,
+});
+```
+
+```javascript
+console.debug('[Demo Suggested Pre-Order Source Navigation]', {
+  suggestionId,
+  sourceOrderId,
+  scrolledIntoView: true,
+  highlighted: true,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Item Description in the Suggested Pre-orders table is clickable
+2. ✅ Each suggested pre-order links to its corresponding source order
+3. ✅ Clicking the Item Description scrolls to the source order in the demo order table
+4. ✅ The source order is brought into view successfully
+5. ✅ The source order is highlighted or focused if implemented
+6. ✅ No UI errors or console errors are introduced

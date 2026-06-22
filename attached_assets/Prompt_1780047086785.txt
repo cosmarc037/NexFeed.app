@@ -1,0 +1,285 @@
+Please improve the **Fulfillment (Demo) pre-order suggestion UI and behavior** in the duplicated **Demo All Feedmills** tab.
+
+---
+
+# 1. MOVE THE `APPROVE` / `DISMISS` BUTTONS CLOSER TO THE PRE-ORDER CONTENT
+
+The current pre-order suggestion rows place the `Approve` and `Dismiss` buttons too far to the right side of the table.
+
+### Current issue
+Users have to scroll horizontally before they can reach the action buttons.
+
+### Expected behavior
+Please move the `Approve` and `Dismiss` buttons closer to the suggestion text/content so they are easier to access without excessive horizontal scrolling.
+
+### Goal
+Users should be able to quickly review and act on pre-order suggestions without needing to scroll far across the table.
+
+### Expected result
+The action buttons should appear near the pre-order summary/details area for easier clicking.
+
+---
+
+# 2. SEPARATE PRE-ORDER SUGGESTIONS FROM ACTIVE ORDERS
+
+Right now, the generated pre-order suggestions appear mixed into the same main order table view.
+
+Please separate the **suggested pre-orders** from the active orders.
+
+### Suggested UI approach
+Add a collapsible section / dropdown / accordion **below the active order table** that contains the generated pre-order suggestions.
+
+### Example
+A section such as:
+- `Suggested Pre-orders`
+- or `Fulfillment Suggestions`
+- optionally with a count:
+  - `Suggested Pre-orders (4)`
+
+### Expected behavior
+- Active orders remain in the main table
+- Suggested pre-orders are shown in a separate expandable section below the table
+- User can expand/collapse that section to review suggestions
+
+### Goal
+Make it visually clear that these are pending suggestions, not already committed active sequence orders.
+
+### Expected result
+Pre-order suggestions are clearly separated from the live order sequence.
+
+---
+
+# 3. EXPAND THE DETAILS SHOWN FOR EACH PRE-ORDER SUGGESTION
+
+The current pre-order suggestions show only minimal information, such as material code and volume.
+
+Please expand the details shown for each suggested pre-order.
+
+### Include as much of the following as applicable
+- Planned Order:
+  - `FG`
+  - `SFG`
+  - `SFGPMX` / `SFG1`
+- Material Codes:
+  - `FG`
+  - `SFG`
+- Volume
+  - already adjusted correctly based on batch size / generation logic
+- Batch Size
+- Batches
+- Bags
+- Production Time
+- AI-powered suggested Avail Date
+
+### Goal
+Users should be able to understand the generated pre-order in enough detail before deciding whether to approve or dismiss it.
+
+### Expected result
+Each suggestion becomes much more informative and easier to evaluate.
+
+---
+
+# 4. ADD AN AI-POWERED SUGGESTED AVAIL DATE FOR THE PRE-ORDER
+
+Please include an **AI-powered suggested Avail Date** for the generated pre-order suggestion.
+
+### Intended behavior
+The AI should analyze the current lineup/sequence and suggest where best to place the pre-order in the line.
+
+### Goal
+The pre-order suggestion should not be a blind generated row.
+It should include a recommended schedule context for where the order best fits.
+
+### Expected result
+Each pre-order suggestion should display an AI-suggested avail date or sequence placement recommendation that helps users decide whether to approve it.
+
+---
+
+# 5. GENERATED PRE-ORDERS SHOULD ALWAYS START AS SINGLE ORDERS, NOT COMBINED ORDERS
+
+There is a current issue where, if the original order is a combined order, the generated pre-order may also appear as a combined order.
+
+Please fix this.
+
+### New rule
+A generated fulfillment pre-order should always start as a **single order**.
+
+### Important
+Do not automatically create it as:
+- a combined order
+- a lead order with sub-orders
+- or any inherited combined structure from the original order
+
+### Expected result
+Generated pre-order suggestions should always begin as standalone/single orders unless the user later combines them through normal allowed workflows.
+
+---
+
+# 6. ADD A `PRE-ORDER` OR `RE-ORDER` BADGE IN THE FPR COLUMN
+
+Please add a visible badge in the **FPR column** for generated fulfillment orders, similar to how the app displays badges/labels for things like cut or combined orders.
+
+### Suggested badge text
+- `Pre-order`
+- or `Re-order`
+
+### Suggested styling
+- highlighted in **yellow**
+- clearly visible
+- visually distinct from normal order rows
+
+### Goal
+Users should be able to quickly recognize that the order is a generated fulfillment-related order.
+
+### Expected result
+Approved generated pre-orders display a badge in the FPR column identifying them as `Pre-order` / `Re-order`.
+
+---
+
+# 7. KEEP PENDING SUGGESTIONS DISTINCT FROM APPROVED PRE-ORDERS
+
+Please preserve a distinction between:
+
+### Pending suggestions
+- shown in the separate suggestion section
+- waiting for `Approve` / `Dismiss`
+- not yet part of the active sequence
+
+### Approved pre-orders
+- added into the main demo sequence
+- behave like normal demo orders
+- visually identified with the `Pre-order` / `Re-order` badge in the FPR column
+
+### Expected result
+Users can clearly tell the difference between:
+- suggestions waiting for decision
+- and approved pre-orders already inserted into the sequence
+
+---
+
+# 8. PRESERVE NORMAL APPROVED PRE-ORDER FUNCTIONALITY AFTER APPROVAL
+
+Once a generated pre-order is approved and inserted into the sequence, it should continue behaving as a normal demo order.
+
+### Expected result
+After approval, the generated pre-order should still support the normal demo order capabilities such as:
+- auto-sequence
+- drag-drop
+- cut
+- edit
+- combination if later allowed
+- other relevant order actions
+
+### Important
+The improvement request here is about how the pre-order suggestion is presented and inserted initially, not about reducing its normal post-approval capabilities.
+
+---
+
+# 9. KEEP THE PRE-ORDER VOLUME ADJUSTED CORRECTLY
+
+When showing the generated pre-order details, please ensure the displayed volume is already adjusted correctly according to the fulfillment generation logic and batch sizing logic.
+
+### Goal
+The user should see the actual meaningful proposed production quantity, not a raw/unadjusted placeholder amount.
+
+### Expected result
+The volume shown in the pre-order suggestion is the correct final proposed volume for approval.
+
+---
+
+# 10. KEEP THIS WITHIN THE FULFILLMENT (DEMO) WORKSPACE ONLY
+
+Please apply these UI and behavior improvements only to the **Fulfillment (Demo)** implementation of pre-order suggestions.
+
+### Important
+Do not change the main application order table workflow unless explicitly requested later.
+
+### Expected result
+These improvements remain part of the isolated demo fulfillment testing environment.
+
+---
+
+# IMPORTANT
+
+Please implement the following improvements for demo pre-order suggestions:
+
+### UI / placement
+- move `Approve` / `Dismiss` buttons closer to the suggestion content
+- separate pre-order suggestions from active orders using a collapsible section below the table
+
+### Richer suggestion details
+Show more information including:
+- Planned Order (FG / SFG / SFGPMX or SFG1)
+- Material Codes (FG / SFG)
+- Volume
+- Batch Size
+- Batches
+- Bags
+- Production Time
+- AI-powered suggested Avail Date
+
+### Order structure
+- generated pre-orders must always start as **single orders**
+- do not automatically inherit combined state from the original order
+
+### Badge
+- approved pre-orders should show a `Pre-order` / `Re-order` badge in the FPR column
+- use a yellow highlight for visibility
+
+---
+
+# DEBUG LOGGING
+
+Temporarily log the new pre-order suggestion rendering and approval behavior.
+
+```javascript
+console.debug('[Demo Pre-Order Suggestion Render]', {
+  suggestionId,
+  shownInSeparateSection: true,
+  approveDismissButtonsNearContent: true,
+  detailsShown: {
+    plannedOrder: true,
+    materialCodes: true,
+    volume: true,
+    batchSize: true,
+    batches: true,
+    bags: true,
+    productionTime: true,
+    aiSuggestedAvailDate: true,
+  },
+});
+```
+
+```javascript
+console.debug('[Demo Pre-Order Structure]', {
+  suggestionId,
+  originalOrderWasCombined,
+  generatedAsSingleOrder: true,
+  inheritedCombinedState: false,
+});
+```
+
+```javascript
+console.debug('[Demo Pre-Order Approval]', {
+  suggestionId,
+  approved,
+  insertedIntoSequence: approved,
+  fprBadge: approved ? 'Pre-order' : null,
+});
+```
+
+---
+
+# VERIFICATION
+
+1. ✅ `Approve` / `Dismiss` buttons are moved closer to the pre-order content
+2. ✅ Users no longer need excessive horizontal scrolling to reach the action buttons
+3. ✅ Pre-order suggestions are shown in a separate collapsible section below the active order table
+4. ✅ Active orders and pending suggestions are visually separated
+5. ✅ Each pre-order suggestion shows expanded details beyond just material code and volume
+6. ✅ Expanded details include planned order fields, material codes, volume, batch size, batches, bags, production time, and AI-suggested avail date
+7. ✅ Generated pre-orders always start as single orders
+8. ✅ Generated pre-orders do not inherit combined structure from the original order
+9. ✅ Approved pre-orders display a yellow `Pre-order` / `Re-order` badge in the FPR column
+10. ✅ Approved pre-orders still behave like normal demo orders after approval
+11. ✅ No UI errors or console errors are introduced

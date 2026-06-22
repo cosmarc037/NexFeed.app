@@ -1,0 +1,170 @@
+```
+Improve the "Sequence Insight" column in the After table so that the explanation becomes strategy-aware and clearly explains why each order is placed in its current position.
+
+## Objective
+Now that the app supports:
+- Standard Sequence
+- AI Balanced
+- AI Profit-Optimized
+
+the Sequence Insight should reflect the actual selected strategy and explain the placement logic accordingly.
+
+The current insight text is too generic. It should now explain:
+- for Standard: chronology / avail date / urgency / protected order rules
+- for AI Balanced: material grouping / changeover reduction / safe-window date suggestion / line load reasoning
+- for AI Profit-Optimized: profit-rate reasoning using margin, production hours, and changeover hours
+
+## Requirements
+
+### 1. Strategy-aware insight generation
+Create separate insight builders for each strategy:
+- `buildStandardInsight(...)`
+- `buildBalancedInsight(...)`
+- `buildProfitInsight(...)`
+
+Then use the currently selected strategy to determine which one populates the Sequence Insight column.
+
+---
+
+### 2. Standard Sequence insight
+The insight should explain rule-based placement.
+
+Use reasons such as:
+- earlier avail date
+- protected actual date
+- critical / urgent / monitor priority
+- later target date
+- chronological sequencing
+
+Examples:
+- “Placed earlier due to earlier avail date and higher urgency.”
+- “Protected actual-dated order; kept in sequence by fixed deadline.”
+- “Positioned later because its target date is after the orders above.”
+
+---
+
+### 3. AI Balanced insight
+The insight should explain efficiency-based sequencing.
+
+Use reasons such as:
+- grouped with similar category / color / diameter / form
+- reduced changeover from previous or next order
+- practical date suggested due to light line load
+- placed within safe window to improve sequence efficiency
+- moved to align with compatible materials
+
+Examples:
+- “Placed here to group with similar Swine · Brown orders and reduce changeover.”
+- “Suggested for 30 Apr because this date has lighter load and supports smoother sequencing.”
+- “Moved near compatible material to reduce cleaning and setup time.”
+
+For expanded “more” content, include:
+- previous order material
+- current order material
+- estimated changeover impact
+- safe-window explanation if the date changed
+
+---
+
+### 4. AI Profit-Optimized insight
+The insight should explain profitability-based sequencing.
+
+Use:
+- Margin from master data
+- Production hours
+- Changeover hours
+- Profit rate formula:
+  Profit Rate = Margin ÷ (Production Hours + Changeover Hours)
+
+Examples:
+- “Prioritized here due to higher profit rate versus other safe orders.”
+- “Scheduled earlier because its margin returns more value per production hour.”
+- “Deferred because other eligible orders had stronger profit rate first.”
+
+For expanded “more” content, explicitly show the calculation:
+- Margin: X
+- Production Hours: Y
+- Changeover Hours: Z
+- Profit Rate = X ÷ (Y + Z) = N
+
+If useful, also compare against a competing flexible order:
+- “This order was preferred over Material 1000000000235 because 5.71 > 4.22 profit/hr.”
+
+---
+
+### 5. Keep short row text concise
+The visible row insight should remain short and readable.
+
+Use:
+- a short one-line summary in the table
+- a “more” link or expanded tooltip/modal for full details
+
+Do not overcrowd the table cell.
+
+---
+
+### 6. Use actual app data
+The insight must use real values from the app:
+- selected strategy
+- current and neighboring orders
+- effective avail date / AI-suggested date
+- N10D status
+- master data margin
+- production hours
+- live changeover rules
+
+Do not hardcode explanation numbers.
+
+---
+
+### 7. Suggested implementation structure
+
+```javascript
+function buildSequenceInsight(order, prevOrder, nextOrder, strategy, context) {
+  if (strategy === 'standard') {
+    return buildStandardInsight(order, prevOrder, nextOrder, context);
+  }
+
+  if (strategy === 'ai_balanced') {
+    return buildBalancedInsight(order, prevOrder, nextOrder, context);
+  }
+
+  if (strategy === 'ai_profit') {
+    return buildProfitInsight(order, prevOrder, nextOrder, context);
+  }
+
+  return {
+    short: 'Position determined by sequencing logic.',
+    long: 'This order was placed based on the currently selected scheduling strategy.',
+  };
+}
+```
+
+Example structure for returned data:
+```javascript
+{
+  short: 'Placed here to reduce changeover with similar material.',
+  long: 'This order was grouped near Swine · Brown · 4.00mm products to reduce cleaning and setup time. AI suggested 30 Apr because the date is within the safe window and the line has lighter load.'
+}
+```
+
+---
+
+### 8. Populate the After table
+Update the Sequence Insight column so that:
+- the short text appears directly in the cell
+- clicking “more” expands or shows the long explanation
+
+---
+
+## Verification
+
+1. Sequence Insight changes depending on selected strategy
+2. Standard insight explains chronology / date / urgency logic
+3. AI Balanced insight explains changeover reduction / grouping / safe-window logic
+4. AI Profit insight explains profit-rate logic using actual numbers
+5. Profit insight shows formula: Margin ÷ (Production Hours + Changeover Hours)
+6. Short text stays concise in the row
+7. Expanded text gives fuller reasoning
+8. Insights use real app data, not hardcoded explanation text
+9. Users can clearly understand why an order is placed in its position

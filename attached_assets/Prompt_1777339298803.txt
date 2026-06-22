@@ -1,0 +1,447 @@
+```
+Add adjustable/resizable Before-and-After tables in the Auto-Sequence (All) preview:
+
+---
+
+## 1. ADD RESIZABLE SPLIT PANE STATE
+
+```jsx
+// In PlantAutoSequencePreview.jsx
+
+const DEFAULT_SPLIT = 50; // 50% / 50%
+const MIN_SPLIT = 25;     // left panel minimum width %
+const MAX_SPLIT = 75;     // left panel maximum width %
+
+const [splitRatio, setSplitRatio] = useState(DEFAULT_SPLIT);
+const [isDraggingDivider, setIsDraggingDivider] = useState(false);
+
+const splitContainerRef = useRef(null);
+const dividerRef = useRef(null);
+```
+
+---
+
+## 2. RESET SPLIT WHEN MODAL OPENS
+
+```jsx
+// Reset to default every time modal opens
+useEffect(() => {
+  if (isOpen) {
+    setSplitRatio(DEFAULT_SPLIT);
+  }
+}, [isOpen]);
+```
+
+If the component mounts/unmounts with modal open/close, this is enough:
+
+```jsx
+useEffect(() => {
+  setSplitRatio(DEFAULT_SPLIT);
+}, []);
+```
+
+---
+
+## 3. ADD DRAG HANDLERS
+
+```jsx
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function handleDividerMouseDown(e) {
+  e.preventDefault();
+  setIsDraggingDivider(true);
+  document.body.style.cursor = 'col-resize';
+  document.body.style.userSelect = 'none';
+}
+
+function handleDividerDoubleClick() {
+  setSplitRatio(DEFAULT_SPLIT);
+}
+
+useEffect(() => {
+  function handleMouseMove(e) {
+    if (!isDraggingDivider || !splitContainerRef.current) return;
+    
+    const rect = splitContainerRef.current.getBoundingClientRect();
+    const relativeX = e.clientX - rect.left;
+    const percent = (relativeX / rect.width) * 100;
+    const clamped = clamp(percent, MIN_SPLIT, MAX_SPLIT);
+    
+    setSplitRatio(clamped);
+  }
+  
+  function handleMouseUp() {
+    if (!isDraggingDivider) return;
+    setIsDraggingDivider(false);
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+  }
+  
+  window.addEventListener('mousemove', handleMouseMove);
+  window.addEventListener('mouseup', handleMouseUp);
+  
+  return () => {
+    window.removeEventListener('mousemove', handleMouseMove);
+    window.removeEventListener('mouseup', handleMouseUp);
+  };
+}, [isDraggingDivider]);
+```
+
+---
+
+## 4. REPLACE THE CURRENT BEFORE/AFTER LAYOUT WITH A RESIZABLE SPLIT CONTAINER
+
+```jsx
+// BEFORE:
+// <div className="as-before-after-wrap">
+//   <div className="as-before-panel">...</div>
+//   <div className="as-middle-divider">...</div>
+//   <div className="as-after-panel">...</div>
+// </div>
+
+// AFTER:
+<div
+  ref={splitContainerRef}
+  className={`as-before-after-split ${isDraggingDivider ? 'is-dragging' : ''}`}
+>
+  {/* LEFT: BEFORE */}
+  <div
+    className="as-split-panel as-split-panel-before"
+    style={{ width: `${splitRatio}%` }}
+  >
+    <div className="as-panel-header as-panel-header-before">
+      <span className="as-panel-header-icon">📋</span>
+      <span>Before — {beforeOrdersCount} orders</span>
+    </div>
+    
+    <div className="as-panel-scroll">
+      {/* existing Before table */}
+      {renderBeforeTable()}
+    </div>
+  </div>
+  
+  {/* DRAGGABLE DIVIDER */}
+  <div
+    ref={dividerRef}
+    className={`as-split-divider ${isDraggingDivider ? 'active' : ''}`}
+    onMouseDown={handleDividerMouseDown}
+    onDoubleClick={handleDividerDoubleClick}
+    title="Drag to resize • Double-click to reset"
+    role="separator"
+    aria-orientation="vertical"
+    aria-label="Resize before and after tables"
+  >
+    <div className="as-split-divider-line" />
+    <div className="as-split-divider-handle">
+      ↔
+    </div>
+  </div>
+  
+  {/* RIGHT: AFTER */}
+  <div
+    className="as-split-panel as-split-panel-after"
+    style={{ width: `${100 - splitRatio}%` }}
+  >
+    <div className="as-panel-header as-panel-header-after">
+      <span className="as-panel-header-icon">✨</span>
+      <span>{afterHeaderLabel}</span>
+    </div>
+    
+    <div className="as-panel-scroll">
+      {/* existing After table */}
+      {renderAfterTable()}
+    </div>
+  </div>
+</div>
+```
+
+---
+
+## 5. KEEP EXISTING TABLES, JUST WRAP THEM
+
+If your current code already has the two table render blocks, do not rewrite the table internals — just wrap them with the split layout above.
+
+Example:
+
+```jsx
+function renderBeforeTable() {
+  return (
+    <table className="as-table as-table-before">
+      {/* existing before table head/body */}
+    </table>
+  );
+}
+
+function renderAfterTable() {
+  return (
+    <table className="as-table as-table-after">
+      {/* existing after table head/body */}
+    </table>
+  );
+}
+```
+
+---
+
+## 6. ADD CSS FOR RESIZABLE SPLIT PANE
+
+```css
+.as-before-after-split {
+  display: flex;
+  align-items: stretch;
+  width: 100%;
+  min-height: 420px;
+  max-height: calc(100vh - 260px);
+  position: relative;
+  overflow: hidden;
+}
+
+.as-before-after-split.is-dragging {
+  cursor: col-resize;
+}
+
+.as-split-panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0; /* important for shrinking */
+  height: 100%;
+  overflow: hidden;
+  background: #fff;
+}
+
+.dark-mode .as-split-panel {
+  background: var(--color-bg);
+}
+
+.as-split-panel-before {
+  border-right: none;
+}
+
+.as-split-panel-after {
+  border-left: none;
+}
+
+.as-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 48px;
+  padding: 0 16px;
+  font-size: 14px;
+  font-weight: 700;
+  border-bottom: 1px solid #e5e7eb;
+  white-space: nowrap;
+}
+
+.as-panel-header-before {
+  color: #4b5563;
+  background: #fff;
+}
+
+.as-panel-header-after {
+  color: #c2410c;
+  background: #fff7ed;
+}
+
+.dark-mode .as-panel-header-before {
+  color: var(--color-text);
+  background: var(--color-bg-secondary);
+  border-bottom-color: var(--color-border);
+}
+
+.dark-mode .as-panel-header-after {
+  color: #fdba74;
+  background: rgba(194, 65, 12, 0.12);
+  border-bottom-color: var(--color-border);
+}
+
+.as-panel-header-icon {
+  font-size: 14px;
+}
+
+.as-panel-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto; /* keep internal scrollbars */
+}
+
+/* Divider */
+.as-split-divider {
+  position: relative;
+  width: 16px;
+  min-width: 16px;
+  cursor: col-resize;
+  background: transparent;
+  flex-shrink: 0;
+  z-index: 5;
+}
+
+.as-split-divider:hover .as-split-divider-line,
+.as-split-divider.active .as-split-divider-line {
+  background: #93c5fd;
+}
+
+.dark-mode .as-split-divider:hover .as-split-divider-line,
+.dark-mode .as-split-divider.active .as-split-divider-line {
+  background: #60a5fa;
+}
+
+.as-split-divider-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 2px;
+  transform: translateX(-50%);
+  background: #d1d5db;
+  transition: background 0.15s ease;
+}
+
+.dark-mode .as-split-divider-line {
+  background: var(--color-border);
+}
+
+.as-split-divider-handle {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  background: #fff;
+  border: 1px solid #d1d5db;
+  color: #6b7280;
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+  pointer-events: none;
+}
+
+.dark-mode .as-split-divider-handle {
+  background: var(--color-bg-secondary);
+  border-color: var(--color-border);
+  color: var(--color-text-secondary);
+}
+
+/* Tables keep their own natural width */
+.as-table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: collapse;
+}
+
+/* Optional sticky headers if already supported */
+.as-panel-scroll thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: inherit;
+}
+```
+
+---
+
+## 7. OPTIONAL: ADD KEYBOARD ACCESSIBILITY FOR DIVIDER
+
+```jsx
+function handleDividerKeyDown(e) {
+  if (e.key === 'ArrowLeft') {
+    setSplitRatio(prev => clamp(prev - 2, MIN_SPLIT, MAX_SPLIT));
+  } else if (e.key === 'ArrowRight') {
+    setSplitRatio(prev => clamp(prev + 2, MIN_SPLIT, MAX_SPLIT));
+  } else if (e.key === 'Home') {
+    setSplitRatio(MIN_SPLIT);
+  } else if (e.key === 'End') {
+    setSplitRatio(MAX_SPLIT);
+  } else if (e.key === 'Enter' || e.key === ' ') {
+    setSplitRatio(DEFAULT_SPLIT);
+  }
+}
+```
+
+Then apply it:
+
+```jsx
+<div
+  ref={dividerRef}
+  className={`as-split-divider ${isDraggingDivider ? 'active' : ''}`}
+  onMouseDown={handleDividerMouseDown}
+  onDoubleClick={handleDividerDoubleClick}
+  onKeyDown={handleDividerKeyDown}
+  tabIndex={0}
+  title="Drag to resize • Double-click to reset"
+  role="separator"
+  aria-orientation="vertical"
+  aria-label="Resize before and after tables"
+>
+```
+
+---
+
+## 8. PREVENT TEXT SELECTION / DRAG GLITCHS INSIDE TABLES WHILE RESIZING
+
+```css
+.as-before-after-split.is-dragging * {
+  user-select: none !important;
+  cursor: col-resize !important;
+}
+```
+
+---
+
+## 9. DO NOT PERSIST WIDTH ACROSS MODAL REOPEN
+
+Do NOT save `splitRatio` to localStorage or DB.
+
+Each time the modal is opened:
+- reset to 50 / 50
+
+This matches the expected behavior:
+- adjustable during current session
+- reset when modal opens again
+
+---
+
+## VERIFICATION
+
+### Resize behavior
+1. ✅ User can drag the center divider left and right
+2. ✅ Before panel width increases when divider is dragged right
+3. ✅ After panel width decreases when divider is dragged right
+4. ✅ Before panel width decreases when divider is dragged left
+5. ✅ After panel width increases when divider is dragged left
+
+### Constraints
+6. ✅ Left panel cannot go below 25%
+7. ✅ Left panel cannot exceed 75%
+8. ✅ Right panel also effectively respects 25% minimum
+9. ✅ Divider stops at min/max bounds
+
+### Scrollbars
+10. ✅ Before table keeps its own horizontal/vertical scrollbars
+11. ✅ After table keeps its own horizontal/vertical scrollbars
+12. ✅ Resizing does not remove internal scrolling
+13. ✅ User can resize and still scroll inside each table independently
+
+### Reset behavior
+14. ✅ Double-clicking the divider resets layout to 50 / 50
+15. ✅ Closing and reopening the modal resets layout to default 50 / 50
+16. ✅ Width is not persisted after modal closes
+
+### UX
+17. ✅ Divider shows col-resize cursor on hover
+18. ✅ Divider handle remains visible and centered
+19. ✅ Dragging disables accidental text selection
+20. ✅ No layout breaking when resizing rapidly
+
+### Accessibility
+21. ✅ Divider has tooltip: "Drag to resize • Double-click to reset"
+22. ✅ Divider has separator role and keyboard focus
+23. ✅ ArrowLeft / ArrowRight resize by keyboard if enabled
+24. ✅ Enter / Space resets to default if keyboard support is enabled
+```

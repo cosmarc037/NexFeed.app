@@ -1,0 +1,73 @@
+```
+Implement the following change to the NexFeed application:
+
+---
+
+## SAP FILE UPLOAD — PRESERVE ORIGINAL ROW ORDER PER LINE
+
+When a SAP file is uploaded, the original row order of orders within the file must be preserved when distributing orders to their respective feedmill lines. The system must NOT re-sort or rearrange orders within a line after upload.
+
+**Current behavior (incorrect):**
+- Orders are uploaded and may be re-sorted by some criteria (e.g., Avail Date, Material Code, or alphabetical) after being assigned to their respective lines.
+- This disrupts the original order intended by SAP/the client.
+
+**Correct behavior:**
+- The system reads the SAP file top-to-bottom.
+- Each order is assigned to its respective feedmill line based on the Line column value.
+- Within each line, orders maintain the EXACT same relative order as they appeared in the SAP file.
+
+**Example:**
+
+SAP file row order (all lines mixed):
+```
+Row 1: Order A — Line 1
+Row 2: Order B — Line 3
+Row 3: Order C — Line 5
+Row 4: Order D — Line 7
+Row 5: Order E — Line 1
+Row 6: Order F — Line 2
+Row 7: Order G — Line 1
+```
+
+After upload, Line 1 tab should show:
+```
+Prio 1: Order A  (was Row 1 in SAP file)
+Prio 2: Order E  (was Row 5 in SAP file)
+Prio 3: Order G  (was Row 7 in SAP file)
+```
+
+Line 3 tab should show:
+```
+Prio 1: Order B  (was Row 2 in SAP file)
+```
+
+Line 5 tab should show:
+```
+Prio 1: Order C  (was Row 3 in SAP file)
+```
+
+And so on for all lines.
+
+**Prio assignment:**
+- Prio numbers are assigned sequentially (1, 2, 3, ...) based on the preserved order within each line.
+- Prio 1 = first order that appeared for that line in the SAP file.
+- Prio 2 = second order that appeared for that line in the SAP file.
+- And so on.
+
+**This preserved order is the INITIAL order only:**
+- After upload, the user can freely reorder via drag-and-drop or Auto-Sequence.
+- The scheduling logic (work backwards from Avail Date, fill gaps with non-dated orders) applies AFTER the initial order is set — but the initial Prio assignment must reflect the SAP file order.
+
+**Important — this applies to:**
+- First-time upload (no existing orders).
+- Subsequent uploads (M-W-F pattern): New orders from the new file are appended to the existing orders in each line, maintaining the new file's row order among the new orders. Existing orders retain their current positions.
+
+**Do NOT re-sort by:**
+- Avail Date
+- Material Code
+- Volume
+- Item Description
+- Or any other field
+
+The SAP file row order is the source of truth for initial sequencing.
+```

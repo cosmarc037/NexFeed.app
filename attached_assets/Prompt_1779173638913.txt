@@ -1,0 +1,157 @@
+Please update the **Detailed Demand View** table in the Demand Profile page with the following improvements.
+
+---
+
+## 1. ENABLE FILTERS IN TABLE HEADER COLUMNS
+
+Please make the table header columns filterable.
+
+Users should be able to filter the table using the column headers where applicable, similar to standard table filtering behavior.
+
+At minimum, support filtering for:
+- FG Code
+- Item Description
+- Period
+- Demand (MT)
+- Done (MT)
+- Plotted (MT)
+- Gap (MT)
+- Coverage (%)
+- Status
+
+If full per-column filtering is too heavy for numeric fields, at least make text columns filterable and numeric columns sortable/filterable in a practical way.
+
+---
+
+## 2. APPLY DEFAULT SORTING LOGIC
+
+Please sort the Detailed Demand View table by default so that rows **nearest to covering the demand** appear at the top.
+
+### Desired behavior
+Rows with:
+- higher coverage %
+- lower remaining gap
+- closer to the historical demand target
+
+should appear first.
+
+Rows with:
+- large remaining gap
+- very low coverage
+- or 0% coverage
+
+should appear lower in the table.
+
+### Recommended default sort logic
+Use:
+1. **Coverage (%) descending**
+2. then **Gap (MT) ascending**
+
+This should prioritize SKUs that are closest to the demand target.
+
+---
+
+## 3. UPDATE COLUMN LABELS
+
+Please rename the table columns to use the following terms:
+
+- **FG Code**
+- **Item Description**
+- **Period**
+- **Demand (MT)**
+- **Done (MT)**
+- **Plotted (MT)**
+- **Gap (MT)**
+- **Coverage (%)**
+- **Status**
+
+### Notes
+Please update only the displayed column labels.
+Do not change the underlying calculation logic unless needed for alignment.
+
+---
+
+## COLUMN TERM MAPPING
+
+Please align the current logic to these display terms:
+
+- `Historical Demand (MT)` → **Demand (MT)**
+- `Fulfilled / Done (MT)` → **Done (MT)**
+- `Planned / Pipeline (MT)` → **Plotted (MT)**
+- `Remaining Gap (MT)` → **Gap (MT)**
+- `Coverage %` → **Coverage (%)**
+- `Insight` → **Status**
+
+---
+
+## STATUS COLUMN
+
+Please rename the current “Insight” column to:
+## **Status**
+
+Use concise statuses such as:
+- Covered
+- Near target
+- Below target
+- Large gap
+- No fulfillment yet
+- Exceeds demand
+
+This should read more clearly in the table.
+
+---
+
+## IMPORTANT
+
+Do not remove the current calculations.
+This request is mainly for:
+- better usability
+- better default prioritization
+- cleaner business terms in the UI
+
+Please preserve the existing demand comparison logic:
+- Demand benchmark
+- Done volume
+- Plotted / pipeline volume
+- Gap
+- Coverage %
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log:
+
+```javascript
+console.debug('[Demand Table Default Sort]', {
+  sortBy: ['coveragePct desc', 'gapMT asc'],
+  rowCount,
+});
+```
+
+```javascript
+console.debug('[Demand Table Column Filters]', {
+  enabledColumns: ['fgCode', 'itemDescription', 'period', 'demandMT', 'doneMT', 'plottedMT', 'gapMT', 'coveragePct', 'status'],
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Detailed Demand View column headers support filtering where applicable
+2. ✅ Table is sorted by default with near-covered demand rows on top
+3. ✅ Rows with large gap / 0% coverage appear lower in the table
+4. ✅ Column labels are updated to:
+   - FG Code
+   - Item Description
+   - Period
+   - Demand (MT)
+   - Done (MT)
+   - Plotted (MT)
+   - Gap (MT)
+   - Coverage (%)
+   - Status
+5. ✅ “Insight” is replaced by “Status”
+6. ✅ Existing demand calculations are preserved
+7. ✅ No table rendering or filtering errors are introduced

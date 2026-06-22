@@ -1,0 +1,265 @@
+```
+Fix the changeover total in the preview summary/tooltip so it uses the actual row-level changeover values shown in the table, not just the base/default changeover.
+
+---
+
+## OBJECTIVE
+
+The preview is undercounting total changeover.
+
+Current behavior appears to use only the base/default changeover value (0.17) for each order, instead of summing the actual row-level changeover values shown in the preview table.
+
+This causes the preview summary/tooltip to show a much smaller changeover total than what the order rows actually indicate.
+
+---
+
+## PROBLEM TO FIX
+
+Example:
+The preview tooltip currently shows:
+- Production: 19.74 hrs
+- Changeover: 1.70 hrs
+- Total: 21.44 hrs
+
+But the actual row-level changeovers in the Before table are:
+
+- 0.17
+- 0.83
+- 0.83
+- 0.17
+- 0.83
+- 0.17
+- 0.17
+- 0.17
+- 0.17
+- 0.17
+
+Correct total:
+- **3.68 hrs**
+
+The current `1.70 hrs` strongly suggests the app is doing something like:
+- `10 orders × 0.17`
+instead of summing the actual row-level CO values.
+
+This is incorrect.
+
+---
+
+## REQUIRED RULE
+
+For preview totals, changeover must always be calculated as:
+
+### sum of the actual row-level changeover values shown in the table
+
+Meaning:
+- if a row shows `CO: 0.83`, use 0.83
+- if a row shows `CO: 0.17`, use 0.17
+
+Do not use:
+- a global default/base changeover
+- line-level base CO multiplied by order count
+- fixed assumptions that all rows have the same CO
+
+---
+
+## 1. DEFINE A SHARED HELPER TO READ THE ACTUAL ROW-LEVEL CHANGEOVER
+
+Create or update a helper that returns the actual resolved changeover value used by each row.
+
+### Suggested helper:
+```javascript
+function getOrderChangeoverHours(order) {
+  const candidates = [
+    order.changeover,
+    order.changeover_hours,
+    order._changeoverHrs,
+    order._changeover,
+    order.change_over,
+    order.co,
+  ];
+
+  for (const val of candidates) {
+    const parsed = parseFloat(val);
+    if (!Number.isNaN(parsed)) {
+      return parsed;
+    }
+  }
+
+  return 0;
+}
+```
+
+Important:
+- prioritize the exact row-level changeover field already being displayed in the table
+- if necessary, explicitly store the final row display CO value on the order object
+- the same value shown in `CO: X` should be the one used in totals
+
+---
+
+## 2. SUM THE ACTUAL CHANGEOVER PER ROW
+
+Replace any logic that currently computes total changeover like:
+- `orders.length * 0.17`
+- `lineBaseCO * orderCount`
+- `defaultChangeover * rowCount`
+
+with:
+
+```javascript
+function calculateLineTotalChangeover(orders) {
+  return Number(
+    (orders || []).reduce((sum, order) => {
+      return sum + getOrderChangeoverHours(order);
+    }, 0).toFixed(2)
+  );
+}
+```
+
+Then use this for:
+- preview tooltip breakdown
+- line total changeover in summary
+- before/after comparison if applicable
+
+---
+
+## 3. USE THE SAME CHANGEOVER VALUE THE USER SEES IN THE TABLE
+
+If the table row shows:
+- `CO: 0.83`
+
+the preview total must include:
+- `0.83`
+
+If the table row shows:
+- `CO: 0.17`
+
+the preview total must include:
+- `0.17`
+
+The preview summary must match the visible row data exactly.
+
+This is the source of truth.
+
+---
+
+## 4. INCLUDE ALL TYPES OF CHANGEOVER, NOT JUST BASE CHANGEOVER
+
+The changeover total must include:
+- base changeover
+- cleaning changeover
+- changing/material/formula changeover
+- any larger transition-specific CO already resolved in the row
+
+If the row-level CO already contains the final resolved total for that step, use it directly.
+
+Do not flatten everything back to the base/default CO.
+
+---
+
+## 5. APPLY THIS TO BOTH BEFORE AND AFTER PREVIEW TOTALS
+
+Make sure this fix applies consistently to:
+- Total Hrs Before tooltip breakdown
+- Total Hrs After tooltip breakdown
+- any line-level changeover summary shown in preview
+
+The `Changeover:` line in the tooltip must always equal the sum of the actual row CO values for that line.
+
+---
+
+## 6. KEEP TOTAL HOURS CONSISTENT
+
+If total hours is shown as:
+- `Production + Changeover`
+
+then once changeover is corrected, the `Total` value in the tooltip must also update accordingly.
+
+### Example:
+If:
+- Production = 19.74 hrs
+- Changeover = 3.68 hrs
+
+Then:
+- Total = 23.42 hrs
+
+Do not leave total based on old undercounted changeover logic.
+
+---
+
+## 7. IF NEEDED, STORE FINAL DISPLAY CHANGEOVER ON EACH ROW
+
+If the table display currently computes `CO: X` during rendering only, store it explicitly.
+
+### Example:
+```javascript
+const enrichedOrder = {
+  ...order,
+  _displayChangeoverHrs: resolvedChangeoverHours,
+};
+```
+
+Then:
+- row rendering uses `_displayChangeoverHrs`
+- preview totals use `_displayChangeoverHrs`
+
+This prevents table vs summary mismatches.
+
+---
+
+## 8. ADD DEBUG LOGGING TO VERIFY CHANGEOVER TOTALS
+
+Temporarily log:
+
+```javascript
+console.debug('[Preview Changeover Check]', {
+  line,
+  orders: (orders || []).map(order => ({
+    orderId: order.id,
+    displayedChangeover: getOrderChangeoverHours(order),
+  })),
+  totalChangeover: calculateLineTotalChangeover(orders),
+});
+```
+
+This should confirm:
+- rows with 0.83 are contributing 0.83
+- rows with 0.17 are contributing 0.17
+- total matches the visible sequence
+
+---
+
+## 9. VERIFY AGAINST THE PROVIDED EXAMPLE
+
+Given the row-level changeovers:
+- 0.17
+- 0.83
+- 0.83
+- 0.17
+- 0.83
+- 0.17
+- 0.17
+- 0.17
+- 0.17
+- 0.17
+
+Expected total:
+- **3.68 hrs**
+
+The preview tooltip should not show:
+- `Changeover: 1.70 hrs`
+
+It should show:
+- `Changeover: 3.68 hrs`
+
+And total hours should be recalculated accordingly.
+
+---
+
+## 10. VERIFICATION
+
+1. ✅ Preview changeover total now uses actual row-level CO values
+2. ✅ Rows with 0.83 changeover are fully counted
+3. ✅ Rows with 0.17 changeover are fully counted
+4. ✅ Base/default CO is no longer incorrectly applied to all rows
+5. ✅ Tooltip changeover matches the visible row sequence
+6. ✅ Total hours update correctly after fixing changeover total

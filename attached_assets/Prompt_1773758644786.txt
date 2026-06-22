@@ -1,0 +1,206 @@
+```
+Implement the following ADDITION to the availability date sorting rules:
+
+---
+
+## AUTO-SORT WHEN AVAILABILITY DATES CHANGE
+
+Whenever a user modifies an order's availability date — whether setting a new date, changing an existing date, or removing a date — the app must automatically re-validate and re-sort the dated orders to maintain chronological sequence.
+
+---
+
+### SCENARIO 1 — NON-DATED ORDER GETS A DATE
+
+When a user changes a non-dated order (prio replenish, safety stocks, etc.) to an actual date:
+
+**Before:**
+```
+Prio 1: March 17, 2026
+Prio 2: March 22, 2026
+Prio 3: prio replenish       ← user changes this to "March 19, 2026"
+Prio 4: safety stocks
+Prio 5: March 28, 2026
+```
+
+**After auto-sort:**
+```
+Prio 1: March 17, 2026
+Prio 2: March 19, 2026       ← moved UP, now between March 17 and March 22
+Prio 3: March 22, 2026
+Prio 4: safety stocks
+Prio 5: March 28, 2026
+```
+
+**Logic:**
+- The newly dated order is removed from its current position.
+- It is re-inserted into the correct chronological position among OTHER dated orders.
+- Non-dated orders that were between dated orders remain in their positions.
+- Prio numbers re-sequence.
+
+---
+
+### SCENARIO 2 — DATED ORDER GETS A DIFFERENT DATE
+
+When a user changes an existing dated order to a different date:
+
+**Before:**
+```
+Prio 1: March 17, 2026
+Prio 2: March 22, 2026       ← user changes this to "March 30, 2026"
+Prio 3: safety stocks
+Prio 4: March 28, 2026
+```
+
+**After auto-sort:**
+```
+Prio 1: March 17, 2026
+Prio 2: safety stocks
+Prio 3: March 28, 2026
+Prio 4: March 30, 2026       ← moved DOWN, now after March 28
+```
+
+**Another example — date moved earlier:**
+
+**Before:**
+```
+Prio 1: March 17, 2026
+Prio 2: prio replenish
+Prio 3: March 22, 2026
+Prio 4: March 28, 2026       ← user changes this to "March 18, 2026"
+```
+
+**After auto-sort:**
+```
+Prio 1: March 17, 2026
+Prio 2: March 18, 2026       ← moved UP, now between March 17 and March 22
+Prio 3: prio replenish
+Prio 4: March 22, 2026
+```
+
+---
+
+### SCENARIO 3 — DATED ORDER BECOMES NON-DATED
+
+When a user changes an actual date to a non-date value (e.g., changes "March 22, 2026" to "prio replenish"):
+
+**Before:**
+```
+Prio 1: March 17, 2026
+Prio 2: March 22, 2026       ← user changes this to "prio replenish"
+Prio 3: safety stocks
+Prio 4: March 28, 2026
+```
+
+**After:**
+```
+Prio 1: March 17, 2026
+Prio 2: prio replenish       ← stays in same position, now a non-dated order
+Prio 3: safety stocks
+Prio 4: March 28, 2026
+```
+
+- The order stays in its current position.
+- No resorting needed — removing a date doesn't violate chronological order.
+- The order is now a non-dated order and is freely movable.
+
+---
+
+### SCENARIO 4 — MULTIPLE ORDERS GET DATES AT ONCE
+
+If multiple orders change dates in a single operation (e.g., bulk edit or SAP re-upload):
+
+- ALL dated orders are collected.
+- ALL dated orders are sorted chronologically.
+- Non-dated orders retain their relative positions.
+- The full list is rebuilt using the same logic as the initial SAP upload auto-sort.
+
+---
+
+### AUTO-SORT BEHAVIOR
+
+**When auto-sort triggers:**
+
+1. The order moves to its correct chronological position SMOOTHLY.
+   - Brief animation: the row slides to its new position (~300ms).
+   - Other rows shift to accommodate.
+
+2. A notification toast confirms the re-sort:
+   ```
+   ┌─────────────────────────────────────────────────────┐
+   │ ↕ Order re-sorted                                    │
+   │                                                      │
+   │ FPR: 260309 was moved from Prio 3 to Prio 2 to      │
+   │ maintain date sequence (March 19, 2026).             │
+   └─────────────────────────────────────────────────────┘
+   ```
+   - Position: Top-right.
+   - Background: Light blue (#eff6ff).
+   - Border-left: 3px solid #3b82f6.
+   - Auto-dismiss after 4 seconds.
+   - Has close (×) button.
+
+3. Prio numbers re-sequence after the move.
+
+4. Cascade recalculation triggers (completion dates update).
+
+---
+
+### INSERTION LOGIC FOR AUTO-SORT
+
+When a newly dated or re-dated order needs to be placed in the correct position:
+
+```
+function findCorrectPosition(order, allOrders) {
+  const orderDate = parseDate(order.availability);
+  
+  // Get all OTHER dated orders (excluding this one), sorted by current position
+  const otherDatedOrders = allOrders
+    .filter(o => o.id !== order.id && isDateValue(o.availability))
+    .sort((a, b) => a.prio - b.prio);
+  
+  if (otherDatedOrders.length === 0) {
+    // No other dated orders — place at current position (no constraint)
+    return order.currentIndex;
+  }
+  
+  // Find the last dated order with date <= orderDate
+  const lastEarlierOrder = otherDatedOrders
+    .filter(o => parseDate(o.availability) <= orderDate)
+    .pop();  // last one (highest prio among earlier dates)
+  
+  // Find the first dated order with date > orderDate
+  const firstLaterOrder = otherDatedOrders
+    .find(o => parseDate(o.availability) > orderDate);
+  
+  if (!lastEarlierOrder) {
+    // This order has the earliest date — place before the first dated order
+    return firstLaterOrder.currentIndex;
+  }
+  
+  if (!firstLaterOrder) {
+    // This order has the latest date — place after the last dated order
+    return lastEarlierOrder.currentIndex + 1;
+  }
+  
+  // Place after the last earlier dated order
+  return lastEarlierOrder.currentIndex + 1;
+}
+```
+
+---
+
+### TRIGGER EVENTS FOR AUTO-SORT
+
+The auto-sort validation and correction runs whenever:
+
+| Event | Action |
+|---|---|
+| User edits availability date (any order) | Re-validate and auto-sort if needed |
+| SAP file upload (new orders added) | Auto-sort all dated orders |
+| Order status change to Cancel PO | Remove from sequence, re-validate |
+| Order uncombine | Re-validate the uncombined order's position |
+| Order cut | Both portions inherit the date, validate both positions |
+| Order merge back | Merged order validates its position |
+| Auto-Sequence (AI reorder) | Must respect date chronological rule |
+| Any bulk operation | Re-validate entire line |
+```

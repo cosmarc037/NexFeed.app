@@ -1,0 +1,466 @@
+Please refine the auto-sequence feature so the AI becomes more schedule-feasibility-aware and more operationally useful in four specific areas:
+
+1. Better filling of underutilized days
+2. Better advancement of long-running orders that would otherwise complete late
+3. Better sequence insight that explains why the AI suggested a date
+4. Better AI-suggested start date/time logic, while preserving user manual edits
+
+IMPORTANT:
+Do not rewrite the entire auto-sequence system. Improve the existing AI-generated strategy behavior in a targeted way, while preserving the current architecture and user-editable workflow.
+
+---
+
+## OVERALL PRIORITY ORDER
+
+When refining these behaviors, the AI should prioritize decisions in this order:
+
+### Priority 1
+Avoid lateness / prevent orders from completing beyond their required avail date
+
+### Priority 2
+Fill underutilized early days where possible
+
+### Priority 3
+Reduce unnecessary changeovers
+
+### Priority 4
+Preserve good physical grouping / compatibility when reasonable
+
+This means the AI should improve utilization, but not at the expense of creating late orders or obviously bad operational outcomes.
+
+---
+
+# PART 1 — IMPROVE GAP FILLING / DAILY UTILIZATION
+
+## OBJECTIVE
+
+There is still room to improve how the AI advances orders into underutilized days.
+
+Example Daily Utilization:
+- May 12, 2026 → 1 order → 2.2 hrs → 9.0%
+- May 14, 2026 → 3 orders → 15.5 hrs → 64.5%
+- May 15, 2026 → 1 order → 5.3 hrs → 22.1%
+- May 22, 2026 → 1 order → 0.2 hrs → 0.7%
+
+In cases like this, the AI should do a better job of filling available gaps on earlier underloaded days, especially if only a small number of orders are anchored by true MTO/fixed timing and other orders are movable.
+
+---
+
+## REQUIRED BEHAVIOR
+
+When building AI sequence strategies, the AI should actively look for underutilized days and attempt to pull eligible orders into those days if all of the following are true:
+
+- the order is flexible enough to move earlier
+- moving it earlier does not cause lateness for another order
+- moving it earlier does not violate existing constraints
+- moving it earlier does not create unacceptable changeover penalties
+- moving it earlier does not compromise user-set/fixed anchors
+
+The AI should not stop at the first “acceptable” sequence if there are still obvious underutilized gaps that could be safely filled.
+
+---
+
+## GAP FILLING HEURISTIC
+
+For each underutilized day, the AI should evaluate:
+
+- remaining available hours in that day
+- candidate orders from later dates
+- whether those candidate orders are allowed to be advanced
+- whether they fit in the remaining hours
+- whether they preserve due-date safety
+- whether they create reasonable or unreasonable changeover impact
+
+The AI should prefer candidate orders that:
+- fit well into the remaining capacity
+- reduce wasted day capacity
+- do not create due-date spillover
+- create lower changeover disruption relative to alternatives
+
+This should result in better day-packing.
+
+---
+
+## IMPORTANT CONSTRAINT
+
+Do not force utilization to 100% if that would:
+- create lateness
+- increase risk
+- break feasibility
+- create highly inefficient changeovers
+
+This is “smart filling,” not brute-force packing.
+
+---
+
+# PART 2 — IMPROVE DELAY-AWARE ADVANCEMENT OF LONGER ORDERS
+
+## OBJECTIVE
+
+The AI must become aware that an order can still be “on its target date” in name, but actually finish late because of its production duration and actual start time.
+
+Example:
+- Order target date from Future Dispatches = May 13
+- Prior order finishes, so this order can only start at 12:00 PM on May 13
+- This order has 18.0 production hours
+- Completion becomes 6:00 AM on May 14
+- That means the order is effectively late relative to its May 13 target date
+
+The AI should detect this and avoid keeping the order on May 13 if it cannot actually complete by end-of-day May 13.
+
+Instead, the AI should consider advancing it earlier, such as May 12, so it can finish by May 13.
+
+---
+
+## REQUIRED BEHAVIOR
+
+When evaluating a candidate date for an order, the AI must not only check the target date from Future Dispatches.
+
+It must also evaluate:
+- actual start time on that date
+- production hours
+- changeover from the previous order
+- projected completion time
+- whether projected completion stays within the required date window
+
+If projected completion goes beyond 11:59 PM of the order’s target/required avail date, then the AI should treat that assignment as unsafe / late-risk.
+
+If feasible, it should advance the order to an earlier day so completion happens on or before the target date.
+
+---
+
+## FUTURE DISPATCH CONTEXT
+
+The AI must explicitly use the Future Dispatch / target avail date as the requirement deadline reference.
+
+Meaning:
+- if the order’s target date is May 13
+- then completion must not spill into May 14
+- otherwise the order is effectively late / delayed
+
+This should be part of the AI’s advancement logic.
+
+---
+
+## DATE VALIDATION RULE
+
+A candidate production placement is valid only if:
+- the order can start based on prior order completion + changeover
+- and still complete on or before 11:59 PM of its required avail date
+
+If not, the AI should seek:
+- an earlier placement
+- or another feasible sequence position
+
+This is especially important for long-running orders.
+
+---
+
+# PART 3 — IMPROVE SEQUENCE INSIGHT EXPLANATIONS
+
+## OBJECTIVE
+
+The sequence insight should become more specific and explain the actual scheduling reason for the AI’s suggestion.
+
+Right now, sequence insight can still feel generic.
+
+We want the insight to explain cases like:
+- the AI advanced an order because keeping it on the original future-dispatch date would cause completion after midnight and therefore lateness
+- the AI filled an underutilized day to improve line usage without compromising due dates
+- the AI preserved a nearby grouping to reduce changeover while still keeping the order on time
+
+---
+
+## REQUIRED BEHAVIOR
+
+For each AI-suggested order placement, the sequence insight should mention the primary reason why that date was suggested.
+
+Examples of valid reasoning themes:
+- delay avoidance
+- stockout prevention
+- underutilized day filling
+- same-category grouping
+- changeover minimization
+- preservation of due-date safety
+- user-set anchor respect
+
+---
+
+## EXAMPLE FOR LONG-RUN DELAY AVOIDANCE
+
+If an order has:
+- target date = May 13
+- start time = 12:00 PM
+- production = 18.0 hours
+- completion = 6:00 AM on May 14
+
+then the insight should say something like:
+
+“This order was advanced because keeping it on May 13 would result in a 12:00 PM start and an estimated 6:00 AM completion on May 14, which exceeds the original target date from Future Dispatches.”
+
+This level of explanation is preferred.
+
+---
+
+## EXAMPLE FOR GAP FILLING
+
+If the AI moves an order into a lightly loaded day, the insight can say something like:
+
+“This order was advanced into May 12 to utilize an underloaded production day while still preserving its due-date safety and maintaining acceptable changeover cost.”
+
+This makes the strategy easier to trust.
+
+---
+
+## INSIGHT QUALITY REQUIREMENT
+
+Please improve the insight so it is:
+- specific
+- operationally grounded
+- tied to actual timing
+- tied to real scheduling tradeoffs
+
+Do not keep it too generic if the AI has stronger reasoning available.
+
+---
+
+# PART 4 — IMPROVE AI-SUGGESTED START DATE / START TIME
+
+## OBJECTIVE
+
+The AI should not only suggest a better sequence and effective avail date; it should also suggest a better start date and start time when possible.
+
+This should be informed by:
+- avail date
+- estimated completion target
+- production hours
+- prior order completion
+- changeovers
+- current anchor logic
+- the one-day planning gap logic when applicable
+
+---
+
+## CURRENT BEHAVIOR CONTEXT
+
+Current app logic:
+- user may manually set Start Date / Start Time on an order
+- first order may default to today at 8:00 AM if no explicit start is set
+- downstream orders cascade based on:
+  - previous completion
+  - plus previous changeover
+- estimated completion is derived from start + production hours
+- avail date is the required deadline
+- if completion > avail date, order is late
+
+This logic must remain intact.
+
+The AI enhancement should work within this model.
+
+---
+
+## REQUIRED BEHAVIOR
+
+When generating an AI preview, the AI should analyze:
+- order avail date
+- prior order completion
+- prior order changeover
+- production duration
+- line position
+- whether a manual start already exists
+
+Then it should suggest a realistic:
+- start date
+- start time
+
+for orders where suggestion is appropriate.
+
+The AI should not simply leave these blank if a meaningful suggestion can be inferred.
+
+---
+
+## START-TIME FEASIBILITY RULE
+
+If the AI suggests a date for an order, it should also validate whether:
+- the order can actually start at a realistic time
+- the start is consistent with the prior order’s completion and changeover
+- the resulting completion remains on time relative to avail date
+
+This should make the AI’s suggestions more operationally usable.
+
+---
+
+## ONE-DAY BUFFER LOGIC
+
+Where applicable, the AI may respect the planner’s operational pattern such as:
+
+Avail Date > Estimated Completion Date > Start Date / Time
+
+Example:
+- avail date = May 20
+- estimated completion = May 19
+- start date may be May 18
+
+The AI does not need to rigidly enforce a fixed one-day gap in every case, but it should be aware of this operational pattern and favor schedules that preserve useful completion buffer before the deadline, especially for longer orders or critical orders.
+
+---
+
+# PART 5 — USER EDITS TO START DATE / TIME MUST BE RETAINED
+
+## OBJECTIVE
+
+User-edited Start Date / Start Time in the auto-sequence preview must persist.
+
+Currently, if the user edits the start date/time, switches to another line, and then comes back, the preview may revert to the AI’s original suggestion.
+
+That should not happen.
+
+---
+
+## REQUIRED BEHAVIOR
+
+If a user manually edits:
+- Start Date
+- Start Time
+
+for an order in the auto-sequence preview, that edit must be retained while navigating across:
+- lines
+- strategy cards
+- tabs or other preview views
+
+The app should preserve the user’s override state in the preview session.
+
+Do not revert back to the original AI suggestion unless the user explicitly:
+- resets
+- re-analyzes
+- or discards changes
+
+---
+
+## USER OVERRIDE RULE
+
+Once Start Date / Start Time is edited by the user:
+- mark that order as manually overridden in preview state
+- use the user value as the active anchor for that order
+- re-anchor downstream calculations from that value if needed
+- keep the override when navigating away and back
+
+This must be true even if the AI originally suggested something else.
+
+---
+
+## CASCADE BEHAVIOR
+
+If the user edits Start Date / Time for an order mid-line:
+- that order becomes a new anchor
+- downstream start/completion should be recalculated from it
+- upstream orders should not be altered by that manual edit
+
+This should follow the app’s existing start-date override logic.
+
+---
+
+## PERSISTENCE SCOPE
+
+At minimum, retain the manual override during the preview/session workflow.
+
+If the app already supports draft persistence in local state or backend draft storage, use it appropriately.
+
+The key requirement is:
+- switching away and back must not lose the user’s edit
+
+---
+
+# PART 6 — KEEP EXISTING EDITABILITY
+
+## IMPORTANT
+
+Do not make AI-suggested start dates/times non-editable.
+
+The user must still be able to edit:
+- start date
+- start time
+
+even after the AI suggests them.
+
+The AI should propose values, not lock them.
+
+---
+
+# PART 7 — DEBUG LOGGING
+
+Temporarily log the following to help verify the new behavior.
+
+## A. Gap filling
+```javascript
+console.debug('[AI Gap Fill Evaluation]', {
+  strategyId,
+  underutilizedDate,
+  remainingHours,
+  candidateOrders: candidateOrders.map(o => ({
+    orderId: o.id,
+    availDate: o.availDate,
+    productionHours: o.productionHours,
+    changeoverHours: o.changeoverHours,
+    movable: o.movable,
+  })),
+  selectedOrderIds,
+});
+```
+
+## B. Delay-aware advancement
+```javascript
+console.debug('[AI Delay-Aware Advancement]', {
+  orderId,
+  targetAvailDate,
+  candidateStart,
+  productionHours,
+  projectedCompletion,
+  completesWithinTargetDate,
+  advancedEarlier: suggestedDate !== targetAvailDate,
+  suggestedDate,
+});
+```
+
+## C. Sequence insight
+```javascript
+console.debug('[AI Sequence Insight Reason]', {
+  orderId,
+  primaryReason,
+  targetAvailDate,
+  projectedStart,
+  projectedCompletion,
+  suggestedDate,
+});
+```
+
+## D. Start date/time retention
+```javascript
+console.debug('[AI Start Override Retention]', {
+  orderId,
+  aiSuggestedStartDate,
+  aiSuggestedStartTime,
+  userOverrideStartDate,
+  userOverrideStartTime,
+  usingUserOverride,
+  currentLineId,
+  currentStrategyId,
+});
+```
+
+---
+
+# PART 8 — VERIFICATION
+
+1. ✅ The AI better fills underutilized days where safe and feasible
+2. ✅ The AI does not leave obvious early-day gaps unexamined if movable orders could fit
+3. ✅ Long-running orders are checked against real start time + duration + completion timing
+4. ✅ Orders that would complete after their Future Dispatch target date are advanced earlier when feasible
+5. ✅ The AI uses Future Dispatch target dates as real completion deadlines, not just label dates
+6. ✅ Sequence insight now explains why a date was suggested for a specific order
+7. ✅ Sequence insight includes timing-based reasons when lateness avoidance is the driver
+8. ✅ The AI can suggest meaningful start date/time values in preview where appropriate
+9. ✅ AI-suggested start date/time remains editable by the user
+10. ✅ User edits to start date/time are retained when navigating away and back
+11. ✅ Manual start-date overrides become the active anchor for downstream preview recalculation
+12. ✅ Existing scheduling / cascade logic remains intact

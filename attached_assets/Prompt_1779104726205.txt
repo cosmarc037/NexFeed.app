@@ -1,0 +1,210 @@
+Please add a new tab under the **Dashboard** group called **Demand**.
+
+When the user clicks this tab, the page content / page title should display:
+## Demand Profile
+
+So the sidebar label should be:
+- Overview
+- Analytics
+- Demand
+
+But the opened page itself should clearly show the title:
+## Demand Profile
+
+---
+
+## PURPOSE OF THE PAGE
+
+The Demand Profile page should help users understand:
+- historical demand behavior by SKU
+- seasonality / recurring demand patterns
+- whether current supply appears sufficient relative to historical demand
+
+This feature is for insight only for now.
+It should not yet change scheduling, sequencing, or production logic.
+
+---
+
+## DATA SOURCE
+
+Use the available historical demand dataset with fields like:
+- Date
+- Year
+- Month
+- FG Material Code
+- FG Item Description
+- SFG1 Material Code
+- SFG Item Description
+- Demand QTY (MT)
+
+---
+
+## TIME-GRAIN DISPLAY OPTIONS
+
+Although monthly display is the main initial view, please allow users to switch the demand view between:
+
+- Daily
+- Monthly
+- Quarterly
+- Yearly
+
+This should be a user-selectable display mode / time-grain option on the Demand Profile page.
+
+### Expected behavior
+- **Daily** = show demand at date level
+- **Monthly** = aggregate demand by month
+- **Quarterly** = aggregate demand by quarter
+- **Yearly** = aggregate demand by year
+
+Please ensure the displayed data updates correctly based on the selected time grain.
+
+---
+
+## PAGE STRUCTURE
+
+### 1. FILTERS / CONTROLS
+Add filters and controls such as:
+- FG Material Code / SKU search
+- Item Description search
+- Category filter (if available)
+- Year filter
+- Month filter (when relevant)
+- Time-grain selector:
+  - Daily
+  - Monthly
+  - Quarterly
+  - Yearly
+
+---
+
+### 2. SUMMARY / KPI CARDS (optional but recommended)
+At the top of the page, show simple summary cards such as:
+- Total SKUs in view
+- Total historical demand (MT)
+- Highest demand SKU
+- Peak period in selected view
+
+Please make the summary logic respect the selected time grain where applicable.
+
+---
+
+### 3. MAIN TABLE
+Add a table to display demand profile data.
+
+Recommended columns:
+- FG Material Code
+- FG Item Description
+- Time Period
+- Historical Demand (MT)
+- Current Inventory (MT)
+- Planned + In Progress Orders (MT)
+- Coverage %
+- Insight
+
+### Notes
+- Time Period should adjust based on selected grain:
+  - Daily → specific date
+  - Monthly → month
+  - Quarterly → quarter
+  - Yearly → year
+- Historical Demand should come from the historical demand dataset
+- Current Inventory and active orders should come from the app’s current operational data if available
+- Coverage % can be derived from available supply vs historical demand
+- Insight can be a simple descriptive label
+
+---
+
+## INSIGHT EXAMPLES
+
+Use simple labels for prototype/demo purposes such as:
+- Sufficient coverage
+- Below expected demand
+- Demand likely exceeds available supply
+- Peak-demand period
+- Historically low-demand period
+
+Keep the logic lightweight and easy to explain.
+
+---
+
+## IMPORTANT SCOPE LIMIT
+
+This page is for insight only for now.
+
+Do not:
+- auto-generate production orders
+- alter sequencing
+- alter scheduling logic
+- alter line assignments
+
+This is a descriptive dashboard tab, not a planning automation engine yet.
+
+---
+
+## OPTIONAL ENHANCEMENT
+
+If easy to implement, allow clicking a SKU row to show a simple trend view based on the selected grain, such as:
+- daily trend
+- monthly trend
+- quarterly trend
+- yearly trend
+
+But this is optional for the first version.
+
+---
+
+## EMPTY STATE
+
+If no historical demand data is available for the selected filters, show a clean empty state such as:
+- No demand profile data available for the selected filters
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log:
+
+```javascript
+console.debug('[Demand Profile Data Load]', {
+  totalRows,
+  selectedFilters,
+  selectedTimeGrain,
+  aggregatedRows,
+});
+```
+
+```javascript
+console.debug('[Demand Profile Coverage Calculation]', {
+  fgMaterialCode,
+  timePeriod,
+  selectedTimeGrain,
+  historicalDemandMT,
+  currentInventoryMT,
+  plannedAndInProgressMT,
+  coveragePct,
+  insight,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ A new **Demand** tab appears under **Dashboard**
+2. ✅ The sidebar shows:
+   - Overview
+   - Analytics
+   - Demand
+3. ✅ Clicking **Demand** opens a page titled **Demand Profile**
+4. ✅ Historical demand data is loaded into the page
+5. ✅ Users can switch between:
+   - Daily
+   - Monthly
+   - Quarterly
+   - Yearly
+6. ✅ The table updates correctly based on the selected time grain
+7. ✅ Time Period values display correctly for each selected grain
+8. ✅ Coverage % and Insight values still calculate correctly per displayed grain
+9. ✅ Existing Dashboard tabs still work normally
+10. ✅ No scheduling or sequencing logic is changed by this feature
+11. ✅ No console errors or route issues are introduced

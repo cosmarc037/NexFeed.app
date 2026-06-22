@@ -1,0 +1,292 @@
+```
+Update the AI 3-dimension analysis so the profitability dimension uses **margin** instead of **profit score** for this test, while keeping the old profit-score logic intact and reversible. Also update the last column in AI-powered sequence tables so it shows **Margin** instead of **Profit Score** while this test is active.
+
+---
+
+## OBJECTIVE
+
+We want to test whether **margin alone** is a better profitability signal for AI sequencing than the current **profit score**.
+
+For this test:
+- the AI should use **margin** when considering profitability in the 3-dimension analysis
+- not profit score
+
+Important:
+- we are **not removing** the existing profit-score logic
+- we are only changing the active profitability signal for testing
+- if margin turns out not to be helpful, we may revert back to using profit score later
+
+This should be implemented in a way that is easy to switch back.
+
+Also, the UI must stay aligned with the active profitability basis:
+- if AI is using **margin**, the final column shown in AI-powered sequence tables should also show **Margin**
+- not **Profit Score**
+
+---
+
+## REQUIRED CHANGE
+
+For the AI strategy logic and 3-dimension analysis:
+- replace the active profitability signal from **profit score** to **margin**
+- but preserve the old profit-score path in code behind a configurable switch or helper
+
+For the AI-powered sequence table:
+- replace the rightmost `Profit Score` column with `Margin` while margin mode is active
+
+### For now, active test mode should be:
+```text
+profitability basis = margin
+```
+
+---
+
+## 1. ADD A CONFIGURABLE PROFITABILITY BASIS
+
+Do not hard-delete or overwrite the old profit-score path.
+
+Instead, define a configuration switch such as:
+
+```javascript
+const AI_PROFITABILITY_BASIS = 'margin';
+// allowed values: 'margin' | 'profit_score'
+```
+
+Or equivalent config/env/feature flag structure.
+
+This should control which profitability signal is used by the AI during:
+- 3-dimension analysis
+- sequencing tie-breaks
+- profitability reasoning
+- row-level AI explanations where relevant
+- the rightmost profitability column shown in the AI-powered sequence table
+
+---
+
+## 2. USE MARGIN AS THE ACTIVE PROFITABILITY SIGNAL FOR THIS TEST
+
+When the AI evaluates profitability as one of the sequencing dimensions, it should now use:
+- **margin**
+not
+- **profit score**
+
+This means:
+- higher margin orders should be considered more profitable for AI prioritization
+- the AI reasoning should refer to margin if profitability is discussed
+- local ranking / tie-breaking should use margin where profitability is applied
+
+---
+
+## 3. KEEP PROFIT SCORE LOGIC INTACT BUT INACTIVE
+
+Do not remove:
+- profit score calculation
+- profit score storage
+- existing helpers related to profit score
+
+Just make sure profit score is no longer the active profitability basis during this test.
+
+This way:
+- we can revert later
+- comparison remains possible
+- existing dependent features are not broken unnecessarily
+
+---
+
+## 4. UPDATE THE 3-DIMENSION ANALYSIS LABELING AND REASONING
+
+If the AI currently says things like:
+- `Profit scores vary moderately...`
+- `uses profit score as tie-breaker`
+
+update this so the wording reflects the new active basis:
+- `Margins vary moderately...`
+- `uses margin as tie-breaker`
+
+### Example updated reasoning:
+```text
+Profitability: MEDIUM / SECONDARY
+
+Margins vary moderately across the eligible orders but are not enough alone to drive the sequence. Margin is used as a tie-breaker after the primary clustering objective.
+```
+
+Avoid mentioning profit score in AI reasoning while margin mode is active.
+
+---
+
+## 5. UPDATE AI PROMPTS SO AI USES MARGIN, NOT PROFIT SCORE
+
+If Azure OpenAI prompts currently instruct the model to consider:
+- profit score
+- profitability score
+- score-based profitability ranking
+
+change the prompt so it instead uses:
+- margin
+- relative margin differences
+- higher-margin orders as the profitability signal
+
+### Example prompt adjustment:
+#### Old:
+```text
+Use profit score as the profitability dimension when ranking tied orders.
+```
+
+#### New:
+```text
+Use margin as the profitability dimension when ranking tied orders.
+Higher-margin orders should be considered more profitable where profitability is used as a secondary sequencing factor.
+```
+
+This is important so the AI-generated reasoning and strategy logic both align with the test.
+
+---
+
+## 6. UPDATE EXECUTION LOGIC WHERE PROFITABILITY IS USED AS A TIE-BREAKER
+
+If the execution layer currently does things like:
+- compare `_profitScore`
+- sort within cluster/date group using profit score
+- explain ordering using profit score
+
+switch the active comparison to use margin while `AI_PROFITABILITY_BASIS === 'margin'`.
+
+### Example helper:
+```javascript
+function getAIProfitabilityValue(order) {
+  if (AI_PROFITABILITY_BASIS === 'margin') {
+    return parseFloat(order.margin ?? order._margin ?? 0) || 0;
+  }
+
+  return parseFloat(order._profitScore ?? order.profit_score ?? 0) || 0;
+}
+```
+
+Use this helper consistently anywhere the AI needs a profitability signal.
+
+---
+
+## 7. UPDATE THE RIGHTMOST COLUMN IN AI-POWERED SEQUENCE TABLES
+
+This is important.
+
+When AI profitability basis is `margin`, the rightmost column in AI-powered sequence tables must also show:
+- **Margin**
+
+and not:
+- **Profit Score**
+
+Otherwise the UI would be inconsistent with the logic being tested.
+
+### Required behavior:
+- Standard Sequence with profitability applied → rightmost column = `Margin`
+- AI Strategy Option 1 / 2 while margin mode is active → rightmost column = `Margin`
+- AI Strategy Option 1 / 2 only show `Profit Score` again if the profitability basis is switched back to `profit_score`
+
+### Example:
+```javascript
+const aiUsesMargin = AI_PROFITABILITY_BASIS === 'margin';
+const finalColumnLabel = aiUsesMargin ? 'Margin' : 'Profit Score';
+```
+
+For AI strategies in margin mode, the cell should show the actual margin value for that row.
+
+---
+
+## 8. REMOVE PROFIT SCORE TOOLTIP IN AI TABLE WHEN MARGIN MODE IS ACTIVE
+
+If the AI-powered table was previously showing a Profit Score tooltip/formula, do not show that while margin mode is active.
+
+Instead:
+- show the margin value only
+- or reuse the same margin presentation already used elsewhere
+
+Do not leave Profit Score tooltip logic attached to a Margin column.
+
+---
+
+## 9. UPDATE ROW-LEVEL INSIGHTS TO REFERENCE MARGIN WHEN RELEVANT
+
+If row-level sequence insights mention profitability as a reason for placement, and margin mode is active, then they should say things like:
+- higher margin
+- lower margin
+- margin-based tie-break
+
+Do not say:
+- higher profit score
+- lower profit score
+while the AI is using margin as the active profitability basis
+
+---
+
+## 10. ADD DEBUG LOGGING TO CONFIRM ACTIVE BASIS AND COLUMN DISPLAY
+
+Temporarily log:
+
+```javascript
+console.debug('[AI Profitability Basis]', {
+  activeBasis: AI_PROFITABILITY_BASIS,
+  orderId: order.id,
+  item: order.item_description,
+  margin: parseFloat(order.margin ?? order._margin ?? 0) || 0,
+  profitScore: parseFloat(order._profitScore ?? order.profit_score ?? 0) || 0,
+  valueUsedForAI: getAIProfitabilityValue(order),
+});
+```
+
+And for the table column:
+```javascript
+console.debug('[AI Sequence Final Column]', {
+  activeBasis: AI_PROFITABILITY_BASIS,
+  finalColumnLabel,
+});
+```
+
+This helps verify:
+- margin mode is actually active
+- AI is no longer using profit score during the test
+- the last column is also aligned to margin
+
+---
+
+## 11. MAKE REVERTING EASY
+
+The implementation should make it easy to switch back later.
+
+Expected future rollback path:
+```javascript
+const AI_PROFITABILITY_BASIS = 'profit_score';
+```
+
+When switched back:
+- AI reasoning should mention profit score again
+- execution logic should use profit score again
+- the AI-powered sequence final column should show `Profit Score` again
+
+No large refactor should be needed to revert.
+
+---
+
+## 12. VERIFICATION
+
+### Configuration
+1. ✅ AI profitability basis is now configurable
+2. ✅ Active test mode uses `margin`
+3. ✅ Old `profit_score` logic is still preserved and can be restored later
+
+### AI reasoning
+4. ✅ 3-dimension analysis now refers to margin, not profit score
+5. ✅ AI prompts now instruct the model to use margin as the profitability signal
+6. ✅ Row-level insights refer to higher/lower margin where applicable
+
+### Execution
+7. ✅ AI sequencing tie-breaks now use margin when profitability is applied
+8. ✅ Profit score is no longer the active profitability driver during this test
+
+### UI
+9. ✅ AI-powered sequence tables now show `Margin` in the last column while margin mode is active
+10. ✅ Profit Score column/tooltip is no longer shown in AI mode while testing margin
+11. ✅ Standard Sequence with profitability applied still shows Margin correctly
+
+### Reversibility
+12. ✅ Switching back to `profit_score` later is straightforward
+```

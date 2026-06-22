@@ -1,0 +1,232 @@
+```
+Fix the "Apply to Schedule" button for plant-level auto-sequence:
+
+---
+
+## FIX: APPLY TO SCHEDULE — PLANT LEVEL
+
+The issue is that clicking "Apply to Schedule" does nothing. The handler needs to:
+1. Remove all original active orders from all affected lines
+2. Insert the sequenced orders (including combined orders) into each line
+3. Reassign prio numbers
+4. Recalculate changeovers and completion dates
+5. Close the preview
+6. Show success notification
+
+```javascript
+function handlePlantApply(sequencedResults) {
+  // Get all affected lines
+  const affectedLines = Object.keys(sequencedResults);
+  
+  // Start with a copy of all current orders
+  let updatedOrders = allOrders.map(o => ({ ...o }));
+  
+  // For each affected line, remove existing active orders and replace with sequenced
+  affectedLines.forEach(line => {
+    const sequencedLineOrders = sequencedResults[line] || [];
+    
+    // Remove all existing active orders for this line
+    updatedOrders = updatedOrders.filter(o => {
+      if (o.line !== line) return true; // Keep orders from other lines
+      if (o.status === 'Done' || o.status === 'Cancel PO') return true; // Keep Done/Cancelled
+      return false; // Remove active orders — they'll be replaced
+    });
+    
+    // Also remove orders that were MOVED from this line to another line
+    // These orders now exist in a different line's sequenced results
+    const allSequencedIds = new Set();
+    Object.values(sequencedResults).forEach(lineOrders => {
+      lineOrders.forEach(o => {
+        allSequencedIds.add(o.id);
+        // Also track combined sub-order IDs
+        if (o._combinedFrom) {
+          o._combinedFrom.forEach(sub => allSequencedIds.add(sub.id));
+        }
+      });
+    });
+    
+    // Remove any remaining originals that are now part of combined orders
+    updatedOrders = updatedOrders.filter(o => {
+      if (o.status === 'Done' || o.status === 'Cancel PO') return true;
+      // If this order's ID is consumed by a combined order, remove it
+      if (allSequencedIds.has(o.id)) {
+        // Check if it exists as a top-level sequenced order
+        const isTopLevel = Object.values(sequencedResults).some(lineOrders =>
+          lineOrders.some(so => so.id === o.id)
+        );
+        if (!isTopLevel) return false; // It's a sub-order of a combined order — remove
+      }
+      return true;
+    });
+  });
+  
+  // Remove ALL original active orders that were consumed by combinations
+  // across any line (some originals may have been on non-affected lines)
+  const allCombinedSubIds = new Set();
+  Object.values(sequencedResults).forEach(lineOrders => {
+    lineOrders.forEach(o => {
+      if (o._combinedFrom) {
+        o._combinedFrom.forEach(sub => allCombinedSubIds.add(sub.id));
+      }
+    });
+  });
+  
+  updatedOrders = updatedOrders.filter(o => {
+    if (o.status === 'Done' || o.status === 'Cancel PO') return true;
+    if (allCombinedSubIds.has(o.id)) return false; // Consumed by a combination
+    return true;
+  });
+  
+  // Now insert sequenced orders for each line
+  affectedLines.forEach(line => {
+    const sequencedLineOrders = sequencedResults[line] || [];
+    
+    sequencedLineOrders.forEach((order, index) => {
+      // Clean up internal tracking properties
+      const cleanOrder = { ...order };
+      cleanOrder.prio = index + 1;
+      cleanOrder.line = line;
+      
+      // Keep _isCombined and _combinedFrom for reference
+      // But remove movement tracking
+      delete cleanOrder._movement;
+      delete cleanOrder._movementDelta;
+      delete cleanOrder._originalPrio;
+      delete cleanOrder._movedFromLine;
+      delete cleanOrder._originalLine;
+      delete cleanOrder._combinedFromLines;
+      
+      // Check if this order already exists in updatedOrders (by ID)
+      const existingIndex = updatedOrders.findIndex(uo => uo.id === cleanOrder.id);
+      if (existingIndex >= 0) {
+        // Update existing
+        updatedOrders[existingIndex] = cleanOrder;
+      } else {
+        // Add new (combined order)
+        updatedOrders.push(cleanOrder);
+      }
+    });
+  });
+  
+  // Recalculate changeovers for all affected lines
+  const changeoverRules = getDefaultChangeoverRules();
+  
+  affectedLines.forEach(line => {
+    const lineOrders = updatedOrders
+      .filter(o => o.line === line && o.status !== 'Done' && o.status !== 'Cancel PO')
+      .sort((a, b) => a.prio - b.prio);
+    
+    calculatePreviewChangeovers(lineOrders, changeoverRules);
+  });
+  
+  // Recalculate completion dates
+  recalculateCompletionDates(updatedOrders);
+  
+  // Update state
+  setAllOrders(updatedOrders);
+  
+  // Close preview
+  setShowPlantAutoSequencePreview(false);
+  
+  // Show notification
+  const totalOrders = Object.values(sequencedResults).reduce((sum, lo) => sum + lo.length, 0);
+  const combinedCount = Object.values(sequencedResults).reduce((sum, lo) =>
+    sum + lo.filter(o => o._isCombined).length, 0
+  );
+  
+  showNotification(
+    'success',
+    `Plant-level auto-sequence applied: ${totalOrders} orders across ${affectedLines.length} lines.${combinedCount > 0 ? ` ${combinedCount} orders combined.` : ''}`
+  );
+}
+```
+
+### ENSURE THE BUTTON IS CONNECTED
+
+```jsx
+{/* In PlantAutoSequencePreview component */}
+<div className="auto-sequence-footer">
+  <div className="auto-sequence-footer-left">
+    <button className="btn-reanalyze" onClick={onReanalyze}>
+      ↻ Re-analyze
+    </button>
+    <button className="btn-reset" onClick={onResetToOriginal}>
+      ↺ Reset to Original
+    </button>
+  </div>
+  <div className="auto-sequence-footer-right">
+    <button className="btn-cancel" onClick={onCancel}>Cancel</button>
+    <button 
+      className="btn-apply"
+      onClick={() => onApply(sequencedResults)}
+    >
+      Apply to Schedule
+    </button>
+  </div>
+</div>
+```
+
+### ENSURE PARENT PASSES THE HANDLER
+
+```jsx
+{showPlantAutoSequencePreview && (
+  <PlantAutoSequencePreview
+    originalSnapshot={originalPlantSnapshot}
+    sequencedResults={plantSequenceResults}
+    summaryStats={plantSummaryStats}
+    placementLog={plantPlacementLog}
+    allLines={getAllLines()}
+    onApply={handlePlantApply}
+    onCancel={() => setShowPlantAutoSequencePreview(false)}
+    onReanalyze={handlePlantLevelAutoSequence}
+    onResetToOriginal={() => {
+      // Reset all lines to original
+      const resetResults = {};
+      Object.entries(originalPlantSnapshot).forEach(([line, orders]) => {
+        resetResults[line] = orders.map((o, index) => ({
+          ...JSON.parse(JSON.stringify(o)),
+          prio: index + 1,
+          _movement: 'same',
+          _movementDelta: 0
+        }));
+      });
+      setPlantSequenceResults(resetResults);
+    }}
+  />
+)}
+```
+
+---
+
+## VERIFICATION
+
+### Apply works
+1. ✅ Clicking "Apply to Schedule" closes the preview
+2. ✅ All sequenced orders are applied to their respective lines
+3. ✅ Combined orders appear as single rows with combined volume
+4. ✅ Original sub-orders are removed (not duplicated)
+5. ✅ Prio numbers reassigned sequentially per line
+6. ✅ Changeovers recalculated for all affected lines
+7. ✅ Completion dates recalculated
+8. ✅ Success notification shown
+
+### Combined orders handled correctly
+9. ✅ Combined order replaces individual sub-orders
+10. ✅ Sub-order IDs tracked and removed from all lines
+11. ✅ Combined order has correct volume, batches, production time
+12. ✅ Combined order placed on the correct line
+
+### Cross-line moves handled correctly
+13. ✅ Orders moved from Line 1 to Line 3 are removed from Line 1
+14. ✅ Orders moved from Line 1 to Line 3 appear in Line 3
+15. ✅ No duplicate orders after apply
+
+### Cleanup
+16. ✅ Internal tracking properties removed (_movement, _movementDelta, etc.)
+17. ✅ _isCombined and _combinedFrom preserved for reference
+18. ✅ Done/Cancelled orders untouched
+
+### Reset to Original
+19. ✅ Reset restores all lines to their original state
+20. ✅ All movement indicators cleared
+```

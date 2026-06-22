@@ -1,0 +1,204 @@
+Please redesign the **Demand Profile** page’s monthly view so it is easier to understand seasonality and historical demand behavior per SKU.
+
+The current table is technically correct but not intuitive for reading demand patterns because it repeats the same SKU across many monthly rows.
+
+Please update the monthly view into a pivot-style seasonality matrix.
+
+---
+
+## REQUIRED CHANGE
+
+For the **Monthly** time-grain view:
+
+### Instead of:
+- one row per SKU per month
+
+### Change it to:
+- **one row per SKU**
+- with separate columns for:
+  - Jan
+  - Feb
+  - Mar
+  - Apr
+  - May
+  - Jun
+  - Jul
+  - Aug
+  - Sep
+  - Oct
+  - Nov
+  - Dec
+
+This should make the historical demand pattern easier to read across the year.
+
+---
+
+## ROW STRUCTURE
+
+Each row should represent a single SKU.
+
+Recommended columns:
+- FG Code
+- Item Description
+- Jan
+- Feb
+- Mar
+- Apr
+- May
+- Jun
+- Jul
+- Aug
+- Sep
+- Oct
+- Nov
+- Dec
+- Total Annual Demand (MT)
+- Insight
+
+---
+
+## CELL VALUES
+
+For the monthly matrix view, display the **monthly percentage share of annual demand** in each month cell instead of raw MT.
+
+### Example
+If annual total demand for a SKU is 1,674.1 MT, and January demand is 139.9 MT:
+
+January cell should display:
+- `8.4%`
+
+### Logic
+For each SKU:
+- calculate total annual demand
+- calculate each month’s share of that annual total
+- display that percentage in the cell
+
+---
+
+## TOOLTIP / HOVER DETAIL
+
+If easy to implement, when hovering a month cell, show:
+- raw monthly demand in MT
+- monthly percentage share
+
+Example tooltip:
+- `139.9 MT (8.4% of annual demand)`
+
+This preserves exact values without cluttering the table.
+
+---
+
+## CONDITIONAL FORMATTING
+
+Please apply conditional formatting / heatmap styling to the monthly cells so users can quickly identify:
+- peak months
+- average months
+- low months
+
+Recommended behavior:
+- lower percentages = lighter shade
+- higher percentages = darker shade
+
+A single-color heatmap is preferred for simplicity, but a low-to-high gradient is acceptable.
+
+The goal is to make seasonality visually understandable at a glance.
+
+---
+
+## INSIGHT COLUMN
+
+Add a simple summary insight per SKU based on the monthly pattern.
+
+Examples:
+- Stable all year
+- Peaks in Q1
+- Peaks in Q2
+- Peaks in Q4
+- Strong in Mar–May
+- Seasonal spike in Dec
+- Higher demand in 2nd half
+
+This should summarize the SKU’s historical demand profile.
+
+---
+
+## KEEP TOTAL ANNUAL DEMAND VISIBLE
+
+Please include a column for:
+- **Total Annual Demand (MT)**
+
+This gives context behind the monthly percentages.
+
+---
+
+## IMPORTANT SCOPE
+
+Apply this redesign specifically for the **Monthly** view of Demand Profile.
+
+For other time-grain views:
+- Daily
+- Quarterly
+- Yearly
+
+you may keep an appropriate row-based layout if needed.
+
+But the Monthly view should use the matrix/pivot format because it is the most suitable for seasonality reading.
+
+---
+
+## DATA PRESENTATION GOAL
+
+The user should be able to quickly answer:
+- Which months are high-demand for this SKU?
+- Which months are low-demand?
+- Is this SKU stable or seasonal?
+- What is the total annual demand behind the pattern?
+
+The redesign should prioritize readability and pattern recognition.
+
+---
+
+## OPTIONAL CLEANUP
+
+If the current inventory / planned / in-progress / coverage columns make the monthly matrix too crowded, it is acceptable to remove them from the main monthly matrix view and reserve them for:
+- a detail panel
+- row expansion
+- or future enhancement
+
+The main monthly matrix should focus primarily on demand behavior.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log:
+
+```javascript
+console.debug('[Demand Profile Monthly Matrix Build]', {
+  skuCount,
+  selectedYear,
+  rows: matrixRows,
+});
+
+javascript
+Run Code
+Copy code
+console.debug('[Demand Profile Monthly Share Calculation]', {
+  fgMaterialCode,
+  annualDemandMT,
+  monthlyValuesMT,
+  monthlyPercentages,
+  insight,
+});
+
+VERIFICATION
+✅ Monthly Demand Profile view now shows one row per SKU
+✅ Jan–Dec appear as separate columns
+✅ Month cells display percentage share of annual demand
+✅ Total Annual Demand (MT) is shown per SKU
+✅ Conditional formatting highlights relatively high and low months
+✅ Users can visually identify seasonality more easily
+✅ Tooltips show raw MT values if implemented
+✅ Monthly view is easier to read than the previous repeated monthly row layout
+✅ Other time-grain views still work correctly
+✅ No console errors or broken filters are introduced

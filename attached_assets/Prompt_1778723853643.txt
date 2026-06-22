@@ -1,0 +1,241 @@
+Please update and refine the Powermix-generated order behavior with the following corrections.
+
+These generated orders are still not fully inheriting the Powermix Split rule and the source Line 5 context correctly.
+
+Please fix the following items.
+
+---
+
+## 1. BATCH SIZE MUST COME FROM POWERMIX SPLIT CONFIGURATION
+
+Problem:
+Generated orders are still showing incorrect batch sizes such as `1`, even though the Powermix Split table clearly defines batch values like `4` and `2`.
+
+Please revisit the generated order creation logic.
+
+### Required behavior
+When an order is auto-created from a Line 5 Powermix rule:
+- its **Batch Size** must be sourced from the matched **Powermix Split** rule
+- do not use a generic fallback batch size of `1`
+- do not derive batch size from unrelated defaults if the Powermix rule already provides it
+
+### Expected rule source
+Use the configured batch value from the Powermix Split mapping table:
+
+| FG Material | SFG Material | Description | Target Line | Percentage | Batch |
+|---|---|---|---|---:|---:|
+| 1000000000039 | 3000000000248 | Gallimax 2 plus | Line 2 | 85 | 4 |
+| 1000000000041 | 3000000000033 | Salto Stag Developer | Line 2 | 80 | 4 |
+| 1000000000543 | 3000000000033 | Salto Stag Developer | Line 2 | 80 | 4 |
+| 1000000001387 | 3000000000480 | Gallimax 2 Plus red | Line 2 | 85 | 4 |
+| 1000000000565 | 3000000000057 | Gallimax PMP | Line 2 | 40 | 4 |
+| 1000000001121 | 3000000001289 | Pork Solution Booster Plus (Cooked Mash)-1st pass | Line 6 | 81 | 2 |
+
+If the rule says batch = 4 or 2, the generated order should use that exact value.
+
+Please audit why `1` is appearing.
+
+---
+
+## 2. RENAME AND REPOSITION CONFIG TAB
+
+Please update the left navigation under Configurations.
+
+### Current
+- Order History
+- Changeover Rules
+- Master Data
+- Future Dispatches
+- Powermix Split Rules
+
+### Required
+Move the tab so it appears between:
+- Changeover Rules
+- Master Data
+
+And rename it to:
+
+## Powermix Split
+
+### Desired order
+- Order History
+- Changeover Rules
+- Powermix Split
+- Master Data
+- Future Dispatches
+
+---
+
+## 3. USE LINE 5 RUN-RATE AS FALLBACK FOR GENERATED ORDERS
+
+Problem:
+Some generated orders do not have run-rate in the receiving line, so Production Time is blank and cannot be computed.
+
+This is expected for many of these orders because they are primarily produced through Line 5 logic.
+
+### Required behavior
+For a generated order created from Line 5:
+1. first try to resolve the run-rate normally for the generated order on the target line
+2. if no run-rate is available there, use the **Line 5 run-rate** from the source order / source product context
+3. only if still unavailable, leave blank and show warning/fallback state
+
+### Goal
+Generated orders should not lose Production Time just because target line run-rate is missing, if a usable Line 5 run-rate exists.
+
+This should allow Production Time to be generated properly.
+
+---
+
+## 4. COPY PLANNED ORDER (FG | SFG) FROM EXACT LINE 5 SOURCE ORDER
+
+Problem:
+Generated orders are still not copying the source order’s planned order values correctly.
+Some generated rows still show:
+- Enter FG
+- Enter SFG
+
+This is wrong.
+
+### Required behavior
+When a generated order is created from a Line 5 source order, it must copy:
+- Planned Order FG
+- Planned Order SFG
+
+from that exact source Line 5 order.
+
+Do not leave them blank.
+Do not rely on generic material-code-only lookup.
+Do not attempt a weak re-derivation if the source order already has the values.
+
+### Important
+The generated order should inherit source order planning lineage directly from the exact parent row that triggered it.
+
+---
+
+## 5. DISPLAY SPLIT PERCENTAGE SUB-TEXT FOR GENERATED ORDERS USING THE EXACT QUANTITY BASIS
+
+Problem:
+The sub-text for created orders is not rendering.
+
+### Required behavior
+For generated orders, show sub-text indicating the split basis, for example:
+
+`80% of 150 MT`
+
+This should appear as the helper sub-text below the item details / volume context for the generated row.
+
+### Important quantity-basis rule
+Use the **exact quantity basis actually used in the split calculation**, not the raw source quantity unless that raw quantity is exactly what the app used.
+
+This means:
+- if the app normalized the source quantity to `150 MT` and used that value for the split calculation,
+  then display:
+  `80% of 150 MT`
+- if the app used another exact normalized quantity, display that exact value
+- do not show a different raw number if it was not the actual basis used to compute the split
+
+The helper text must match the real quantity basis used by the app, so the displayed explanation and the generated result remain consistent.
+
+### Example desired UI
+
+#### Source Line 5 order
+Salto Stag Developer P 1kg (Bundle)  
+152 MT  
+Batch Size = 4  
+Gamefowl · Yellow · 3.00mm  
+Original: 150 MT
+
+#### Generated Line 2 order
+Salto Stag Developer P 1kg (Bundle)  
+120 MT  
+Batch Size = 4  
+Gamefowl · Yellow · 3.00mm  
+80% of 150 MT
+
+In this example, the generated order should display `80% of 150 MT` because `150 MT` is the exact quantity basis actually used in the split calculation.
+
+Do not leave this sub-text blank.
+
+---
+
+## 6. KEEP PREVIOUS POWERMIX GENERATED ORDER RULES INTACT
+
+Please preserve the previously required behaviors:
+- Material Code (FG) must remain the original FG from the Line 5 source order
+- Material Code (SFG) must use the mapped SFG from Powermix Split
+- generated orders should be visually identifiable
+- generated orders should remain linked to the source Line 5 order
+- status should remain `Plotted`
+- source avail date should still be inherited properly
+
+These should remain intact while adding the fixes above.
+
+---
+
+## 7. DEBUG LOGGING
+
+Temporarily log the following:
+
+### Batch lookup
+```javascript
+console.debug('[Powermix Batch Lookup]', {
+  sourceOrderId,
+  sourceFgCode,
+  matchedRuleId,
+  configuredBatch,
+  appliedBatch,
+  fellBackToDefault: configuredBatch !== appliedBatch,
+});
+```
+
+### Run-rate fallback
+```javascript
+console.debug('[Powermix Run Rate Resolution]', {
+  sourceOrderId,
+  generatedOrderId,
+  targetLine,
+  targetLineRunRate,
+  sourceLine5RunRate,
+  finalAppliedRunRate,
+  usedLine5Fallback: !targetLineRunRate && !!sourceLine5RunRate,
+});
+```
+
+### Planned order copy
+```javascript
+console.debug('[Powermix Planned Order Copy]', {
+  sourceOrderId,
+  sourcePlannedOrderFg,
+  sourcePlannedOrderSfg,
+  generatedOrderId,
+  copiedPlannedOrderFg,
+  copiedPlannedOrderSfg,
+});
+```
+
+### Split sub-text
+```javascript
+console.debug('[Powermix Split Subtext]', {
+  sourceOrderId,
+  generatedOrderId,
+  percentage,
+  exactQtyBasisUsed,
+  generatedQty,
+  renderedSubText,
+});
+```
+
+---
+
+## 8. VERIFICATION
+
+1. ✅ Generated orders use Batch Size from Powermix Split config, not a wrong fallback value like 1
+2. ✅ Powermix Split tab is renamed to `Powermix Split`
+3. ✅ Powermix Split tab is positioned between Changeover Rules and Master Data
+4. ✅ Generated orders can compute Production Time using target-line run-rate or Line 5 fallback run-rate
+5. ✅ Generated orders no longer show blank Production Time when a valid Line 5 run-rate exists
+6. ✅ Planned Order FG and Planned Order SFG are copied from the exact Line 5 source order
+7. ✅ Generated orders no longer show blank `Enter FG` / `Enter SFG` if source values exist
+8. ✅ Generated orders show split helper sub-text such as `80% of 150 MT`
+9. ✅ The sub-text reflects the exact quantity basis actually used in the split calculation
+10. ✅ Previously fixed FG/SFG mapping and source-order linkage remain correct

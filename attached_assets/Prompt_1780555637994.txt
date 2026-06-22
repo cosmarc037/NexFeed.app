@@ -1,0 +1,170 @@
+Please revisit the current use of **Date Rank** and **Strategy Rank** in the **AI vs Final Sequence** logic.
+
+The concern is not that date context is missing from the AI. The AI is already receiving date-related context and suggesting `_aiSuggestedDate`. However, **Date Rank itself is still being computed locally in the frontend/browser** by sorting those AI-suggested dates, which means the final sequence logic is still partially split between:
+
+- AI-provided **Strategy Rank**
+- AI-provided **suggested/effective date**
+- locally computed **Date Rank**
+- final display order formed from combining them
+
+---
+
+## 1. REVISIT THE SPLIT BETWEEN AI DATE DECISION AND LOCALLY COMPUTED DATE RANK
+
+Please review whether the current model is still splitting sequencing logic into two parts:
+
+- the AI suggests the date
+- the frontend/browser computes a separate Date Rank from that date
+
+### Concern
+This means the AI is not yet fully returning one unified final order that already integrates:
+- date
+- urgency
+- strategy
+- grouping
+- advancement
+- sequencing logic
+
+### Goal
+Move toward a cleaner sequence model where the AI itself treats sequencing as one whole decision.
+
+### Expected result
+The sequence should rely less on locally derived rank interpretation and more on a unified AI decision.
+
+---
+
+## 2. CONFIRM WHETHER DATE RANK IS STILL BEING DERIVED LOCALLY FROM AI-SUGGESTED DATES
+
+Please confirm whether the current behavior is indeed:
+
+- AI decides `_aiSuggestedDate`
+- frontend/browser sorts those dates
+- frontend/browser derives `Date Rank`
+- final sequence/explanation uses that derived Date Rank
+
+### Goal
+Make the sequence architecture explicit and transparent.
+
+### Expected result
+We should clearly know whether Date Rank is still a local reconstruction rather than a true AI-returned ranking dimension.
+
+---
+
+## 3. REVISIT WHETHER THE AI CAN RETURN A MORE FULLY UNIFIED FINAL RANK
+
+Please evaluate whether the AI can instead return a rank/order that already integrates:
+- suggested/effective date
+- urgency / future dispatch status
+- strategy considerations
+- grouping/changeovers
+- MTS advancement
+- sequencing logic as one combined judgment
+
+### Goal
+Reduce the need to interpret date separately in the frontend.
+
+### Expected result
+The AI rank becomes a more holistic final sequence rank, rather than only a strategy-oriented rank that must later be reconciled with a separate date-driven sort.
+
+---
+
+## 4. REDUCE THE NEED FOR A SEPARATE `DATE RANK` IF THE AI CAN ALREADY HANDLE DATE-AWARE RANKING AS ONE WHOLE
+
+If the AI can be improved to treat:
+- date
+- urgency
+- strategy
+- flow
+
+as one combined sequencing decision, then there may no longer be a need for a separately interpreted `Date Rank`.
+
+### Goal
+Move toward a simpler and more unified sequence explanation model.
+
+### Expected result
+The app may eventually no longer need to compute and display Date Rank separately if the AI rank already reflects the full intended final order.
+
+---
+
+## 5. KEEP THE DISTINCTION CLEAR: THE ISSUE IS NOT MISSING DATE CONTEXT, BUT SPLIT RANK INTERPRETATION
+
+Please note this distinction clearly:
+
+### This is NOT the concern
+- `date is not fed to the AI`
+
+### This IS the concern
+- `date is fed to the AI, but date is still turned into a separate locally computed rank instead of being fully integrated into one AI-returned final sequencing rank`
+
+### Goal
+Make sure the architecture and reasoning are aligned with the product direction of holistic AI sequencing.
+
+### Expected result
+The sequence model becomes more unified and easier to reason about.
+
+---
+
+## IMPORTANT
+
+Please revisit the current **Date Rank / Strategy Rank** architecture.
+
+The AI is already receiving date context and suggesting dates, so the issue is **not** that date is missing from the AI.
+
+The issue is that:
+- the AI suggests a date
+- the frontend/browser computes Date Rank separately
+- and the final sequence is still being formed through a split interpretation
+
+Please evaluate whether the AI can instead return a **more unified final sequencing rank** that already treats:
+- suggested/effective date
+- urgency
+- strategy
+- grouping
+- and sequencing logic
+
+as **one whole decision**, reducing the need for a separate locally computed Date Rank.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log how Date Rank is being derived and whether the final sequence is still split between AI and frontend computation.
+
+```javascript
+console.debug('[AI vs Final Sequence Date Rank Derivation]', {
+  strategyId,
+  aiSuggestedDates: rows?.map(r => ({
+    entityId: r.entityId || r.orderId,
+    suggestedDate: r._aiSuggestedDate,
+    strategyRank: r._aiRank,
+  })),
+  dateRankComputedLocally: true,
+});
+```
+
+```javascript
+console.debug('[AI vs Final Sequence Rank Architecture]', {
+  strategyId,
+  aiProvidesStrategyRank: true,
+  aiProvidesSuggestedDate: true,
+  frontendComputesDateRank: true,
+});
+```
+
+```javascript
+console.debug('[AI vs Final Sequence Unified Rank Evaluation]', {
+  strategyId,
+  evaluatingUnifiedAiRankApproach: true,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Confirm whether Date Rank is still computed locally from AI-suggested dates
+2. ✅ Confirm whether the current final sequence logic is still split between AI output and frontend rank interpretation
+3. ✅ Evaluate whether the AI can return a more unified final ranking that already incorporates date and strategy together
+4. ✅ Clarify that the concern is not missing date context, but split rank interpretation
+5. ✅ Improve alignment between the AI sequencing architecture and the goal of holistic AI-driven sequencing
+6. ✅ No UI errors or console errors are introduced

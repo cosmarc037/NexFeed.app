@@ -1,0 +1,211 @@
+```
+Implement the following fix to the Smart Combine panel:
+
+---
+
+## FIX: SMART COMBINE PANEL — COLUMN WIDTH DISTRIBUTION
+
+The three columns (FPR details, Time details, Volume/Availability) should be evenly distributed with consistent widths.
+
+---
+
+### CURRENT ISSUE
+
+Columns are not evenly spaced — the middle column (time) and right column (volume) appear cramped or unevenly distributed.
+
+---
+
+### FIX — THREE COLUMN GRID
+
+```css
+.smart-combine-order-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid #f3f4f6;
+  align-items: start;
+}
+```
+
+| Column | Width | Alignment | Content |
+|---|---|---|---|
+| Left (FPR) | 1fr (equal) | Left-aligned | FPR, FG code, SFG code |
+| Middle (Time) | 1fr (equal) | Left-aligned | Production time, CD, CT |
+| Right (Volume) | 1fr (equal) | Right-aligned | Volume, Availability label, Avail date |
+
+### COLUMN STYLING
+
+**Left column — FPR details:**
+
+```css
+.combine-col-fpr {
+  text-align: left;
+}
+
+.combine-col-fpr .fpr-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #1a1a1a;
+}
+
+.combine-col-fpr .fg-label,
+.combine-col-fpr .sfg-label {
+  font-size: 10px;
+  font-weight: 400;
+  color: #9ca3af;
+  margin-top: 2px;
+}
+```
+
+**Middle column — Time details:**
+
+```css
+.combine-col-time {
+  text-align: left;
+}
+
+.combine-col-time .time-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #1a1a1a;
+}
+
+.combine-col-time .cd-label,
+.combine-col-time .ct-label {
+  font-size: 10px;
+  font-weight: 400;
+  color: #9ca3af;
+  margin-top: 2px;
+}
+```
+
+**Right column — Volume and Availability:**
+
+```css
+.combine-col-volume {
+  text-align: right;
+}
+
+.combine-col-volume .volume-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: #1a1a1a;
+}
+
+.combine-col-volume .avail-label {
+  font-size: 10px;
+  font-weight: 400;
+  color: #9ca3af;
+  margin-top: 2px;
+}
+
+.combine-col-volume .avail-date {
+  font-size: 10px;
+  font-weight: 500;
+  color: #16a34a; /* green for safety stocks */
+  /* or #ea580c for prio replenish */
+  margin-top: 2px;
+}
+```
+
+### CLOSE (×) BUTTON
+
+```css
+.combine-row-close {
+  position: absolute;
+  top: 12px;
+  right: 8px;
+  font-size: 12px;
+  color: #9ca3af;
+  cursor: pointer;
+}
+
+.combine-row-close:hover {
+  color: #374151;
+}
+```
+
+### ROW CONTAINER — RELATIVE FOR CLOSE BUTTON
+
+```css
+.smart-combine-order-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 12px;
+  padding: 12px 16px;
+  padding-right: 32px; /* space for × button */
+  border-bottom: 1px solid #f3f4f6;
+  align-items: start;
+  position: relative;
+}
+```
+
+### COMPLETE ROW LAYOUT
+
+```jsx
+function CombineOrderRow({ order, onRemove }) {
+  return (
+    <div className="smart-combine-order-row">
+      {/* Left — FPR details */}
+      <div className="combine-col-fpr">
+        <div className="fpr-label">FPR: {order.fpr}</div>
+        <div className="fg-label">FG: {order.planned_order_fg || '—'}</div>
+        <div className="sfg-label">SFG: {order.planned_order_sfg || '—'}</div>
+      </div>
+      
+      {/* Middle — Time details */}
+      <div className="combine-col-time">
+        <div className="time-label">{formatProductionTime(order.production_time)}</div>
+        <div className="cd-label">CD: {formatDateFull(order.completion_date) || '—'}</div>
+        <div className="ct-label">CT: {order.completion_time || '—'}</div>
+      </div>
+      
+      {/* Right — Volume and Availability */}
+      <div className="combine-col-volume">
+        <div className="volume-label">{order.volume} MT</div>
+        <div className="avail-label">Availability</div>
+        <div className="avail-date">{order.avail_date || '—'}</div>
+      </div>
+      
+      {/* Close button */}
+      <span className="combine-row-close" onClick={() => onRemove(order.id)}>
+        ×
+      </span>
+    </div>
+  );
+}
+```
+
+### VISUAL — EVENLY DISTRIBUTED
+
+```
+┌──────────────────┬──────────────────┬──────────────────┬───┐
+│ FPR: 260330      │ 4 hrs 11 min     │          80 MT   │ × │
+│ FG: 5869937      │ CD: April 11, 2026│     Availability │   │
+│ SFG: 5877608     │ CT: 01:55 PM     │  prio replenish  │   │
+├──────────────────┼──────────────────┼──────────────────┼───┤
+│ FPR: 260330      │ 4 hrs 11 min     │          80 MT   │ × │
+│ FG: 5873008      │ CD: April 12, 2026│     Availability │   │
+│ SFG: 5920946     │ CT: 12:48 AM     │  safety stocks   │   │
+├──────────────────┼──────────────────┼──────────────────┼───┤
+│ FPR: 260330      │ 25 min           │           8 MT   │ × │
+│ FG: 5873012      │ CD: April 12, 2026│     Availability │   │
+│ SFG: 5920950     │ CT: 01:24 AM     │  safety stocks   │   │
+├──────────────────┼──────────────────┼──────────────────┼───┤
+│ FPR: 260330      │ 1 hr 41 min      │          32 MT   │ × │
+│ FG: 5873010      │ CD: April 12, 2026│     Availability │   │
+│ SFG: 5920948     │ CT: 04:03 AM     │  safety stocks   │   │
+├──────────────────┼──────────────────┼──────────────────┼───┤
+│ FPR: 260330      │ 1 hr 3 min       │          20 MT   │ × │
+│ FG: 5873011      │ CD: April 12, 2026│     Availability │   │
+│ SFG: 5920949     │ CT: 05:16 AM     │  safety stocks   │   │
+├──────────────────┼──────────────────┼──────────────────┼───┤
+│ FPR: 260330      │ 38 min           │          12 MT   │ × │
+│ FG: 5873009      │ CD: April 12, 2026│     Availability │   │
+│ SFG: 5920947     │ CT: 02:12 AM     │  safety stocks   │   │
+└──────────────────┴──────────────────┴──────────────────┴───┘
+```
+
+Each column takes exactly 1/3 of the available width, ensuring clean distribution regardless of content length.
+```

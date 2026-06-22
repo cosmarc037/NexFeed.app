@@ -1,0 +1,109 @@
+```
+Implement the following change to the sparkle button:
+
+---
+
+## SPARKLE BUTTON — STYLED AS A BUTTON WITH SUBTLE YELLOW BACKGROUND
+
+The sparkle should look like a small button with a subtle yellow background, similar to the icon in the snip but using the app's yellow tone.
+
+### UPDATED STYLING
+
+```css
+.sparkle-btn {
+  background: #fef3c7;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  margin-left: 6px;
+  transition: background 0.15s ease;
+  vertical-align: middle;
+}
+
+.sparkle-btn:hover {
+  background: #fde68a;
+}
+
+.sparkle-btn:active {
+  background: #fcd34d;
+}
+
+.sparkle-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+```
+
+| Property | Value |
+|---|---|
+| Background | Subtle yellow (#fef3c7) |
+| Hover | Slightly darker yellow (#fde68a) |
+| Active/click | Darker yellow (#fcd34d) |
+| Size | 28px × 28px |
+| Border-radius | 6px (rounded square) |
+| Icon size | 14px |
+| Border | None |
+| Cursor | Pointer |
+| Alignment | Vertically centered with "Summary" text |
+
+### VISUAL
+
+```
+┌──────────────────────────┐
+│    PRODUCT INSIGHTS      │
+├──────────────────────────┤
+│  Summary  [✨]            │
+│            ↑              │
+│     28×28 yellow button   │
+└──────────────────────────┘
+```
+
+### SUB-HEADER JSX
+
+```jsx
+<th className="ai-subheader">
+  <span>Summary</span>
+  <button 
+    className="sparkle-btn"
+    onClick={handleEnhanceWithAI}
+    disabled={isGenerating}
+    title="Enhance with AI"
+  >
+    ✨
+  </button>
+</th>
+```
+
+### LOADING STATE
+
+When AI is generating, the button shows a subtle loading animation:
+
+```css
+.sparkle-btn.generating {
+  animation: sparkle-pulse 1s ease infinite;
+}
+
+@keyframes sparkle-pulse {
+  0% { background: #fef3c7; }
+  50% { background: #fde68a; }
+  100% { background: #fef3c7; }
+}
+```
+
+```jsx
+<button 
+  className={`sparkle-btn ${isGenerating ? 'generating' : ''}`}
+  onClick={handleEnhanceWithAI}
+  disabled={isGenerating}
+  title={isGenerating ? 'Generating...' : 'Enhance with AI'}
+>
+  ✨
+</button>
+```
+```

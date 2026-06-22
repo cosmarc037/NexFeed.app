@@ -1,0 +1,307 @@
+```
+Fix the auto-sequence cancellation reset flow so cancelling one run does not break AI generation for the next run.
+
+---
+
+## OBJECTIVE
+
+Currently, clicking Cancel during auto-sequence stops the current run immediately, which is good.
+
+However, after cancelling, when the user runs auto-sequence again, AI strategy generation no longer works and the UI shows:
+- `AI Strategy Unavailable`
+- `AI could not generate this strategy...`
+
+This suggests that the cancellation state from the previous run is leaking into the next run.
+
+We need to ensure that cancelling an auto-sequence run only affects the current run, and that the next run starts with a completely fresh AI state.
+
+---
+
+## PROBLEM TO FIX
+
+Likely causes:
+- stale `autoSequenceCancelled = true` is still set on next run
+- previous `AbortController` is being reused after abort
+- AI unavailable/error state is not cleared before retry
+- previous aborted promise result is still mutating current UI state
+- strategy generation state is not being reinitialized cleanly
+
+As a result:
+- current run cancels correctly
+- next run incorrectly behaves as if AI is still cancelled/unavailable
+
+---
+
+## REQUIRED BEHAVIOR
+
+### On Cancel
+Cancel should:
+- stop the current run immediately
+- abort in-flight requests for the current run only
+- discard current run results
+- close/exit the progress flow
+
+### On Next Run
+The next auto-sequence run should:
+- create a brand-new cancellation state
+- create a brand-new `AbortController`
+- clear stale AI-unavailable state
+- clear stale strategy-generation error state
+- allow AI generation to run normally again
+
+Cancellation must not permanently disable AI for future runs.
+
+---
+
+## 1. RESET ALL RUN-SPECIFIC CANCEL STATE AT THE START OF A NEW RUN
+
+At the beginning of every new auto-sequence run, explicitly reset:
+- cancellation flag
+- cancelling flag
+- abort controller
+- AI unavailable flags
+- strategy generation errors
+- per-line AI failure states from the previous run
+
+### Example:
+```javascript
+function initializeAutoSequenceRunState() {
+  autoSequenceCancelled = false;
+  autoSequenceCancelling = false;
+
+  autoSequenceAbortController = new AbortController();
+
+  clearAutoSequenceErrors();
+  clearAIStrategyUnavailableState();
+  clearStrategyGenerationFailures();
+}
+```
+
+Call this at the very beginning of every new auto-sequence run.
+
+Do not reuse any previous controller or flags.
+
+---
+
+## 2. NEVER REUSE AN ABORTED ABORTCONTROLLER
+
+Once an `AbortController` has been aborted, it must not be reused.
+
+Make sure each auto-sequence run gets a fresh controller.
+
+### Bad:
+```javascript
+// reusing old controller from previous run
+fetch(..., { signal: autoSequenceAbortController.signal });
+```
+
+### Good:
+```javascript
+autoSequenceAbortController = new AbortController();
+fetch(..., { signal: autoSequenceAbortController.signal });
+```
+
+This must happen for every fresh run.
+
+---
+
+## 3. CLEAR "AI UNAVAILABLE" UI STATE BEFORE STARTING AGAIN
+
+The UI currently appears to retain the AI failure/unavailable result after a cancelled run.
+
+Before starting a new run, clear:
+- any existing `AI Strategy Unavailable` cards
+- previous AI failure placeholders
+- strategy generation error flags
+- line-level AI unavailable markers
+
+### Example:
+```javascript
+function clearAIStrategyUnavailableState() {
+  setLineStrategies([]);
+  setAiStrategyErrors({});
+  setAiUnavailableLines({});
+}
+```
+
+Or equivalent based on the app’s state structure.
+
+The next run should start with a clean slate.
+
+---
+
+## 4. ENSURE CANCELLATION ERRORS ARE TREATED DIFFERENTLY FROM REAL AI FAILURES
+
+A cancelled request should not be converted into:
+- `AI unavailable`
+- `AI could not generate this strategy`
+
+Cancellation is not an AI failure.
+It is a user action.
+
+So when the AI request is aborted:
+- do not mark the strategy as failed/unavailable
+- do not persist error state to the next run
+- do not build fallback “AI unavailable” cards unless the current run truly failed for a non-cancel reason
+
+### Example:
+```javascript
+try {
+  const result = await generateAIStrategies(...);
+  checkCancelled();
+  return result;
+} catch (err) {
+  if (
+    autoSequenceCancelled ||
+    err?.name === 'AbortError' ||
+    err?.message === 'AUTO_SEQUENCE_CANCELLED'
+  ) {
+    return { cancelled: true };
+  }
+
+  // real failure only
+  throw err;
+}
+```
+
+Then ensure cancelled runs do not write AI failure state into the UI.
+
+---
+
+## 5. ASSOCIATE ASYNC RESULTS WITH A RUN ID
+
+To prevent stale cancelled responses from affecting a future run, attach a unique run ID to each auto-sequence execution.
+
+### Example:
+```javascript
+let autoSequenceRunId = 0;
+
+function createNewAutoSequenceRun() {
+  autoSequenceRunId += 1;
+  const runId = autoSequenceRunId;
+
+  autoSequenceCancelled = false;
+  autoSequenceCancelling = false;
+  autoSequenceAbortController = new AbortController();
+
+  return runId;
+}
+```
+
+Then when async results return:
+```javascript
+if (runId !== autoSequenceRunId) {
+  return; // stale result from older run, ignore completely
+}
+```
+
+This ensures:
+- cancelled run responses do not contaminate newer runs
+- late AI responses from aborted runs are ignored safely
+
+---
+
+## 6. DO NOT PERSIST AI FAILURE CARDS FROM A CANCELLED RUN
+
+If the user cancels during the “Generating strategy options...” step:
+- do not finalize that line with `AI Strategy Unavailable`
+- do not keep empty AI cards from the cancelled run
+- do not show failed strategy placeholders unless the current run genuinely completed and failed
+
+A cancelled run should simply be cancelled, not converted into a fake AI failure state.
+
+---
+
+## 7. RESET PER-LINE STRATEGY LOADING / ERROR FLAGS ON RETRY
+
+If the UI tracks states like:
+- `isGeneratingStrategies`
+- `strategyGenerationFailed`
+- `aiUnavailable`
+- `lineStrategyStatus`
+
+ensure these are all reset when the user retries auto-sequence.
+
+### Example:
+```javascript
+function resetLineStrategyStates() {
+  setLineStrategyStatus({});
+  setStrategyGenerationFailed({});
+  setStrategyLoading({});
+  setAIUnavailableFlags({});
+}
+```
+
+Call this at the start of each fresh run.
+
+---
+
+## 8. ONLY SHOW "AI STRATEGY UNAVAILABLE" FOR REAL FAILURES IN THE CURRENT RUN
+
+If a line’s AI generation actually fails during a completed run:
+- okay to show `AI Strategy Unavailable`
+
+But if the run was cancelled:
+- do not show that message
+- do not carry it into the next run
+
+The cancelled run should leave no stale AI failure footprint.
+
+---
+
+## 9. ADD DEBUG LOGGING TO TRACE RUN STATE
+
+Temporarily log:
+```javascript
+console.debug('[AutoSequence Run State]', {
+  runId: autoSequenceRunId,
+  autoSequenceCancelled,
+  autoSequenceCancelling,
+  hasAbortController: !!autoSequenceAbortController,
+  abortSignalAborted: autoSequenceAbortController?.signal?.aborted,
+});
+```
+
+Also log AI generation state:
+```javascript
+console.debug('[AI Strategy Generation]', {
+  runId,
+  line,
+  cancelled: autoSequenceCancelled,
+  signalAborted: autoSequenceAbortController?.signal?.aborted,
+  status: 'starting',
+});
+```
+
+And when results return:
+```javascript
+console.debug('[AI Strategy Result]', {
+  runId,
+  currentRunId: autoSequenceRunId,
+  stale: runId !== autoSequenceRunId,
+});
+```
+
+This will help verify:
+- new run state is properly reset
+- old aborted run results are ignored
+- next run uses fresh controller/state
+
+---
+
+## 10. VERIFICATION
+
+### Cancellation behavior
+1. ✅ Current run still cancels immediately when user clicks cancel
+2. ✅ Cancelled AI requests do not get treated as permanent AI failure
+
+### Retry behavior
+3. ✅ Starting a new auto-sequence run creates a fresh cancellation state
+4. ✅ Starting a new auto-sequence run creates a fresh AbortController
+5. ✅ AI strategy generation works normally again after a cancelled run
+6. ✅ `AI Strategy Unavailable` does not persist incorrectly from the cancelled run
+
+### UI correctness
+7. ✅ A cancelled run does not poison future runs
+8. ✅ Only real current-run AI failures produce unavailable strategy cards
+9. ✅ Late/stale responses from cancelled runs are ignored completely

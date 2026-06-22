@@ -1,0 +1,238 @@
+Please update the **AI vs Final Sequence** table so it gives users clearer visibility into **what really happened in the sequence**, by separating **date-based ordering** from the AI’s **strategy-based ordering**.
+
+---
+
+## 1. UPDATE THE TABLE STRUCTURE TO SHOW FINAL, DATE, AND STRATEGY-BASED RANKING
+
+Please restructure the table to use these columns:
+
+- **Final Rank**
+- **Order ID**
+- **Item Description**
+- **Current Line**
+- **Proposed Line**
+- **Moved?**
+- **Repositioned?**
+- **Date Rank**
+- **Strategy Rank**
+- **Reason**
+
+### Goal
+Make it easier for users to understand:
+- where the order ended up
+- how the date-based ordering affected it
+- how the AI strategically ranked it
+- and why its final placement looks the way it does
+
+### Expected result
+The table becomes much more transparent and easier to interpret.
+
+---
+
+## 2. DEFINE `DATE RANK` AS THE ORDER’S POSITION WHEN SORTED BY DATE
+
+Please make **Date Rank** represent the order’s position when sorted by the **AI’s suggested/effective date**.
+
+### Important
+This should reflect the date-first sequencing behavior currently used by the app.
+
+### Goal
+Show users where the order falls when date is treated as the main ordering basis.
+
+### Expected result
+Users can compare the order’s date-driven placement against its strategy-driven placement.
+
+---
+
+## 3. DEFINE `STRATEGY RANK` AS THE AI’S STRATEGIC RANKING
+
+Please use **Strategy Rank** as the column name for the AI’s strategic order preference.
+
+### Important
+This replaces the current `AI Rank` label.
+
+### Goal
+Clarify that this rank reflects the AI’s sequencing logic based on things like:
+- grouping
+- changeover efficiency
+- material clustering
+- urgency reasoning
+- MTS advancement strategy
+- and other strategic sequencing considerations
+
+### Expected result
+Users understand this as the AI’s strategy-based ranking, not the final visible order.
+
+---
+
+## 4. KEEP `FINAL RANK` AS THE ACTUAL DISPLAYED POSITION
+
+Please make **Final Rank** reflect the final visible position of the order in the preview.
+
+### Goal
+Users should be able to compare:
+- `Final Rank`
+- `Date Rank`
+- `Strategy Rank`
+
+and understand how the final sequence was formed.
+
+### Expected result
+The relationship between these three ranks becomes clearer.
+
+---
+
+## 5. MAKE `REPOSITIONED?` REFLECT WHETHER THE FINAL POSITION DIFFERS FROM THE STRATEGY-BASED ORDER
+
+Please use the `Repositioned?` column to indicate whether the order’s final displayed position differs from the AI’s original strategic rank due to the final date-aware ordering.
+
+### Goal
+Show users whether the order stayed exactly where the AI strategically ranked it, or whether date-first ordering caused it to shift.
+
+### Expected result
+Users can quickly identify rows whose visible position changed after applying the final sort logic.
+
+---
+
+## 6. SIMPLIFY THE `REASON` COLUMN SO IT EXPLAINS WHAT ACTUALLY HAPPENED IN PLAIN LANGUAGE
+
+Please make the **Reason** column simpler, clearer, and more aligned to the current feature behavior.
+
+### Current issue
+Some explanations currently use language that feels too technical or not very intuitive, such as:
+- hard ceiling
+- cannot be delayed
+- monitor future-dispatch
+- immutable contract
+- and other phrasing that does not clearly explain the actual visible sequence
+
+### Required improvement
+Please rewrite the reasoning in plain language so it explains things like:
+- moved earlier to respect the earlier date
+- placed later because another order has an earlier suggested date
+- stayed in position because it shares the same date and has a lower Strategy Rank
+- moved up by date-first sorting
+- same-date order was ordered by Strategy Rank
+- AI ranked this order strategically higher, but date rank placed it later
+- or other similar straightforward explanations
+
+### Goal
+Make the reason easy to understand without needing to interpret technical scheduling language.
+
+### Expected result
+The Reason column clearly explains the order’s visible final placement in terms users can easily follow.
+
+---
+
+## 7. MAKE THE REASON EXPLAIN THE RELATIONSHIP BETWEEN DATE RANK, STRATEGY RANK, AND FINAL RANK
+
+Please make the Reason column help users understand how the final result was formed.
+
+### Examples of useful explanation patterns
+- `Moved earlier because its suggested date is earlier than other orders, so date rank placed it ahead of a higher Strategy Rank order.`
+- `Stayed behind another order because both share the same date, and Strategy Rank is lower.`
+- `Final position matches Strategy Rank because its date rank and strategy rank were aligned.`
+- `Repositioned by date-first ordering; Strategy Rank applied only within the same date group.`
+
+### Goal
+Help users understand how the three ranking dimensions interact.
+
+### Expected result
+The table gives a clearer explanation of what actually happened in the sequence.
+
+---
+
+## 8. KEEP THE TABLE ALIGNED TO THE CURRENT APP BEHAVIOR
+
+Please make sure the updated table structure reflects the app’s current sequence logic, where:
+- suggested/effective date is a primary sequencing factor
+- Strategy Rank reflects the AI’s strategic preference
+- Final Rank reflects the actual displayed order
+- the reason explains the difference clearly
+
+### Expected result
+The table feels aligned with the current feature instead of older deterministic-adjustment behavior.
+
+---
+
+## IMPORTANT
+
+Please update the **AI vs Final Sequence** table with this structure:
+
+- **Final Rank**
+- **Order ID**
+- **Item Description**
+- **Current Line**
+- **Proposed Line**
+- **Moved?**
+- **Repositioned?**
+- **Date Rank**
+- **Strategy Rank**
+- **Reason**
+
+Also:
+- rename `AI Rank` to **Strategy Rank**
+- simplify the **Reason** column so it explains what really happened in plain language
+- make the reasoning reflect the relationship between:
+  - Final Rank
+  - Date Rank
+  - Strategy Rank
+
+This is needed so users can better understand why an order appears where it does in the final sequence.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log the new ranking fields and explanation basis.
+
+```javascript
+console.debug('[AI vs Final Sequence New Rank Fields]', {
+  entityId,
+  finalRank,
+  dateRank,
+  strategyRank,
+  moved,
+  repositioned,
+});
+```
+
+```javascript
+console.debug('[AI vs Final Sequence Reason Basis]', {
+  entityId,
+  finalRank,
+  dateRank,
+  strategyRank,
+  generatedReason,
+});
+```
+
+```javascript
+console.debug('[AI vs Final Sequence Table Columns]', {
+  columns: [
+    'Final Rank',
+    'Order ID',
+    'Item Description',
+    'Current Line',
+    'Proposed Line',
+    'Moved?',
+    'Repositioned?',
+    'Date Rank',
+    'Strategy Rank',
+    'Reason',
+  ],
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Table uses the new requested column structure
+2. ✅ `AI Rank` is renamed to `Strategy Rank`
+3. ✅ `Date Rank` is added and correctly reflects date-based ordering
+4. ✅ `Final Rank` reflects the actual displayed order
+5. ✅ `Repositioned?` clearly shows whether final position differs from strategy-based order
+6. ✅ Reason text is simplified and more understandable
+7. ✅ Reason explains the relationship between Final Rank, Date Rank, and Strategy Rank
+8. ✅ No UI errors or console errors are introduced

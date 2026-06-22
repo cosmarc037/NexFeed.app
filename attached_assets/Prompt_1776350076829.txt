@@ -1,0 +1,226 @@
+```
+Fix: Ensure the ✕ uncombine button shows on combined orders in the After table:
+
+---
+
+## 1. CHECK THE CONDITION IN PlantAfterRow
+
+The ✕ button only renders when both conditions are true:
+- order._isCombined is true
+- onUncombineSingle is provided
+
+```jsx
+// In PlantAfterRow — the uncombine button section
+// BEFORE (possibly wrong condition):
+{order._isCombined && onUncombineSingle && (
+  <span className="as-uncombine-inline">
+    <span className="as-desc-arrow">▶</span>
+    <button
+      className="as-uncombine-btn"
+      onClick={(e) => { e.stopPropagation(); onUncombineSingle(order); }}
+      title="Uncombine this order"
+    >
+      ✕
+    </button>
+  </span>
+)}
+
+// AFTER (ensure it always shows for combined orders):
+{order._isCombined && order._combinedFrom && order._combinedFrom.length > 0 && (
+  <span className="as-uncombine-inline">
+    <span className="as-desc-arrow">▶</span>
+    {onUncombineSingle && (
+      <button
+        className="as-uncombine-btn"
+        onClick={(e) => { e.stopPropagation(); onUncombineSingle(order); }}
+        title="Uncombine this order"
+      >
+        ✕
+      </button>
+    )}
+  </span>
+)}
+```
+
+---
+
+## 2. ENSURE onUncombineSingle IS PASSED FROM ALL PARENTS
+
+### From PlantAutoSequencePreview:
+
+```jsx
+{activeTab !== 'summary' && (
+  <PlantLineTab
+    line={activeTab}
+    originalOrders={originalSnapshot[activeTab] || []}
+    sequencedOrders={sequencedResults[activeTab] || []}
+    placementLog={placementLog}
+    aiExplanations={aiExplanations}
+    isLoadingAI={isLoadingAI}
+    useFallback={useFallback}
+    onUncombineSingle={(combinedOrder) => handleUncombineSingle(activeTab, combinedOrder)}
+    cachedRowInsights={lineRowInsights[activeTab] || null}
+    onRowInsightsLoaded={(insights) => { /* ... */ }}
+    shouldRegenerate={/* ... */}
+  />
+)}
+```
+
+### From PlantLineTab to PlantAfterRow:
+
+```jsx
+function PlantLineTab({ 
+  line, 
+  originalOrders, 
+  sequencedOrders, 
+  placementLog,
+  aiExplanations,
+  isLoadingAI,
+  useFallback,
+  onUncombineSingle,  // <-- MUST be received here
+  cachedRowInsights,
+  onRowInsightsLoaded,
+  shouldRegenerate
+}) {
+  // ... existing code ...
+  
+  return (
+    <div className="plant-line-tab">
+      {/* ... stats ... */}
+      
+      {/* Before and After tables */}
+      <div className="auto-sequence-comparison">
+        <div className="auto-sequence-comparison-container">
+          <div className="auto-sequence-comparison-scroll">
+            {/* Before table */}
+            {/* ... */}
+            
+            <div className="auto-sequence-divider"></div>
+            
+            {/* After table */}
+            <div className="auto-sequence-table-panel">
+              {/* ... header ... */}
+              <div className="auto-sequence-table-wrapper">
+                <table className="auto-sequence-table auto-sequence-table-after">
+                  <thead>
+                    {/* ... existing headers ... */}
+                  </thead>
+                  <tbody>
+                    {sequencedOrders.map(order => (
+                      <PlantAfterRow
+                        key={order.id}
+                        order={order}
+                        onUncombineSingle={onUncombineSingle}  // <-- MUST be passed here
+                        insight={rowInsights?.[order.prio] || null}
+                        isLoadingInsight={isLoadingRowInsights}
+                      />
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      {/* ... actions taken ... */}
+    </div>
+  );
+}
+```
+
+---
+
+## 3. ALSO ADD TO All Lines Summary TAB
+
+If the summary tab also shows an After table with combined orders:
+
+```jsx
+{activeTab === 'summary' && (
+  <PlantSummaryTab
+    summaryStats={summaryStats}
+    placementLog={placementLog}
+    sequencedResults={sequencedResults}  // Pass this if summary shows orders
+    aiExplanations={aiExplanations}
+    isLoadingAI={isLoadingAI}
+    useFallback={useFallback}
+    onRefreshInsights={() => generateAIExplanations(placementLog)}
+    onUncombineSingle={(line, combinedOrder) => handleUncombineSingle(line, combinedOrder)}
+  />
+)}
+```
+
+---
+
+## 4. ENSURE STYLING IS CORRECT
+
+```css
+/* The arrow and X should be inline after the item description */
+.as-uncombine-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 4px;
+  flex-shrink: 0;
+}
+
+.as-desc-arrow {
+  font-size: 8px;
+  color: #9ca3af;
+}
+
+.as-uncombine-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: none;
+  background: none;
+  color: #9ca3af;
+  font-size: 10px;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+  transition: all 0.15s;
+}
+
+.as-uncombine-btn:hover {
+  background: #fef2f2;
+  color: #dc2626;
+}
+
+/* Ensure the description row has flex layout */
+.as-desc-main-row {
+  display: flex;
+  align-items: center;
+}
+
+.as-desc-main {
+  flex: 1;
+}
+```
+
+---
+
+## VERIFICATION
+
+### ✕ button visible
+1. ✅ Shows on ALL combined orders in the After table
+2. ✅ Appears after the ▶ arrow: "Item Description ▶ ✕"
+3. ✅ Only on combined orders — regular orders don't show it
+4. ✅ Grey by default, red on hover
+
+### ✕ button functional
+5. ✅ onUncombineSingle passed from PlantAutoSequencePreview → PlantLineTab → PlantAfterRow
+6. ✅ Clicking ✕ splits the combined order back to individual orders
+7. ✅ Line re-sequences after uncombine
+8. ✅ Row insights invalidated and regenerated
+
+### Prop chain complete
+9. ✅ PlantAutoSequencePreview defines handleUncombineSingle
+10. ✅ PlantLineTab receives onUncombineSingle prop
+11. ✅ PlantAfterRow receives onUncombineSingle prop
+12. ✅ No missing prop at any level
+```

@@ -1,0 +1,951 @@
+```
+Implement all four features with specifications:
+
+---
+
+## 1. CLICKABLE EDITABLE PLANNED ORDER (FG | SFG) IN ORDER TABLE
+
+```jsx
+// In OrderTable.jsx — make planned order cells clickable
+
+function OrderTableRow({ order }) {
+  const [editingField, setEditingField] = useState(null);
+  const [editValue, setEditValue] = useState('');
+  const inputRef = useRef(null);
+  
+  function startEdit(fieldKey) {
+    setEditingField(fieldKey);
+    setEditValue(order[fieldKey] || '');
+    setTimeout(() => inputRef.current?.focus(), 0);
+  }
+  
+  async function saveEdit() {
+    if (!editingField) return;
+    
+    const trimmedValue = editValue.trim();
+    const currentValue = order[editingField] || '';
+    
+    // Only save if value actually changed
+    if (trimmedValue !== currentValue) {
+      try {
+        await updateOrderMutation.mutateAsync({
+          id: order.id,
+          data: { [editingField]: trimmedValue }
+        });
+        toast.success('Planned order updated');
+      } catch (error) {
+        toast.error(`Update failed: ${error.message}`);
+      }
+    }
+    
+    setEditingField(null);
+    setEditValue('');
+  }
+  
+  function handleKeyDown(e) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      saveEdit();
+    } else if (e.key === 'Escape') {
+      setEditingField(null);
+      setEditValue('');
+    }
+  }
+  
+  return (
+    <tr>
+      {/* ... other cells ... */}
+      
+      {/* Planned Order FG */}
+      <td className="order-cell">
+        {editingField === 'planned_order_fg' ? (
+          <input
+            ref={inputRef}
+            type="text"
+            value={editValue}
+            onChange={(e) => setEditValue(e.target.value)}
+            onBlur={saveEdit}
+            onKeyDown={handleKeyDown}
+            className="order-edit-input"
+          />
+        ) : (
+          <span
+            className="order-editable-field"
+            onClick={() => startEdit('planned_order_fg')}
+            title="Click to edit"
+          >
+            {order.planned_order_fg || '—'}
+          </span>
+        )}
+      </td>
+      
+      {/* Planned Order SFG */}
+      <td className="order-cell">
+        {editingField === 'planned_order_sfg' ? (
+          <input
+            ref={inputRef}
+            type="text"
+            value={editValue}
+            onChange={(e) => setEditValue(e.target.value)}
+            onBlur={saveEdit}
+            onKeyDown={handleKeyDown}
+            className="order-edit-input"
+          />
+        ) : (
+          <span
+            className="order-editable-field"
+            onClick={() => startEdit('planned_order_sfg')}
+            title="Click to edit"
+          >
+            {order.planned_order_sfg || '—'}
+          </span>
+        )}
+      </td>
+      
+      {/* ... other cells ... */}
+    </tr>
+  );
+}
+```
+
+Styling:
+
+```css
+.order-editable-field {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all 0.15s;
+  border: 1px solid transparent;
+}
+
+.order-editable-field:hover {
+  background: var(--color-hover-bg, #fef3c7);
+  border: 1px dashed var(--color-primary, #f59e0b);
+}
+
+.order-edit-input {
+  width: 100%;
+  max-width: 100px;
+  padding: 2px 6px;
+  border: 2px solid var(--color-primary, #3b82f6);
+  border-radius: 3px;
+  font-size: 11px;
+  font-family: inherit;
+  background: var(--color-input-bg, #ffffff);
+  color: var(--color-text, #1f2937);
+}
+
+.order-edit-input:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+}
+```
+
+---
+
+## 2. IMPROVED FILTERING IN ORDER TABLE — ADD COLOR AND DIAMETER FILTERS
+
+```jsx
+// In OrderTableFilters.jsx — add Color and Diameter checkboxes
+// Keep existing Category and Item Description filters as-is
+
+function OrderTableFilters({ orders, onFilter }) {
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedCategories, setSelectedCategories] = useState([]);
+  const [selectedDescriptions, setSelectedDescriptions] = useState([]);
+  const [selectedColors, setSelectedColors] = useState([]);
+  const [selectedDiameters, setSelectedDiameters] = useState([]);
+  
+  // Extract unique values from current orders
+  const uniqueCategories = useMemo(() => 
+    [...new Set(orders.map(o => o.category))].filter(Boolean).sort(),
+    [orders]
+  );
+  
+  const uniqueColors = useMemo(() =>
+    [...new Set(orders.map(o => o.color))].filter(Boolean).sort(),
+    [orders]
+  );
+  
+  const uniqueDiameters = useMemo(() =>
+    [...new Set(orders.map(o => o.diameter))].filter(Boolean).sort(),
+    [orders]
+  );
+  
+  const uniqueDescriptions = useMemo(() =>
+    [...new Set(orders.map(o => o.item_description))].filter(Boolean).sort(),
+    [orders]
+  );
+  
+  // Apply filters (case-insensitive OR match)
+  useEffect(() => {
+    const filtered = orders.filter(order => {
+      // Search term — OR match across multiple fields (case-insensitive)
+      let matchesSearch = true;
+      if (searchTerm.trim()) {
+        const term = searchTerm.toLowerCase().trim();
+        matchesSearch =
+          (order.item_description || '').toLowerCase().includes(term) ||
+          (order.color || '').toLowerCase().includes(term) ||
+          String(order.diameter || '').toLowerCase().includes(term) ||
+          (order.category || '').toLowerCase().includes(term) ||
+          (order.form || '').toLowerCase().includes(term) ||
+          (order.material_code_fg || '').toLowerCase().includes(term) ||
+          (order.fpr || '').toLowerCase().includes(term);
+      }
+      
+      // Category filter — OR match
+      const matchesCategory = selectedCategories.length === 0 || 
+                              selectedCategories.includes(order.category);
+      
+      // Description filter — OR match
+      const matchesDescription = selectedDescriptions.length === 0 || 
+                                 selectedDescriptions.includes(order.item_description);
+      
+      // Color filter — OR match
+      const matchesColor = selectedColors.length === 0 || 
+                          selectedColors.includes(order.color);
+      
+      // Diameter filter — OR match
+      const matchesDiameter = selectedDiameters.length === 0 || 
+                             selectedDiameters.includes(order.diameter);
+      
+      return matchesSearch && matchesCategory && matchesDescription && 
+             matchesColor && matchesDiameter;
+    });
+    
+    onFilter(filtered);
+  }, [searchTerm, selectedCategories, selectedDescriptions, selectedColors, selectedDiameters, orders]);
+  
+  return (
+    <div className="order-filters">
+      {/* Search input — existing */}
+      <input
+        type="text"
+        placeholder="Search by item, color, diameter, category, form, material code..."
+        value={searchTerm}
+        onChange={(e) => setSearchTerm(e.target.value)}
+        className="filter-search"
+      />
+      
+      {/* Filters button that opens dropdown */}
+      <FilterDropdown
+        categories={{ 
+          options: uniqueCategories, 
+          selected: selectedCategories, 
+          onChange: setSelectedCategories 
+        }}
+        descriptions={{ 
+          options: uniqueDescriptions, 
+          selected: selectedDescriptions, 
+          onChange: setSelectedDescriptions 
+        }}
+        colors={{ 
+          options: uniqueColors, 
+          selected: selectedColors, 
+          onChange: setSelectedColors 
+        }}
+        diameters={{ 
+          options: uniqueDiameters, 
+          selected: selectedDiameters, 
+          onChange: setSelectedDiameters 
+        }}
+      />
+    </div>
+  );
+}
+
+function FilterDropdown({ categories, descriptions, colors, diameters }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const dropdownRef = useRef(null);
+  
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+        setIsOpen(false);
+      }
+    }
+    if (isOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [isOpen]);
+  
+  const totalActive = categories.selected.length + descriptions.selected.length + 
+                      colors.selected.length + diameters.selected.length;
+  
+  return (
+    <div className="filter-dropdown" ref={dropdownRef}>
+      <button
+        className={`filter-dropdown-btn ${totalActive > 0 ? 'active' : ''}`}
+        onClick={() => setIsOpen(!isOpen)}
+      >
+        🔍 Filters
+        {totalActive > 0 && <span className="filter-badge">{totalActive}</span>}
+      </button>
+      
+      {isOpen && (
+        <div className="filter-dropdown-panel">
+          <FilterSection label="Category" {...categories} />
+          <FilterSection label="Item Description" {...descriptions} scrollable />
+          <FilterSection label="Color" {...colors} showColorDot />
+          <FilterSection label="Diameter" {...diameters} suffix="mm" />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FilterSection({ label, options, selected, onChange, scrollable, showColorDot, suffix }) {
+  function toggle(option) {
+    if (selected.includes(option)) {
+      onChange(selected.filter(o => o !== option));
+    } else {
+      onChange([...selected, option]);
+    }
+  }
+  
+  return (
+    <div className="filter-section">
+      <div className="filter-section-header">
+        <span>{label}</span>
+        {selected.length > 0 && (
+          <button className="filter-clear" onClick={() => onChange([])}>Clear</button>
+        )}
+      </div>
+      <div className={`filter-checkboxes ${scrollable ? 'scrollable' : ''}`}>
+        {options.map(option => (
+          <label key={option} className="filter-checkbox">
+            <input
+              type="checkbox"
+              checked={selected.includes(option)}
+              onChange={() => toggle(option)}
+            />
+            {showColorDot && (
+              <span className="color-dot" style={{background: getColorHex(option)}}></span>
+            )}
+            <span>{option}{suffix}</span>
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function getColorHex(color) {
+  const colorMap = {
+    'Brown': '#8B4513',
+    'Yellow': '#FFC107',
+    'White': '#F5F5F5',
+    'Red': '#DC2626',
+    'Blue': '#2563EB',
+    'Green': '#16A34A',
+  };
+  return colorMap[color] || '#9ca3af';
+}
+```
+
+Styling:
+
+```css
+.filter-dropdown {
+  position: relative;
+}
+
+.filter-dropdown-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--color-border, #d1d5db);
+  border-radius: 6px;
+  background: var(--color-bg, #ffffff);
+  color: var(--color-text, #1f2937);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.filter-dropdown-btn.active {
+  border-color: var(--color-primary, #3b82f6);
+  background: var(--color-primary-light, #dbeafe);
+}
+
+.filter-badge {
+  background: var(--color-primary, #3b82f6);
+  color: white;
+  padding: 1px 6px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.filter-dropdown-panel {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 4px;
+  width: 280px;
+  max-height: 500px;
+  overflow-y: auto;
+  background: var(--color-bg, #ffffff);
+  border: 1px solid var(--color-border, #e5e7eb);
+  border-radius: 8px;
+  box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+  padding: 12px;
+  z-index: 100;
+}
+
+.filter-section {
+  margin-bottom: 14px;
+}
+
+.filter-section:last-child {
+  margin-bottom: 0;
+}
+
+.filter-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--color-text-secondary, #6b7280);
+  text-transform: uppercase;
+  margin-bottom: 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--color-border, #e5e7eb);
+}
+
+.filter-clear {
+  border: none;
+  background: none;
+  color: var(--color-primary, #3b82f6);
+  font-size: 10px;
+  cursor: pointer;
+  text-transform: none;
+  font-weight: 500;
+}
+
+.filter-checkboxes {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.filter-checkboxes.scrollable {
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.filter-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  cursor: pointer;
+  padding: 3px 4px;
+  border-radius: 3px;
+}
+
+.filter-checkbox:hover {
+  background: var(--color-hover-bg, #f3f4f6);
+}
+
+.color-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1px solid var(--color-border, #d1d5db);
+}
+```
+
+---
+
+## 3. THEME SWITCHER IN NAVBAR — DROPDOWN WITH ICON + NAME
+
+```jsx
+// In Navbar.jsx — place between "Take a tour" and "Help"
+
+function Navbar() {
+  return (
+    <nav className="navbar">
+      {/* ... left side (logo, menu) ... */}
+      
+      <div className="navbar-right">
+        <button className="navbar-btn">
+          🧭 Take a tour
+        </button>
+        
+        <ThemeSwitcher />  {/* NEW — between Take a tour and Help */}
+        
+        <button className="navbar-btn">
+          ❔ Help
+        </button>
+        
+        <UserAvatar />
+      </div>
+    </nav>
+  );
+}
+
+function ThemeSwitcher() {
+  const [isOpen, setIsOpen] = useState(false);
+  const dropdownRef = useRef(null);
+  const [theme, setTheme] = useUserPreference('app-theme', 'default');
+  const [isDarkMode, setIsDarkMode] = useUserPreference('app-dark-mode', false);
+  
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+        setIsOpen(false);
+      }
+    }
+    if (isOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [isOpen]);
+  
+  // Apply theme on mount
+  useEffect(() => {
+    applyTheme(theme);
+    if (isDarkMode) {
+      document.documentElement.classList.add('dark-mode');
+    } else {
+      document.documentElement.classList.remove('dark-mode');
+    }
+  }, [theme, isDarkMode]);
+  
+  function applyTheme(themeName) {
+    const themeData = THEMES[themeName];
+    if (!themeData) return;
+    
+    document.documentElement.style.setProperty('--color-primary', themeData.primary);
+    document.documentElement.style.setProperty('--color-primary-dark', themeData.primaryDark);
+    document.documentElement.style.setProperty('--color-primary-light', themeData.primaryLight);
+  }
+  
+  return (
+    <div className="theme-switcher" ref={dropdownRef}>
+      <button
+        className="navbar-btn theme-switcher-btn"
+        onClick={() => setIsOpen(!isOpen)}
+      >
+        🎨 Themes
+      </button>
+      
+      {isOpen && (
+        <div className="theme-switcher-dropdown">
+          {/* Dark Mode section */}
+          <div className="theme-dropdown-section">
+            <div className="theme-dropdown-row">
+              <span className="theme-dropdown-label">Dark Mode</span>
+              <button
+                className={`theme-toggle ${isDarkMode ? 'active' : ''}`}
+                onClick={() => setIsDarkMode(!isDarkMode)}
+              >
+                <span className="theme-toggle-thumb"></span>
+              </button>
+            </div>
+          </div>
+          
+          <div className="theme-dropdown-divider"></div>
+          
+          {/* Themes section */}
+          <div className="theme-dropdown-section">
+            <div className="theme-dropdown-label">Themes</div>
+            <div className="theme-circles">
+              {Object.entries(THEMES).map(([key, themeData]) => (
+                <button
+                  key={key}
+                  className={`theme-circle ${theme === key ? 'active' : ''}`}
+                  onClick={() => setTheme(key)}
+                  style={{background: themeData.primary}}
+                  title={themeData.name}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const THEMES = {
+  pilmico: { 
+    name: 'Pilmico (Blue)', 
+    primary: '#0099DD', 
+    primaryDark: '#007AB0', 
+    primaryLight: '#B8E6FA' 
+  },
+  aboitiz: { 
+    name: 'Aboitiz (Green)', 
+    primary: '#4CAF50', 
+    primaryDark: '#388E3C', 
+    primaryLight: '#C8E6C9' 
+  },
+  default: { 
+    name: 'Default (Orange)', 
+    primary: '#EA580C', 
+    primaryDark: '#C2410C', 
+    primaryLight: '#FED7AA' 
+  },
+};
+```
+
+Styling:
+
+```css
+.theme-switcher {
+  position: relative;
+}
+
+.theme-switcher-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: none;
+  background: none;
+  color: var(--color-text, #1f2937);
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.theme-switcher-btn:hover {
+  background: var(--color-hover-bg, #f3f4f6);
+}
+
+.theme-switcher-dropdown {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 8px;
+  width: 200px;
+  background: var(--color-bg, #ffffff);
+  border: 1px solid var(--color-border, #e5e7eb);
+  border-radius: 8px;
+  box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+  padding: 12px;
+  z-index: 1000;
+}
+
+.theme-dropdown-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.theme-dropdown-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.theme-dropdown-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--color-text-secondary, #6b7280);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.theme-dropdown-divider {
+  height: 1px;
+  background: var(--color-border, #e5e7eb);
+  margin: 10px 0;
+}
+
+/* Toggle switch */
+.theme-toggle {
+  position: relative;
+  width: 36px;
+  height: 18px;
+  border: none;
+  border-radius: 10px;
+  background: #d1d5db;
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.3s;
+}
+
+.theme-toggle.active {
+  background: var(--color-primary, #3b82f6);
+}
+
+.theme-toggle-thumb {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  background: white;
+  border-radius: 50%;
+  top: 2px;
+  left: 2px;
+  transition: left 0.3s;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+}
+
+.theme-toggle.active .theme-toggle-thumb {
+  left: 20px;
+}
+
+/* Theme circles */
+.theme-circles {
+  display: flex;
+  gap: 10px;
+}
+
+.theme-circle {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: all 0.2s;
+  padding: 0;
+}
+
+.theme-circle:hover {
+  transform: scale(1.1);
+}
+
+.theme-circle.active {
+  border-color: var(--color-text, #1f2937);
+  box-shadow: 0 0 0 2px var(--color-bg, #ffffff), 0 0 0 4px var(--color-text, #1f2937);
+}
+
+.dark-mode .theme-circle.active {
+  border-color: #ffffff;
+  box-shadow: 0 0 0 2px #1f2937, 0 0 0 4px #ffffff;
+}
+```
+
+---
+
+## 4. PER-USER THEME PERSISTENCE
+
+```javascript
+// Custom hook that saves to the DB per user (not localStorage)
+
+function useUserPreference(key, defaultValue) {
+  const { user } = useAuth();
+  const [value, setValue] = useState(defaultValue);
+  
+  // Load from user preferences on mount
+  useEffect(() => {
+    if (!user) return;
+    
+    async function loadPref() {
+      try {
+        const pref = await UserPreference.filter({ 
+          user_id: user.id, 
+          key: key 
+        });
+        if (pref && pref.length > 0) {
+          setValue(JSON.parse(pref[0].value));
+        }
+      } catch (error) {
+        console.error('Load pref failed:', error);
+      }
+    }
+    
+    loadPref();
+  }, [user, key]);
+  
+  // Save on change
+  const updateValue = async (newValue) => {
+    setValue(newValue);
+    
+    if (!user) return;
+    
+    try {
+      const existing = await UserPreference.filter({ 
+        user_id: user.id, 
+        key: key 
+      });
+      
+      if (existing && existing.length > 0) {
+        await UserPreference.update(existing[0].id, {
+          value: JSON.stringify(newValue)
+        });
+      } else {
+        await UserPreference.create({
+          user_id: user.id,
+          key: key,
+          value: JSON.stringify(newValue)
+        });
+      }
+    } catch (error) {
+      console.error('Save pref failed:', error);
+    }
+  };
+  
+  return [value, updateValue];
+}
+```
+
+If user preferences table doesn't exist, use localStorage with user ID prefix:
+
+```javascript
+function useUserPreference(key, defaultValue) {
+  const { user } = useAuth();
+  const storageKey = user ? `user_${user.id}_${key}` : key;
+  
+  const [value, setValue] = useState(() => {
+    try {
+      const stored = localStorage.getItem(storageKey);
+      return stored ? JSON.parse(stored) : defaultValue;
+    } catch {
+      return defaultValue;
+    }
+  });
+  
+  useEffect(() => {
+    localStorage.setItem(storageKey, JSON.stringify(value));
+  }, [storageKey, value]);
+  
+  return [value, setValue];
+}
+```
+
+---
+
+## 5. DARK MODE CSS
+
+```css
+:root {
+  --color-primary: #EA580C;
+  --color-primary-dark: #C2410C;
+  --color-primary-light: #FED7AA;
+  --color-bg: #FFFFFF;
+  --color-bg-secondary: #F9FAFB;
+  --color-text: #1F2937;
+  --color-text-secondary: #6B7280;
+  --color-border: #E5E7EB;
+  --color-hover-bg: #F3F4F6;
+  --color-input-bg: #FFFFFF;
+}
+
+.dark-mode {
+  --color-bg: #111827;
+  --color-bg-secondary: #1F2937;
+  --color-text: #F3F4F6;
+  --color-text-secondary: #9CA3AF;
+  --color-border: #374151;
+  --color-hover-bg: #374151;
+  --color-input-bg: #1F2937;
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-text);
+  transition: background 0.3s, color 0.3s;
+}
+
+.dark-mode table,
+.dark-mode table thead,
+.dark-mode table tbody {
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+
+.dark-mode table thead {
+  background: var(--color-bg-secondary);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.dark-mode table tbody tr {
+  border-bottom: 1px solid var(--color-border);
+}
+
+.dark-mode table tbody tr:hover {
+  background: var(--color-hover-bg);
+}
+
+.dark-mode .card,
+.dark-mode .modal,
+.dark-mode .panel {
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+}
+
+.dark-mode input,
+.dark-mode textarea,
+.dark-mode select {
+  background: var(--color-input-bg);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+}
+
+.dark-mode .navbar {
+  background: var(--color-bg-secondary);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.dark-mode .sidebar {
+  background: var(--color-bg-secondary);
+  border-right: 1px solid var(--color-border);
+}
+
+/* Charts — force dark backgrounds */
+.dark-mode .chart-container,
+.dark-mode .recharts-surface {
+  background: var(--color-bg-secondary);
+}
+
+.dark-mode .recharts-text {
+  fill: var(--color-text);
+}
+
+.dark-mode .recharts-cartesian-grid line {
+  stroke: var(--color-border);
+}
+```
+
+---
+
+## VERIFICATION
+
+### 1. Editable Planned Order
+1. ✅ Click text → becomes input
+2. ✅ Save on Enter or blur (click away)
+3. ✅ Escape cancels without saving
+4. ✅ No validation, any text accepted
+5. ✅ Applied in ORDER TABLE (not master data)
+
+### 2. Improved filtering in ORDER TABLE
+6. ✅ Case-insensitive search
+7. ✅ OR match across all filter fields
+8. ✅ New: Color checkbox filter
+9. ✅ New: Diameter checkbox filter
+10. ✅ Existing Category filter preserved
+11. ✅ Existing Description filter preserved
+12. ✅ Filter badge shows active count
+
+### 3. Theme switcher placement
+13. ✅ Between "Take a tour" and "Help"
+14. ✅ Icon + "Themes" label (🎨 Themes)
+15. ✅ Opens as dropdown on click
+16. ✅ Visible to all users
+17. ✅ Preference saved per user
+
+### 4. Dropdown layout
+18. ✅ Dark Mode toggle at top
+19. ✅ Divider line
+20. ✅ "Themes" label below
+21. ✅ Three color circles (blue, green, orange)
+22. ✅ Active theme highlighted with ring
+
+### 5. Dark mode
+23. ✅ Manual toggle (not auto)
+24. ✅ Standalone (works with any theme)
+25. ✅ Applied to all UI elements
+26. ✅ Charts and tables styled
+27. ✅ Smooth transitions
+```

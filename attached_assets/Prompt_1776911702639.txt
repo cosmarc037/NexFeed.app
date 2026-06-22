@@ -1,0 +1,685 @@
+```
+Implement with your specifications:
+
+---
+
+## 1. CLICKABLE EDITABLE PLANNED ORDER FIELD
+
+```jsx
+// In OrderTable.jsx
+
+function OrderTableRow({ order, onOrderUpdate }) {
+  const [editingField, setEditingField] = useState(null);
+  const [editValue, setEditValue] = useState('');
+  const inputRef = useRef(null);
+  
+  // Close edit when clicking outside
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (inputRef.current && !inputRef.current.contains(e.target)) {
+        setEditingField(null);
+      }
+    }
+    
+    if (editingField) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [editingField]);
+  
+  async function handleFieldEdit(fieldKey) {
+    setEditingField(fieldKey);
+    setEditValue(order[fieldKey] || '');
+    setTimeout(() => inputRef.current?.focus(), 0);
+  }
+  
+  async function handleFieldChange(e, fieldKey) {
+    const newValue = e.target.value;
+    setEditValue(newValue);
+    
+    // Auto-save immediately
+    try {
+      await updateOrderMutation.mutateAsync({
+        id: order.id,
+        data: { [fieldKey]: newValue }
+      });
+      setEditingField(null);
+      toast.success(`${fieldKey} updated`);
+    } catch (error) {
+      toast.error(`Update failed: ${error.message}`);
+    }
+  }
+  
+  return (
+    <tr className="order-table-row">
+      {/* ... other columns ... */}
+      
+      {/* Planned Order FG */}
+      <td className="order-table-cell order-table-editable">
+        {editingField === 'planned_order_fg' ? (
+          <input
+            ref={inputRef}
+            type="text"
+            value={editValue}
+            onChange={(e) => handleFieldChange(e, 'planned_order_fg')}
+            className="order-table-edit-input order-table-edit-active"
+            onBlur={() => setEditingField(null)}
+          />
+        ) : (
+          <span
+            className="order-table-editable-field"
+            onClick={() => handleFieldEdit('planned_order_fg')}
+            title="Click to edit"
+          >
+            {order.planned_order_fg || '—'}
+          </span>
+        )}
+      </td>
+      
+      {/* Planned Order SFG */}
+      <td className="order-table-cell order-table-editable">
+        {editingField === 'planned_order_sfg' ? (
+          <input
+            ref={inputRef}
+            type="text"
+            value={editValue}
+            onChange={(e) => handleFieldChange(e, 'planned_order_sfg')}
+            className="order-table-edit-input order-table-edit-active"
+            onBlur={() => setEditingField(null)}
+          />
+        ) : (
+          <span
+            className="order-table-editable-field"
+            onClick={() => handleFieldEdit('planned_order_sfg')}
+            title="Click to edit"
+          >
+            {order.planned_order_sfg || '—'}
+          </span>
+        )}
+      </td>
+      
+      {/* ... other columns ... */}
+    </tr>
+  );
+}
+```
+
+Styling:
+
+```css
+.order-table-editable-field {
+  display: inline-block;
+  padding: 4px 6px;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all 0.15s;
+  border: 1px solid transparent;
+}
+
+.order-table-editable-field:hover {
+  background: #fef3c7;
+  border: 1px dashed #f59e0b;
+}
+
+.order-table-editable-field:active {
+  background: #fef3c7;
+}
+
+.order-table-edit-input {
+  width: 100%;
+  padding: 4px 6px;
+  border: 2px solid #3b82f6;
+  border-radius: 3px;
+  font-size: 11px;
+  font-family: inherit;
+}
+
+.order-table-edit-input:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+}
+```
+
+---
+
+## 2. IMPROVED ITEM DESCRIPTION FILTERING WITH CHECKBOXES
+
+```jsx
+// In MasterDataFilter.jsx
+
+function MasterDataFilter({ onFilter }) {
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedCategories, setSelectedCategories] = useState([]);
+  const [selectedColors, setSelectedColors] = useState([]);
+  const [selectedDiameters, setSelectedDiameters] = useState([]);
+  const [selectedDescriptions, setSelectedDescriptions] = useState([]);
+  
+  const uniqueCategories = [...new Set(masterData.map(m => m.category))].filter(Boolean).sort();
+  const uniqueColors = [...new Set(masterData.map(m => m.color))].filter(Boolean).sort();
+  const uniqueDiameters = [...new Set(masterData.map(m => m.diameter))].filter(Boolean).sort();
+  const uniqueDescriptions = [...new Set(masterData.map(m => m.item_description))].filter(Boolean).sort();
+  
+  function applyFilters() {
+    const filtered = masterData.filter(item => {
+      // Search term (OR match across multiple fields)
+      let matchesSearch = true;
+      if (searchTerm) {
+        const term = searchTerm.toLowerCase();
+        matchesSearch =
+          (item.item_description || '').toLowerCase().includes(term) ||
+          (item.color || '').toLowerCase().includes(term) ||
+          (item.diameter || '').toLowerCase().includes(term) ||
+          (item.category || '').toLowerCase().includes(term) ||
+          (item.form || '').toLowerCase().includes(term);
+      }
+      
+      // Category filter (AND — all selected must match)
+      const matchesCategory = selectedCategories.length === 0 || selectedCategories.includes(item.category);
+      
+      // Color filter
+      const matchesColor = selectedColors.length === 0 || selectedColors.includes(item.color);
+      
+      // Diameter filter
+      const matchesDiameter = selectedDiameters.length === 0 || selectedDiameters.includes(item.diameter);
+      
+      // Description filter
+      const matchesDescription = selectedDescriptions.length === 0 || selectedDescriptions.includes(item.item_description);
+      
+      return matchesSearch && matchesCategory && matchesColor && matchesDiameter && matchesDescription;
+    });
+    
+    onFilter(filtered);
+  }
+  
+  useEffect(() => {
+    applyFilters();
+  }, [searchTerm, selectedCategories, selectedColors, selectedDiameters, selectedDescriptions]);
+  
+  function toggleCategory(category) {
+    setSelectedCategories(prev =>
+      prev.includes(category) ? prev.filter(c => c !== category) : [...prev, category]
+    );
+  }
+  
+  function toggleColor(color) {
+    setSelectedColors(prev =>
+      prev.includes(color) ? prev.filter(c => c !== color) : [...prev, color]
+    );
+  }
+  
+  function toggleDiameter(diameter) {
+    setSelectedDiameters(prev =>
+      prev.includes(diameter) ? prev.filter(d => d !== diameter) : [...prev, diameter]
+    );
+  }
+  
+  function toggleDescription(desc) {
+    setSelectedDescriptions(prev =>
+      prev.includes(desc) ? prev.filter(d => d !== desc) : [...prev, desc]
+    );
+  }
+  
+  return (
+    <div className="master-data-filters">
+      {/* Search */}
+      <div className="filter-group">
+        <input
+          type="text"
+          placeholder="Search by item, color, diameter, category, or form..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          className="filter-search-input"
+        />
+      </div>
+      
+      {/* Category Filter */}
+      <div className="filter-group">
+        <label className="filter-group-label">Category</label>
+        <div className="filter-checkboxes">
+          {uniqueCategories.map(cat => (
+            <label key={cat} className="filter-checkbox">
+              <input
+                type="checkbox"
+                checked={selectedCategories.includes(cat)}
+                onChange={() => toggleCategory(cat)}
+              />
+              <span>{cat}</span>
+            </label>
+          ))}
+        </div>
+      </div>
+      
+      {/* Color Filter */}
+      <div className="filter-group">
+        <label className="filter-group-label">Color</label>
+        <div className="filter-checkboxes">
+          {uniqueColors.map(color => (
+            <label key={color} className="filter-checkbox">
+              <input
+                type="checkbox"
+                checked={selectedColors.includes(color)}
+                onChange={() => toggleColor(color)}
+              />
+              <span>
+                <span
+                  className="color-dot"
+                  style={{background: getColorHex(color)}}
+                ></span>
+                {color}
+              </span>
+            </label>
+          ))}
+        </div>
+      </div>
+      
+      {/* Diameter Filter */}
+      <div className="filter-group">
+        <label className="filter-group-label">Diameter</label>
+        <div className="filter-checkboxes">
+          {uniqueDiameters.map(diameter => (
+            <label key={diameter} className="filter-checkbox">
+              <input
+                type="checkbox"
+                checked={selectedDiameters.includes(diameter)}
+                onChange={() => toggleDiameter(diameter)}
+              />
+              <span>{diameter}mm</span>
+            </label>
+          ))}
+        </div>
+      </div>
+      
+      {/* Item Description Filter */}
+      <div className="filter-group">
+        <label className="filter-group-label">Item Description</label>
+        <div className="filter-checkboxes filter-checkboxes-scroll">
+          {uniqueDescriptions.map(desc => (
+            <label key={desc} className="filter-checkbox">
+              <input
+                type="checkbox"
+                checked={selectedDescriptions.includes(desc)}
+                onChange={() => toggleDescription(desc)}
+              />
+              <span>{desc}</span>
+            </label>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+```
+
+Styling:
+
+```css
+.master-data-filters {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 12px;
+  background: #f9fafb;
+  border-radius: 6px;
+}
+
+.filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.filter-group-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #6b7280;
+  text-transform: uppercase;
+}
+
+.filter-search-input {
+  padding: 6px 8px;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  font-size: 11px;
+}
+
+.filter-checkboxes {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.filter-checkboxes-scroll {
+  max-height: 150px;
+}
+
+.filter-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 3px;
+  transition: background 0.15s;
+}
+
+.filter-checkbox:hover {
+  background: #e5e7eb;
+}
+
+.filter-checkbox input {
+  cursor: pointer;
+  width: 14px;
+  height: 14px;
+}
+
+.color-dot {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1px solid #d1d5db;
+}
+```
+
+---
+
+## 3. THEME SWITCHER WITH DARK MODE TOGGLE
+
+```jsx
+// In Navbar.jsx — grouped theme switcher
+
+const THEMES = {
+  pilmico: { name: 'Pilmico', color: '#0099DD' },
+  aboitiz: { name: 'Aboitiz', color: '#4CAF50' },
+  default: { name: 'Default', color: '#EA580C' },
+};
+
+function ThemeSwitcher() {
+  const [theme, setTheme] = useLocalStorage('app-theme', 'default');
+  const [isDarkMode, setIsDarkMode] = useLocalStorage('app-dark-mode', false);
+  
+  function applyTheme(themeName) {
+    setTheme(themeName);
+    const themeData = THEMES[themeName];
+    
+    document.documentElement.style.setProperty('--color-primary', themeData.color);
+    document.documentElement.style.setProperty('--color-primary-dark', darkenColor(themeData.color, 0.2));
+    document.documentElement.style.setProperty('--color-primary-light', lightenColor(themeData.color, 0.2));
+  }
+  
+  function toggleDarkMode() {
+    const newValue = !isDarkMode;
+    setIsDarkMode(newValue);
+    
+    if (newValue) {
+      document.documentElement.classList.add('dark-mode');
+    } else {
+      document.documentElement.classList.remove('dark-mode');
+    }
+  }
+  
+  // Apply saved theme on mount
+  useEffect(() => {
+    applyTheme(theme);
+    if (isDarkMode) {
+      document.documentElement.classList.add('dark-mode');
+    }
+  }, []);
+  
+  return (
+    <div className="theme-switcher-container">
+      {/* Dark Mode Toggle */}
+      <div className="theme-switcher-dark-mode">
+        <span className="theme-label">Dark Mode</span>
+        <button
+          className={`dark-mode-toggle ${isDarkMode ? 'active' : ''}`}
+          onClick={toggleDarkMode}
+          title="Toggle dark mode"
+        >
+          <span className="toggle-track"></span>
+          <span className="toggle-thumb"></span>
+        </button>
+      </div>
+      
+      {/* Divider */}
+      <div className="theme-switcher-divider"></div>
+      
+      {/* Themes */}
+      <div className="theme-switcher-themes">
+        <span className="theme-label">Themes</span>
+        <div className="theme-circles">
+          {Object.entries(THEMES).map(([key, themeData]) => (
+            <button
+              key={key}
+              className={`theme-circle ${theme === key ? 'active' : ''}`}
+              onClick={() => applyTheme(key)}
+              style={{background: themeData.color}}
+              title={themeData.name}
+            />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+```
+
+Styling:
+
+```css
+.theme-switcher-container {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 8px 12px;
+  background: #f3f4f6;
+  border-radius: 6px;
+}
+
+.theme-switcher-dark-mode {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.theme-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Toggle Switch */
+.dark-mode-toggle {
+  position: relative;
+  width: 40px;
+  height: 20px;
+  border: none;
+  border-radius: 10px;
+  background: #d1d5db;
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.3s;
+}
+
+.dark-mode-toggle.active {
+  background: #3b82f6;
+}
+
+.toggle-track {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  border-radius: 10px;
+}
+
+.toggle-thumb {
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  background: white;
+  border-radius: 50%;
+  top: 2px;
+  left: 2px;
+  transition: left 0.3s;
+}
+
+.dark-mode-toggle.active .toggle-thumb {
+  left: 22px;
+}
+
+.theme-switcher-divider {
+  height: 1px;
+  background: #d1d5db;
+}
+
+.theme-switcher-themes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.theme-circles {
+  display: flex;
+  gap: 6px;
+}
+
+.theme-circle {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.theme-circle:hover {
+  transform: scale(1.1);
+}
+
+.theme-circle.active {
+  border-color: #000;
+  box-shadow: 0 0 0 2px rgba(0,0,0,0.1);
+}
+
+.dark-mode .theme-circle.active {
+  border-color: #fff;
+  box-shadow: 0 0 0 2px rgba(255,255,255,0.2);
+}
+```
+
+---
+
+## 4. DARK MODE CSS WITH CHART SUPPORT
+
+```css
+:root {
+  --color-primary: #EA580C;
+  --color-primary-dark: #C2410C;
+  --color-primary-light: #FB923C;
+  --color-bg: #FFFFFF;
+  --color-text: #1F2937;
+  --color-border: #E5E7EB;
+  --color-bg-secondary: #F3F4F6;
+}
+
+:root.dark-mode {
+  --color-bg: #111827;
+  --color-text: #F3F4F6;
+  --color-border: #374151;
+  --color-bg-secondary: #1F2937;
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-text);
+  transition: background 0.3s, color 0.3s;
+}
+
+/* Dark mode for charts */
+.dark-mode .chart-container {
+  background: var(--color-bg-secondary);
+}
+
+.dark-mode .chart-title {
+  color: var(--color-text);
+}
+
+.dark-mode .chart-legend {
+  color: var(--color-text);
+}
+
+/* Tables */
+.dark-mode table {
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+
+.dark-mode table thead {
+  background: var(--color-bg-secondary);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.dark-mode table tbody tr:hover {
+  background: var(--color-bg-secondary);
+}
+
+/* Inputs */
+.dark-mode input,
+.dark-mode textarea,
+.dark-mode select {
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+}
+
+.dark-mode input:focus,
+.dark-mode textarea:focus,
+.dark-mode select:focus {
+  border-color: var(--color-primary);
+  background: var(--color-bg);
+}
+
+/* Cards and modals */
+.dark-mode .card,
+.dark-mode .modal {
+  background: var(--color-bg);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+}
+```
+
+---
+
+## VERIFICATION
+
+### 1. Editable planned order
+1. ✅ Click field to edit
+2. ✅ Auto-save on change
+3. ✅ Click outside to close edit
+4. ✅ Hover shows yellow background
+
+### 2. Improved filtering
+5. ✅ Search term matches multiple fields (OR)
+6. ✅ Checkboxes for category, color, diameter, description
+7. ✅ All filters work together (AND)
+8. ✅ Color dots shown next to color names
+
+### 3. Theme switcher
+9. ✅ Dark mode toggle at top
+10. ✅ Toggle switch UI (off/on)
+11. ✅ Three color circles below
+12. ✅ Active theme highlighted
+13. ✅ Preference persisted
+
+### 4. Dark mode
+14. ✅ Toggle applies dark background
+15. ✅ Text readable in dark mode
+16. ✅ Charts styled for dark mode
+17. ✅ Smooth transition
+```

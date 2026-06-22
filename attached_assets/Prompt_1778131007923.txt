@@ -1,0 +1,280 @@
+```
+Update auto-sequence so row-level sequence insights are generated during the auto-sequence process itself and are already available when the preview finishes loading. Once generated for that preview run, keep them fixed and do not regenerate them when the user switches between strategies.
+
+---
+
+## OBJECTIVE
+
+We want the row-level sequence insights to already be available as soon as auto-sequence finishes.
+
+That means:
+- insights should be generated during the auto-sequence run itself
+- by the time the preview is shown, the row insights should already be attached to each strategy/result
+
+Additionally, we want to preserve the old/stable behavior:
+- once the insights for that run are generated, keep them as-is
+- do not regenerate row-level insights every time the user switches between Standard Sequence / AI Strategy 1 / AI Strategy 2
+
+Strategy switching should be fast and should use already-generated insights stored in the result.
+
+---
+
+## REQUIRED BEHAVIOR
+
+### During auto-sequence
+Generate row-level insights for:
+- Standard Sequence
+- AI Strategy 1
+- AI Strategy 2
+(or whichever strategies are available for that line)
+
+### After auto-sequence completes
+The preview should already include:
+- final ordered rows
+- metrics
+- row-level insights
+- expanded insights if applicable
+
+### While user switches strategies
+- use the already-generated insights attached to that strategy
+- do not regenerate just because the active tab/card changed
+
+---
+
+## 1. GENERATE INSIGHTS AS PART OF THE AUTO-SEQUENCE PIPELINE
+
+Add row-level insight generation into the auto-sequence build flow itself.
+
+For each line and each strategy result, the pipeline should produce:
+- final ordered orders
+- strategy metrics
+- AI-generated row-level insights
+
+### Example conceptual flow:
+```javascript
+for (const line of lines) {
+  const standardResult = buildStandardSequence(line);
+  const aiOption1Result = await buildAIStrategy1(line);
+  const aiOption2Result = await buildAIStrategy2(line);
+
+  const enrichedStandard = await generateRowInsightsForStrategy(standardResult);
+  const enrichedAi1 = await generateRowInsightsForStrategy(aiOption1Result);
+  const enrichedAi2 = await generateRowInsightsForStrategy(aiOption2Result);
+
+  previewResults[line.id] = {
+    standard: enrichedStandard,
+    ai_option_1: enrichedAi1,
+    ai_option_2: enrichedAi2,
+  };
+}
+```
+
+The important point:
+- by the time preview is rendered, insights are already included
+
+---
+
+## 2. STORE INSIGHTS DIRECTLY ON THE STRATEGY RESULT / ORDER OBJECTS
+
+Once the insights are generated for that run, store them in the preview result structure.
+
+Each strategy package should include:
+- ordered rows
+- row short insight
+- row long/expanded insight
+- any AI rationale metadata if applicable
+
+### Example:
+```javascript
+previewResults[line.id][strategyId] = {
+  orders: ordersWithInsights,
+  metrics,
+  generatedAt,
+  insightSource: 'ai',
+};
+```
+
+Then the UI can simply render the stored result.
+
+---
+
+## 3. DO NOT REGENERATE INSIGHTS ON STRATEGY SWITCH
+
+When the user switches from:
+- Standard Sequence
+to
+- AI Strategy 1
+to
+- AI Strategy 2
+
+the app should:
+- just load the already-generated result for that strategy
+- not trigger new AI insight generation
+
+Switching strategies should be a read/render action only.
+
+### Desired behavior:
+```javascript
+function onStrategySelected(strategyId) {
+  setActiveStrategy(strategyId);
+  // no AI re-generation here
+}
+```
+
+---
+
+## 4. FREEZE INSIGHTS FOR THE CURRENT PREVIEW RUN
+
+Treat the preview as a “frozen result package.”
+
+Once auto-sequence completes:
+- the row insights for that preview are fixed
+- the app should not rewrite them during normal navigation inside that preview
+
+This avoids:
+- unnecessary latency
+- drifting explanations
+- inconsistent text after each switch
+
+---
+
+## 5. ONLY REGENERATE INSIGHTS WHEN THE ACTUAL SEQUENCE STATE CHANGES
+
+Do regenerate insights if a new preview state is created, such as when:
+- auto-sequence is run again
+- user clicks refresh/re-analyze
+- profitability changes the actual row ordering
+- any action changes the final sequence content/positions
+
+In those cases:
+- build a new preview package
+- generate fresh insights for that new sequence state
+
+But not for simple viewing/switching.
+
+---
+
+## 6. IF PROFITABILITY IS APPLIED DURING AUTO-SEQUENCE BUILD, GENERATE INSIGHTS FOR THAT FINAL STATE TOO
+
+If profitability-adjusted sequences are part of the preview state:
+- generate their row-level insights during the run as well
+- store them alongside the relevant strategy result
+
+Then when the user views that profitability-adjusted strategy:
+- insights are already there
+- no additional wait or regeneration needed
+
+---
+
+## 7. KEEP STRATEGY-SPECIFIC INSIGHTS SEPARATE
+
+Each strategy should retain its own frozen row-level insights.
+
+Do not overwrite one strategy’s insights with another.
+
+Example structure:
+```javascript
+previewResults[lineId] = {
+  standard: { orders, insights, metrics },
+  ai_option_1: { orders, insights, metrics },
+  ai_option_2: { orders, insights, metrics },
+};
+```
+
+This ensures switching is instant and correct.
+
+---
+
+## 8. IF AI INSIGHT GENERATION FAILS, STORE THE FALLBACK ONCE AND KEEP IT STABLE
+
+If for any strategy insight generation fails during the run:
+- generate/store a fallback insight once
+- keep it stable for that preview
+- do not keep retrying every time the user switches tabs
+
+This preserves the same “frozen preview package” behavior.
+
+---
+
+## 9. UPDATE THE LOADING FLOW SO INSIGHTS ARE PART OF COMPLETION
+
+Auto-sequence should only be considered “fully ready” when:
+- strategy generation is complete
+- row-level insights are also attached
+
+So when the completion sound/modal closes/preview opens:
+- insights should already be present
+
+This avoids the current experience where preview appears first and insights catch up later or regenerate on switch.
+
+---
+
+## 10. ADD A PREVIEW-RUN IDENTIFIER / CACHE MODEL
+
+Tie generated insights to a specific preview run or preview result state.
+
+### Example:
+```javascript
+const previewRunId = crypto.randomUUID();
+```
+
+Then store:
+```javascript
+previewResults.runId = previewRunId;
+```
+
+This helps ensure:
+- insights belong to that exact generated preview
+- strategy switching within the same run does not trigger regeneration
+- new run = new result package = fresh insights
+
+---
+
+## 11. ADD DEBUG LOGGING TO CONFIRM THE FLOW
+
+Temporarily log:
+
+```javascript
+console.debug('[AutoSequence Insight Build]', {
+  lineId,
+  strategyId,
+  generatedDuringRun: true,
+  orderCount: orders.length,
+});
+```
+
+And on strategy switch:
+```javascript
+console.debug('[Strategy Switch]', {
+  lineId,
+  strategyId,
+  reusedStoredInsights: true,
+  regenerated: false,
+});
+```
+
+This helps confirm:
+- insights are created during the run
+- switching only reuses stored results
+
+---
+
+## 12. VERIFICATION
+
+### Build timing
+1. ✅ Row-level insights are generated during auto-sequence
+2. ✅ When preview appears, insights are already available
+
+### Strategy switching
+3. ✅ Switching strategies does not regenerate row insights
+4. ✅ Strategy switching is instant and uses stored insights
+5. ✅ Each strategy keeps its own already-generated insight set
+
+### Regeneration rules
+6. ✅ Insights only regenerate when a new preview state is created
+7. ✅ Simple strategy switching does not trigger new AI calls
+8. ✅ Re-analyze / refresh / new auto-sequence run correctly creates fresh insights
+
+### UX
+9. ✅ Users no longer wait for row insights after preview is already loaded
+10. ✅ Insights remain stable within the same generated preview session

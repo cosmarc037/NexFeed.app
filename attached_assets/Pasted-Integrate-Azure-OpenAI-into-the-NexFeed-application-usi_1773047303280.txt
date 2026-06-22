@@ -1,0 +1,47 @@
+Integrate Azure OpenAI into the NexFeed application using the following configuration:
+
+**Service Configuration:**
+- Endpoint: https://nexfeed-ai.cognitiveservices.azure.com/
+- Model Name: gpt-4o-mini
+- Deployment: gpt-4o-mini
+- API Key: AU9EFKGXAGiP5agMGEwYl1mswUElDHJiaL2ogAjZ1cNDUXz7MQK1JQQJ99CBACYeBjFXJ3w3AAAAACOGzR7m
+- API Version: 2024-12-01-preview
+
+**Implementation Requirements:**
+
+1. Create a centralized AI service module (e.g., `services/azureAI.ts`) that handles all Azure OpenAI API calls. Use the Azure OpenAI REST API with the following request format:
+
+POST {endpoint}/openai/deployments/{deployment}/chat/completions?api-version={api-version}
+Headers:
+  Content-Type: application/json
+  api-key: {API_KEY}
+
+2. The AI service module should expose functions for each AI use case:
+   - `suggestStartDateTime(orderData)` — Suggests Start Date and Start Time by working backwards from Avail Date as the deadline. Considers Suggested Volume, Number of Batches, Batch Size, Production Hours, Changeover Time, Run Rate, and line capacity. Guidelines: Small orders (<50 MT) start 1–2 days before, Medium (50–200 MT) 2–3 days, Large (>200 MT) 3–5 days. Default Start Time: 08:00 AM unless AI determines otherwise. Returns blank if Avail Date is non-date text.
+   - `generateSmartRecommendations(ordersInView)` — Generates contextual recommendations for the current tab/sub-tab view. Identifies combine/cut opportunities (same Material Code), orders below minimum MT threshold, stagnant orders, and cross-line opportunities (for "All" tab). Returns empty state message if no orders exist.
+   - `generateSmartAlerts(allOrders)` — Generates natural language alert summaries covering: URGENT (Avail Date within 2 business days, not Done), COMPLETION APPROACHING (Completion Date within 2 business days), COMPLETION OVERDUE (Completion Date passed, not Done), OVERDUE/STAGNANT (Avail Date passed, not Done), INCOMPLETE (red X readiness), LINE CAPACITY (line at full capacity).
+   - `generateOverviewSummary(allOrders, lineCapacities)` — Generates a natural language summary for the Overview tab covering production health, line capacity, key action items, and priority recommendations.
+   - `generateAnalyticsInsights(allOrders)` — Generates contextual insights about order trends, demand patterns, high-demand products, slow-moving items, and production optimization recommendations.
+   - `chatWithAssistant(messageHistory, currentAppState)` — Handles Smart Assistant (chatbot) conversations. The assistant can answer questions about current order status, provide scheduling recommendations, explain urgent/flagged orders, summarize production state and line capacity, and assist with app feature queries.
+
+3. For each function, construct a system prompt that provides the AI with relevant context about the orders and the specific task. Send the order data as part of the user message. Parse the AI's response and return structured data that the frontend can render.
+
+4. Implement error handling: If the Azure OpenAI API call fails (network error, rate limit, invalid response), display a subtle error toast notification and gracefully degrade (e.g., show "Smart recommendations unavailable" instead of crashing).
+
+5. Implement a loading state for all AI-powered sections: Show a subtle loading spinner or skeleton placeholder while waiting for AI responses.
+
+6. Each AI-powered section (Smart Recommendations, Smart Alerts, Overview Summary, Analytics Insights) should include a refresh button that re-calls the respective AI function to regenerate content.
+
+7. The Smart Assistant chatbot:
+   - Floating circular bubble icon in the lower-right corner (Orange #fd5108 background, white chat icon).
+   - Expands into a chat panel when clicked. Dismissible.
+   - Displays 3 starter questions on first open:
+     1. "Which orders are urgent and need immediate attention?"
+     2. "What is the current capacity status of all feedmill lines?"
+     3. "Can you summarize today's production schedule?"
+   - Text input field, send button, scrollable message history.
+   - Follows the app's design system (color palette, fonts).
+
+8. IMPORTANT: All user-facing labels must use "Smart" instead of "AI" (e.g., "Smart Recommendations", "Smart Insights", "Smart Assistant", "Refresh Smart Insights"). Internal code can use "AI" terminology.
+
+9. API calls should be made from the backend (Node.js) to avoid exposing the API key in the frontend. Create a backend endpoint (e.g., POST /api/ai/chat, POST /api/ai/recommendations, etc.) that the frontend calls, and the backend proxies the request to Azure OpenAI.

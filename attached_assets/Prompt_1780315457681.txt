@@ -1,0 +1,160 @@
+Please update the **Suggested Re-orders** table and **Approve Re-order** modal behavior so that the `AI Avail Date` remains visible in the table, but is understood as the recommendation for the **original/current line only**, and updates if the user selects a different line in the modal.
+
+---
+
+## 1. KEEP `AI AVAIL DATE` IN THE SUGGESTED RE-ORDERS TABLE
+
+Please keep the `AI Avail Date` column visible in the **Suggested Re-orders** table.
+
+### Goal
+Users should still be able to see an immediate date recommendation in the table without opening the modal.
+
+### Expected result
+The Suggested Re-orders table continues to display an AI-recommended avail date for each suggested re-order.
+
+---
+
+## 2. TREAT THE TABLE’S `AI AVAIL DATE` AS THE RECOMMENDATION FOR THE ORIGINAL/CURRENT LINE ONLY
+
+Please define the table-level `AI Avail Date` as the recommendation for the **original/current line** of that suggested re-order.
+
+### Important
+This table date should not be treated as a universal date across all possible lines.
+
+### Expected result
+The AI Avail Date shown in the table represents:
+- the AI recommendation if the re-order stays on its original/current line
+
+---
+
+## 3. WHEN THE USER OPENS `APPROVE RE-ORDER`, ALLOW LINE SELECTION LIKE DIVERT
+
+Please keep the planned enhancement where the **Approve Re-order** modal allows the user to evaluate/select different candidate lines, similar to the **Divert** feature.
+
+### Expected result
+The modal should still allow the user to review which line is best suited for the re-order.
+
+---
+
+## 4. IF THE USER SELECTS ANOTHER LINE IN THE MODAL, RECALCULATE THE RECOMMENDED DATE
+
+If the user selects a different line in the **Approve Re-order** modal, please update the recommendation accordingly.
+
+### Required behavior
+When a different line is selected, the app should refresh:
+- the recommended avail date
+- insertion position
+- impact analysis
+- and other line-dependent recommendation details
+
+### Expected result
+The modal should show a line-specific updated recommendation based on the selected line.
+
+---
+
+## 5. THE TABLE DATE SHOULD REMAIN THE ORIGINAL-LINE DEFAULT, WHILE THE MODAL CAN DYNAMICALLY CHANGE IT
+
+Please keep this distinction clear:
+
+### In the table
+- `AI Avail Date` = recommendation for the original/current line
+
+### In the modal
+- the date can update dynamically if the user chooses another line
+
+### Expected result
+The table provides a useful default quick-view.
+The modal provides the line-specific recalculated recommendation.
+
+---
+
+## 6. CONSIDER MAKING THE TABLE LABEL CLEARER IF NEEDED
+
+If helpful for clarity, please consider adjusting the label or tooltip so users understand the table date is for the original/current line.
+
+### Possible examples
+- `AI Avail Date (Current Line)`
+- `AI Avail Date (Original Line)`
+
+If the shorter `AI Avail Date` label is kept, please ensure the meaning is still made clear in the UX.
+
+### Expected result
+Users should not mistakenly assume the table date applies equally to every candidate line.
+
+---
+
+## 7. KEEP THE FINAL INSERTION CONSISTENT WITH THE LINE SELECTED IN THE MODAL
+
+If the user keeps the original/current line:
+- the inserted re-order should use the same date logic as the table’s AI Avail Date
+
+If the user selects a different line:
+- the inserted re-order should use the recalculated modal recommendation for that selected line
+
+### Expected result
+The final insertion should match the line-specific recommendation the user actually confirmed.
+
+---
+
+## IMPORTANT
+
+Please implement the following behavior:
+
+- keep `AI Avail Date` visible in the **Suggested Re-orders** table
+- treat that table date as the recommendation for the **original/current line only**
+- when the user opens **Approve Re-order** and selects another line, recalculate:
+  - avail date
+  - insertion position
+  - impact analysis
+- the final inserted re-order should follow the recommendation for the line the user actually confirmed
+
+This way the table keeps a useful default recommendation, while the modal remains dynamic and line-aware.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log original-line default date vs selected-line recalculation.
+
+```javascript
+console.debug('[Suggested Re-Order Table AI Date]', {
+  suggestionId,
+  originalLine,
+  tableAiAvailDate,
+  meaning: 'original_line_default',
+});
+```
+
+```javascript
+console.debug('[Approve Re-Order Line-Specific Date Recalculation]', {
+  suggestionId,
+  originalLine,
+  selectedLine,
+  tableAiAvailDate,
+  recalculatedModalAiAvailDate,
+  changedBecauseDifferentLineSelected: originalLine !== selectedLine,
+});
+```
+
+```javascript
+console.debug('[Approve Re-Order Final Insert Date Source]', {
+  suggestionId,
+  selectedLine,
+  finalInsertedAvailDate,
+  cameFromOriginalLineDefault: selectedLine === originalLine,
+  cameFromModalRecalculation: selectedLine !== originalLine,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ `AI Avail Date` remains visible in the Suggested Re-orders table
+2. ✅ The table’s date is treated as the recommendation for the original/current line only
+3. ✅ The Approve Re-order modal still supports line selection
+4. ✅ Selecting another line recalculates the recommended avail date
+5. ✅ Insertion position and impact analysis also update for the selected line
+6. ✅ Final insertion follows the selected line’s recommendation
+7. ✅ Users can distinguish between the table default and the modal’s line-specific recommendation
+8. ✅ No UI errors or console errors are introduced

@@ -1,0 +1,647 @@
+```
+Add Production Insights and Alerts & Reminders to the All Feedmills tab:
+
+---
+
+## 1. UPDATE AllFeedmillsView — ADD INSIGHTS AND ALERTS
+
+```jsx
+function AllFeedmillsView({ 
+  allOrders, 
+  masterData, 
+  n10dData, 
+  changeoverRules,
+  onOrderUpdate,
+  onAutoSequenceAll
+}) {
+  const activeOrders = allOrders.filter(
+    o => o.status !== 'Done' && o.status !== 'Cancel PO'
+  );
+  
+  return (
+    <div className="all-feedmills-view">
+      {/* Header */}
+      <div className="all-feedmills-header">
+        <div>
+          <h2 className="all-feedmills-title">All Feedmills</h2>
+          <p className="all-feedmills-subtitle">Production orders across all feedmills and lines</p>
+        </div>
+        <div className="all-feedmills-header-actions">
+          <button className="btn-auto-sequence-all" onClick={onAutoSequenceAll}>
+            ✨ Auto-Sequence (All)
+          </button>
+          {/* ... other buttons like Upload SAP Orders, Export ... */}
+        </div>
+      </div>
+      
+      {/* Search and filters */}
+      <div className="all-feedmills-toolbar">
+        {/* ... existing search bar and filters ... */}
+      </div>
+      
+      {/* Stats cards */}
+      <div className="all-feedmills-stats">
+        {/* ... existing stat cards (Total Orders, Active, Urgent, Lacking) ... */}
+      </div>
+      
+      {/* Production Insights + Alerts & Reminders — same layout as per-feedmill */}
+      <div className="all-feedmills-insights-row">
+        {/* Production Insights — left side */}
+        <div className="all-feedmills-insights-panel">
+          <ProductionInsights
+            orders={activeOrders}
+            n10dData={n10dData}
+            masterData={masterData}
+            scope="all"
+            scopeLabel="All Feedmills"
+          />
+        </div>
+        
+        {/* Alerts & Reminders — right side */}
+        <div className="all-feedmills-alerts-panel">
+          <AlertsAndReminders
+            orders={activeOrders}
+            n10dData={n10dData}
+            masterData={masterData}
+            scope="all"
+            scopeLabel="All Feedmills"
+          />
+        </div>
+      </div>
+      
+      {/* All line tables */}
+      <div className="all-feedmills-tables">
+        {ALL_LINES_ORDERED.map(({ feedmill, line }) => {
+          const lineOrders = activeOrders
+            .filter(o => normalizeLine(o.feedmill_line) === normalizeLine(line))
+            .sort((a, b) => (a.priority_seq || 0) - (b.priority_seq || 0));
+          
+          return (
+            <div key={`${feedmill}-${line}`} className="all-feedmills-line-section">
+              <div className="all-feedmills-line-header">
+                <span className="all-feedmills-line-label">
+                  🏭 {feedmill} — {line}
+                </span>
+                <span className="all-feedmills-line-count">
+                  {lineOrders.length} order{lineOrders.length !== 1 ? 's' : ''}
+                </span>
+              </div>
+              <OrderTable
+                orders={lineOrders}
+                line={line}
+                feedmill={feedmill}
+                masterData={masterData}
+                n10dData={n10dData}
+                changeoverRules={changeoverRules}
+                onOrderUpdate={onOrderUpdate}
+                showAutoSequenceButton={false}
+              />
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+## 2. UPDATE ProductionInsights — SUPPORT "ALL" SCOPE
+
+The existing ProductionInsights component likely filters by feedmill. Add support for scope="all":
+
+```jsx
+function ProductionInsights({ orders, n10dData, masterData, scope, scopeLabel }) {
+  const [summary, setSummary] = useState('');
+  const [isLoading, setIsLoading] = useState(true);
+  const [isCollapsed, setIsCollapsed] = useState(false);
+  
+  useEffect(() => {
+    generateInsights();
+  }, [orders]);
+  
+  async function generateInsights() {
+    setIsLoading(true);
+    
+    const totalOrders = orders.length;
+    const totalMT = orders.reduce((sum, o) => sum + (parseFloat(o.volume) || 0), 0);
+    
+    // Count per line
+    const perLine = {};
+    orders.forEach(o => {
+      const line = normalizeLine(o.feedmill_line || o.line || 'Unassigned');
+      if (!perLine[line]) perLine[line] = { count: 0, mt: 0 };
+      perLine[line].count++;
+      perLine[line].mt += parseFloat(o.volume) || 0;
+    });
+    
+    // Urgent / critical orders
+    const urgentOrders = orders.filter(o => {
+      const n10d = n10dData.find(n => String(n.material_code) === String(o.material_code_fg));
+      return n10d && (n10d.status === 'Critical' || n10d.status === 'Urgent');
+    });
+    
+    // In production
+    const inProduction = orders.filter(o => o.status === 'In Production' || o.status === 'On-going');
+    
+    // Build prompt based on scope
+    let scopeContext = '';
+    if (scope === 'all') {
+      const lineBreakdown = Object.entries(perLine)
+        .map(([line, data]) => `${line}: ${data.count} orders, ${data.mt.toFixed(1)} MT`)
+        .join('\n');
+      
+      scopeContext = `
+This is a plant-wide overview across ALL feedmills and lines.
+
+Line Breakdown:
+${lineBreakdown}
+
+Total: ${totalOrders} orders, ${totalMT.toFixed(1)} MT
+In Production: ${inProduction.length}
+Urgent/Critical: ${urgentOrders.length}
+${urgentOrders.map(o => `- ${o.item_description} (${o.volume} MT) on ${o.feedmill_line}`).join('\n')}
+      `;
+    } else {
+      scopeContext = `
+This is for ${scopeLabel}.
+Total: ${totalOrders} orders, ${totalMT.toFixed(1)} MT
+In Production: ${inProduction.length}
+Urgent/Critical: ${urgentOrders.length}
+      `;
+    }
+    
+    try {
+      const prompt = `
+You are a production scheduling advisor. Provide a brief smart summary and 3 recommended actions.
+
+${scopeContext}
+
+Write:
+1. A 2-3 sentence summary of the current production status.
+2. 3 numbered recommended actions.
+
+Keep it concise. No markdown. Use plain text.
+      `;
+      
+      const response = await callAI(prompt);
+      setSummary(response);
+    } catch {
+      // Fallback
+      setSummary(
+        `${scopeLabel} has a total of ${totalOrders} orders totaling ${totalMT.toFixed(1)} MT across ${Object.keys(perLine).length} lines. ${urgentOrders.length > 0 ? `There are ${urgentOrders.length} urgent orders requiring immediate attention.` : 'No urgent orders at this time.'} ${inProduction.length > 0 ? `${inProduction.length} order${inProduction.length > 1 ? 's are' : ' is'} currently in production.` : 'No production is currently underway.'}`
+      );
+    }
+    
+    setIsLoading(false);
+  }
+  
+  // Check for N10D stock-level sequencing
+  const stockLevelOrders = orders.filter(o => {
+    const n10d = n10dData.find(n => String(n.material_code) === String(o.material_code_fg));
+    return n10d && n10d.inferred_target_date;
+  });
+  
+  return (
+    <div className="production-insights-card">
+      <div className="production-insights-header" onClick={() => setIsCollapsed(!isCollapsed)}>
+        <span className="production-insights-title">🍳 Production Insights</span>
+        <span className="production-insights-toggle">{isCollapsed ? '▼' : '▲'}</span>
+      </div>
+      
+      {!isCollapsed && (
+        <div className="production-insights-body">
+          {/* Smart Summary */}
+          <div className="production-insights-section">
+            <div className="production-insights-section-header">
+              <span>✨ Smart Summary</span>
+              <button className="production-insights-refresh" onClick={generateInsights}>
+                ↻ Refresh
+              </button>
+            </div>
+            {isLoading ? (
+              <div className="production-insights-loading">Generating insights...</div>
+            ) : (
+              <div className="production-insights-text">{summary}</div>
+            )}
+          </div>
+          
+          {/* Stock-Level Sequencing */}
+          {stockLevelOrders.length > 0 && (
+            <div className="production-insights-section">
+              <div className="production-insights-stock-label">
+                📊 Stock-Level Sequencing Available
+              </div>
+              <div className="production-insights-stock-text">
+                Future Dispatches data shows {stockLevelOrders.length} order{stockLevelOrders.length > 1 ? 's' : ''} with inferred target dates. Run Auto-Sequence to optimize the production schedule based on stock demand forecasts.
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+```
+
+---
+
+## 3. UPDATE AlertsAndReminders — SUPPORT "ALL" SCOPE
+
+```jsx
+function AlertsAndReminders({ orders, n10dData, masterData, scope, scopeLabel }) {
+  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [aiSummary, setAiSummary] = useState('');
+  const [isLoading, setIsLoading] = useState(true);
+  
+  // Build alerts from ALL orders
+  const alerts = useMemo(() => {
+    const result = [];
+    
+    orders.forEach(order => {
+      const n10d = n10dData.find(n => String(n.material_code) === String(order.material_code_fg));
+      
+      if (!n10d) return;
+      
+      // Critical — stock already run out
+      if (n10d.status === 'Critical') {
+        result.push({
+          type: 'critical',
+          icon: '🔴',
+          label: 'Stock Running Low',
+          order: order,
+          n10d: n10d,
+          message: `FPR: ${order.fpr} (${order.item_description}) (Prio ${order.priority_seq}) has inferred target ${n10d.inferred_target_date ? new Date(n10d.inferred_target_date).toLocaleDateString() : '—'} — target has passed! This order has no avail date set. Consider prioritizing it.`,
+          line: order.feedmill_line
+        });
+      }
+      
+      // Urgent — stock about to run out
+      if (n10d.status === 'Urgent') {
+        const daysAway = n10d.inferred_target_date 
+          ? Math.ceil((new Date(n10d.inferred_target_date) - new Date()) / (1000 * 60 * 60 * 24))
+          : null;
+        
+        result.push({
+          type: 'urgent',
+          icon: '🟡',
+          label: 'Stock Running Low',
+          order: order,
+          n10d: n10d,
+          message: `FPR: ${order.fpr} (${order.item_description}) (Prio ${order.priority_seq}) has inferred target ${n10d.inferred_target_date ? new Date(n10d.inferred_target_date).toLocaleDateString() : '—'} — ${daysAway} day(s) away. This order has no avail date set. Consider prioritizing it.`,
+          line: order.feedmill_line
+        });
+      }
+    });
+    
+    // Sort: critical first, then urgent
+    result.sort((a, b) => {
+      if (a.type === 'critical' && b.type !== 'critical') return -1;
+      if (a.type !== 'critical' && b.type === 'critical') return 1;
+      return 0;
+    });
+    
+    return result;
+  }, [orders, n10dData]);
+  
+  useEffect(() => {
+    generateAlertSummary();
+  }, [alerts]);
+  
+  async function generateAlertSummary() {
+    setIsLoading(true);
+    
+    if (alerts.length === 0) {
+      setAiSummary(`No critical or urgent stock issues detected across ${scopeLabel}.`);
+      setIsLoading(false);
+      return;
+    }
+    
+    const criticalCount = alerts.filter(a => a.type === 'critical').length;
+    const urgentCount = alerts.filter(a => a.type === 'urgent').length;
+    
+    try {
+      const prompt = `
+You are a production scheduling advisor. Summarize the current alerts for ${scopeLabel}.
+
+Alerts:
+- ${criticalCount} critical (stock already depleted)
+- ${urgentCount} urgent (stock about to run out)
+
+Critical items:
+${alerts.filter(a => a.type === 'critical').map(a => `- ${a.order.item_description} on ${a.line}`).join('\n')}
+
+Urgent items:
+${alerts.filter(a => a.type === 'urgent').map(a => `- ${a.order.item_description} on ${a.line}`).join('\n')}
+
+Write a 2-3 sentence summary and 3 recommended actions. No markdown. Plain text.
+      `;
+      
+      const response = await callAI(prompt);
+      setAiSummary(response);
+    } catch {
+      setAiSummary(
+        `There are ${criticalCount} critical and ${urgentCount} urgent stock alerts across ${scopeLabel}. ${criticalCount > 0 ? `Critical items like ${alerts[0].order.item_description} require immediate production attention.` : ''}`
+      );
+    }
+    
+    setIsLoading(false);
+  }
+  
+  return (
+    <div className="alerts-reminders-card">
+      <div className="alerts-reminders-header" onClick={() => setIsCollapsed(!isCollapsed)}>
+        <span className="alerts-reminders-title">🔔 Alerts & Reminders</span>
+        <span className="alerts-reminders-toggle">{isCollapsed ? '▼' : '▲'}</span>
+      </div>
+      
+      {!isCollapsed && (
+        <div className="alerts-reminders-body">
+          {/* Smart Summary */}
+          <div className="alerts-reminders-section">
+            <div className="alerts-reminders-section-header">
+              <span>✨ Smart Summary</span>
+              <button className="alerts-reminders-refresh" onClick={generateAlertSummary}>
+                ↻ Refresh
+              </button>
+            </div>
+            {isLoading ? (
+              <div className="alerts-reminders-loading">Analyzing alerts...</div>
+            ) : (
+              <div className="alerts-reminders-text">{aiSummary}</div>
+            )}
+          </div>
+          
+          {/* Alert items */}
+          {alerts.length === 0 ? (
+            <div className="alerts-reminders-empty">
+              No critical or urgent alerts at this time.
+            </div>
+          ) : (
+            <div className="alerts-reminders-list">
+              {alerts.map((alert, index) => (
+                <div key={index} className={`alert-item alert-item-${alert.type}`}>
+                  <div className="alert-item-header">
+                    <span className="alert-item-icons">
+                      {alert.type === 'critical' ? '🔴 🍳' : '🟡 🍳'}
+                    </span>
+                    <span className="alert-item-label">{alert.label}</span>
+                  </div>
+                  <div className="alert-item-message">
+                    {alert.message}
+                  </div>
+                  {/* Show line info for All Feedmills scope */}
+                  {scope === 'all' && alert.line && (
+                    <span className="alert-item-line-badge">
+                      {alert.line}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+```
+
+---
+
+## 4. STYLING
+
+```css
+/* Insights row — two columns */
+.all-feedmills-insights-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  padding: 0 24px 16px 24px;
+}
+
+.all-feedmills-insights-panel,
+.all-feedmills-alerts-panel {
+  min-width: 0;
+}
+
+/* Cards */
+.production-insights-card,
+.alerts-reminders-card {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #ffffff;
+  overflow: hidden;
+}
+
+/* Headers */
+.production-insights-header,
+.alerts-reminders-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.production-insights-header:hover,
+.alerts-reminders-header:hover {
+  background: #f9fafb;
+}
+
+.production-insights-title,
+.alerts-reminders-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #1a1a1a;
+}
+
+.production-insights-toggle,
+.alerts-reminders-toggle {
+  font-size: 10px;
+  color: #9ca3af;
+}
+
+/* Body */
+.production-insights-body,
+.alerts-reminders-body {
+  padding: 0 16px 16px 16px;
+}
+
+/* Section */
+.production-insights-section,
+.alerts-reminders-section {
+  margin-bottom: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.production-insights-section:last-child,
+.alerts-reminders-section:last-child {
+  border-bottom: none;
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+
+.production-insights-section-header,
+.alerts-reminders-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #374151;
+}
+
+.production-insights-refresh,
+.alerts-reminders-refresh {
+  font-size: 11px;
+  color: #ea580c;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.production-insights-refresh:hover,
+.alerts-reminders-refresh:hover {
+  text-decoration: underline;
+}
+
+.production-insights-text,
+.alerts-reminders-text {
+  font-size: 12px;
+  color: #6b7280;
+  line-height: 1.7;
+}
+
+.production-insights-loading,
+.alerts-reminders-loading {
+  font-size: 12px;
+  color: #9ca3af;
+  font-style: italic;
+}
+
+/* Stock level sequencing */
+.production-insights-stock-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #374151;
+  margin-bottom: 4px;
+}
+
+.production-insights-stock-text {
+  font-size: 12px;
+  color: #6b7280;
+  line-height: 1.5;
+}
+
+/* Alert items */
+.alerts-reminders-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.alerts-reminders-empty {
+  font-size: 12px;
+  color: #9ca3af;
+  font-style: italic;
+  padding: 8px 0;
+}
+
+.alert-item {
+  padding: 10px 12px;
+  border-radius: 6px;
+  border-left: 3px solid transparent;
+}
+
+.alert-item-critical {
+  background: #fef2f2;
+  border-left-color: #dc2626;
+}
+
+.alert-item-urgent {
+  background: #fffbeb;
+  border-left-color: #f59e0b;
+}
+
+.alert-item-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.alert-item-icons {
+  font-size: 12px;
+}
+
+.alert-item-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #374151;
+}
+
+.alert-item-message {
+  font-size: 11px;
+  color: #6b7280;
+  line-height: 1.6;
+}
+
+.alert-item-message strong {
+  color: #1a1a1a;
+}
+
+/* Line badge on alerts for All scope */
+.alert-item-line-badge {
+  display: inline-flex;
+  margin-top: 6px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 700;
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: 1px solid #bfdbfe;
+}
+
+/* Responsive — stack on smaller screens */
+@media (max-width: 1200px) {
+  .all-feedmills-insights-row {
+    grid-template-columns: 1fr;
+  }
+}
+```
+
+---
+
+## VERIFICATION
+
+### Production Insights present
+1. ✅ Shows on All Feedmills tab
+2. ✅ AI-generated Smart Summary covering all feedmills and lines
+3. ✅ Shows line breakdown in the AI context
+4. ✅ Stock-Level Sequencing prompt if N10D data has inferred dates
+5. ✅ Collapsible with ▲/▼
+6. ✅ Refresh button to regenerate
+
+### Alerts & Reminders present
+7. ✅ Shows on All Feedmills tab
+8. ✅ Aggregates alerts from ALL lines
+9. ✅ Critical alerts (red) shown first
+10. ✅ Urgent alerts (yellow) shown after
+11. ✅ Each alert shows which line it belongs to (line badge)
+12. ✅ AI-generated summary of alerts
+13. ✅ Collapsible with ▲/▼
+14. ✅ Refresh button
+
+### Layout
+15. ✅ Two-column layout: Insights left, Alerts right
+16. ✅ Below stats cards, above line tables
+17. ✅ Same look and feel as per-feedmill panels
+18. ✅ Stacks to single column on smaller screens
+```

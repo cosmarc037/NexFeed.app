@@ -1,0 +1,463 @@
+```
+Implement the following fixes to the Smart Combine feature:
+
+---
+
+## FIX 1: MATCH LOOK AND FEEL OF IMPACT ANALYSIS WITH SUMMARY/SAVINGS
+
+Update the Impact Analysis sub-sections to match the clean, simple style of the Combined Production Summary and Changeover Savings cards.
+
+### UPDATED DISPLAY COMPONENT
+
+```jsx
+function CombineAnalysisDisplay({ analysis }) {
+  if (!analysis) return null;
+  
+  return (
+    <div className="combine-analysis-content">
+      {/* Insertion Position */}
+      <div className="combine-analysis-row">
+        <div className="combine-analysis-row-label">
+          <span className="combine-analysis-row-icon">📍</span>
+          Insertion Position
+        </div>
+        <div className="combine-analysis-row-text">
+          {analysis.insertionPosition}
+        </div>
+      </div>
+      
+      {/* Scheduling Impact */}
+      <div className="combine-analysis-row">
+        <div className="combine-analysis-row-label">
+          <span className="combine-analysis-row-icon">📊</span>
+          Scheduling Impact
+        </div>
+        <div className="combine-analysis-row-text">
+          {analysis.schedulingImpact}
+        </div>
+      </div>
+      
+      {/* Alerts */}
+      <div className="combine-analysis-row combine-analysis-row-alerts">
+        <div className="combine-analysis-row-label">
+          <span className="combine-analysis-row-icon">⚠</span>
+          Alerts
+        </div>
+        <div className="combine-analysis-row-text">
+          {analysis.alerts}
+        </div>
+      </div>
+    </div>
+  );
+}
+```
+
+### UPDATED STYLING — MATCH SUMMARY/SAVINGS
+
+```css
+/* Remove old card-within-card styles */
+/* REMOVE these if they exist: */
+.combine-analysis-section { }
+.combine-analysis-section-header { }
+.combine-analysis-section-body { }
+.combine-analysis-alerts { }
+
+/* New styles — matching Summary/Savings look */
+.combine-analysis-content {
+  display: flex;
+  flex-direction: column;
+}
+
+.combine-analysis-row {
+  padding: 10px 0;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.combine-analysis-row:last-child {
+  border-bottom: none;
+}
+
+.combine-analysis-row-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #6b7280;
+  margin-bottom: 4px;
+}
+
+.combine-analysis-row-icon {
+  font-size: 12px;
+}
+
+.combine-analysis-row-text {
+  font-size: 12px;
+  color: #374151;
+  line-height: 1.6;
+  padding-left: 20px;
+}
+
+/* Alerts row — subtle warning tone */
+.combine-analysis-row-alerts .combine-analysis-row-label {
+  color: #92400e;
+}
+
+.combine-analysis-row-alerts .combine-analysis-row-text {
+  color: #92400e;
+}
+```
+
+### ANALYSIS CARD — MATCH PARENT CARD STYLE
+
+```css
+.combine-analysis-card {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  overflow: hidden;
+  margin: 8px 0;
+}
+
+.combine-analysis-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  background: #f9fafb;
+  border-bottom: 1px solid #e5e7eb;
+  font-size: 12px;
+  font-weight: 600;
+  color: #374151;
+}
+
+.combine-analysis-scroll {
+  max-height: 250px;
+  overflow-y: auto;
+  padding: 4px 14px;
+}
+
+.combine-analysis-scroll::-webkit-scrollbar {
+  width: 5px;
+}
+
+.combine-analysis-scroll::-webkit-scrollbar-track {
+  background: #f3f4f6;
+}
+
+.combine-analysis-scroll::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 3px;
+}
+```
+
+---
+
+## FIX 2: REMOVE EXTERNAL ALERT CARDS — MOVE INTO AI ALERTS SECTION
+
+Remove the separate yellow alert cards that appear outside/below the Impact Analysis. These warnings (like "Combining will push downstream order FPR: 260311 past its Avail Date by 24 days") should now be included in the AI's Alerts section.
+
+### REMOVE EXTERNAL ALERT CARDS
+
+```jsx
+{/* REMOVE THIS ENTIRE BLOCK */}
+{group.alerts && group.alerts.map((alert, index) => (
+  <div key={index} className="combine-alert-card">
+    <span className="combine-alert-icon">⚠</span>
+    <span className="combine-alert-text">{alert.message}</span>
+  </div>
+))}
+```
+
+### REMOVE ASSOCIATED CSS
+
+```css
+/* REMOVE */
+.combine-alert-card { }
+.combine-alert-icon { }
+.combine-alert-text { }
+```
+
+### FEED ALERT DATA TO THE AI PROMPT
+
+Add the calculated alert information to the AI context so it can include them in the Alerts section:
+
+```javascript
+function buildCombineAnalysisContext(group, lineOrders, masterData, n10dData, changeoverRules) {
+  // ... existing context building ...
+  
+  // Calculate alerts — downstream orders that would be pushed past avail date
+  const calculatedAlerts = calculateCombineAlerts(group, lineOrders);
+  
+  return {
+    // ... existing context ...
+    calculatedAlerts
+  };
+}
+
+function calculateCombineAlerts(group, lineOrders) {
+  const alerts = [];
+  const line = group.line;
+  
+  const currentLineOrders = lineOrders
+    .filter(o => o.line === line && o.status !== 'Done' && o.status !== 'Cancel PO')
+    .sort((a, b) => a.prio - b.prio);
+  
+  const combiningOrders = group.orders;
+  const combinedVolume = combiningOrders.reduce((s, o) => s + (parseFloat(o.volume) || 0), 0);
+  const runRate = parseFloat(combiningOrders[0].run_rate) || 0;
+  const combinedProdHours = runRate > 0 ? combinedVolume / runRate : 0;
+  
+  // Separate production time
+  const separateProdHours = combiningOrders.reduce((s, o) => {
+    const v = parseFloat(o.volume) || 0;
+    const r = parseFloat(o.run_rate) || 0;
+    return s + (r > 0 ? v / r : 0);
+  }, 0);
+  
+  // Time difference from combining
+  const timeDifference = combinedProdHours - separateProdHours;
+  
+  // Check downstream orders for avail date violations
+  currentLineOrders.forEach(o => {
+    if (combiningOrders.some(co => co.id === o.id)) return;
+    
+    const availDate = o.avail_date;
+    if (!availDate) return;
+    
+    const availLower = availDate.toLowerCase();
+    if (availLower.includes('prio') || availLower.includes('safety') || availLower === '' || availLower === '—') return;
+    
+    // This is a dated order — check if combining would push it past avail date
+    const currentCompletion = o._calculatedCompletionTime;
+    if (!currentCompletion) return;
+    
+    const availDateObj = new Date(availDate);
+    if (isNaN(availDateObj.getTime())) return;
+    
+    // If already past avail date, or would be pushed past
+    if (currentCompletion > availDateObj) {
+      const delayMs = currentCompletion.getTime() - availDateObj.getTime();
+      const delayDays = Math.floor(delayMs / (1000 * 60 * 60 * 24));
+      
+      alerts.push({
+        orderName: o.item_description,
+        fpr: o.fpr,
+        prio: o.prio,
+        availDate: availDate,
+        completionDate: o.completion_date,
+        delayDays: delayDays
+      });
+    }
+  });
+  
+  // Volume ceiling check
+  if (combinedVolume > 200) {
+    alerts.push({
+      type: 'volume_ceiling',
+      message: `The combined total of ${combinedVolume} MT exceeds the recommended ceiling of 200 MT. Large combined orders may impact scheduling flexibility and downstream production.`
+    });
+  }
+  
+  return alerts;
+}
+```
+
+### ADD ALERTS TO AI PROMPT
+
+```javascript
+function buildCombineAnalysisPrompt(context) {
+  let alertsContext = '';
+  
+  if (context.calculatedAlerts && context.calculatedAlerts.length > 0) {
+    alertsContext = `
+KNOWN ISSUES DETECTED:
+${context.calculatedAlerts.map(a => {
+  if (a.type === 'volume_ceiling') {
+    return `- VOLUME WARNING: ${a.message}`;
+  }
+  return `- DELAY WARNING: Order "${a.orderName}" (FPR: ${a.fpr}, Prio ${a.prio}) completion at ${a.completionDate} will be past its Avail Date of ${a.availDate} by approximately ${a.delayDays} days.`;
+}).join('\n')}
+
+Include ALL of these warnings in your Alerts section. Do not omit any.
+`;
+  }
+
+  return `
+You are a production scheduling advisor for a feed manufacturing plant.
+The planner is considering combining orders on ${context.line}.
+
+ORDERS BEING COMBINED:
+${context.combiningOrders.map(o => `  Prio ${o.prio}: ${o.name} | ${o.volume} MT | Avail: ${o.availDate} | Form: ${o.form}`).join('\n')}
+
+COMBINED ORDER DETAILS:
+  Total Volume: ${context.combinedVolume} MT
+  Form: ${context.combinedForm}
+  Production Time: ${context.combinedProductionHours} hrs
+  Base Changeover: ${context.baseChangeover} hrs
+  Avail Date (combined): ${context.combinedAvailDate || 'None'}
+  Avail Date Type: ${context.availDateType}
+  Future Dispatches Status: ${context.n10dStatus || 'N/A'}
+  DFL: ${context.n10dDfl || 'N/A'} MT | Inventory: ${context.n10dInventory || 'N/A'} MT
+
+ORDERS THAT WILL BE REMOVED (merged into combined): Prio ${context.removedPrios.join(', Prio ')}
+
+CURRENT LINE SEQUENCE (${context.line}, ${context.totalOrdersOnLine} orders):
+${context.lineContext.map(o => `  Prio ${o.prio}: ${o.name} | ${o.volume} MT | Prod: ${o.prodHours} hrs | CO: ${o.changeover} hrs | Avail: ${o.availDate} | N10D: ${o.n10dStatus} | Completion: ${o.completionDate}${o.isBeingCombined ? ' ← BEING COMBINED' : ''} | Color: ${o.color} | Diameter: ${o.diameter} | Category: ${o.category}`).join('\n')}
+
+${alertsContext}
+
+RULES FOR DETERMINING INSERTION POSITION:
+1. If the combined order has a DATED avail date, the combined order MUST take the position of the order with the EARLIEST avail date among the orders being combined. For example, if Prio 1 has avail March 19 and Prio 2 has avail March 22, the combined order takes Prio 1.
+2. If the combined order has a NON-DATED avail date (prio replenish, safety reorder, etc.), you have freedom to determine the best position based on stock status, production impact, and downstream delays.
+3. When the combined orders are already at consecutive positions (e.g., Prio 1 and Prio 2), the combined order takes the lowest prio number (Prio 1) and the other slot is removed, shifting everything up.
+4. NEVER recommend a position that would delay a Critical or Urgent downstream order past its avail date, unless unavoidable.
+5. Account for the fact that merging removes order slots — downstream orders shift up.
+
+RESPOND IN EXACTLY THIS FORMAT (no markdown formatting, no # headers):
+
+Insertion Position:
+[State the exact priority number. Explain why this position was chosen. Reference avail dates, stock status, or scheduling logic.]
+
+Scheduling Impact:
+[Describe what happens to downstream orders when the combined order is inserted and the duplicate slots are removed. Name specific orders and quantify any time shifts. If no delays, state clearly.]
+
+Alerts:
+[List ALL warnings including any delay warnings and volume ceiling warnings provided above. Format each as a separate line starting with "⚠". If no issues at all, state "No alerts — all orders remain on schedule."]
+  `;
+}
+```
+
+---
+
+## FIX 3: REMOVE SEPARATE VOLUME CEILING WARNING
+
+The "Volume Ceiling Warning" card that appears separately should also be moved inside the AI Alerts section.
+
+### REMOVE
+
+```jsx
+{/* REMOVE THIS */}
+{group.combinedVolume > 200 && (
+  <div className="combine-volume-warning">
+    <span>⚠ Volume Ceiling Warning</span>
+    <p>The combined total of {group.combinedVolume} MT exceeds the recommended ceiling of 200 MT...</p>
+  </div>
+)}
+```
+
+This is now handled by the `calculatedAlerts` which feeds into the AI prompt, and the AI includes it in the Alerts section.
+
+---
+
+## FIX 4: INSERTION POSITION LOGIC — EARLIEST AVAIL DATE
+
+Update the AI prompt rules to be very explicit about the insertion position for dated orders. Also update the fallback logic:
+
+### UPDATED APPROVE HANDLER
+
+```javascript
+function handleApprove(group, analysis) {
+  const combiningOrders = group.orders;
+  
+  // Determine the correct insertion prio
+  let insertionPrio;
+  
+  // First check: does the AI recommend a position?
+  const aiPrio = parseRecommendedPrio(analysis?.insertionPosition, group);
+  
+  // Second check: enforce dated avail date rule
+  const datedOrders = combiningOrders.filter(o => {
+    const avail = (o.avail_date || '').toLowerCase();
+    return avail && !avail.includes('prio') && !avail.includes('safety') && avail !== '' && avail !== '—';
+  });
+  
+  if (datedOrders.length > 0) {
+    // DATED — use the prio of the order with the earliest avail date
+    const earliest = datedOrders.sort((a, b) => new Date(a.avail_date) - new Date(b.avail_date))[0];
+    insertionPrio = earliest.prio;
+  } else {
+    // NON-DATED — use AI recommendation
+    insertionPrio = aiPrio || Math.min(...combiningOrders.map(o => o.prio));
+  }
+  
+  // Determine avail date
+  const combinedAvailDate = datedOrders.length > 0
+    ? datedOrders.sort((a, b) => new Date(a.avail_date) - new Date(b.avail_date))[0].avail_date
+    : combiningOrders[0].avail_date;
+  
+  // Create combined order
+  const combinedVolume = combiningOrders.reduce((s, o) => s + (parseFloat(o.volume) || 0), 0);
+  const baseOrder = { ...combiningOrders.find(o => o.prio === insertionPrio) || combiningOrders[0] };
+  
+  baseOrder.volume = combinedVolume;
+  baseOrder.avail_date = combinedAvailDate;
+  baseOrder.prio = insertionPrio;
+  baseOrder.batches = Math.ceil(combinedVolume / (parseFloat(baseOrder.batch_size) || 1));
+  baseOrder.bags = baseOrder.batches * (parseFloat(baseOrder.fg_weight) || 1) * 20;
+  
+  const runRate = parseFloat(baseOrder.run_rate) || 0;
+  baseOrder.production_time = runRate > 0 ? (combinedVolume / runRate).toFixed(2) : '0.00';
+  baseOrder._isCombined = true;
+  baseOrder._combinedFrom = combiningOrders.map(o => o.id);
+  
+  // Remove all original orders and insert combined
+  const orderIdsToRemove = combiningOrders.map(o => o.id);
+  let updatedOrders = allOrders.filter(o => !orderIdsToRemove.includes(o.id));
+  updatedOrders.push(baseOrder);
+  
+  // Re-sort line orders and reassign prios
+  const lineOrders = updatedOrders
+    .filter(o => o.line === group.line)
+    .sort((a, b) => {
+      if (a.id === baseOrder.id) return insertionPrio - 0.5 - b.prio;
+      if (b.id === baseOrder.id) return a.prio - (insertionPrio - 0.5);
+      return a.prio - b.prio;
+    });
+  
+  lineOrders.forEach((o, idx) => {
+    o.prio = idx + 1;
+  });
+  
+  // Recalculate
+  recalculateAllChangeovers(updatedOrders, getDefaultChangeoverRules());
+  recalculateCompletionDates(updatedOrders);
+  
+  setAllOrders(updatedOrders);
+  showNotification('success', `Orders combined: ${baseOrder.item_description} (${combinedVolume} MT) at Priority ${insertionPrio}.`);
+}
+```
+
+---
+
+## VERIFICATION
+
+### Look and feel
+1. ✅ Impact Analysis sub-sections match the font size of Summary/Savings (12px body, 11px labels)
+2. ✅ Simple row layout with label + text, separated by subtle borders
+3. ✅ No card-within-card look
+4. ✅ Analysis card header matches Summary/Savings card header style
+5. ✅ Scrollable container with matching scrollbar
+
+### Alerts consolidated
+6. ✅ No separate yellow alert cards outside Impact Analysis
+7. ✅ Downstream delay warnings appear inside AI Alerts section
+8. ✅ Volume ceiling warning appears inside AI Alerts section
+9. ✅ "No alerts — all orders remain on schedule" when no issues
+10. ✅ Each alert prefixed with ⚠
+
+### Insertion position
+11. ✅ Dated orders: combined order takes prio of earliest avail date order
+12. ✅ Prio 1 (March 19) + Prio 2 (March 22) → combined at Prio 1
+13. ✅ Non-dated orders: AI freely determines position
+14. ✅ AI accounts for removed slots shifting sequence
+15. ✅ Approve handler enforces earliest avail date prio for dated orders
+16. ✅ Fallback to AI recommendation for non-dated orders
+17. ✅ Final fallback to lowest prio number if AI parsing fails
+
+### Data fed to AI
+18. ✅ Calculated delay warnings included in AI prompt
+19. ✅ Volume ceiling warning included in AI prompt
+20. ✅ AI instructed to include ALL warnings in Alerts section
+21. ✅ Full line context with all order details provided to AI
+```

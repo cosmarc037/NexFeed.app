@@ -1,0 +1,399 @@
+```
+Implement the following changes to the notification system:
+
+---
+
+## NOTIFICATION TIMERS — DYNAMIC DURATION BASED ON TYPE AND LENGTH
+
+Notifications in the upper-right should have different auto-dismiss durations based on their type and text length.
+
+---
+
+### DURATION RULES
+
+#### BASE DURATION BY TYPE
+
+| Type | Base Duration | Reasoning |
+|---|---|---|
+| Success | 3 seconds | Short, confirmatory — user just needs a glance |
+| Info | 4 seconds | Slightly longer — may contain useful context |
+| Warning | 6 seconds | Important — user should read and understand |
+| Error | 8 seconds | Critical — user needs time to read and may need to act |
+
+#### DYNAMIC DURATION — BASED ON TEXT LENGTH
+
+Add extra time for longer messages. For every 50 characters beyond 80 characters, add 1 second:
+
+```javascript
+function getNotificationDuration(type, message) {
+  // Base durations (milliseconds)
+  const baseDurations = {
+    success: 3000,
+    info: 4000,
+    warning: 6000,
+    error: 8000
+  };
+  
+  const base = baseDurations[type] || 4000;
+  
+  // Add time for longer messages
+  const messageLength = (message || '').length;
+  let extraTime = 0;
+  
+  if (messageLength > 80) {
+    const extraChars = messageLength - 80;
+    extraTime = Math.ceil(extraChars / 50) * 1000; // 1 second per 50 chars
+  }
+  
+  // Cap at maximum duration
+  const maxDurations = {
+    success: 5000,
+    info: 7000,
+    warning: 10000,
+    error: 15000
+  };
+  
+  const maxDuration = maxDurations[type] || 10000;
+  
+  return Math.min(base + extraTime, maxDuration);
+}
+```
+
+### EXAMPLES
+
+| Type | Message | Length | Duration |
+|---|---|---|---|
+| Success | "Order saved successfully." | 26 chars | 3s (base) |
+| Success | "Auto-sequence applied to Line 1. 10 orders updated." | 52 chars | 3s (base) |
+| Info | "N10D data loaded. 20 products found." | 37 chars | 4s (base) |
+| Info | "Filters applied. Showing 5 of 19 orders matching your criteria on Line 1." | 75 chars | 4s (base) |
+| Warning | "Completion date exceeds availability date. Consider adjusting the schedule." | 76 chars | 6s (base) |
+| Warning | "There are orders at earlier priorities that have not been produced or completed yet. Consider producing or completing those orders first before starting this one." | 163 chars | 8s (6s + 2s extra) |
+| Error | "Failed to generate AI insights." | 32 chars | 8s (base) |
+| Error | "Failed to upload N10D file. The file format is incorrect or the data is corrupted. Please check the file and try again. If the issue persists, contact support." | 161 chars | 10s (8s + 2s extra) |
+
+### NOTIFICATION COMPONENT
+
+```jsx
+function Notification({ id, type, title, message, onDismiss }) {
+  const duration = getNotificationDuration(type, message);
+  const [isExiting, setIsExiting] = useState(false);
+  const timerRef = useRef(null);
+  const progressRef = useRef(null);
+  
+  useEffect(() => {
+    // Start auto-dismiss timer
+    timerRef.current = setTimeout(() => {
+      handleDismiss();
+    }, duration);
+    
+    return () => clearTimeout(timerRef.current);
+  }, [duration]);
+  
+  function handleDismiss() {
+    setIsExiting(true);
+    setTimeout(() => {
+      onDismiss(id);
+    }, 300); // Exit animation duration
+  }
+  
+  // Pause timer on hover
+  function handleMouseEnter() {
+    clearTimeout(timerRef.current);
+  }
+  
+  // Resume timer on mouse leave
+  function handleMouseLeave() {
+    timerRef.current = setTimeout(() => {
+      handleDismiss();
+    }, 2000); // Give 2 more seconds after hover
+  }
+  
+  const icons = {
+    success: '✓',
+    info: 'ℹ',
+    warning: '⚠',
+    error: '✕'
+  };
+  
+  const colors = {
+    success: { bg: '#f0fdf4', border: '#bbf7d0', icon: '#16a34a', progress: '#16a34a' },
+    info: { bg: '#eff6ff', border: '#bfdbfe', icon: '#2563eb', progress: '#2563eb' },
+    warning: { bg: '#fffbeb', border: '#fde68a', icon: '#ca8a04', progress: '#ca8a04' },
+    error: { bg: '#fef2f2', border: '#fecaca', icon: '#dc2626', progress: '#dc2626' }
+  };
+  
+  const style = colors[type] || colors.info;
+  
+  return (
+    <div
+      className={`notification ${type} ${isExiting ? 'exiting' : ''}`}
+      style={{
+        background: style.bg,
+        border: `1px solid ${style.border}`,
+      }}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
+    >
+      <div className="notification-content">
+        <span className="notification-icon" style={{ color: style.icon }}>
+          {icons[type]}
+        </span>
+        
+        <div className="notification-text">
+          {title && (
+            <div className="notification-title">{title}</div>
+          )}
+          <div className="notification-message">{message}</div>
+        </div>
+        
+        <button 
+          className="notification-close"
+          onClick={handleDismiss}
+        >
+          ✕
+        </button>
+      </div>
+      
+      {/* Progress bar — shows remaining time */}
+      <div 
+        className="notification-progress"
+        style={{
+          background: style.progress,
+          animationDuration: `${duration}ms`
+        }}
+      />
+    </div>
+  );
+}
+```
+
+### STYLING
+
+```css
+.notification {
+  position: relative;
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-bottom: 8px;
+  min-width: 300px;
+  max-width: 420px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  animation: notificationSlideIn 0.3s ease;
+  overflow: hidden;
+}
+
+.notification.exiting {
+  animation: notificationSlideOut 0.3s ease forwards;
+}
+
+@keyframes notificationSlideIn {
+  from {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes notificationSlideOut {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+}
+
+.notification-content {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.notification-icon {
+  font-size: 16px;
+  font-weight: 700;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.notification-text {
+  flex: 1;
+}
+
+.notification-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #1a1a1a;
+  margin-bottom: 2px;
+}
+
+.notification-message {
+  font-size: 11px;
+  font-weight: 400;
+  color: #374151;
+  line-height: 1.5;
+}
+
+.notification-close {
+  background: none;
+  border: none;
+  color: #9ca3af;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.notification-close:hover {
+  color: #374151;
+}
+
+/* Progress bar — shrinks over time */
+.notification-progress {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  height: 3px;
+  width: 100%;
+  opacity: 0.6;
+  animation: progressShrink linear forwards;
+}
+
+@keyframes progressShrink {
+  from {
+    width: 100%;
+  }
+  to {
+    width: 0%;
+  }
+}
+```
+
+### PAUSE ON HOVER
+
+When user hovers over a notification:
+- Timer pauses (stops countdown)
+- Progress bar pauses
+- After mouse leaves, gives 2 extra seconds then dismisses
+
+```css
+.notification:hover .notification-progress {
+  animation-play-state: paused;
+}
+```
+
+### NOTIFICATION CONTAINER
+
+```jsx
+function NotificationContainer({ notifications, onDismiss }) {
+  return (
+    <div className="notification-container">
+      {notifications.map(notif => (
+        <Notification
+          key={notif.id}
+          id={notif.id}
+          type={notif.type}
+          title={notif.title}
+          message={notif.message}
+          onDismiss={onDismiss}
+        />
+      ))}
+    </div>
+  );
+}
+```
+
+```css
+.notification-container {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 99999;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+```
+
+### SHOW NOTIFICATION HELPER
+
+```javascript
+function showNotification(type, message, title = null) {
+  const id = Date.now() + Math.random();
+  
+  const notification = {
+    id,
+    type,    // 'success' | 'info' | 'warning' | 'error'
+    title,   // optional title
+    message  // notification text
+  };
+  
+  addNotification(notification);
+}
+
+// Usage examples:
+showNotification('success', 'Order saved successfully.');
+showNotification('success', 'Auto-sequence applied to Line 1. 10 orders updated.');
+showNotification('info', 'N10D data loaded. 20 products found.');
+showNotification('warning', 'Completion date exceeds availability date.');
+showNotification('error', 'Failed to generate AI insights. Try again.');
+showNotification('error', 'Failed to upload N10D file. The file format is incorrect.', 'Upload Error');
+```
+
+---
+
+## SUMMARY TABLE
+
+| Type | Base | Max | Extra per 50 chars (over 80) | Progress bar color |
+|---|---|---|---|---|
+| Success | 3s | 5s | +1s | Green |
+| Info | 4s | 7s | +1s | Blue |
+| Warning | 6s | 10s | +1s | Yellow/amber |
+| Error | 8s | 15s | +1s | Red |
+
+---
+
+## VERIFICATION
+
+1. Success notification
+   - ✅ Short message (< 80 chars): 3 seconds
+   - ✅ Longer message: up to 5 seconds max
+   - ✅ Green styling
+
+2. Info notification
+   - ✅ Short: 4 seconds
+   - ✅ Long: up to 7 seconds max
+   - ✅ Blue styling
+
+3. Warning notification
+   - ✅ Short: 6 seconds
+   - ✅ Long: up to 10 seconds max
+   - ✅ Yellow/amber styling
+
+4. Error notification
+   - ✅ Short: 8 seconds
+   - ✅ Long: up to 15 seconds max
+   - ✅ Red styling
+
+5. User interaction
+   - ✅ Click X to dismiss immediately
+   - ✅ Hover pauses timer and progress bar
+   - ✅ After hover ends, 2 more seconds then dismisses
+
+6. Progress bar
+   - ✅ Shows at bottom of notification
+   - ✅ Shrinks from left to right over duration
+   - ✅ Color matches notification type
+   - ✅ Pauses on hover
+
+7. Animation
+   - ✅ Slides in from right
+   - ✅ Slides out to right on dismiss
+```

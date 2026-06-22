@@ -1,0 +1,442 @@
+Please update the Order History feature so it remains simple and focused, while adding support for the most meaningful movement/edit events introduced in the app. Also update the new history entries to use a two-line format: a clear main action line plus a sub-text/details line where applicable.
+
+---
+
+## OBJECTIVE
+
+Enhance the History column / OrderHistoryModal so it records only a small set of clear, high-signal operational events.
+
+We want to keep history:
+- simple
+- readable
+- easy to scan
+
+Do not flood the history modal with planning noise or verbose strategy explanations.
+
+---
+
+## KEEP EXISTING HISTORY BEHAVIOR
+
+Keep the current history system and data structure as-is:
+
+```json
+{
+  "timestamp": "05/09/2026, 02:15 PM",
+  "action": "Status changed: plotted → completed",
+  "details": "End Date auto-set: 05/09/2026, 02:15 PM"
+}
+```
+
+Continue using:
+- `action` = main visible line
+- `details` = sub-text / smaller grey text underneath
+
+The modal should continue to:
+- display newest first
+- show timestamp
+- show action
+- show details underneath when present
+
+Do not remove or break existing history events such as:
+- Uploaded
+- Status changed
+- Cancel / restore
+- Completed
+- Cut order / merge back
+- Un-combine
+- etc.
+
+This is an additive enhancement only.
+
+---
+
+## NEW HISTORY EVENTS TO SUPPORT
+
+Only add these new history event types:
+
+1. **Auto-sequence**
+2. **Line shutdown**
+3. **Feedmill shutdown**
+4. **Override volume**
+5. **Manually reordered**
+6. **Optimize order**
+
+Also support **revert** history for:
+- Line shutdown
+- Feedmill shutdown
+- Override volume
+
+Do **not** add revert handling for:
+- Auto-sequence
+- Optimize order
+
+Do not add:
+- apply to schedule / strategy application
+- profitability applied
+- auto-sequence reasoning summary
+- app-adjusted divisible volume
+- generic planning rationale
+- sequence insight explanation
+
+These are intentionally excluded to keep history clean and useful.
+
+---
+
+## DISPLAY FORMAT
+
+Use a two-line format for the new entries where applicable:
+
+### Main action line
+Shows the primary change
+
+### Sub-text/details line
+Shows supporting context such as:
+- AI strategy name
+- shutdown reason
+- priority movement
+
+This should visually fit the current modal style shown in the screenshot:
+- bold action
+- small grey details underneath
+
+---
+
+## 1. AUTO-SEQUENCE HISTORY
+
+When auto-sequence changes an order and that change is actually committed/applied, add a history entry.
+
+### If the order moved across lines:
+**Action**
+- `Auto-sequence: Line X -> Line Y`
+
+**Details**
+- `[AI-powered sequence name]. Moved from Prio A -> B`
+
+### Example
+Action:
+- `Auto-sequence: Line 1 -> Line 3`
+
+Details:
+- `Red-Last Changeover Relief. Moved from Prio 5 -> 3`
+
+### If the order stayed on the same line but changed priority:
+**Action**
+- `Auto-sequence: Prio A -> B`
+
+**Details**
+- `[AI-powered sequence name]`
+
+### Example
+Action:
+- `Auto-sequence: Prio 7 -> 3`
+
+Details:
+- `Swine Diameter Segmentation`
+
+Use the actual AI strategy name selected/applied by the user.
+
+No revert support is needed for Auto-sequence.
+
+---
+
+## 2. LINE SHUTDOWN HISTORY
+
+When a line shutdown diverts an order to another line, add a history entry.
+
+A line shutdown always implies cross-line movement.
+
+### Normal line shutdown entry
+
+**Action**
+- `Line shutdown: Line X -> Line Y`
+
+**Details**
+- `[selected shutdown reason]. Moved from Prio A -> B`
+
+### Example
+Action:
+- `Line shutdown: Line 2 -> Line 3`
+
+Details:
+- `Scheduled maintenance. Moved from Prio 3 -> 5`
+
+### Revert line shutdown entry
+
+When diverted orders are restored back to their original line, add a revert history entry.
+
+**Action**
+- `Line shutdown: Line Y -> Line X [revert]`
+
+**Details**
+- `[selected shutdown reason]. Moved from Prio B -> A`
+
+### Example
+Action:
+- `Line shutdown: Line 2 -> Line 1 [revert]`
+
+Details:
+- `Scheduled maintenance. Moved from Prio 10 -> 3`
+
+### Important
+The shutdown reason must come from the actual shutdown modal selection (the reason dropdown), such as:
+- Scheduled maintenance
+- Equipment breakdown
+- Natural disaster
+- Power outage
+- Supply shortage
+- Staff shortage
+- Quality issue
+- Regulatory compliance
+- Other
+
+Use the exact selected reason text in history.
+
+For now, do not include optional shutdown notes in the history entry unless separately requested later.
+
+If the order is reverted/restored, use the same stored shutdown reason from the original shutdown event if available.
+
+---
+
+## 3. FEEDMILL SHUTDOWN HISTORY
+
+When a feedmill shutdown diverts an order to another line, add a history entry.
+
+### Normal feedmill shutdown entry
+
+**Action**
+- `Feedmill shutdown: Line X -> Line Y`
+
+**Details**
+- `[selected shutdown reason]. Moved from Prio A -> B`
+
+### Example
+Action:
+- `Feedmill shutdown: Line 4 -> Line 7`
+
+Details:
+- `Power outage. Moved from Prio 2 -> 6`
+
+### Revert feedmill shutdown entry
+
+When diverted orders are restored back after a feedmill shutdown, add a revert history entry.
+
+**Action**
+- `Feedmill shutdown: Line Y -> Line X [revert]`
+
+**Details**
+- `[selected shutdown reason]. Moved from Prio B -> A`
+
+### Example
+Action:
+- `Feedmill shutdown: Line 7 -> Line 4 [revert]`
+
+Details:
+- `Power outage. Moved from Prio 6 -> 2`
+
+As with line shutdown, use the actual selected shutdown reason from the shutdown modal, and reuse the same stored reason for revert entries if available.
+
+---
+
+## 4. OVERRIDE VOLUME HISTORY
+
+When a user manually overrides the volume, add a history entry.
+
+### Normal override entry
+**Action**
+- `Override volume: OLD MT -> NEW MT`
+
+### Example
+- `Override volume: 140 MT -> 160 MT`
+
+### Revert override entry
+When a manually overridden volume is restored/reverted, add:
+
+**Action**
+- `Override volume: NEW MT -> OLD MT [revert]`
+
+### Example
+- `Override volume: 6 MT -> 3 MT [revert]`
+
+### Details
+- leave blank / not required for now
+
+### Important
+This applies only to **manual override volume**.
+
+Do **not** add app-adjusted divisible volume into history.
+
+App-adjusted divisible volume should remain outside the history modal.
+
+---
+
+## 5. MANUALLY REORDERED HISTORY
+
+When a user manually drags/drops an order within the same line, add a history entry.
+
+This is always same-line only.
+
+### Action
+- `Manually reordered: Prio A -> B`
+
+### Example
+- `Manually reordered: Prio 7 -> 3`
+
+### Details
+- leave blank / not required for now
+
+Do not include line movement in this event.
+
+---
+
+## 6. OPTIMIZE ORDER HISTORY
+
+When the user uses the **Optimize** feature and the app moves an order from another line into the selected line, add a history entry.
+
+### Action
+- `Optimize order: Line X -> Line Y`
+
+### Details
+- `Moved from Prio A -> B`
+
+### Example
+Action:
+- `Optimize order: Line 3 -> Line 4`
+
+Details:
+- `Moved from Prio 4 -> 3`
+
+This should be distinct from Auto-sequence because Optimize is a separate user-triggered feature.
+
+No revert support is needed for Optimize order.
+
+---
+
+## 7. APP-ADJUSTED DIVISIBLE VOLUME SHOULD USE A TOOLTIP, NOT HISTORY
+
+If a volume is app-adjusted because the original value is not divisible by batch size:
+- do not write it to order history
+- instead, surface it via a tooltip in the order table if needed
+
+Example tooltip:
+- `Adjusted from 145 MT to 148 MT so the volume is divisible by batch size 4.`
+
+This is intentionally outside history.
+
+---
+
+## 8. WRITE HISTORY ONLY WHEN THE CHANGE IS ACTUALLY COMMITTED
+
+For all new history types:
+- write the history entry when the action is actually committed
+- not when it is merely previewed
+
+Examples:
+- Auto-sequence entry should be written when the selected sequence is applied
+- Optimize entry should be written when optimize is executed
+- Shutdown entries should be written when the divert/reassignment is confirmed
+- Shutdown revert entries should be written when the order is restored back
+- Manual reorder should be written when the drag/drop reorder is saved/applied
+- Override volume should be written when the manual override is confirmed
+- Override revert should be written when the override is restored
+
+This keeps history as a true audit trail.
+
+---
+
+## 9. KEEP THE MODAL UI SIMPLE
+
+No major redesign needed.
+
+Continue using the current OrderHistoryModal style:
+- title: `Order History — FPR: XXXXXX`
+- timeline layout
+- newest first
+- timestamp shown
+- action text clearly visible
+- details/sub-text shown beneath when present
+
+The new entries should visually match the current screenshot style.
+
+---
+
+## 10. USE CONSISTENT LABELS AND WORDING
+
+Use these exact action prefixes consistently:
+
+- `Auto-sequence: ...`
+- `Line shutdown: ...`
+- `Feedmill shutdown: ...`
+- `Override volume: ...`
+- `Manually reordered: ...`
+- `Optimize order: ...`
+
+Also:
+- always use `Line X -> Line Y`
+- use `Prio A -> B`
+- use `[revert]` exactly for revert entries
+- for shutdown details, use the exact selected reason text from the shutdown modal
+- for auto-sequence details, use the applied AI strategy name
+
+---
+
+## 11. ADD DEBUG LOGGING FOR NEW HISTORY EVENTS
+
+Temporarily log:
+
+```javascript
+console.debug('[Order History Write]', {
+  orderId,
+  timestamp,
+  action,
+  details,
+  eventType,
+  isRevert,
+});
+```
+
+Especially for:
+- Auto-sequence
+- Line shutdown
+- Line shutdown revert
+- Feedmill shutdown
+- Feedmill shutdown revert
+- Override volume
+- Override volume revert
+- Manually reordered
+- Optimize order
+
+This will help verify that history entries are being written correctly.
+
+---
+
+## VERIFICATION
+
+1. ✅ Existing history behavior remains intact
+2. ✅ New history entries use a two-line format:
+   - action on the main line
+   - details as sub-text when applicable
+3. ✅ Auto-sequence writes:
+   - `Auto-sequence: Line X -> Line Y` + `[AI strategy name]. Moved from Prio A -> B`
+   - or `Auto-sequence: Prio A -> B` + `[AI strategy name]`
+4. ✅ Line shutdown writes:
+   - `Line shutdown: Line X -> Line Y`
+   - details = `[selected shutdown reason]. Moved from Prio A -> B`
+5. ✅ Line shutdown revert writes:
+   - `Line shutdown: Line Y -> Line X [revert]`
+   - details = `[selected shutdown reason]. Moved from Prio B -> A`
+6. ✅ Feedmill shutdown writes:
+   - `Feedmill shutdown: Line X -> Line Y`
+   - details = `[selected shutdown reason]. Moved from Prio A -> B`
+7. ✅ Feedmill shutdown revert writes:
+   - `Feedmill shutdown: Line Y -> Line X [revert]`
+   - details = `[selected shutdown reason]. Moved from Prio B -> A`
+8. ✅ Shutdown reason is pulled from the actual shutdown modal reason dropdown
+9. ✅ Override volume writes `Override volume: OLD MT -> NEW MT`
+10. ✅ Override volume revert writes `Override volume: NEW MT -> OLD MT [revert]`
+11. ✅ Manual drag/drop writes `Manually reordered: Prio A -> B`
+12. ✅ Optimize writes `Optimize order: Line X -> Line Y` + `Moved from Prio A -> B`
+13. ✅ No revert history is added for Auto-sequence or Optimize order
+14. ✅ App-adjusted divisible volume is NOT written into history
+15. ✅ Apply-to-schedule, profitability, and planning rationale are NOT added to history
+16. ✅ History entries are written only when the action is actually committed
+17. ✅ The history modal stays simple, readable, and visually consistent with the current UI

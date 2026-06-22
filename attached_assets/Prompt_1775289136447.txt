@@ -1,0 +1,298 @@
+Implement the following fixes to the Knowledge Base:
+
+---
+
+## FIX 1: REMOVE YELLOW HIGHLIGHTS ON FRESH FILE UPLOAD
+
+When a user uploads a new file, no cells should be highlighted. Currently, cells are showing yellow highlights immediately after file upload even though no manual edits have been made.
+
+### THE PROBLEM
+
+The `getEditedCells` comparison function is detecting differences between the baseline and current data even on fresh upload. This is likely because:
+
+1. The baseline snapshot and the current table data are being set at slightly different times or with different object references, causing string comparison mismatches
+2. Cells with empty/null/undefined values are being compared inconsistently (e.g., `null` vs `""` vs `undefined` vs `"-"`)
+3. Numeric values may be compared as different types (e.g., number `4` vs string `"4"`)
+4. The baseline is not being set to the EXACT same data object that the table is using
+
+### THE FIX
+
+#### NORMALIZE VALUES BEFORE COMPARISON
+
+The comparison function must normalize all values to handle null, undefined, empty string, numbers, and whitespace consistently:
+
+```javascript
+function normalizeValue(val) {
+  if (val === null || val === undefined) return '';
+  return String(val).trim();
+}
+
+function getEditedCells(baselineSnapshot, currentData) {
+  const editedCells = new Set();
+
+  if (!baselineSnapshot || !currentData) return editedCells;
+
+  currentData.forEach((row) => {
+    const originalRow = baselineSnapshot.find(
+      (orig) => orig._rowId === row._rowId
+    );
+
+    if (!originalRow) {
+      // Entire row is new (inserted) — mark all data cells as edited
+      Object.keys(row).forEach((key) => {
+        if (!key.startsWith('_')) {
+          editedCells.add(`${row._rowId}_${key}`);
+        }
+      });
+      return;
+    }
+
+    // Compare each field using normalized values
+    Object.keys(row).forEach((key) => {
+      if (key.startsWith('_')) return; // Skip internal fields
+      if (normalizeValue(row[key]) !== normalizeValue(originalRow[key])) {
+        editedCells.add(`${row._rowId}_${key}`);
+      }
+    });
+  });
+
+  return editedCells;
+}
+```
+
+#### ENSURE BASELINE AND TABLE DATA ARE SET FROM THE EXACT SAME SOURCE
+
+When uploading a file, create ONE normalized data array, then deep clone it for both the table and the baseline. Do NOT create them separately:
+
+```javascript
+function handleUploadComplete(filename, parsedData, recordCount) {
+  const dataWithIds = parsedData.map((row, index) => ({
+    ...row,
+    _rowId: row._rowId || `kb_row_${index}_${Date.now()}`,
+    _originalIndex: index,
+  }));
+
+  // Create ONE source, then clone for both uses
+  const masterCopy = JSON.parse(JSON.stringify(dataWithIds));
+
+  setKbData(JSON.parse(JSON.stringify(masterCopy)));          // Clone 1 for table
+  setBaselineSnapshot(JSON.parse(JSON.stringify(masterCopy))); // Clone 2 for baseline
+
+  // These are now guaranteed identical — no highlights will appear
+
+  const uploadEntry = {
+    id: Date.now(),
+    type: 'file_upload',
+    timestamp: new Date().toISOString(),
+    summary: `Uploaded: ${filename} (${recordCount} records)`,
+    details: `File "${filename}" uploaded and applied as new Knowledge Base with ${recordCount} records.`,
+    snapshot: JSON.parse(JSON.stringify(masterCopy)), // Clone 3 for history
+    filename: filename,
+    user: getCurrentUser(),
+  };
+
+  addToHistory(uploadEntry);
+}
+```
+
+#### NORMALIZE DATA DURING PARSING
+
+When parsing the Excel file, normalize all cell values immediately so there are no type/format inconsistencies later:
+
+```javascript
+function parseExcelData(rawData) {
+  return rawData.map((row) => {
+    const normalized = {};
+    Object.keys(row).forEach((key) => {
+      const val = row[key];
+      // Normalize: convert null/undefined to empty string, trim whitespace, convert numbers to strings
+      if (val === null || val === undefined) {
+        normalized[key] = '';
+      } else {
+        normalized[key] = String(val).trim();
+      }
+    });
+    return normalized;
+  });
+}
+```
+
+Call this before assigning IDs:
+
+```javascript
+function handleUploadComplete(filename, rawParsedData, recordCount) {
+  // Normalize first
+  const parsedData = parseExcelData(rawParsedData);
+
+  const dataWithIds = parsedData.map((row, index) => ({
+    ...row,
+    _rowId: `kb_row_${index}_${Date.now()}`,
+    _originalIndex: index,
+  }));
+
+  const masterCopy = JSON.parse(JSON.stringify(dataWithIds));
+
+  setKbData(JSON.parse(JSON.stringify(masterCopy)));
+  setBaselineSnapshot(JSON.parse(JSON.stringify(masterCopy)));
+
+  // ... rest of upload logic
+}
+```
+
+#### WHEN LOADING FROM localStorage — NORMALIZE BASELINE TOO
+
+```javascript
+function initializeFromStorage() {
+  const storedHistory = loadHistoryFromStorage();
+
+  if (storedHistory.length > 0) {
+    const activeEntry = storedHistory[0];
+    if (activeEntry.snapshot) {
+      setKbData(JSON.parse(JSON.stringify(activeEntry.snapshot)));
+    }
+
+    // Find file_upload baseline
+    const fileUploadEntry = storedHistory.find((h) => h.type === 'file_upload');
+    if (fileUploadEntry && fileUploadEntry.snapshot) {
+      setBaselineSnapshot(JSON.parse(JSON.stringify(fileUploadEntry.snapshot)));
+    } else {
+      // No file upload found — use the oldest entry as baseline to prevent false highlights
+      const oldestEntry = storedHistory[storedHistory.length - 1];
+      if (oldestEntry && oldestEntry.snapshot) {
+        setBaselineSnapshot(JSON.parse(JSON.stringify(oldestEntry.snapshot)));
+      }
+    }
+  }
+
+  setHistory(storedHistory);
+}
+```
+
+---
+
+## FIX 2: REMOVE THE THICK AMBER BORDER LINE ON LEFT SIDE OF EDITED CELLS
+
+The edited cell highlight currently shows a thick amber/orange vertical border on the left side of each highlighted cell. Remove this entirely. Only keep the light yellow/amber background color.
+
+### THE PROBLEM
+
+The CSS uses a `::after` pseudo-element to render a 3px amber bar on the left side of edited cells. This is too visually heavy and distracting.
+
+### THE FIX
+
+Remove the `::after` pseudo-element entirely. Keep only the background color:
+
+```css
+/* Edited cell highlight — light amber/yellow background ONLY */
+.kb-cell-edited {
+  background-color: #fef9e7 !important;
+}
+
+/* REMOVE THIS ENTIRE BLOCK — no left border accent */
+/*
+.kb-cell-edited::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: 0;
+  width: 3px;
+  background-color: #f59e0b;
+  border-radius: 0 2px 2px 0;
+}
+*/
+
+/* Edit mode — input inside edited cell */
+.kb-cell-input-edited {
+  background-color: #fef9e7 !important;
+}
+
+/* Hover state for edited cells — slightly deeper amber */
+.kb-cell-edited:hover {
+  background-color: #fef3c7 !important;
+}
+
+/* Ensure the highlight works with table striping */
+tr:nth-child(even) .kb-cell-edited {
+  background-color: #fef9e7 !important;
+}
+
+tr:nth-child(odd) .kb-cell-edited {
+  background-color: #fef9e7 !important;
+}
+
+/* Remove position: relative since ::after is no longer used */
+/* If .kb-cell-edited previously had position: relative, it can be removed */
+
+/* Row number, checkbox, and delete cells should NOT get highlight */
+.kb-row-number-cell,
+.kb-select-cell,
+.kb-delete-cell {
+  background-color: inherit !important;
+}
+```
+
+Also ensure there are no inline styles adding borders or pseudo-elements to edited cells. Search for any of these patterns and remove them:
+
+```javascript
+// REMOVE any inline border styling on edited cells:
+// style={{ borderLeft: '3px solid #f59e0b' }}  ← REMOVE
+// style={{ borderLeft: '3px solid orange' }}    ← REMOVE
+// style={{ boxShadow: 'inset 3px 0 0 #f59e0b' }}  ← REMOVE
+
+// CORRECT — only background color
+const cellStyle = isCellEdited(row._rowId, col.key)
+  ? { backgroundColor: '#fef9e7' }
+  : {};
+```
+
+If the border is being applied via inline styles in JSX rather than CSS classes, find and update:
+
+```jsx
+{/* WRONG — has border */}
+<td
+  style={{
+    backgroundColor: isCellEdited(row._rowId, col.key) ? '#fef9e7' : undefined,
+    borderLeft: isCellEdited(row._rowId, col.key) ? '3px solid #f59e0b' : undefined,
+  }}
+>
+
+{/* CORRECT — background only, no border */}
+<td
+  className={`kb-cell ${isCellEdited(row._rowId, col.key) ? 'kb-cell-edited' : ''}`}
+>
+```
+
+---
+
+## VERIFICATION
+
+### No Highlights on Fresh File Upload
+1. ✅ Upload a new file → zero cells are highlighted
+2. ✅ All cells have normal white/default background
+3. ✅ No yellow/amber on any cell immediately after upload
+4. ✅ Upload a second file (replacing the first) → zero cells are highlighted
+
+### Highlights Only Appear After Manual Edit
+5. ✅ Upload file → edit one cell (e.g., Form "P" → "MP") → save → only that one cell is highlighted in light yellow
+6. ✅ Edit multiple cells → save → only the edited cells are highlighted
+7. ✅ Cells that were NOT edited have no highlight
+8. ✅ Edit a cell back to its original value → highlight disappears (matches baseline)
+
+### No Thick Border Line
+9. ✅ Edited cells show ONLY a light yellow/amber background
+10. ✅ No thick amber/orange vertical line on the left side of any cell
+11. ✅ No `::after` pseudo-element rendering on edited cells
+12. ✅ No inline `borderLeft` or `boxShadow` styles on edited cells
+13. ✅ Clean, subtle highlight — background color only
+
+### Highlights Clear Correctly
+14. ✅ Upload a new file → all previous highlights cleared
+15. ✅ Revert to File Upload history → highlights cleared (data matches baseline)
+16. ✅ Delete active Manual Edit → falls back to File Upload → highlights cleared
+
+### Edge Cases
+17. ✅ Cells with "-" or empty values in uploaded file → no false highlights
+18. ✅ Numeric cells (e.g., Batch FM1 = 4) → no false highlights from type mismatch
+19. ✅ Cells with leading/trailing whitespace → no false highlights after trim
+20. ✅ Page reload → highlights only show for genuinely edited cells, not for upload data

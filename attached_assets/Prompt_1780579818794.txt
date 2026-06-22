@@ -1,0 +1,176 @@
+Please revisit the **Auto-Sequence AI** so that it has stronger context on **production time**, **changeover time**, and **estimated completion timing** when deciding both the **sequence** and the **suggested date**.
+
+Right now, there are still cases where the AI suggests a date that does not seem consistent with the actual runtime of the orders and the resulting completion timing.
+
+---
+
+## 1. GIVE THE AI EXPLICIT CONTEXT ON PRODUCTION TIME PER ORDER
+
+Please make sure the AI receives each order’s production time as a first-class input.
+
+### This should include
+- calculated production time
+- run rate basis
+- total duration needed for the order
+
+### Goal
+The AI should understand how long each order will actually take to produce before assigning its sequence position or suggested date.
+
+### Expected result
+The AI can make more realistic sequence and date decisions based on actual order duration.
+
+---
+
+## 2. GIVE THE AI EXPLICIT CONTEXT ON CHANGEOVER TIME
+
+Please make sure the AI receives the expected changeover time between orders as part of the sequencing context.
+
+### This should include
+- changeover impact from the previous/adjacent order
+- category / color / diameter / form transitions where relevant
+- total changeover burden affecting the schedule
+
+### Goal
+The AI should understand that the real time consumed is not just production time, but also changeover time.
+
+### Expected result
+The AI can better judge whether a date/position is realistic once changeovers are considered.
+
+---
+
+## 3. LET THE AI REASON ABOUT ESTIMATED COMPLETION DATE / TIME
+
+Please improve the AI context so it can reason not just about the order’s suggested date, but also about when the order would actually complete based on:
+- production time
+- changeover time
+- sequence placement
+- cumulative load of the orders ahead of it
+
+### Goal
+The AI should be able to recognize when an order placed on a given date would actually finish too late.
+
+### Expected result
+Suggested dates become more realistic because the AI understands the likely completion timing.
+
+---
+
+## 4. MAKE THE AI USE PRODUCTION TIME + CHANGEOVER + CUMULATIVE LOAD TO DECIDE SUGGESTED DATE
+
+Please improve the AI so that its suggested date is based not only on strategy or urgency, but also on:
+- how long the order takes
+- what changeover time is needed
+- what work is already scheduled ahead of it
+- and when it would realistically complete
+
+### Goal
+Avoid cases where an order gets a suggested date that looks too early or too optimistic compared to its estimated completion date.
+
+### Expected result
+Suggested date and estimated completion timing become more aligned.
+
+---
+
+## 5. DO NOT LET THE AI SUGGEST A DATE WITHOUT UNDERSTANDING WHETHER THE ORDER CAN REALISTICALLY FINISH AROUND THAT DATE
+
+There are cases where:
+- the AI gives an order a suggested date
+- but the actual estimated completion spills too far or creates delay risk
+
+### Goal
+The AI should not suggest a date blindly. It should know whether the order can realistically be completed in the intended time window.
+
+### Expected result
+The AI should assign a later date when production time + changeover + queue length make the earlier date unrealistic.
+
+---
+
+## 6. MAKE THE AI MORE AWARE OF `DELAY RISK` WHEN CHOOSING SUGGESTED DATE
+
+If the order’s estimated completion timing suggests delay risk, the AI should account for that during the sequencing decision itself.
+
+### Goal
+Suggested date should be informed by the risk of late completion, not just by strategic grouping.
+
+### Expected result
+The AI should place or date long-running orders more realistically to reduce delay-risk situations.
+
+---
+
+## 7. KEEP THIS CONTEXT ACTIVE FOR BOTH TOP-PRIORITY AND FLEXIBLE ORDERS
+
+This improvement should apply to:
+- Critical orders
+- MTO orders
+- Monitor/Urgent orders
+- Flexible / MTS orders
+
+### Goal
+All order types should benefit from more realistic runtime-aware date assignment.
+
+### Expected result
+The AI becomes more operationally realistic across the whole sequence.
+
+---
+
+## IMPORTANT
+
+Please improve Auto-Sequence so that the AI has explicit context on:
+
+- **production time**
+- **changeover time**
+- **estimated completion timing**
+- **cumulative load from earlier orders**
+
+and uses those to decide:
+- the sequence position
+- the suggested date
+
+The AI should not suggest a date without understanding whether the order can realistically complete around that date.
+
+This is needed because there are still cases where the suggested date does not appear aligned with the runtime and completion reality of the order.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log runtime-aware AI context and suggested-date realism.
+
+```javascript
+console.debug('[Auto-Sequence AI Runtime Context]', {
+  strategyId,
+  orderId,
+  productionTime,
+  changeoverTime,
+  estimatedCompletion,
+  cumulativeLoadAhead,
+});
+```
+
+```javascript
+console.debug('[Auto-Sequence AI Suggested Date Realism]', {
+  strategyId,
+  orderId,
+  suggestedDate,
+  estimatedCompletion,
+  delayRisk,
+});
+```
+
+```javascript
+console.debug('[Auto-Sequence AI Completion-Aware Sequencing]', {
+  strategyId,
+  runtimeAwareDateAssignment: true,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ AI receives production time per order
+2. ✅ AI receives changeover time context
+3. ✅ AI reasons about estimated completion timing
+4. ✅ Suggested date is based on runtime + changeover + cumulative load
+5. ✅ AI avoids unrealistic early suggested dates
+6. ✅ Delay risk is considered during sequencing
+7. ✅ No UI errors or console errors are introduced

@@ -1,0 +1,156 @@
+Please refine the **Detailed Demand View** table UI in the Demand Profile page with the following improvements.
+
+---
+
+## 1. USE FUNNEL ICON FILTERS IN TABLE HEADERS
+
+Please replace the current inline filter input fields under the table headers with a **funnel icon filter behavior**, similar to the filter interaction already used in other tables in the app (such as the Orders / Feedmills table).
+
+### Required behavior
+- each applicable column header should show a **funnel/filter icon**
+- clicking the funnel icon should open a filter panel / dropdown / popover
+- the filter UI should behave consistently with the existing filter pattern already used elsewhere in the application
+- do not keep the always-visible text input fields directly under the headers
+
+### Goal
+Make the Demand table filtering experience visually consistent with the rest of the app.
+
+### Applicable columns
+At minimum, support funnel-style filtering for:
+- FG Code
+- Item Description
+- Period
+- Status
+
+If practical, also allow filtering/sorting for numeric columns in a sensible way:
+- Demand (MT)
+- Done (MT)
+- Plotted (MT)
+- Gap (MT)
+- Coverage (%)
+
+---
+
+## 2. KEEP HEADER LABELS IN A SINGLE LINE FORMAT
+
+Please adjust the table header labels so they do not wrap into two lines like:
+
+```text
+Demand
+(MT)
+```
+
+Instead, I want them displayed in a cleaner single-line format like:
+
+```text
+Demand (MT)
+```
+
+### Apply this to all relevant columns
+Use:
+- FG Code
+- Item Description
+- Period
+- Demand (MT)
+- Done (MT)
+- Plotted (MT)
+- Gap (MT)
+- Coverage (%)
+- Status
+
+Please ensure the header row styling/layout is adjusted so these labels stay visually clean and readable.
+
+---
+
+## 3. DEFAULT THE VIEW TO TODAY’S CURRENT PERIOD
+
+Please make the Demand Profile page automatically default to the **current period** when the user opens the page.
+
+### Expected behavior
+When the user first opens Demand Profile:
+- the app should already show the current relevant time period by default
+- so the user can immediately see the demand status for the current month (or current date depending on time grain)
+
+### Default behavior by time grain
+- If the default time grain is **Monthly**, show the **current month**
+  - example: if today is January 2025, default to **January 2025**
+- If the user switches to **Daily**, show the **current date**
+- If the user switches to **Quarterly**, show the **current quarter**
+- If the user switches to **Yearly**, show the **current year**
+
+### Important
+The user must still be able to manually change:
+- period
+- year
+- month
+- time grain
+
+But on first load, the page should already open in the current time context.
+
+### Goal
+At first glance, the user should immediately see what the demand fulfillment / gap looks like for the current period.
+
+---
+
+## KEEP EXISTING TABLE LOGIC
+
+Please preserve the current demand logic:
+- Demand (historical benchmark)
+- Done (fulfilled)
+- Plotted (pipeline)
+- Gap
+- Coverage (%)
+- Status
+
+This request is mainly about:
+- filter UI consistency
+- cleaner header presentation
+- better default time-context behavior
+
+---
+
+## UI CONSISTENCY
+
+Please make the Demand table feel consistent with the existing app tables, especially:
+- filter behavior
+- spacing
+- header styling
+- popover/dropdown filter interaction
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log:
+
+```javascript
+console.debug('[Demand Table Header Filter UI]', {
+  filterMode: 'funnel_icon',
+  enabledColumns: ['fgCode', 'itemDescription', 'period', 'status'],
+});
+```
+
+```javascript
+console.debug('[Demand Profile Default Period Selection]', {
+  today: new Date().toISOString(),
+  selectedTimeGrain,
+  defaultPeriodApplied,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Inline text fields under the headers are removed
+2. ✅ Funnel/filter icons are shown in the applicable table headers
+3. ✅ Clicking a funnel icon opens a filter UI similar to other app tables
+4. ✅ Header labels display in single-line format such as `Demand (MT)` instead of wrapping to two lines
+5. ✅ Demand Profile defaults to the current time context on first load
+6. ✅ Monthly default opens to the current month
+7. ✅ Daily default opens to the current date
+8. ✅ Quarterly default opens to the current quarter
+9. ✅ Yearly default opens to the current year
+10. ✅ Users can still manually change time grain and period
+11. ✅ Existing demand calculations remain intact
+12. ✅ No UI regressions or console errors are introduced

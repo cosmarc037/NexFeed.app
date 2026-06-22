@@ -1,0 +1,368 @@
+```
+Fix the profitability sorting to properly work with dates and margins:
+
+---
+
+## 1. SINGLE CLEAN SORTING FUNCTION — NO EXTERNAL ENRICHMENT NEEDED
+
+```javascript
+function sortWithMargin(orders, masterData, n10dData) {
+  
+  // Step 1: Resolve date and margin for EVERY order
+  const enriched = orders.map(order => {
+    const materialCode = String(order.material_code_fg || '').trim();
+    
+    // Resolve margin from master data
+    const mdEntry = masterData.find(md =>
+      String(md.material_code_fg || '').trim() === materialCode
+    );
+    const margin = mdEntry ? (parseFloat(mdEntry.margin) || 0) : 0;
+    const hasMarginData = mdEntry && mdEntry.margin != null && mdEntry.margin !== '';
+    
+    // Resolve date — try three sources in order
+    const resolvedDate = resolveOrderDate(order, n10dData, materialCode);
+    
+    return {
+      ...order,
+      _margin: margin,
+      _hasMarginData: hasMarginData,
+      _resolvedDate: resolvedDate.date,
+      _dateSource: resolvedDate.source,
+      _dateCategory: resolvedDate.category,
+    };
+  });
+  
+  // Step 2: Sort
+  enriched.sort((a, b) => {
+    // Category priority: Critical/Urgent first
+    const catOrder = getCategoryPriority(a._dateCategory) - getCategoryPriority(b._dateCategory);
+    if (catOrder !== 0) return catOrder;
+    
+    // Within same category: sort by date ascending
+    if (a._resolvedDate && b._resolvedDate) {
+      const dateA = new Date(a._resolvedDate);
+      const dateB = new Date(b._resolvedDate);
+      
+      // Different dates — earlier first
+      if (!isSameDay(dateA, dateB)) {
+        return dateA - dateB;
+      }
+      
+      // SAME DATE — higher margin first
+      if (a._hasMarginData || b._hasMarginData) {
+        const marginDiff = (b._margin || 0) - (a._margin || 0);
+        if (Math.abs(marginDiff) > 0.01) return marginDiff;
+      }
+      
+      // Same date and same margin — keep original order
+      return 0;
+    }
+    
+    // One has date, one doesn't — dated first
+    if (a._resolvedDate && !b._resolvedDate) return -1;
+    if (!a._resolvedDate && b._resolvedDate) return 1;
+    
+    // Neither has date — higher margin first
+    if (a._hasMarginData || b._hasMarginData) {
+      const marginDiff = (b._margin || 0) - (a._margin || 0);
+      if (Math.abs(marginDiff) > 0.01) return marginDiff;
+    }
+    
+    return 0;
+  });
+  
+  // Step 3: Reassign prio
+  enriched.forEach((order, index) => {
+    order.prio = index + 1;
+    order.priority_seq = index + 1;
+  });
+  
+  return enriched;
+}
+```
+
+---
+
+## 2. RESOLVE ORDER DATE — SINGLE FUNCTION, THREE SOURCES
+
+```javascript
+function resolveOrderDate(order, n10dData, materialCode) {
+  // Source 1: Actual avail date on the order (hard date from SAP)
+  const availDate = order.target_avail_date;
+  if (availDate && isValidISODate(availDate)) {
+    return {
+      date: availDate,
+      source: 'avail_date',
+      category: 'dated',
+    };
+  }
+  
+  // Source 2: N10D lookup — inferred target date
+  if (n10dData && n10dData.length > 0 && materialCode) {
+    const n10dEntry = n10dData.find(n =>
+      String(n.material_code || n.material_code_fg || '').trim() === materialCode
+    );
+    
+    if (n10dEntry) {
+      const inferredDate = n10dEntry.inferred_target_date || n10dEntry.target_date;
+      const n10dStatus = n10dEntry.status || n10dEntry.stock_status || '';
+      
+      if (inferredDate && isValidISODate(inferredDate)) {
+        // Has a real inferred date
+        const isCritical = n10dStatus === 'Critical';
+        const isUrgent = n10dStatus === 'Urgent';
+        
+        return {
+          date: inferredDate,
+          source: 'n10d',
+          category: isCritical ? 'critical' : isUrgent ? 'urgent' : 'n10d_dated',
+        };
+      }
+      
+      // N10D entry exists but no date — check status
+      if (n10dStatus === 'Critical') {
+        return { date: null, source: 'n10d_status', category: 'critical' };
+      }
+      if (n10dStatus === 'Urgent') {
+        return { date: null, source: 'n10d_status', category: 'urgent' };
+      }
+      if (n10dStatus === 'Sufficient' || n10dStatus === 'Safe' || n10dStatus === 'OK') {
+        return { date: null, source: 'n10d_status', category: 'sufficient' };
+      }
+    }
+  }
+  
+  // Source 3: Fallback — existing _effectiveDate or _targetDate on the order
+  const fallbackDate = order._effectiveDate || order._targetDate;
+  if (fallbackDate) {
+    const dateStr = fallbackDate instanceof Date 
+      ? fallbackDate.toISOString().split('T')[0]
+      : String(fallbackDate);
+    
+    if (isValidISODate(dateStr)) {
+      return {
+        date: dateStr,
+        source: 'fallback',
+        category: order._category === 'C' ? 'critical' : 
+                  order._category === 'B' ? 'n10d_dated' :
+                  order._category === 'D' ? 'sufficient' : 'dated',
+      };
+    }
+  }
+  
+  // No date at all
+  return {
+    date: null,
+    source: 'none',
+    category: 'no_data',
+  };
+}
+
+function isValidISODate(str) {
+  if (!str) return false;
+  const s = String(str).trim();
+  // Must look like a date, not "prio replenish" or "safety stocks"
+  if (!/^\d{4}-\d{2}-\d{2}/.test(s)) return false;
+  const d = new Date(s);
+  return !isNaN(d.getTime());
+}
+
+function getCategoryPriority(category) {
+  switch (category) {
+    case 'critical': return 0;
+    case 'urgent': return 1;
+    case 'dated': return 2;
+    case 'n10d_dated': return 3;
+    case 'sufficient': return 4;
+    case 'no_data': return 5;
+    default: return 5;
+  }
+}
+
+function isSameDay(dateA, dateB) {
+  if (!dateA || !dateB) return false;
+  if (isNaN(dateA.getTime()) || isNaN(dateB.getTime())) return false;
+  return dateA.getFullYear() === dateB.getFullYear() &&
+         dateA.getMonth() === dateB.getMonth() &&
+         dateA.getDate() === dateB.getDate();
+}
+```
+
+---
+
+## 3. UPDATE handleToggleProfitability TO USE THE NEW FUNCTION
+
+```javascript
+async function handleToggleProfitability() {
+  if (isProfitabilityApplied) {
+    // Revert to original chronological sort
+    setSequencedResults(preMarginResults);
+    setIsProfitabilityApplied(false);
+    allLines.forEach(line => invalidateLineCache(line));
+    return;
+  }
+  
+  // Save current results for reverting
+  setPreMarginResults(JSON.parse(JSON.stringify(sequencedResults)));
+  
+  // Re-sort all lines with margin
+  const marginResults = {};
+  
+  allLines.forEach(line => {
+    const lineOrders = sequencedResults[line] || [];
+    if (lineOrders.length === 0) {
+      marginResults[line] = [];
+      return;
+    }
+    
+    // Deep copy to avoid mutating original
+    const ordersCopy = lineOrders.map(o => ({ ...JSON.parse(JSON.stringify(o)) }));
+    
+    // Sort with margin — pass master data and n10d directly
+    const sorted = sortWithMargin(ordersCopy, masterData, n10dData);
+    
+    // Recalculate changeovers
+    calculatePreviewChangeovers(sorted, changeoverRules);
+    
+    // Recalculate movement indicators
+    const originalLineOrders = originalSnapshot[line] || [];
+    sorted.forEach((order, index) => {
+      order.prio = index + 1;
+      
+      const originalIndex = originalLineOrders.findIndex(o => o.id === order.id);
+      if (originalIndex >= 0) {
+        const originalPrio = originalIndex + 1;
+        const delta = originalPrio - order.prio;
+        order._originalPrio = originalPrio;
+        order._movement = delta > 0 ? 'up' : delta < 0 ? 'down' : 'same';
+        order._movementDelta = Math.abs(delta);
+      } else {
+        order._movement = order._movedFromLine ? 'new_to_line' : 'same';
+      }
+    });
+    
+    marginResults[line] = sorted;
+  });
+  
+  setSequencedResults(marginResults);
+  setIsProfitabilityApplied(true);
+  allLines.forEach(line => invalidateLineCache(line));
+}
+```
+
+---
+
+## 4. ADD CONSOLE LOGGING FOR DEBUGGING
+
+```javascript
+function sortWithMargin(orders, masterData, n10dData) {
+  const enriched = orders.map(order => {
+    const materialCode = String(order.material_code_fg || '').trim();
+    
+    const mdEntry = masterData.find(md =>
+      String(md.material_code_fg || '').trim() === materialCode
+    );
+    const margin = mdEntry ? (parseFloat(mdEntry.margin) || 0) : 0;
+    const hasMarginData = mdEntry && mdEntry.margin != null && mdEntry.margin !== '';
+    
+    const resolvedDate = resolveOrderDate(order, n10dData, materialCode);
+    
+    // Debug log
+    console.log(`[Margin Sort] ${order.item_description?.substring(0, 30)} | ` +
+      `Material: ${materialCode} | ` +
+      `Date: ${resolvedDate.date || 'NONE'} (${resolvedDate.source}) | ` +
+      `Category: ${resolvedDate.category} | ` +
+      `Margin: ${margin}%`
+    );
+    
+    return {
+      ...order,
+      _margin: margin,
+      _hasMarginData: hasMarginData,
+      _resolvedDate: resolvedDate.date,
+      _dateSource: resolvedDate.source,
+      _dateCategory: resolvedDate.category,
+    };
+  });
+  
+  enriched.sort((a, b) => {
+    const catOrder = getCategoryPriority(a._dateCategory) - getCategoryPriority(b._dateCategory);
+    if (catOrder !== 0) return catOrder;
+    
+    if (a._resolvedDate && b._resolvedDate) {
+      const dateA = new Date(a._resolvedDate);
+      const dateB = new Date(b._resolvedDate);
+      
+      if (!isSameDay(dateA, dateB)) {
+        return dateA - dateB;
+      }
+      
+      // SAME DAY — margin tiebreak
+      const marginDiff = (b._margin || 0) - (a._margin || 0);
+      if (Math.abs(marginDiff) > 0.01) {
+        console.log(`  [Tiebreak] ${a.item_description?.substring(0, 20)} (${a._margin}%) vs ${b.item_description?.substring(0, 20)} (${b._margin}%) → winner: ${marginDiff > 0 ? 'B' : 'A'}`);
+        return marginDiff;
+      }
+      
+      return 0;
+    }
+    
+    if (a._resolvedDate && !b._resolvedDate) return -1;
+    if (!a._resolvedDate && b._resolvedDate) return 1;
+    
+    const marginDiff = (b._margin || 0) - (a._margin || 0);
+    if (Math.abs(marginDiff) > 0.01) return marginDiff;
+    
+    return 0;
+  });
+  
+  enriched.forEach((order, index) => {
+    order.prio = index + 1;
+    order.priority_seq = index + 1;
+  });
+  
+  console.log(`[Margin Sort Result]`);
+  enriched.forEach(o => {
+    console.log(`  Prio ${o.prio}: ${o.item_description?.substring(0, 30)} | Date: ${o._resolvedDate || 'NONE'} | Margin: ${o._margin}% | Category: ${o._dateCategory}`);
+  });
+  
+  return enriched;
+}
+```
+
+---
+
+## VERIFICATION
+
+### Date resolution works correctly
+1. ✅ Source 1: Actual avail date (e.g., "2026-04-14") — used first
+2. ✅ Source 2: N10D inferred date — used when no avail date
+3. ✅ Source 3: Fallback _effectiveDate — used when no N10D
+4. ✅ Non-date strings like "prio replenish" or "safety stocks" → rejected by isValidISODate
+5. ✅ Null/undefined dates → category "no_data"
+
+### Sorting order correct
+6. ✅ Critical/Urgent → always at top
+7. ✅ Dated orders → sorted by date ascending (Apr 14 before Apr 15)
+8. ✅ N10D dated → after actual dated, sorted by date
+9. ✅ Sufficient → after N10D dated
+10. ✅ No data → at bottom
+
+### Margin tiebreak works
+11. ✅ Three orders on Apr 14: 16.4% → 16.2% → 16.0%
+12. ✅ Higher margin comes first within same day
+13. ✅ Different dates → date order preserved regardless of margin
+14. ✅ No margin data → sorted after orders with margin (within same date)
+
+### Revert works
+15. ✅ Pre-margin results saved in state
+16. ✅ Clicking button again restores exact previous order
+17. ✅ Insight caches invalidated both ways
+
+### No external enrichment dependency
+18. ✅ sortWithMargin does ALL enrichment internally
+19. ✅ Reads master data directly for margin
+20. ✅ Reads n10d data directly for dates
+21. ✅ No reliance on _effectiveDate being pre-populated
+22. ✅ Console logs for debugging every order's resolution
+```

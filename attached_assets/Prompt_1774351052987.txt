@@ -1,0 +1,231 @@
+```
+Implement the following change to the Add New Order dialog:
+
+---
+
+## PRODUCTION PARAMETERS — 3-COLUMN LAYOUT
+
+Update the Production Parameters section to use a 3-column grid layout.
+
+---
+
+### LAYOUT
+
+```
+┌─ PRODUCTION PARAMETERS ───────────────────────────────────┐
+│                                                           │
+│  Volume (MT) *          Batch Size          Batches        │
+│  [80]                   4.00 (auto)         20 (auto)      │
+│                                                           │
+│  Production Time        Changeover          Run Rate       │
+│  6.71 hrs (auto)        0.17 hrs (auto)     20.13 (auto)  │
+│                                                           │
+│  (divisibility warning here if needed)                    │
+│                                                           │
+└───────────────────────────────────────────────────────────┘
+```
+
+---
+
+### GRID
+
+| Property | Value |
+|---|---|
+| Display | Grid, 3 columns |
+| Column widths | 1fr 1fr 1fr (equal thirds) |
+| Row gap | 16px |
+| Column gap | 16px |
+
+**Row 1:**
+
+| Column 1 | Column 2 | Column 3 |
+|---|---|---|
+| Volume (MT) * | Batch Size | Batches |
+| User input | Read-only, auto from KB | Read-only, auto-calculated |
+
+**Row 2:**
+
+| Column 1 | Column 2 | Column 3 |
+|---|---|---|
+| Production Time | Changeover | Run Rate |
+| Read-only, auto-calculated | Read-only, auto from KB | Read-only, auto from KB |
+
+---
+
+### FIELD DETAILS
+
+**Volume (MT) — User input:**
+
+| Property | Value |
+|---|---|
+| Type | Number input |
+| Editable | ✅ Yes |
+| Placeholder | "Enter volume..." |
+| Required | Yes (*) |
+| Validation | Must be > 0 |
+
+**Batch Size — Read-only:**
+
+| Property | Value |
+|---|---|
+| Type | Read-only display |
+| Source | Knowledge Base, based on selected line (FM1, FM2, FM3, PMX) |
+| Format | Number with 2 decimals (e.g., "4.00") |
+| Background | Light grey (#f9fafb) |
+| When empty | Blank — no product selected yet |
+
+**Batches — Read-only:**
+
+| Property | Value |
+|---|---|
+| Type | Read-only display |
+| Calculation | Volume ÷ Batch Size (rounded up to whole number) |
+| Background | Light grey (#f9fafb) |
+| When empty | Blank — no volume or batch size yet |
+| Updates when | Volume changes OR Batch Size changes (line change) |
+
+**Production Time — Read-only:**
+
+| Property | Value |
+|---|---|
+| Type | Read-only display |
+| Calculation | Volume (MT) ÷ Run Rate (MT/hr) |
+| Format | Match main order table format (e.g., "6.71 hrs" or "6 hrs 43 min") |
+| Background | Light grey (#f9fafb) |
+| When empty | Blank — no volume or run rate yet |
+| When no run rate | Show "—" with note below: "No run rate available" in grey italic, 10px |
+| Updates when | Volume changes OR Run Rate changes (line change) |
+
+**Changeover — Read-only:**
+
+| Property | Value |
+|---|---|
+| Type | Read-only display |
+| Source | Knowledge Base or default changeover time for the selected line |
+| Format | Match main order table format (e.g., "0.17 hrs") |
+| Background | Light grey (#f9fafb) |
+| When empty | Blank or "—" if no changeover data |
+
+**Run Rate — Read-only:**
+
+| Property | Value |
+|---|---|
+| Type | Read-only display |
+| Source | Knowledge Base, based on selected product AND selected line (L1-L7 Rate) |
+| Format | Number with 2 decimals + unit (e.g., "20.13 MT/hr") |
+| Background | Light grey (#f9fafb) |
+| When empty | Blank — no product or line selected yet |
+| When no run rate for selected line | Show "—" with note below: "No run rate for this line" in grey italic, 10px |
+| Updates when | Line selection changes OR Product selection changes |
+
+---
+
+### READ-ONLY FIELD STYLING
+
+All read-only fields share the same styling:
+
+| Property | Value |
+|---|---|
+| Background | Light grey (#f9fafb) |
+| Border | 1px solid #e5e7eb |
+| Border-radius | 6px |
+| Padding | 10px 12px |
+| Font size | 14px |
+| Color | Dark text (#1a1a1a) |
+| Cursor | Default (not text cursor) |
+| No focus state | Cannot be clicked into or edited |
+
+---
+
+### FIELD LABELS
+
+| Property | Value |
+|---|---|
+| Font size | 12px |
+| Color | Grey (#6b7280) |
+| Font weight | 400 |
+| Margin bottom | 4px (between label and input) |
+| Required indicator | Red asterisk (*) for Volume only |
+
+---
+
+### DIVISIBILITY WARNING — BELOW THE GRID
+
+The batch size divisibility warning spans the full width below both rows:
+
+```
+Volume (MT) *          Batch Size          Batches
+[30]                   4.00                8
+
+Production Time        Changeover          Run Rate
+1.49 hrs               0.17 hrs            20.13 MT/hr
+
+┌──────────────────────────────────────────────────────────┐
+│ ⚠ 30 MT is not divisible by batch size 4.00.             │
+│   Suggested: 32 MT (8 batches)                           │
+│   Use 32 MT                                              │
+└──────────────────────────────────────────────────────────┘
+```
+
+Warning spans all 3 columns width.
+
+---
+
+### RECALCULATION TRIGGERS
+
+| Event | What recalculates |
+|---|---|
+| Volume changes | Batches, Production Time, HA Info, Bags, divisibility check |
+| Line changes | Batch Size, Run Rate, Changeover, Batches, Production Time, HA Info, Bags, divisibility re-check |
+| Product changes | Batch Size, Run Rate, Changeover, Batches, Production Time, HA Info, Bags |
+| "Use XX MT" clicked | Volume updates → triggers all Volume-change recalculations |
+
+---
+
+### EXAMPLE — FULLY POPULATED
+
+```
+┌─ PRODUCTION PARAMETERS ───────────────────────────────────┐
+│                                                           │
+│  Volume (MT) *          Batch Size          Batches        │
+│  [80]                   4.00                20             │
+│                                                           │
+│  Production Time        Changeover          Run Rate       │
+│  3.97 hrs               0.17 hrs            20.13 MT/hr   │
+│                                                           │
+└───────────────────────────────────────────────────────────┘
+```
+
+Calculation: 80 MT ÷ 20.13 MT/hr = 3.97 hrs
+
+### EXAMPLE — NO RUN RATE
+
+```
+┌─ PRODUCTION PARAMETERS ───────────────────────────────────┐
+│                                                           │
+│  Volume (MT) *          Batch Size          Batches        │
+│  [80]                   4.00                20             │
+│                                                           │
+│  Production Time        Changeover          Run Rate       │
+│  —                      —                   —              │
+│  No run rate available  No data             No run rate    │
+│                                                           │
+└───────────────────────────────────────────────────────────┘
+```
+
+### EXAMPLE — EMPTY (NO PRODUCT SELECTED)
+
+```
+┌─ PRODUCTION PARAMETERS ───────────────────────────────────┐
+│                                                           │
+│  Volume (MT) *          Batch Size          Batches        │
+│  [Enter volume...]                                        │
+│                                                           │
+│  Production Time        Changeover          Run Rate       │
+│                                                           │
+│                                                           │
+└───────────────────────────────────────────────────────────┘
+```
+
+All read-only fields are blank until a product and line are selected.
+```

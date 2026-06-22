@@ -1,0 +1,204 @@
+Please review this AI strategy because the strategy description is clearly misaligned with the final After-table sequence.
+
+---
+
+## OBJECTIVE
+
+The selected strategy card says:
+
+### `Swine Diameter Pairing Focus`
+> Places the single Swine order last to minimize costly diameter and category changeovers upfront.
+
+However, in the actual After table:
+- the Swine order is placed first / at the top
+- not last
+
+This is a direct contradiction between the strategy card and the table.
+
+Even if the resulting changeover metrics are good, the visible sequence does not match what the strategy claims.
+
+We need to make sure the strategy description, AI reasoning, and final table are aligned.
+
+---
+
+## WHAT IS WRONG
+
+### Strategy card claim
+The card explicitly says:
+- `Places the single Swine order last`
+
+### Actual table result
+The Swine order:
+- `Elite XP Startex, Mini-pellet 50kg`
+appears at the top / first row in the After table.
+
+So the card is making a concrete claim that is visibly false.
+
+---
+
+## IMPORTANT NUANCE
+
+The measured result may still be good:
+- Changeover time = **2.66 hr**
+- Time-saved = **-2.00 hr**
+
+So the issue is not necessarily that the final sequence is bad.
+
+The issue is:
+- the description does not match what the final table actually did
+
+This creates a trust and faithfulness problem.
+
+If the final sequence achieved lower changeover by a different structure than the original AI wording, then the card must describe the actual final structure, not the discarded/idealized one.
+
+---
+
+## REQUIRED FIX
+
+Please ensure that AI strategy cards and reasoning are generated or revised from the actual final applied sequence, not from an earlier intended move that did not end up being reflected in the table.
+
+If the final table places Swine first:
+- the card must not say `places Swine last`
+
+---
+
+## 1. DO NOT ALLOW CONCRETE CLAIMS THAT ARE FALSE IN THE FINAL TABLE
+
+If a strategy card says something specific like:
+- `places the Swine order last`
+- `moves red to the end`
+- `clusters yellow 4mm early`
+
+then that must be directly true in the final table.
+
+If not, the wording must be revised.
+
+This rule should apply to all concrete positional claims.
+
+---
+
+## 2. REGENERATE OR REWRITE STRATEGY DESCRIPTION FROM THE FINAL APPLIED ORDERING
+
+After the final sequence is known, generate or revise the card description based on:
+- the actual final row order
+- the actual adjacency pattern
+- the actual realized changeover improvement
+
+Do not leave the card describing an intended move that was not preserved.
+
+In this case, if Swine remains first but the sequence still reduces total changeover, then the description should explain the real reason instead.
+
+---
+
+## 3. IF THE RESULT IS GOOD, KEEP THE RESULT — BUT FIX THE DESCRIPTION
+
+If the final sequence truly achieves:
+- lower changeover
+- better time-saved
+- valid date-safe arrangement
+
+then the strategy can still be valid.
+
+But the card should describe what actually happened.
+
+For example, instead of:
+- `Places the single Swine order last...`
+
+it may need wording like:
+- `Keeps the Swine run isolated from the main Poultry block to reduce cumulative diameter and category transitions.`
+or something else that matches the actual final order.
+
+The exact wording should come from the actual final sequence.
+
+---
+
+## 4. REASSESS THE AI REASONING PANEL TOO
+
+The expanded AI reasoning currently says things like:
+- `Swine order moves from position 1 to 5`
+- `By moving the Swine order to last...`
+
+If the After table still shows Swine first, then those statements are also wrong.
+
+Please ensure the AI reasoning panel is revised together with the card description.
+
+The card title, description, detailed reasoning, and table must all reflect the same final reality.
+
+---
+
+## 5. RECHECK FAITHFULNESS FOR THIS CASE
+
+If the strategy card and reasoning say:
+- Swine moves to last
+
+but the actual table shows:
+- Swine first
+
+then faithfulness should not be treated as aligned.
+
+Please verify whether:
+- the faithfulness metric is being calculated against stale intended moves instead of the final applied result
+- or whether the visible wording is not being updated after execution
+
+This case suggests a mismatch in that pipeline.
+
+---
+
+## 6. VALIDATE STRATEGY CLAIMS AGAINST FINAL ROW POSITIONS BEFORE DISPLAY
+
+Add a validation step before rendering the card:
+
+Example:
+- if the description claims `Swine last`
+- check whether the Swine order is actually last in finalOrders
+- if false, revise or downgrade the wording
+
+Do this for other position-specific claims too.
+
+---
+
+## 7. DEBUG THIS SPECIFIC CASE
+
+Please inspect this exact strategy and confirm:
+- did the AI originally intend to move Swine last?
+- did the execution layer fail to preserve it?
+- did the final optimizer choose a different lower-changeover sequence?
+- if so, why was the description not updated?
+- why is the card still talking about Swine-last when the table clearly does not do that?
+
+---
+
+## 8. ADD DEBUG LOGGING FOR CLAIM VS TABLE ALIGNMENT
+
+Temporarily log:
+
+```javascript
+console.debug('[Strategy Claim Alignment]', {
+  strategyId,
+  title: strategy.title,
+  description: strategy.description,
+  claimsSwineLast: /swine.*last/i.test(`${strategy.title} ${strategy.description} ${strategy.reasoning}`),
+  finalOrders: finalOrders.map((o, index) => ({
+    position: index + 1,
+    orderId: o.id,
+    item: o.item_description,
+    category: o.category,
+  })),
+  swineFinalPosition: finalOrders.findIndex(o => o.category === 'Swine') + 1,
+  totalOrders: finalOrders.length,
+});
+```
+
+This will help verify:
+- whether the displayed claim matches the final order position
+
+---
+
+## VERIFICATION
+
+1. ✅ The strategy card no longer makes false concrete claims like `Swine last` when Swine is actually first
+2. ✅ The card description is regenerated or revised based on the final applied sequence
+3. ✅ The expanded AI reasoning is also aligned to the final table
+4. ✅ Good sequences are preserved if they truly improve changeover, but their wording is corrected
+5. ✅ Faithfulness is no longer based on stale intended moves
+6. ✅ Strategy title, description, reasoning, and After table are all aligned and tell the same story

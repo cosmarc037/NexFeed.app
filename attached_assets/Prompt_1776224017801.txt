@@ -1,0 +1,229 @@
+```
+Update the queue time calculation to use per-line run rates:
+
+---
+
+## 1. UPDATE RUN RATES — PER LINE, NOT PER FEEDMILL
+
+```javascript
+// Replace FEEDMILL_RUN_RATES with LINE_RUN_RATES
+const LINE_RUN_RATES = {
+  'Line 1': 20,
+  'Line 2': 20,
+  'Line 3': 10,
+  'Line 4': 10,
+  'Line 5': 10,
+  'Line 6': 10,
+  'Line 7': 10
+};
+
+function getLineRunRate(line) {
+  return LINE_RUN_RATES[line] || 10;
+}
+```
+
+## 2. UPDATE calculateLineQueueTime
+
+```javascript
+// Replace the old function
+function calculateLineQueueTime(lineOrders, line) {
+  const totalMT = lineOrders.reduce((sum, o) => sum + (parseFloat(o.volume) || 0), 0);
+  const runRate = getLineRunRate(line);
+  return runRate > 0 ? totalMT / runRate : Infinity;
+}
+```
+
+## 3. UPDATE ALL CALLERS — PASS LINE INSTEAD OF FEEDMILL
+
+### In plantLevelCombineAndPlace:
+
+```javascript
+// When calculating line scores for matched groups
+const lineScores = eligibleLines.map(line => {
+  const currentLineOrders = lineOrdersMap[line] || [];
+  const totalMT = currentLineOrders.reduce((sum, o) => sum + (parseFloat(o.volume) || 0), 0);
+  const runRate = getLineRunRate(line);
+  const queueTime = calculateLineQueueTime(currentLineOrders, line);
+  const lineNumber = parseInt(line.match(/\d+/)?.[0] || '99');
+  
+  return { line, runRate, totalMT, queueTime, lineNumber };
+});
+
+// Sort: lowest queue time, then lowest line number
+lineScores.sort((a, b) => {
+  if (Math.abs(a.queueTime - b.queueTime) > 0.01) return a.queueTime - b.queueTime;
+  return a.lineNumber - b.lineNumber;
+});
+```
+
+### In non-matched orders placement:
+
+```javascript
+const lineScores = eligibleLines.map(line => {
+  const currentLineOrders = lineOrdersMap[line] || [];
+  const totalMT = currentLineOrders.reduce((sum, o) => sum + (parseFloat(o.volume) || 0), 0);
+  const runRate = getLineRunRate(line);
+  const queueTime = calculateLineQueueTime(currentLineOrders, line);
+  const lineNumber = parseInt(line.match(/\d+/)?.[0] || '99');
+  
+  return { line, runRate, totalMT, queueTime, lineNumber };
+});
+```
+
+## 4. UPDATE PLACEMENT LOG — STORE LINE RUN RATE
+
+```javascript
+// When building placement log entries
+placementLog.push({
+  type: 'combined',
+  // ... existing fields ...
+  lineScores: lineScores.map(ls => ({
+    line: ls.line,
+    runRate: ls.runRate,
+    totalMTBefore: ls.totalMT,
+    queueTimeBefore: ls.queueTime,
+    totalMTAfter: null,
+    queueTimeAfter: null
+  })),
+  bestLineReason: {
+    line: bestLine,
+    runRate: lineScores[0].runRate,
+    queueTime: lineScores[0].queueTime,
+    totalMTBefore: lineScores[0].totalMT
+  }
+});
+
+// Same for moved orders
+placementLog.push({
+  type: 'moved',
+  // ... existing fields ...
+  lineScores: lineScores.map(ls => ({
+    line: ls.line,
+    runRate: ls.runRate,
+    totalMTBefore: ls.totalMT,
+    queueTimeBefore: ls.queueTime
+  })),
+  bestLineReason: {
+    line: bestLine,
+    runRate: lineScores[0].runRate,
+    queueTime: lineScores[0].queueTime
+  },
+  fromLineReason: {
+    line: order._movedFromLine,
+    queueTime: lineScores.find(ls => ls.line === order._movedFromLine)?.queueTime || 0,
+    runRate: getLineRunRate(order._movedFromLine)
+  }
+});
+```
+
+## 5. UPDATE SUMMARY STATS — USE LINE RUN RATE
+
+```javascript
+const perLineSummary = allLines.map(line => {
+  const beforeOrders = originalSnapshot[line] || [];
+  const afterOrders = sequencedResults[line] || [];
+  const runRate = getLineRunRate(line);
+  
+  const beforeMT = beforeOrders.reduce((s, o) => s + (parseFloat(o.volume) || 0), 0);
+  const afterMT = afterOrders.reduce((s, o) => s + (parseFloat(o.volume) || 0), 0);
+  
+  const beforeQueueTime = calculateLineQueueTime(beforeOrders, line);
+  const afterQueueTime = calculateLineQueueTime(afterOrders, line);
+  
+  return {
+    line,
+    runRate,
+    beforeCount: beforeOrders.length,
+    afterCount: afterOrders.length,
+    beforeMT: beforeMT.toFixed(1),
+    afterMT: afterMT.toFixed(1),
+    beforeQueueHrs: beforeQueueTime.toFixed(2),
+    afterQueueHrs: afterQueueTime.toFixed(2),
+    queueDiff: (afterQueueTime - beforeQueueTime).toFixed(2)
+  };
+});
+```
+
+## 6. UPDATE AI PROMPT — SHOW PER-LINE RUN RATES
+
+```javascript
+// In buildActionsPrompt — update the line scores display
+`Line Options Evaluated:
+${entry.lineScores.map(ls => 
+  `  - ${getLineShortName(ls.line)}: ${ls.totalMTBefore.toFixed(1)} MT ÷ ${ls.runRate} MT/hr = ${ls.queueTimeBefore.toFixed(2)} hrs queue time`
+).join('\n')}`
+```
+
+## 7. UPDATE FALLBACK EXPLANATIONS
+
+```javascript
+function generateFallbackExplanation(entry) {
+  if (entry.type === 'combined') {
+    const lineComparisons = entry.lineScores
+      .slice(0, 3)
+      .map(ls => `${getLineShortName(ls.line)} (${ls.runRate} MT/hr): ${ls.totalMTBefore.toFixed(1)} MT ÷ ${ls.runRate} MT/hr = ${ls.queueTimeBefore.toFixed(2)} hrs`)
+      .join('; ');
+    
+    return `${entry.ordersCount} orders of ${entry.product} were combined into a single ${entry.totalVolume} MT run on ${getLineShortName(entry.toLine)}. ${getLineShortName(entry.bestLineReason.line)} was selected because it had the lowest queue time at ${entry.bestLineReason.queueTime.toFixed(2)} hrs — queue times: ${lineComparisons}. The combined volume of ${entry.totalVolume} MT is within the 180 MT cap. This eliminates ${entry.changeoversSaved} changeover${entry.changeoversSaved > 1 ? 's' : ''}, saving approximately ${formatTimeShift(entry.timeSaved)} of production time.`;
+  }
+  
+  if (entry.type === 'moved') {
+    const fromScore = entry.lineScores.find(ls => ls.line === entry.fromLine);
+    const toScore = entry.lineScores.find(ls => ls.line === entry.toLine);
+    
+    const lineComparisons = entry.lineScores
+      .slice(0, 3)
+      .map(ls => `${getLineShortName(ls.line)} (${ls.runRate} MT/hr): ${ls.totalMTBefore.toFixed(1)} MT ÷ ${ls.runRate} MT/hr = ${ls.queueTimeBefore.toFixed(2)} hrs`)
+      .join('; ');
+    
+    return `${entry.product} (${entry.volume} MT) was moved from ${getLineShortName(entry.fromLine)} to ${getLineShortName(entry.toLine)} to optimize queue time. ${getLineShortName(entry.fromLine)} had a queue time of ${fromScore?.queueTimeBefore.toFixed(2) || '—'} hrs (${fromScore?.runRate || '—'} MT/hr) while ${getLineShortName(entry.toLine)} had ${toScore?.queueTimeBefore.toFixed(2) || '—'} hrs (${toScore?.runRate || '—'} MT/hr). Queue times: ${lineComparisons}. Moving this order helps balance production load across lines.`;
+  }
+  
+  return 'Action details unavailable.';
+}
+```
+
+## 8. REMOVE OLD FEEDMILL RUN RATE REFERENCES
+
+```javascript
+// DELETE these:
+const FEEDMILL_RUN_RATES = { ... };
+function getFeedmillRunRate(feedmill) { ... }
+
+// Any remaining references to getFeedmillRunRate should be replaced with getLineRunRate
+// Any remaining references to FEEDMILL_RUN_RATES should be replaced with LINE_RUN_RATES
+```
+
+---
+
+## VERIFICATION
+
+### Run rates
+1. ✅ Line 1: 20 MT/hr
+2. ✅ Line 2: 20 MT/hr
+3. ✅ Line 3: 10 MT/hr
+4. ✅ Line 4: 10 MT/hr
+5. ✅ Line 5: 10 MT/hr
+6. ✅ Line 6: 10 MT/hr
+7. ✅ Line 7: 10 MT/hr
+
+### Queue time calculation
+8. ✅ Queue time = Total MT on line ÷ Line run rate
+9. ✅ Example: Line 1 with 400 MT → 400 ÷ 20 = 20 hrs
+10. ✅ Example: Line 3 with 400 MT → 400 ÷ 10 = 40 hrs
+11. ✅ Lower queue time = better (earlier to complete)
+
+### Best line selection
+12. ✅ Line with lowest queue time is chosen
+13. ✅ Tie-breaker: lowest line number
+14. ✅ Line 1 (20 MT/hr) has advantage over Line 3 (10 MT/hr) when same MT
+
+### Placement log
+15. ✅ Stores per-line run rate (not feedmill)
+16. ✅ AI prompt shows "÷ 20 MT/hr" for L1/L2 and "÷ 10 MT/hr" for L3-L7
+17. ✅ Fallback explanations show correct run rates per line
+
+### Summary
+18. ✅ Per-line summary uses correct run rates
+19. ✅ Queue time before/after calculated correctly
+```

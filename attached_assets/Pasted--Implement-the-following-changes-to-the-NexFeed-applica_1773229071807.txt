@@ -1,0 +1,255 @@
+```
+Implement the following changes to the NexFeed application:
+
+---
+
+## 1. COMBINED ORDERS — STATUS DROPDOWN UPDATE
+
+### LEAD ORDER DROPDOWN (updated):
+
+| # | Status | Behavior |
+|---|---|---|
+| 1 | Uncombine | Triggers uncombine confirmation dialog. Capital "U". |
+| 2 | Combined with other PO | Normal status change for entire group. This is the default/original status for combined orders. |
+| 3 | Hold | Status change for entire group |
+| 4 | In production | Status change for entire group |
+| 5 | On-going batching | Status change for entire group |
+| 6 | On-going pelleting | Status change for entire group |
+| 7 | On-going bagging | Status change for entire group |
+| 8 | Done | Entire group marked Done, moves to top |
+
+**Hidden from lead order dropdown:**
+- ❌ Plotted (replaced by "Uncombine")
+- ❌ Cut
+- ❌ Cancel PO
+
+**"Uncombine" label:**
+- Always displayed as "Uncombine" with capital "U".
+- Badge styling: Light grey (#f3f4f6), grey text (#6b7280).
+
+**"Combined with other PO":**
+- This status is RETAINED in the dropdown for combined orders.
+- It is the natural/default status when orders are first combined.
+- Users can switch away from it (to Hold, In production, etc.) and switch BACK to it.
+- When selected, the entire group syncs to "Combined with other PO".
+
+### CHILD ORDER DROPDOWN:
+- COMPLETELY DISABLED — no click, no dropdown.
+- Status badge displays the current status (mirroring lead) as read-only.
+- Tooltip on hover: "Status controlled by lead order (FPR: [lead FPR])"
+
+---
+
+## 2. "DONE" ORDERS AT TOP — COMBINED GROUPS COUNT AS ONE
+
+### THE PROBLEM:
+Currently, the app shows the top 3 most recent "Done" orders at the top of the interactive table. When a combined group of 3+ orders is set to "Done", each order in the group counts individually toward the "top 3" limit. This causes child orders to be split from the group — some stay at the top while others are prematurely moved to Order History.
+
+**Example of the bug:**
+```
+"Done" section (top 3 limit):
+  Done Order A (standalone)        ← counts as 1
+  Done Order B (standalone)        ← counts as 2
+  Done Lead C (combined group)     ← counts as 3
+  --- LIMIT REACHED ---
+  Done Child C-1 (combined group)  ← ❌ pushed to Order History, breaks group
+  Done Child C-2 (combined group)  ← ❌ pushed to Order History, breaks group
+```
+
+### THE FIX:
+A combined group counts as ONE order toward the "top 3 recent Done" limit, regardless of how many orders are in the group.
+
+**Counting logic:**
+- Standalone "Done" order = counts as 1
+- Combined "Done" group (lead + all children) = counts as 1, regardless of group size
+
+**Examples:**
+
+**Example 1 — 2 standalone Done + 1 combined Done group (3 children):**
+```
+"Done" section at top:
+  Done Order A (standalone)              ← counts as 1
+  Done Order B (standalone)              ← counts as 2
+  Done Lead C (combined, 3 children)     ← counts as 3
+  Done Child C-1                         ← part of group 3, NOT counted separately
+  Done Child C-2                         ← part of group 3, NOT counted separately
+  Done Child C-3                         ← part of group 3, NOT counted separately
+─────────────────────────
+Active orders below...
+```
+
+Total visible Done rows: 6 (but only 3 "units" counted toward the limit).
+
+**Example 2 — 1 standalone Done + 1 combined Done group (4 children) + 1 standalone Done:**
+```
+"Done" section at top:
+  Done Order A (standalone)              ← counts as 1
+  Done Lead B (combined, 4 children)     ← counts as 2
+  Done Child B-1                         ← part of group 2
+  Done Child B-2                         ← part of group 2
+  Done Child B-3                         ← part of group 2
+  Done Child B-4                         ← part of group 2
+  Done Order C (standalone)              ← counts as 3
+─────────────────────────
+Active orders below...
+```
+
+Total visible Done rows: 7 (but only 3 "units").
+
+**Example 3 — 3 combined Done groups:**
+```
+"Done" section at top:
+  Done Lead A (combined, 2 children)     ← counts as 1
+  Done Child A-1                         ← part of group 1
+  Done Child A-2                         ← part of group 1
+  Done Lead B (combined, 3 children)     ← counts as 2
+  Done Child B-1                         ← part of group 2
+  Done Child B-2                         ← part of group 2
+  Done Child B-3                         ← part of group 2
+  Done Lead C (combined, 1 child)        ← counts as 3
+  Done Child C-1                         ← part of group 3
+─────────────────────────
+Active orders below...
+```
+
+Total visible Done rows: 9 (but only 3 "units").
+
+### IMPLEMENTATION:
+
+**Counting function:**
+
+```
+function countDoneUnits(doneOrders) {
+  const counted = new Set();
+  let unitCount = 0;
+  
+  for (const order of doneOrders) {
+    // If this order is part of a combined group
+    if (order.group_id) {
+      // If we haven't counted this group yet
+      if (!counted.has(order.group_id)) {
+        counted.add(order.group_id);
+        unitCount += 1;  // entire group counts as 1
+      }
+      // If already counted, skip (don't increment)
+    } else {
+      // Standalone order counts as 1
+      unitCount += 1;
+    }
+  }
+  
+  return unitCount;
+}
+```
+
+**Display logic:**
+
+```
+function getDoneOrdersToDisplay(allDoneOrders, limit = 3) {
+  // Sort by completion date (most recent first)
+  const sorted = allDoneOrders.sort by completion date descending;
+  
+  const toDisplay = [];
+  const countedGroups = new Set();
+  let unitCount = 0;
+  
+  for (const order of sorted) {
+    if (unitCount >= limit) {
+      // Check if this order belongs to a group already being displayed
+      if (order.group_id && countedGroups.has(order.group_id)) {
+        // This is part of an already-counted group — include it
+        toDisplay.push(order);
+        continue;
+      }
+      // Otherwise, this order exceeds the limit — move to Order History
+      break;
+    }
+    
+    if (order.group_id) {
+      if (!countedGroups.has(order.group_id)) {
+        countedGroups.add(order.group_id);
+        unitCount += 1;
+      }
+      toDisplay.push(order);
+    } else {
+      unitCount += 1;
+      toDisplay.push(order);
+    }
+  }
+  
+  // Also include any remaining group members that weren't reached in the loop
+  for (const order of sorted) {
+    if (order.group_id && countedGroups.has(order.group_id) && !toDisplay.includes(order)) {
+      toDisplay.push(order);
+    }
+  }
+  
+  return toDisplay;
+}
+```
+
+**Order of Done orders at the top:**
+- Most recent Done first.
+- Combined groups stay together (lead + all children contiguous).
+- Within a combined group: lead first, then children in order.
+
+### AUTO-REMOVAL TO ORDER HISTORY:
+
+When the "top 3" limit is exceeded and older Done orders/groups need to move to Order History:
+
+- **Standalone Done order:** Moves individually to Order History > Completed Orders.
+- **Combined Done group:** The ENTIRE group moves together to Order History. All orders in the group (lead + children) move at once. The group is never split.
+
+**The 4th oldest "unit" and beyond are moved to Order History:**
+```
+Done section (top 3 units):
+  Unit 1: Order A (standalone)     ← stays
+  Unit 2: Lead B + Children        ← stays (entire group)
+  Unit 3: Order C (standalone)     ← stays
+
+Moved to Order History:
+  Unit 4: Lead D + Children        ← entire group moved together
+  Unit 5: Order E (standalone)     ← moved
+```
+
+---
+
+## 3. COMBINED GROUP BLOCK INTEGRITY — DONE SECTION
+
+When combined groups are in the "Done" section at the top:
+
+- The combined block stays contiguous (lead + all children together).
+- Blue tint (#e3f2fd) is retained.
+- Lead/Child badges are retained.
+- The left blue border (3px solid #1976d2) is retained.
+- The block is not draggable (Done orders are locked in position).
+- Status badges show "Done" on all orders (lead and children).
+
+---
+
+## 4. EDGE CASES
+
+**Edge case 1 — Combined group is the 3rd unit but has 10 children:**
+- All 10 children + lead (11 rows) are displayed at the top.
+- This is correct — the group counts as 1 unit.
+- The table may have many rows in the Done section, but this is expected and acceptable.
+
+**Edge case 2 — A 4th Done order comes in while 3 units are already displayed:**
+- The oldest unit (1st unit) is moved to Order History.
+- If the oldest unit is a combined group, the ENTIRE group moves.
+- The new Done order/group takes position as the most recent.
+
+**Edge case 3 — Uncombine a Done combined group:**
+- This should NOT be allowed. "Uncombine" is not available when status is "Done".
+- The "Uncombine" option is hidden/disabled when the group status is "Done".
+- If the user wants to uncombine, they must first change the status back to another active status (e.g., "Combined with other PO"), then select "Uncombine".
+
+**Edge case 4 — All 3 units are combined groups with many children:**
+```
+Unit 1: Lead + 5 children  =  6 rows
+Unit 2: Lead + 3 children  =  4 rows
+Unit 3: Lead + 8 children  =  9 rows
+Total Done rows: 19 rows at the top
+```
+This is correct and acceptable. The "3 unit" limit controls logical grouping, not row count.
+```

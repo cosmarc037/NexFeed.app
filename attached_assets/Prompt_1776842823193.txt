@@ -1,0 +1,626 @@
+```
+Fix: Per-feedmill auto-sequence uses the SAME component as per-line, just scoped to multiple lines:
+
+---
+
+## 1. HANDLER — FIND CANDIDATES FOR THE FEEDMILL'S LINES
+
+```javascript
+async function handleFeedmillAutoSequence(feedmill) {
+  const feedmillLines = getFeedmillLines(feedmill);
+  const feedmillShortName = getFeedmillShortName(feedmill);
+  const normalizedFeedmillLines = feedmillLines.map(l => normalizeLine(l));
+  
+  // Get all active orders
+  const allActiveOrders = enrichedOrders.filter(
+    o => o.status !== 'Done' && o.status !== 'Cancel PO' &&
+         o.status !== 'In Production' && o.status !== 'On-going' &&
+         !o.parent_id
+  );
+  
+  // Orders currently on the feedmill's lines
+  const feedmillOrders = allActiveOrders.filter(o =>
+    normalizedFeedmillLines.includes(normalizeLine(o.feedmill_line))
+  );
+  
+  // Orders on OTHER lines (outside this feedmill)
+  const otherLineOrders = allActiveOrders.filter(o =>
+    !normalizedFeedmillLines.includes(normalizeLine(o.feedmill_line))
+  );
+  
+  // Find candidates: orders from other lines that CAN be produced on any feedmill line
+  const candidates = [];
+  
+  for (const order of otherLineOrders) {
+    if (order.status === 'Planned') continue;
+    
+    const materialCode = String(order.material_code_fg || '').trim();
+    if (!materialCode) continue;
+    
+    // Check which feedmill lines can produce this order
+    const eligibleLines = normalizedFeedmillLines.filter(line =>
+      canProduceOnLine(order, line, masterData)
+    );
+    
+    if (eligibleLines.length === 0) continue;
+    
+    const orderVolume = parseFloat(order.volume) || parseFloat(order.total_volume_mt) || 0;
+    const currentLine = normalizeLine(order.feedmill_line);
+    const currentLineRunRate = getLineRunRate(currentLine);
+    const currentLineMT = allActiveOrders
+      .filter(o => normalizeLine(o.feedmill_line) === currentLine)
+      .reduce((sum, o) => sum + (parseFloat(o.volume) || parseFloat(o.total_volume_mt) || 0), 0);
+    const currentQueueTime = currentLineRunRate > 0 ? currentLineMT / currentLineRunRate : Infinity;
+    
+    // Find best feedmill line
+    let bestLine = null;
+    let bestQueueTime = Infinity;
+    
+    for (const fmLine of eligibleLines) {
+      const lineMT = feedmillOrders
+        .filter(o => normalizeLine(o.feedmill_line) === fmLine)
+        .reduce((sum, o) => sum + (parseFloat(o.volume) || parseFloat(o.total_volume_mt) || 0), 0);
+      const lineRunRate = getLineRunRate(fmLine);
+      const queueTime = lineRunRate > 0 ? lineMT / lineRunRate : Infinity;
+      
+      if (queueTime < bestQueueTime) {
+        bestQueueTime = queueTime;
+        bestLine = fmLine;
+      }
+    }
+    
+    if (!bestLine) continue;
+    
+    // Calculate improvement
+    const improvement = currentQueueTime - bestQueueTime;
+    
+    candidates.push({
+      order,
+      volume: orderVolume,
+      fromLine: currentLine,
+      bestLine,
+      eligibleLines,
+      currentQueueTime,
+      bestQueueTime,
+      improvement,
+      selected: improvement > 0, // Auto-select if queue improves
+    });
+  }
+  
+  // Sort: biggest improvement first
+  candidates.sort((a, b) => b.improvement - a.improvement);
+  
+  if (candidates.length === 0) {
+    toast.info(`No orders from other lines can be moved to ${feedmillShortName}. Lines are already optimal.`);
+    return;
+  }
+  
+  // Store and show preview
+  setFeedmillAutoSequenceData({
+    feedmill,
+    feedmillShortName,
+    feedmillLines: normalizedFeedmillLines,
+    currentOrders: feedmillOrders,
+    candidates,
+  });
+  setShowFeedmillAutoSequencePreview(true);
+}
+```
+
+---
+
+## 2. FEEDMILL AUTO-SEQUENCE PREVIEW COMPONENT — SAME UI AS PER-LINE
+
+```jsx
+function FeedmillAutoSequencePreview({
+  feedmillData,
+  allOrders,
+  masterData,
+  n10dData,
+  changeoverRules,
+  onApplySequence,
+  onCancel
+}) {
+  const { feedmill, feedmillShortName, feedmillLines, currentOrders, candidates: initialCandidates } = feedmillData;
+  
+  const [candidates, setCandidates] = useState(initialCandidates);
+  const [sequencedResults, setSequencedResults] = useState(null);
+  const [isCombined, setIsCombined] = useState(false);
+  const [isCombining, setIsCombining] = useState(false);
+  const [isApplying, setIsApplying] = useState(false);
+  
+  const selectedCandidates = candidates.filter(c => c.selected);
+  
+  // Build before snapshot — orders currently on feedmill lines
+  const beforeOrders = {};
+  feedmillLines.forEach(line => {
+    beforeOrders[line] = currentOrders
+      .filter(o => normalizeLine(o.feedmill_line) === line)
+      .sort((a, b) => (a.priority_seq || 0) - (b.priority_seq || 0));
+  });
+  
+  const totalCurrentOrders = currentOrders.length;
+  
+  // Build after — current orders + selected candidates, assigned to best lines
+  useEffect(() => {
+    buildAfterSequence();
+  }, [candidates]);
+  
+  function buildAfterSequence() {
+    const afterOrders = {};
+    
+    // Start with current orders per line
+    feedmillLines.forEach(line => {
+      afterOrders[line] = currentOrders
+        .filter(o => normalizeLine(o.feedmill_line) === line)
+        .map(o => ({ ...o, _movement: 'same', _movementDelta: 0 }));
+    });
+    
+    // Add selected candidates to their best lines
+    for (const candidate of selectedCandidates) {
+      const targetLine = candidate.bestLine;
+      if (!afterOrders[targetLine]) afterOrders[targetLine] = [];
+      
+      afterOrders[targetLine].push({
+        ...candidate.order,
+        feedmill_line: targetLine,
+        line: targetLine,
+        _movement: 'new_to_line',
+        _movedFromLine: candidate.fromLine,
+        _movementDelta: 0,
+      });
+    }
+    
+    // Sort each line and assign prio
+    feedmillLines.forEach(line => {
+      const orders = afterOrders[line] || [];
+      
+      // Run preSortOrders for N10D dates
+      const categorized = preSortOrders(orders, n10dData, masterData);
+      const sorted = autoSequenceSort(categorized, changeoverRules);
+      
+      // Calculate changeovers
+      calculatePreviewChangeovers(sorted, changeoverRules);
+      
+      // Assign prio and movement
+      const originalLineOrders = beforeOrders[line] || [];
+      sorted.forEach((order, index) => {
+        order.prio = index + 1;
+        
+        if (order._movement !== 'new_to_line') {
+          const originalIndex = originalLineOrders.findIndex(o => o.id === order.id);
+          if (originalIndex >= 0) {
+            const originalPrio = originalIndex + 1;
+            const delta = originalPrio - order.prio;
+            order._originalPrio = originalPrio;
+            order._movement = delta > 0 ? 'up' : delta < 0 ? 'down' : 'same';
+            order._movementDelta = Math.abs(delta);
+          }
+        }
+      });
+      
+      afterOrders[line] = sorted;
+    });
+    
+    setSequencedResults(afterOrders);
+  }
+  
+  function toggleCandidate(index) {
+    setCandidates(prev => prev.map((c, i) => 
+      i === index ? { ...c, selected: !c.selected } : c
+    ));
+  }
+  
+  function selectAll() {
+    setCandidates(prev => prev.map(c => ({ ...c, selected: true })));
+  }
+  
+  function deselectAll() {
+    setCandidates(prev => prev.map(c => ({ ...c, selected: false })));
+  }
+  
+  async function handleCombineOrders() {
+    if (isCombining || !sequencedResults) return;
+    setIsCombining(true);
+    
+    // Run combine logic on the after orders
+    const allAfterOrders = [];
+    feedmillLines.forEach(line => {
+      (sequencedResults[line] || []).forEach(o => {
+        allAfterOrders.push({ ...o, line, feedmill_line: line });
+      });
+    });
+    
+    const { lineOrdersMap, combinedOrders, placementLog } = plantLevelCombineOnly(
+      allAfterOrders, masterData, n10dData, feedmillLines
+    );
+    
+    // Re-sequence each line
+    const results = {};
+    feedmillLines.forEach(line => {
+      const lineOrders = lineOrdersMap[line] || [];
+      if (lineOrders.length === 0) {
+        results[line] = [];
+        return;
+      }
+      
+      const sequenced = runAutoSequence(lineOrders, changeoverRules, masterData, n10dData);
+      calculatePreviewChangeovers(sequenced, changeoverRules);
+      
+      const originalLineOrders = beforeOrders[line] || [];
+      sequenced.forEach((order, index) => {
+        order.prio = index + 1;
+        const originalIndex = originalLineOrders.findIndex(o => o.id === order.id);
+        if (originalIndex >= 0) {
+          const delta = (originalIndex + 1) - order.prio;
+          order._originalPrio = originalIndex + 1;
+          order._movement = delta > 0 ? 'up' : delta < 0 ? 'down' : 'same';
+          order._movementDelta = Math.abs(delta);
+        } else if (!order._movement) {
+          order._movement = 'new_to_line';
+        }
+      });
+      
+      results[line] = sequenced;
+    });
+    
+    setSequencedResults(results);
+    setIsCombined(true);
+    setIsCombining(false);
+  }
+  
+  const totalAfterOrders = feedmillLines.reduce((sum, line) => 
+    sum + (sequencedResults?.[line]?.length || 0), 0
+  );
+  const totalFromOtherLines = selectedCandidates.length;
+  
+  return (
+    <div className="auto-sequence-overlay" onClick={e => e.stopPropagation()}>
+      <div className="auto-sequence-modal" onClick={e => e.stopPropagation()}>
+        {/* Header */}
+        <div className="auto-sequence-header">
+          <div>
+            <h2>✨ Auto-Sequence — {feedmillShortName}</h2>
+            <span className="auto-sequence-subtitle">
+              Find orders from other lines that can be moved to {feedmill} ({feedmillLines.map(l => getLineShortLabel(l)).join(' & ')})
+            </span>
+          </div>
+          <button className="auto-sequence-close" onClick={onCancel} disabled={isApplying}>✕</button>
+        </div>
+        
+        {/* Stats */}
+        <div className="auto-sequence-stats">
+          <StatBadge label="Current Orders" value={totalCurrentOrders} />
+          <StatBadge label="Candidates Found" value={candidates.length} color="blue" />
+          <StatBadge label="Selected to Move" value={selectedCandidates.length} color="red" />
+          <StatBadge label="After" value={totalAfterOrders} />
+        </div>
+        
+        {/* Candidate list */}
+        <div className="line-as-candidates">
+          <div className="line-as-candidates-header">
+            <span className="line-as-candidates-icon">📋</span>
+            <span className="line-as-candidates-title">
+              Orders available to move to {feedmillShortName}
+            </span>
+            <div className="line-as-candidates-actions">
+              <button className="line-as-select-all" onClick={selectAll}>Select All</button>
+              <button className="line-as-deselect-all" onClick={deselectAll}>Deselect All</button>
+            </div>
+          </div>
+          
+          <div className="line-as-candidates-list">
+            {candidates.map((candidate, index) => (
+              <label key={candidate.order.id} className="line-as-candidate-row">
+                <input
+                  type="checkbox"
+                  checked={candidate.selected}
+                  onChange={() => toggleCandidate(index)}
+                />
+                <span className={`line-as-from-badge line-as-from-${getLineShortLabel(candidate.fromLine).toLowerCase()}`}>
+                  {getLineShortLabel(candidate.fromLine)}
+                </span>
+                <span className="line-as-candidate-name">
+                  {candidate.order.item_description}
+                </span>
+                <span className="line-as-candidate-target">
+                  → {getLineShortLabel(candidate.bestLine)}
+                </span>
+                <span className="line-as-candidate-volume">
+                  {candidate.volume} MT
+                </span>
+                <span className="line-as-candidate-improvement">
+                  ↓ {candidate.improvement.toFixed(2)} hrs
+                </span>
+              </label>
+            ))}
+            
+            {candidates.length === 0 && (
+              <div className="line-as-no-candidates">
+                No orders from other lines can be moved to {feedmillShortName}
+              </div>
+            )}
+          </div>
+        </div>
+        
+        {/* Per-line tabs for Before / After */}
+        <FeedmillBeforeAfterTabs
+          feedmillLines={feedmillLines}
+          beforeOrders={beforeOrders}
+          afterOrders={sequencedResults}
+          allOrders={allOrders}
+          changeoverRules={changeoverRules}
+        />
+        
+        {/* Applying overlay */}
+        {isApplying && (
+          <div className="auto-sequence-applying-overlay">
+            <div className="auto-sequence-applying-content">
+              <div className="auto-sequence-applying-spinner"></div>
+              <span className="auto-sequence-applying-text">Applying to schedule...</span>
+            </div>
+          </div>
+        )}
+        
+        {/* Footer */}
+        <div className="auto-sequence-footer">
+          <div className="auto-sequence-footer-left">
+            {!isCombined ? (
+              <button
+                className={`btn-combine-orders ${isCombining ? 'btn-combine-loading' : ''}`}
+                onClick={handleCombineOrders}
+                disabled={isCombining || isApplying || selectedCandidates.length === 0}
+              >
+                {isCombining ? (
+                  <><span className="btn-apply-spinner"></span> Combining...</>
+                ) : (
+                  '🔗 Combine Orders'
+                )}
+              </button>
+            ) : (
+              <button
+                className="btn-uncombine-orders"
+                onClick={() => { setIsCombined(false); buildAfterSequence(); }}
+                disabled={isApplying}
+              >
+                ↩ Uncombine Orders
+              </button>
+            )}
+          </div>
+          <div className="auto-sequence-footer-right">
+            <button className="btn-cancel" onClick={onCancel} disabled={isApplying}>
+              Cancel
+            </button>
+            <button
+              className={`btn-apply ${isApplying ? 'btn-apply-loading' : ''}`}
+              onClick={async () => {
+                if (isApplying) return;
+                setIsApplying(true);
+                await onApplySequence(sequencedResults);
+                setIsApplying(false);
+              }}
+              disabled={isApplying || selectedCandidates.length === 0}
+            >
+              {isApplying ? (
+                <><span className="btn-apply-spinner"></span> Applying...</>
+              ) : (
+                'Apply to Schedule'
+              )}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+## 3. BEFORE/AFTER TABS — PER LINE WITHIN FEEDMILL
+
+```jsx
+function FeedmillBeforeAfterTabs({ feedmillLines, beforeOrders, afterOrders, allOrders, changeoverRules }) {
+  const [activeLineTab, setActiveLineTab] = useState(feedmillLines[0]);
+  
+  const currentBefore = (beforeOrders[activeLineTab] || []).filter(o => !o.parent_id);
+  const currentAfter = afterOrders?.[activeLineTab] || [];
+  
+  const afterLabel = getAfterLabel(currentAfter, currentBefore);
+  
+  return (
+    <div className="fm-before-after">
+      {/* Line tabs within feedmill */}
+      <div className="fm-line-tabs">
+        {feedmillLines.map(line => {
+          const beforeCount = (beforeOrders[line] || []).filter(o => !o.parent_id).length;
+          const afterCount = (afterOrders?.[line] || []).length;
+          const changes = (afterOrders?.[line] || []).filter(o => o._movement !== 'same').length;
+          
+          return (
+            <button
+              key={line}
+              className={`fm-line-tab ${activeLineTab === line ? 'active' : ''}`}
+              onClick={() => setActiveLineTab(line)}
+            >
+              {getLineShortLabel(line)}
+              <span className="fm-line-tab-count">{afterCount}</span>
+              {changes > 0 && <span className="fm-line-tab-changes">{changes}</span>}
+            </button>
+          );
+        })}
+      </div>
+      
+      {/* Before / After tables for selected line */}
+      <div className="auto-sequence-comparison">
+        <div className="auto-sequence-comparison-container">
+          <div className="auto-sequence-comparison-scroll">
+            {/* Before table */}
+            <div className="auto-sequence-table-panel">
+              <div className="auto-sequence-table-label auto-sequence-label-before">
+                <span className="auto-sequence-label-icon">📋</span>
+                Before — {currentBefore.length} orders
+              </div>
+              <div className="auto-sequence-table-wrapper">
+                <table className="auto-sequence-table auto-sequence-table-before">
+                  <thead>
+                    <tr>
+                      <th className="as-col-prio">Prio</th>
+                      <th className="as-col-fpr">FPR</th>
+                      <th className="as-col-planned">Planned Order</th>
+                      <th className="as-col-material">Material Code (FG)</th>
+                      <th className="as-col-desc">Item Description</th>
+                      <th className="as-col-form">Form</th>
+                      <th className="as-col-volume">Volume (MT)</th>
+                      <th className="as-col-batch">Batch Size</th>
+                      <th className="as-col-batches">Batches</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {currentBefore.length > 0 ? (
+                      currentBefore.map(order => (
+                        <PlantBeforeRow key={order.id} order={order} allOrders={allOrders} />
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan="9" className="as-empty-line">
+                          No orders on this line before sequencing
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            
+            <div className="auto-sequence-divider"></div>
+            
+            {/* After table */}
+            <div className="auto-sequence-table-panel">
+              <div className="auto-sequence-table-label auto-sequence-label-after">
+                <span className="auto-sequence-label-icon">✨</span>
+                After — {afterLabel}
+              </div>
+              <div className="auto-sequence-table-wrapper">
+                <table className="auto-sequence-table auto-sequence-table-after">
+                  <thead>
+                    <tr>
+                      <th className="as-col-drag"></th>
+                      <th className="as-col-prio">Prio</th>
+                      <th className="as-col-fpr">FPR</th>
+                      <th className="as-col-planned">Planned Order</th>
+                      <th className="as-col-material">Material Code (FG)</th>
+                      <th className="as-col-desc">Item Description</th>
+                      <th className="as-col-form">Form</th>
+                      <th className="as-col-volume">Volume (MT)</th>
+                      <th className="as-col-batch">Batch Size</th>
+                      <th className="as-col-batches">Batches</th>
+                      <th className="as-col-prod">Production Time</th>
+                      <th className="as-col-avail">Avail Date</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(currentAfter || []).map(order => (
+                      <PlantAfterRow
+                        key={order.id}
+                        order={order}
+                        onUncombineSingle={null}
+                      />
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+## 4. CANDIDATE ROW — SHOW TARGET LINE
+
+```css
+.line-as-candidate-target {
+  font-size: 11px;
+  color: #16a34a;
+  font-weight: 600;
+  margin-left: 4px;
+}
+```
+
+---
+
+## 5. WIRE UP
+
+```jsx
+// Per Feedmill "All" sub-tab:
+<button
+  className="btn-auto-sequence"
+  onClick={() => handleFeedmillAutoSequence(currentFeedmill)}
+>
+  ✨ Auto-Sequence ({getFeedmillShortName(currentFeedmill)})
+</button>
+
+// State:
+const [showFeedmillAutoSequencePreview, setShowFeedmillAutoSequencePreview] = useState(false);
+const [feedmillAutoSequenceData, setFeedmillAutoSequenceData] = useState(null);
+
+// Render:
+{showFeedmillAutoSequencePreview && feedmillAutoSequenceData && (
+  <FeedmillAutoSequencePreview
+    feedmillData={feedmillAutoSequenceData}
+    allOrders={enrichedOrders}
+    masterData={masterData}
+    n10dData={n10dData}
+    changeoverRules={changeoverRules}
+    onApplySequence={async (results) => {
+      await handlePlantApply(results);
+      setShowFeedmillAutoSequencePreview(false);
+    }}
+    onCancel={() => setShowFeedmillAutoSequencePreview(false)}
+  />
+)}
+```
+
+---
+
+## VERIFICATION
+
+### Same UI as per-line
+1. ✅ Candidate list with checkboxes
+2. ✅ Select All / Deselect All buttons
+3. ✅ Shows source line badge (L3, L6, etc.)
+4. ✅ Shows target line (→ L1, → L2)
+5. ✅ Shows volume and queue improvement
+6. ✅ Before/After tables per line within feedmill
+7. ✅ Combine Orders button
+8. ✅ Apply to Schedule button
+
+### Feedmill scoping
+9. ✅ FM1 targets L1 & L2
+10. ✅ FM2 targets L3 & L4
+11. ✅ FM3 targets L5, L6 & L7
+12. ✅ Candidates come from lines OUTSIDE the feedmill
+13. ✅ Each candidate assigned to best feedmill line by queue time
+
+### Line tabs within feedmill
+14. ✅ Tabs for each line (e.g., L1 | L2 for FM1)
+15. ✅ Before shows current orders per line
+16. ✅ After shows current + selected candidates
+17. ✅ Change count badge per line tab
+
+### Combine & Apply
+18. ✅ Combine button runs plantLevelCombineOnly on after orders
+19. ✅ Uncombine reverts to pre-combine state
+20. ✅ Apply uses same handlePlantApply function
+21. ✅ Status set to Planned / Combined with other PO
+
+### Labels
+22. ✅ "Auto-Sequence (FM1)" / "(FM2)" / "(FM3)"
+23. ✅ Title: "Auto-Sequence — FM1"
+24. ✅ Subtitle: "Find orders from other lines that can be moved to Feedmill 1 (L1 & L2)"
+```

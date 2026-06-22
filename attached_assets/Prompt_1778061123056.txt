@@ -1,0 +1,341 @@
+```
+Update the auto-sequence cancellation UX and behavior so cancellation is immediate, and replace the current bottom-right button with centered clickable text.
+
+---
+
+## OBJECTIVE
+
+The current cancel behavior is not ideal:
+- the cancel control is shown as a button in the bottom-right
+- after clicking it, the process does not stop immediately
+- the modal waits for the "Generating strategy options..." step to finish before cancelling
+
+We want to improve this so that:
+1. the cancel control is shown as **centered clickable text**, not a button
+2. clicking cancel should stop the process **immediately**
+3. the app should not wait for the current AI step to finish before respecting cancellation
+4. if an AI request is already in-flight, it should be aborted if possible, or its result must be ignored immediately
+
+---
+
+## 1. REPLACE THE BUTTON WITH CENTERED CLICKABLE TEXT
+
+Remove the bottom-right cancel button.
+
+Instead, show a centered clickable text control near the bottom of the modal.
+
+### Preferred text:
+- `Cancel auto-sequence`
+
+Or if shorter is preferred:
+- `Cancel`
+
+Recommended:
+### `Cancel auto-sequence`
+
+This should look like clickable text, not a button.
+
+### Suggested style:
+- centered horizontally
+- subtle but clearly interactive
+- underline on hover or color change
+- disabled state only after clicked if needed
+
+### Example placement:
+- centered below the stats row
+- or centered in the footer area
+
+### Example JSX:
+```jsx
+<div className="auto-sequence-cancel-text-wrap">
+  {!isCancelling && isRunning && (
+    <span
+      className="auto-sequence-cancel-text"
+      onClick={handleCancelAutoSequence}
+      role="button"
+      tabIndex={0}
+    >
+      Cancel auto-sequence
+    </span>
+  )}
+
+  {isCancelling && (
+    <span className="auto-sequence-cancel-text auto-sequence-cancel-text-disabled">
+      Cancelling...
+    </span>
+  )}
+</div>
+```
+
+### Example CSS:
+```css
+.auto-sequence-cancel-text-wrap {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin-top: 16px;
+}
+
+.auto-sequence-cancel-text {
+  font-size: 14px;
+  font-weight: 500;
+  color: #6b7280;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.auto-sequence-cancel-text:hover {
+  color: #ef4444;
+}
+
+.auto-sequence-cancel-text-disabled {
+  cursor: default;
+  opacity: 0.6;
+  text-decoration: none;
+}
+```
+
+---
+
+## 2. CANCELLATION MUST HAPPEN IMMEDIATELY
+
+This is the main fix.
+
+Currently, clicking cancel appears to wait until the active step (especially AI generation) finishes before the process actually stops.
+
+This must be changed.
+
+### Required behavior:
+As soon as the user clicks cancel:
+- mark the run as cancelled immediately
+- stop UI progress immediately
+- prevent any next steps from continuing
+- abort the current in-flight AI request if possible
+- if abort is not possible, ignore the response immediately when it comes back
+- do not wait for the step to finish before cancelling the run from the user’s perspective
+
+---
+
+## 3. USE AN ACTUAL ABORT/CANCELLATION MECHANISM FOR IN-FLIGHT REQUESTS
+
+A simple boolean flag is not enough if the app is currently waiting on a long AI/network request.
+
+Use:
+- `AbortController`
+- or equivalent request cancellation mechanism
+if available in the current async/fetch implementation
+
+### Example approach:
+```javascript
+let autoSequenceAbortController = null;
+let autoSequenceCancelled = false;
+```
+
+When starting a run:
+```javascript
+autoSequenceCancelled = false;
+autoSequenceAbortController = new AbortController();
+```
+
+When calling async requests:
+```javascript
+await fetch(url, {
+  method: 'POST',
+  body: ...,
+  signal: autoSequenceAbortController.signal,
+});
+```
+
+When user clicks cancel:
+```javascript
+function handleCancelAutoSequence() {
+  autoSequenceCancelled = true;
+
+  if (autoSequenceAbortController) {
+    autoSequenceAbortController.abort();
+  }
+
+  cleanupCancelledRunImmediately();
+}
+```
+
+---
+
+## 4. CANCEL IMMEDIATELY AT THE UI LEVEL
+
+The UI must respond instantly when cancel is clicked.
+
+Do not keep the modal looking “stuck” on the current step until the step finishes.
+
+### On click:
+- immediately switch to cancelled/closing state
+- or immediately close the modal
+- or briefly show `Cancelling...` then close
+
+Recommended behavior:
+- immediately set modal state to cancelling
+- abort active work
+- close modal as soon as cleanup is safe
+
+But from the user’s perspective, cancellation should feel immediate.
+
+---
+
+## 5. IGNORE ANY LATE AI RESPONSE AFTER CANCELLATION
+
+If the AI strategy generation request cannot truly be aborted at transport level:
+- still mark the run cancelled immediately
+- do not wait in the modal
+- when the response comes back, discard it
+- do not apply it
+- do not reopen or continue the run
+
+### Required guard:
+```javascript
+if (autoSequenceCancelled) {
+  return; // ignore response completely
+}
+```
+
+This check must happen after every awaited async step, especially AI generation.
+
+---
+
+## 6. CHECK CANCELLATION BEFORE AND AFTER EACH MAJOR STEP
+
+For each major stage:
+- scan orders
+- combine
+- queue time calculation
+- placement
+- future dispatches
+- sequencing
+- changeovers
+- strategy generation
+
+Add checks both:
+- before starting the step
+- after the awaited result returns
+
+### Example:
+```javascript
+checkCancelled();
+
+const result = await generateStrategies({ signal: autoSequenceAbortController.signal });
+
+checkCancelled();
+```
+
+### Helper:
+```javascript
+function checkCancelled() {
+  if (autoSequenceCancelled) {
+    throw new Error('AUTO_SEQUENCE_CANCELLED');
+  }
+}
+```
+
+---
+
+## 7. DO NOT APPLY PARTIAL RESULTS AFTER CANCEL
+
+When cancel is clicked:
+- do not commit partial working state
+- do not partially apply generated strategy data
+- do not partially update lines
+
+Only finalized successful runs should update the schedule.
+
+Cancellation should leave the schedule unchanged.
+
+Use temporary working state while the run is in progress.
+
+---
+
+## 8. CLOSE THE MODAL WITHOUT WAITING FOR THE FULL STEP TO FINISH
+
+The current behavior appears to keep the modal open and waiting on “Generating strategy options...” even after cancel is clicked.
+
+That should stop.
+
+### New expected behavior:
+Once cancel is clicked:
+- immediately transition to cancel cleanup
+- close the modal as soon as possible
+- do not keep the user trapped in the running modal until the AI call resolves
+
+If needed:
+- close instantly and let cleanup happen silently in the background
+- just ensure late responses are ignored
+
+This is preferable to forcing the user to wait.
+
+---
+
+## 9. HANDLE ABORT ERRORS AS NORMAL CANCELLATION, NOT FAILURES
+
+If `AbortController.abort()` causes a thrown error like:
+- `AbortError`
+
+catch it and treat it as a normal cancellation path.
+
+Do not show a failure error to the user.
+
+### Example:
+```javascript
+try {
+  await runAutoSequence();
+} catch (err) {
+  if (
+    autoSequenceCancelled ||
+    err?.name === 'AbortError' ||
+    err?.message === 'AUTO_SEQUENCE_CANCELLED'
+  ) {
+    // normal cancellation flow
+    return;
+  }
+
+  throw err;
+}
+```
+
+---
+
+## 10. UPDATE THE STATUS TEXT
+
+If you keep a temporary text after cancel click, use something lightweight like:
+- `Cancelling...`
+
+But do not keep the progress spinner blocked on the running step for long.
+
+This status should only be brief.
+
+---
+
+## 11. REMOVE THE OLD BUTTON-STYLE FOOTER CONTROL
+
+The bottom-right button should be removed entirely.
+
+We only want:
+- centered clickable text
+- not a CTA-style button
+
+---
+
+## 12. VERIFICATION
+
+### UI
+1. ✅ Cancel control is now centered clickable text
+2. ✅ No more bottom-right button
+3. ✅ The control visually looks like text/link, not a button
+
+### Behavior
+4. ✅ Clicking cancel stops the run immediately from the user’s perspective
+5. ✅ The modal no longer waits for “Generating strategy...” to finish before cancelling
+6. ✅ In-flight AI/network requests are aborted if possible
+7. ✅ If not abortable, late responses are ignored and never applied
+8. ✅ No partial auto-sequence results are committed after cancellation
+
+### UX
+9. ✅ User is not trapped waiting after clicking cancel
+10. ✅ Cancellation is handled gracefully, not as an error

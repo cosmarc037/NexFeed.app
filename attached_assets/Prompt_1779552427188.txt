@@ -1,0 +1,214 @@
+Please update the **shutdown behavior memory / reset logic** so that orders are evaluated based on their current status at the moment shutdown is triggered, and not permanently treated as already ongoing/done from older states.
+
+---
+
+## 1. RESET SHUTDOWN-SPECIFIC “ALREADY ONGOING / DONE” BEHAVIOR WHEN A NEW SHUTDOWN IS TRIGGERED
+
+There is a problem with how the app is preserving production-state behavior during shutdown.
+
+Right now, it appears that once an order has been treated as already:
+- `in_production`
+- `completed`
+
+the backend may continue preserving that behavior too broadly, even in later shutdown events when the order’s current status is no longer ongoing/done.
+
+This causes orders that are currently only:
+- `plotted`
+- `normal`
+- `hold`
+- `cut`
+
+to still behave as if they are already ongoing/done during a new shutdown.
+
+### Expected result
+When a line enters shutdown, the app must freshly evaluate each order based on its **current status at the moment shutdown is triggered**.
+
+It must not permanently carry forward a stale shutdown-specific protection from earlier states.
+
+---
+
+## 2. USE CURRENT STATUS AT SHUTDOWN TIME, NOT STALE HISTORICAL MEMORY
+
+For shutdown logic specifically, determine whether an order should be treated as already ongoing/done based on the order’s **current actual status when shutdown is activated**.
+
+### If the order is currently:
+- `in_production`
+- `completed`
+
+at the moment shutdown is triggered, then:
+- it should not be divertible
+- it should retain the correct protected behavior during that shutdown event
+
+### If the order is currently:
+- `plotted`
+- `normal`
+- `hold`
+- `cut`
+- or any other non-ongoing/non-completed status
+
+at the moment shutdown is triggered, then:
+- it should **not** be treated as already ongoing/done for that shutdown event
+- it should follow normal shutdown eligibility rules for its current state
+
+### Expected result
+A prior old status should not override the order’s current state when a new shutdown begins.
+
+---
+
+## 3. RESET THE PRESERVED SHUTDOWN BEHAVIOR WHEN THE LINE RESUMES
+
+When a line resumes operations, please clear/reset any shutdown-specific state that was preserving an order as already:
+- ongoing
+- done
+
+### Goal
+The next time shutdown happens, the app should re-evaluate orders fresh again based on their current status at that time.
+
+### Expected result
+Orders should not carry forward stale shutdown-specific protection into future shutdown events after the line has already resumed.
+
+---
+
+## 4. DO NOT TREAT CURRENTLY PLOTTED ORDERS AS ALREADY ONGOING/DONE DURING A NEW SHUTDOWN
+
+Please specifically fix the case where an order is currently **plotted** when shutdown is triggered.
+
+### Current issue
+A plotted order may incorrectly:
+- become non-divertible
+- lose access to correct shutdown options
+- be treated like it is already ongoing/done
+
+because of preserved backend memory from an earlier status state.
+
+### Expected result
+If the order is currently **plotted** at shutdown time, it should be evaluated as a plotted order, not as an already ongoing/done order from the past.
+
+---
+
+## 5. APPLY THIS TO BOTH DIVERSION ELIGIBILITY AND STATUS OPTION RESTRICTIONS
+
+Please apply this reset/re-evaluation rule to both:
+
+### A. Diversion eligibility
+If the order is not currently `in_production` or `completed` when shutdown starts, it should not be automatically excluded from diversion just because of stale historical state.
+
+### B. Status-option behavior during shutdown
+If the order is not currently `in_production` or `completed` when shutdown starts, it should not be treated as one of those preserved special cases.
+
+### Expected result
+Both diversion logic and shutdown status-option behavior should be based on the current state at shutdown time.
+
+---
+
+## 6. KEEP THE VALID PROTECTION DURING THE ACTIVE SHUTDOWN EVENT ITSELF
+
+This reset should not remove correct protection during the same active shutdown event.
+
+### Intended behavior
+If an order is truly:
+- `in_production`
+- or `completed`
+
+at the exact moment shutdown is triggered, then it is valid to preserve that behavior for that shutdown event.
+
+### Important
+The fix is not to remove protection entirely.
+The fix is to ensure the protection is:
+- tied to the current shutdown event
+- based on the order’s current status at shutdown time
+- reset after resume / re-evaluated on the next shutdown
+
+---
+
+## 7. DO NOT USE LIFETIME “HAS EVER BEEN ONGOING/DONE” AS THE SHUTDOWN RULE
+
+Please avoid using a permanent lifetime rule such as:
+- “if the order has ever been in production”
+- “if the order has ever been completed”
+
+for shutdown diversion/status restriction decisions.
+
+### Reason
+That is too broad for shutdown behavior and causes false positives later.
+
+### Expected result
+Shutdown logic should use:
+- current status at shutdown trigger time
+- or a shutdown-event-specific snapshot
+
+not a permanent all-time flag.
+
+---
+
+## IMPORTANT
+
+Please preserve this business rule:
+
+When a new shutdown is triggered, the app should evaluate orders based on what they **currently are at that moment**.
+
+If an order is currently:
+- `in_production`
+- `completed`
+
+then protect it accordingly during that shutdown.
+
+If an order is currently:
+- `plotted`
+- `normal`
+- `hold`
+- `cut`
+
+then do not treat it as already ongoing/done just because it had that status sometime in the past.
+
+When the line resumes, clear the shutdown-specific preserved behavior so future shutdowns can evaluate fresh again.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log shutdown snapshot evaluation and reset behavior.
+
+```javascript
+console.debug('[Shutdown Snapshot Evaluation]', {
+  lineId,
+  orderId,
+  currentStatusAtShutdown,
+  treatedAsProtectedOperationalOrder:
+    ['in_production', 'completed'].includes(currentStatusAtShutdown),
+});
+```
+
+```javascript
+console.debug('[Shutdown State Reset On Resume]', {
+  lineId,
+  shutdownEventId,
+  clearedShutdownProtectedState: true,
+});
+```
+
+```javascript
+console.debug('[Shutdown Diversion / Status Evaluation]', {
+  lineId,
+  orderId,
+  currentStatusAtShutdown,
+  divertible,
+  allowInProduction,
+  allowCompleted,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ When a new shutdown is triggered, each order is evaluated based on its **current status at shutdown time**
+2. ✅ An order currently in `plotted` status is not incorrectly treated as already ongoing/done during shutdown
+3. ✅ An order currently in `normal`, `hold`, or `cut` is not incorrectly treated as already ongoing/done during shutdown unless that is its current state
+4. ✅ Orders currently `in_production` at shutdown time remain protected during that shutdown event
+5. ✅ Orders currently `completed` at shutdown time remain protected during that shutdown event
+6. ✅ Diversion eligibility is recalculated fresh for each shutdown event
+7. ✅ Shutdown status-option restrictions are recalculated fresh for each shutdown event
+8. ✅ When the line resumes, shutdown-specific preserved behavior is cleared/reset
+9. ✅ A later shutdown does not incorrectly reuse stale “already ongoing/done” behavior from a previous shutdown
+10. ✅ No UI errors or console errors are introduced

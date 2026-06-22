@@ -1,0 +1,244 @@
+Please update the **Plant-Level Auto-Sequence** handling for **shutdown lines** so that shutdown lines are excluded as **destination lines**, but eligible orders on those shutdown lines can still be moved out to **active lines**.
+
+---
+
+## 1. REFINE THE SHUTDOWN RULE IN AUTO-SEQUENCE
+
+The current shutdown behavior in auto-sequence appears too restrictive.
+
+Right now, when a line is in shutdown, the app may treat that line as completely excluded from the auto-sequence process, including leaving its orders unmoved.
+
+Please refine this behavior.
+
+### New intended rule
+If a line is in shutdown:
+
+- it must **not** be used as a valid **destination line**
+- but its eligible orders should still be considered as **source orders** that can be moved to other active lines
+
+### Expected result
+Orders on shutdown lines should not be stranded unnecessarily.
+The optimizer should still try to move eligible shutdown-line orders to active lines where production can continue.
+
+---
+
+## 2. SHUTDOWN LINES MUST NOT RECEIVE ORDERS DURING AUTO-SEQUENCE
+
+Please keep this rule:
+
+If a line is in shutdown, auto-sequence must **not** place orders onto that line.
+
+### This means shutdown lines are excluded from:
+- cross-line movement destination evaluation
+- destination scoring
+- auto-sequence placement targets
+- cross-line combination placement
+- final active scheduling destinations
+
+### Expected result
+No order should be newly assigned onto a shutdown line while shutdown is active.
+
+---
+
+## 3. ELIGIBLE ORDERS CURRENTLY ON A SHUTDOWN LINE SHOULD STILL BE EVALUATED FOR MOVEMENT TO ACTIVE LINES
+
+Please allow auto-sequence to consider orders currently on a shutdown line as **movable source orders**, provided they are otherwise eligible for movement.
+
+### Goal
+If the line is shutdown, the app should try to recover production by moving eligible orders off that line and onto active lines.
+
+### Expected result
+Orders on a shutdown line can still be evaluated and moved out during plant-level auto-sequence, as long as:
+- they are eligible for movement
+- a valid active destination line exists
+- run-rate and other applicable rules are satisfied
+
+---
+
+## 4. APPLY NORMAL MOVEMENT ELIGIBILITY RULES TO SHUTDOWN-LINE ORDERS
+
+Please preserve existing movement rules when evaluating orders on a shutdown line.
+
+### This means shutdown-line orders can only move out if they still pass the normal applicable rules, such as:
+- historical run-rate eligibility on the destination line
+- not blocked by line-lock rules
+- not blocked by source/generation restrictions
+- not blocked by overlap rules
+- not blocked by combine restrictions
+- status eligibility rules still apply
+
+### Important
+This request is not asking to move every shutdown-line order blindly.
+
+It is asking to allow **eligible shutdown-line orders** to participate as source candidates in auto-sequence.
+
+### Expected result
+Shutdown-line orders are movable only when they satisfy the same real business constraints as other cross-line moves.
+
+---
+
+## 5. PRESERVE STATUS-BASED PROTECTION FOR NON-MOVABLE ORDERS ON SHUTDOWN LINES
+
+Please preserve the existing business rule that certain orders on a shutdown line should **not** be moved, such as orders already:
+- `in_production`
+- `on-going`
+- `completed`
+- or otherwise non-divertible / non-movable by current rules
+
+### Expected result
+Only valid movable orders on the shutdown line should be considered for auto-sequence movement.
+Protected/non-movable orders should remain excluded.
+
+---
+
+## 6. DO NOT TREAT A SHUTDOWN LINE AS FULLY INVISIBLE TO THE OPTIMIZER
+
+Please do not completely remove shutdown lines from consideration in a way that prevents their current eligible orders from being evaluated.
+
+### Correct behavior
+A shutdown line should be treated as:
+- **not a valid destination**
+- but still a **valid source of eligible movable orders**
+
+### Expected result
+The optimizer can still relieve a shutdown line by moving its eligible orders to active lines.
+
+---
+
+## 7. EXCLUDE SHUTDOWN LINES FROM CROSS-LINE COMBINATION DESTINATION LOGIC, BUT STILL ALLOW THEIR ELIGIBLE ORDERS TO MOVE OUT
+
+Please keep shutdown lines out of:
+- combine destination placement
+- active destination selection
+- final target-line assignment
+
+But if an order currently sits on a shutdown line and is otherwise eligible, the optimizer should still be allowed to:
+- move it out
+- combine it on an active line if valid under existing combine rules
+- place it into the active-line sequence
+
+### Expected result
+Shutdown lines should not receive combinations, but eligible orders on them can still be relocated and combined elsewhere when valid.
+
+---
+
+## 8. UPDATE THE PREVIEW UI MESSAGE SO IT DOES NOT IMPLY THAT NO ORDERS ON THE SHUTDOWN LINE WERE CONSIDERED
+
+The current preview message may say something like:
+- `Orders shown remain on this line and were not moved, combined, or rebalanced.`
+
+That message is too absolute if the intended behavior is to allow eligible shutdown-line orders to move out.
+
+### Please update the message
+The UI should explain that:
+
+- the shutdown line was excluded as a destination
+- but eligible orders on that line may still be considered for movement to active lines
+- only orders that could not be moved under the existing rules remain there
+
+### Example wording
+- `Line 1 is in shutdown and was excluded as a destination line in auto-sequence. Eligible orders on this line were evaluated for movement to active lines where possible.`
+- `This line is in shutdown, so no orders were placed onto it. Eligible orders were considered for relocation to active lines based on normal movement rules.`
+
+### Expected result
+The preview messaging should accurately reflect the refined behavior.
+
+---
+
+## 9. KEEP THE SHUTDOWN INDICATOR IN THE PREVIEW UI
+
+Please preserve the visual shutdown indicator in the preview, such as:
+- a red shutdown badge
+- muted/low-opacity styling
+- a shutdown explanation banner/message
+
+### Goal
+Users should still clearly understand that:
+- this line is in shutdown
+- it was not used as a destination
+- but its eligible orders may still have been evaluated for movement outward
+
+---
+
+## 10. APPLY THIS TO PLANT-LEVEL AUTO-SEQUENCE CROSS-LINE MOVEMENT LOGIC
+
+Please ensure this refined shutdown behavior applies to the plant-level auto-sequence flow where the app:
+- rebalances queue load
+- moves orders across lines
+- combines across lines
+- generates AI sequencing proposals
+
+### Expected result
+The optimizer should behave consistently:
+- shutdown lines do not receive orders
+- active lines remain destinations
+- shutdown-line eligible orders can still move out to active lines
+
+---
+
+## IMPORTANT
+
+Please use this refined shutdown rule for auto-sequence:
+
+### Shutdown line as destination:
+- **Not allowed**
+- do not place orders onto shutdown lines
+- do not use shutdown lines as active combination destinations
+
+### Shutdown line as source:
+- **Allowed for eligible orders**
+- eligible shutdown-line orders should still be considered for movement to active lines
+- normal run-rate, status, overlap, and other movement rules must still apply
+
+Also update the preview UI text so it explains this behavior accurately.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log shutdown-line source vs destination handling.
+
+```javascript
+console.debug('[Auto-Sequence Shutdown Line Role]', {
+  lineId,
+  lineName,
+  shutdownActive,
+  allowedAsDestination: false,
+  allowedAsSource: true,
+});
+```
+
+```javascript
+console.debug('[Shutdown-Line Order Movement Evaluation]', {
+  orderId,
+  currentLine,
+  currentLineShutdownActive,
+  eligibleForMoveEvaluation,
+  candidateActiveLines,
+  moveApplied,
+});
+```
+
+```javascript
+console.debug('[Auto-Sequence Preview Shutdown Message]', {
+  lineId,
+  shutdownActive,
+  destinationExcluded: true,
+  sourceOrdersStillEvaluated: true,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Shutdown lines are excluded as auto-sequence destination lines
+2. ✅ Shutdown lines are excluded from receiving new placements during auto-sequence
+3. ✅ Eligible orders currently on a shutdown line are still evaluated as source orders for movement to active lines
+4. ✅ Protected/non-movable orders on shutdown lines remain excluded from movement
+5. ✅ Run-rate and other normal movement guardrails still apply to shutdown-line orders moving out
+6. ✅ Shutdown lines are not used as combination destinations
+7. ✅ Eligible orders on shutdown lines can still be moved and/or combined on active lines when valid
+8. ✅ Preview UI messaging no longer incorrectly implies that shutdown-line orders were not evaluated at all
+9. ✅ Shutdown indicator remains visible in the preview UI
+10. ✅ No UI errors or console errors are introduced

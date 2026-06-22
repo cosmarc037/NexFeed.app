@@ -1,0 +1,703 @@
+```
+Implement the following changes to the NexFeed application:
+
+---
+
+## 1. UPDATE MASTER DATA PARSING — NEW COLUMNS
+
+Update the Excel file parser to recognize and store the new columns: Diameter, Changeover, Category, and Color.
+
+### NEW COLUMN MAPPING
+
+```javascript
+const MASTER_DATA_COLUMN_MAP = {
+  'FG Material Code': 'fgMaterialCode',
+  'FG Item Description': 'fgItemDescription',
+  'SFG1 Material Code': 'sfg1MaterialCode',
+  'SFG Item Description': 'sfgItemDescription',
+  'Form': 'form',
+  'Diameter': 'diameter',
+  'Changeover': 'changeover',
+  'FG Weight': 'fgWeight',
+  'Category': 'category',
+  'Color': 'color',
+  'Batch FM1': 'batchFm1',
+  'Batch FM2': 'batchFm2',
+  'Batch FM3': 'batchFm3',
+  'Batch PMX': 'batchPmx',
+  'Label 1': 'label1',
+  'Label 2': 'label2',
+  'Thread': 'thread',
+  'Sacks Code': 'sacksCode',
+  'Sacks Desc': 'sacksDesc',
+  'Tags Code': 'tagsCode',
+  'Tags Desc': 'tagsDesc',
+  'L1 Rate': 'l1Rate',
+  'L2 Rate': 'l2Rate',
+  'L3 Rate': 'l3Rate',
+  'L4 Rate': 'l4Rate',
+  'L5 Rate': 'l5Rate',
+  'L6 Rate': 'l6Rate',
+  'L7 Rate': 'l7Rate'
+};
+```
+
+### PARSER UPDATE
+
+```javascript
+function parseMasterDataExcel(rawData) {
+  return rawData.map((row) => {
+    const normalized = {};
+    
+    Object.keys(row).forEach((key) => {
+      const trimmedKey = key.trim();
+      const mappedKey = MASTER_DATA_COLUMN_MAP[trimmedKey];
+      
+      if (mappedKey) {
+        const val = row[key];
+        if (val === null || val === undefined) {
+          normalized[mappedKey] = '';
+        } else {
+          normalized[mappedKey] = String(val).trim();
+        }
+      }
+    });
+    
+    // Ensure all expected fields exist
+    Object.values(MASTER_DATA_COLUMN_MAP).forEach(field => {
+      if (normalized[field] === undefined) {
+        normalized[field] = '';
+      }
+    });
+    
+    return normalized;
+  });
+}
+```
+
+### BACKWARD COMPATIBILITY
+
+If an uploaded file has the OLD columns (without Diameter, Changeover, Category, Color), the parser should still work — those fields will just be empty:
+
+```javascript
+// These fields default to empty if not in the file
+normalized.diameter = normalized.diameter || '';
+normalized.changeover = normalized.changeover || '';
+normalized.category = normalized.category || '';
+normalized.color = normalized.color || '';
+```
+
+---
+
+## 2. UPDATE HEADER GROUPS IN MASTER DATA TABLE
+
+### NEW COLUMN GROUP ORDER
+
+| Group | Columns | Colspan |
+|---|---|---|
+| PRODUCT DETAILS | FG Material Code, FG Item Description, SFG1 Material Code, SFG Item Description, Category, Color | 6 |
+| PRODUCTION PARAMETERS | Form, Diameter, Changeover, FG Weight | 4 |
+| BATCH SIZES | Batch FM1, Batch FM2, Batch FM3, Batch PMX | 4 |
+| LABELING | Label 1, Label 2 | 2 |
+| PACKAGING | Thread, Sacks Code, Sacks Desc, Tags Code, Tags Desc | 5 |
+| RUN RATES (MT/HR) | L1 Rate, L2 Rate, L3 Rate, L4 Rate, L5 Rate, L6 Rate, L7 Rate | 7 |
+
+### TABLE JSX
+
+```jsx
+<table className="master-data-table">
+  <thead>
+    {/* Row 1: Group headers */}
+    <tr className="master-data-group-headers">
+      {isEditMode && <th rowSpan={2} className="md-select-header"><input type="checkbox" /></th>}
+      <th rowSpan={2} className="md-row-number-header">#</th>
+      <th colSpan={6} className="md-group-header md-group-product">PRODUCT DETAILS</th>
+      <th colSpan={4} className="md-group-header md-group-production">PRODUCTION PARAMETERS</th>
+      <th colSpan={4} className="md-group-header md-group-batch">BATCH SIZES</th>
+      <th colSpan={2} className="md-group-header md-group-labeling">LABELING</th>
+      <th colSpan={5} className="md-group-header md-group-packaging">PACKAGING</th>
+      <th colSpan={7} className="md-group-header md-group-rates">RUN RATES (MT/HR)</th>
+      {isEditMode && <th rowSpan={2} className="md-delete-header"></th>}
+    </tr>
+    
+    {/* Row 2: Individual column headers */}
+    <tr className="master-data-column-headers">
+      {/* Product Details */}
+      <th>FG Material Code</th>
+      <th>FG Item Description</th>
+      <th>SFG1 Material Code</th>
+      <th>SFG Item Description</th>
+      <th>Category</th>
+      <th>Color</th>
+      
+      {/* Production Parameters */}
+      <th>Form</th>
+      <th>Diameter</th>
+      <th>Changeover</th>
+      <th>FG Weight</th>
+      
+      {/* Batch Sizes */}
+      <th>Batch FM1</th>
+      <th>Batch FM2</th>
+      <th>Batch FM3</th>
+      <th>Batch PMX</th>
+      
+      {/* Labeling */}
+      <th>Label 1</th>
+      <th>Label 2</th>
+      
+      {/* Packaging */}
+      <th>Thread</th>
+      <th>Sacks Code</th>
+      <th>Sacks Desc</th>
+      <th>Tags Code</th>
+      <th>Tags Desc</th>
+      
+      {/* Run Rates */}
+      <th>L1 Rate</th>
+      <th>L2 Rate</th>
+      <th>L3 Rate</th>
+      <th>L4 Rate</th>
+      <th>L5 Rate</th>
+      <th>L6 Rate</th>
+      <th>L7 Rate</th>
+    </tr>
+  </thead>
+  <tbody>
+    {filteredData.map(row => (
+      <tr key={row._rowId}>
+        {isEditMode && <td className="md-select-cell"><input type="checkbox" /></td>}
+        <td className="md-row-number-cell">{(row._originalIndex ?? 0) + 1}</td>
+        
+        {/* Product Details */}
+        <td>{row.fgMaterialCode}</td>
+        <td>{row.fgItemDescription}</td>
+        <td>{row.sfg1MaterialCode}</td>
+        <td>{row.sfgItemDescription}</td>
+        <td>{row.category}</td>
+        <td>{row.color}</td>
+        
+        {/* Production Parameters */}
+        <td>{row.form}</td>
+        <td>{row.diameter}</td>
+        <td>{row.changeover}</td>
+        <td>{row.fgWeight}</td>
+        
+        {/* Batch Sizes */}
+        <td>{row.batchFm1}</td>
+        <td>{row.batchFm2}</td>
+        <td>{row.batchFm3}</td>
+        <td>{row.batchPmx}</td>
+        
+        {/* Labeling */}
+        <td>{row.label1}</td>
+        <td>{row.label2}</td>
+        
+        {/* Packaging */}
+        <td>{row.thread}</td>
+        <td>{row.sacksCode}</td>
+        <td>{row.sacksDesc}</td>
+        <td>{row.tagsCode}</td>
+        <td>{row.tagsDesc}</td>
+        
+        {/* Run Rates */}
+        <td>{row.l1Rate}</td>
+        <td>{row.l2Rate}</td>
+        <td>{row.l3Rate}</td>
+        <td>{row.l4Rate}</td>
+        <td>{row.l5Rate}</td>
+        <td>{row.l6Rate}</td>
+        <td>{row.l7Rate}</td>
+        
+        {isEditMode && <td className="md-delete-cell"><button>🗑</button></td>}
+      </tr>
+    ))}
+  </tbody>
+</table>
+```
+
+---
+
+## 3. ORDER TABLE — AUTO-POPULATE CATEGORY, COLOR, CHANGEOVER, DIAMETER
+
+### 3A. ITEM DESCRIPTION CELL — ADD COLOR AND DIAMETER
+
+Currently the item description cell shows:
+```
+Salto Conditioner P 1kg (Bundle)
+Gamefowl
+```
+
+Update to show:
+```
+Salto Conditioner P 1kg (Bundle)
+Gamefowl  |  Brown  |  4.5mm
+```
+
+```jsx
+function ItemDescriptionCell({ order }) {
+  return (
+    <td className="item-description-cell">
+      <div className="item-desc-name">
+        {order.item_description}
+      </div>
+      <div className="item-desc-meta">
+        {order.category && (
+          <span className="item-desc-category">{order.category}</span>
+        )}
+        {order.color && (
+          <>
+            <span className="item-desc-separator">|</span>
+            <span className="item-desc-color">{order.color}</span>
+          </>
+        )}
+        {order.diameter && (
+          <>
+            <span className="item-desc-separator">|</span>
+            <span className="item-desc-diameter">{order.diameter}mm</span>
+          </>
+        )}
+      </div>
+    </td>
+  );
+}
+```
+
+### STYLING
+
+```css
+.item-desc-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: #1a1a1a;
+  line-height: 1.4;
+}
+
+.item-desc-meta {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  margin-top: 2px;
+  font-size: 11px;
+}
+
+.item-desc-category {
+  color: #6b7280;
+  font-weight: 400;
+}
+
+.item-desc-separator {
+  color: #d1d5db;
+  margin: 0 6px;
+  font-size: 10px;
+}
+
+.item-desc-color {
+  color: #6b7280;
+  font-weight: 400;
+}
+
+.item-desc-diameter {
+  color: #6b7280;
+  font-weight: 400;
+}
+```
+
+### 3B. CHANGEOVER — AUTO-POPULATE FROM MASTER DATA
+
+Currently changeover defaults to 0.17. Instead, pull it from the master data's Changeover column for that material code.
+
+```javascript
+function getChangeoverForOrder(order, masterData) {
+  const product = masterData.find(
+    p => String(p.fgMaterialCode) === String(order.material_code_fg)
+  );
+  
+  if (product && product.changeover !== '' && product.changeover !== undefined) {
+    return parseFloat(product.changeover) || 0;
+  }
+  
+  // Fallback: default 0.17 if no master data match
+  return 0.17;
+}
+```
+
+### CHANGEOVER IS NOT EDITABLE IN ORDER TABLE
+
+The changeover cell in the order table should be read-only — always pulled from master data:
+
+```jsx
+function ChangeoverCell({ order }) {
+  return (
+    <td className="changeover-cell changeover-readonly">
+      {order.changeover !== undefined && order.changeover !== null
+        ? `${parseFloat(order.changeover).toFixed(2)} hr`
+        : '—'}
+    </td>
+  );
+}
+```
+
+```css
+.changeover-readonly {
+  color: #6b7280;
+  background: #f9fafb;
+  cursor: default;
+}
+```
+
+### 3C. AUTO-POPULATE ON ORDER CREATION / MASTER DATA LOOKUP
+
+When a new order is created or when master data is re-applied, auto-populate category, color, diameter, and changeover:
+
+```javascript
+function autoPopulateFromMasterData(order, masterData) {
+  const product = masterData.find(
+    p => String(p.fgMaterialCode) === String(order.material_code_fg)
+  );
+  
+  if (!product) return order;
+  
+  const updatedOrder = { ...order };
+  
+  // Existing fields
+  if (product.fgItemDescription) updatedOrder.item_description = product.fgItemDescription;
+  if (product.sfg1MaterialCode) updatedOrder.material_code_sfg = product.sfg1MaterialCode;
+  if (product.sfgItemDescription) updatedOrder.sfg_item_description = product.sfgItemDescription;
+  if (product.form) updatedOrder.form = product.form;
+  if (product.fgWeight) updatedOrder.fg_weight = product.fgWeight;
+  if (product.thread) updatedOrder.thread = product.thread;
+  if (product.sacksCode) updatedOrder.sacks_code = product.sacksCode;
+  if (product.sacksDesc) updatedOrder.sacks_desc = product.sacksDesc;
+  if (product.tagsCode) updatedOrder.tags_code = product.tagsCode;
+  if (product.tagsDesc) updatedOrder.tags_desc = product.tagsDesc;
+  if (product.label1) updatedOrder.label_1 = product.label1;
+  if (product.label2) updatedOrder.label_2 = product.label2;
+  
+  // NEW fields
+  if (product.category) updatedOrder.category = product.category;
+  if (product.color) updatedOrder.color = product.color;
+  if (product.diameter) updatedOrder.diameter = product.diameter;
+  if (product.changeover !== '' && product.changeover !== undefined) {
+    updatedOrder.changeover = parseFloat(product.changeover) || 0;
+  }
+  
+  // Batch size based on line
+  const lineBatchMap = {
+    'Line 1': product.batchFm1,
+    'Line 2': product.batchFm1,
+    'Line 3': product.batchFm2,
+    'Line 4': product.batchFm2,
+    'Line 5': product.batchPmx,
+    'Line 6': product.batchFm3,
+    'Line 7': product.batchFm3,
+  };
+  
+  const newBatchSize = lineBatchMap[order.line];
+  if (newBatchSize) {
+    updatedOrder.batch_size = parseFloat(newBatchSize);
+    if (updatedOrder.volume && updatedOrder.batch_size) {
+      updatedOrder.batches = Math.ceil(parseFloat(updatedOrder.volume) / updatedOrder.batch_size);
+    }
+  }
+  
+  // Run rate based on line
+  const lineRateMap = {
+    'Line 1': product.l1Rate,
+    'Line 2': product.l2Rate,
+    'Line 3': product.l3Rate,
+    'Line 4': product.l4Rate,
+    'Line 5': product.l5Rate,
+    'Line 6': product.l6Rate,
+    'Line 7': product.l7Rate,
+  };
+  
+  const newRunRate = lineRateMap[order.line];
+  if (newRunRate) {
+    updatedOrder.run_rate = parseFloat(newRunRate);
+    if (updatedOrder.volume && updatedOrder.run_rate > 0) {
+      updatedOrder.production_time = (parseFloat(updatedOrder.volume) / updatedOrder.run_rate).toFixed(2);
+    }
+  }
+  
+  return updatedOrder;
+}
+```
+
+### 3D. RE-APPLY — INCLUDE NEW FIELDS, RESPECT STATUS RULES
+
+The existing re-apply function already skips Done, Cancel PO, In Production, and On-going orders. Just ensure the new fields are included in the update:
+
+```javascript
+function reapplyMasterDataToOrders(masterData, allOrders) {
+  return allOrders.map(order => {
+    if (!isOrderUpdatable(order)) {
+      return order; // Skip non-updatable
+    }
+    
+    return autoPopulateFromMasterData(order, masterData);
+  });
+}
+```
+
+### 3E. PRODUCTION TIME CALCULATION — USE MASTER DATA CHANGEOVER
+
+Update the production time calculation to use the order's changeover from master data instead of the hardcoded 0.17:
+
+```javascript
+function calculateProductionTime(order) {
+  const volume = parseFloat(order.volume) || 0;
+  const runRate = parseFloat(order.run_rate) || 0;
+  const changeover = parseFloat(order.changeover) ?? 0.17; // Fallback to 0.17 if not set
+  const batchSize = parseFloat(order.batch_size) || 1;
+  const batches = Math.ceil(volume / batchSize);
+  
+  if (runRate <= 0) return 0;
+  
+  const productionHours = volume / runRate;
+  const changeoverHours = changeover; // Per order, not per batch
+  const totalHours = productionHours + changeoverHours;
+  
+  return totalHours;
+}
+```
+
+Search the entire codebase for any hardcoded `0.17` changeover value and replace with `order.changeover`:
+
+```javascript
+// FIND and REPLACE all instances of:
+const changeover = 0.17;
+// WITH:
+const changeover = parseFloat(order.changeover) ?? 0.17;
+
+// FIND and REPLACE:
+const CO = 0.17;
+// WITH:
+const CO = parseFloat(order.changeover) ?? 0.17;
+```
+
+---
+
+## 4. UPDATE DOWNLOAD TEMPLATE
+
+Include the new columns in the template:
+
+```javascript
+function handleDownloadTemplate() {
+  const templateHeaders = [
+    'FG Material Code',
+    'FG Item Description',
+    'SFG1 Material Code',
+    'SFG Item Description',
+    'Form',
+    'Diameter',
+    'Changeover',
+    'FG Weight',
+    'Category',
+    'Color',
+    'Batch FM1',
+    'Batch FM2',
+    'Batch FM3',
+    'Batch PMX',
+    'Label 1',
+    'Label 2',
+    'Thread',
+    'Sacks Code',
+    'Sacks Desc',
+    'Tags Code',
+    'Tags Desc',
+    'L1 Rate',
+    'L2 Rate',
+    'L3 Rate',
+    'L4 Rate',
+    'L5 Rate',
+    'L6 Rate',
+    'L7 Rate'
+  ];
+  
+  const sampleRow = {
+    'FG Material Code': '1000000000001 (example)',
+    'FG Item Description': 'Sample Product Name, 50kg (example)',
+    'SFG1 Material Code': '3000000000001 (example)',
+    'SFG Item Description': 'Sample SFG Description (example)',
+    'Form': 'MP (example)',
+    'Diameter': '4.5 (example)',
+    'Changeover': '0.17 (example)',
+    'FG Weight': '50 (example)',
+    'Category': 'Poultry (example)',
+    'Color': 'Brown (example)',
+    'Batch FM1': '4 (example)',
+    'Batch FM2': '4 (example)',
+    'Batch FM3': '4 (example)',
+    'Batch PMX': '4 (example)',
+    'Label 1': '(example)',
+    'Label 2': '(example)',
+    'Thread': '(example)',
+    'Sacks Code': '(example)',
+    'Sacks Desc': '(example)',
+    'Tags Code': '(example)',
+    'Tags Desc': '(example)',
+    'L1 Rate': '20 (example)',
+    'L2 Rate': '20 (example)',
+    'L3 Rate': '10 (example)',
+    'L4 Rate': '10 (example)',
+    'L5 Rate': '10 (example)',
+    'L6 Rate': '10 (example)',
+    'L7 Rate': '10 (example)'
+  };
+  
+  // Instructions sheet updated
+  const noteWs = XLSX.utils.aoa_to_sheet([
+    ['INSTRUCTIONS'],
+    [''],
+    ['This template contains the required columns for the Master Data upload.'],
+    ['The first data row contains example values — feel free to delete them and enter your own data.'],
+    ['All columns are optional except FG Material Code and FG Item Description.'],
+    [''],
+    ['Column Guide:'],
+    ['PRODUCT DETAILS: FG Material Code, FG Item Description, SFG1 Material Code, SFG Item Description, Category, Color'],
+    ['PRODUCTION PARAMETERS: Form, Diameter, Changeover (in hours, e.g., 0.17 = ~10 min), FG Weight'],
+    ['BATCH SIZES: Batch FM1 (Feedmill 1), Batch FM2 (Feedmill 2), Batch FM3 (Feedmill 3), Batch PMX (Powermix)'],
+    ['LABELING: Label 1, Label 2'],
+    ['PACKAGING: Thread, Sacks Code, Sacks Desc, Tags Code, Tags Desc'],
+    ['RUN RATES: L1-L7 Rate (MT/hr per production line)'],
+    [''],
+    ['Changeover Reference:'],
+    ['P / MP forms = 0.17 hrs (~10 min)'],
+    ['C forms (C-L, C-M, C-S) = 0.33 hrs (~20 min)'],
+    ['Others (M, MX, etc.) = 0.00 hrs'],
+    [''],
+    ['Category Options: Poultry, Hogs, Gamefowl, etc.'],
+    ['Color Options: Brown, Green, Red, Yellow, etc.']
+  ]);
+  
+  const dataWs = XLSX.utils.json_to_sheet([sampleRow], { header: templateHeaders });
+  dataWs['!cols'] = templateHeaders.map(h => ({ wch: Math.max(h.length + 4, 18) }));
+  
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, dataWs, 'Master Data');
+  XLSX.utils.book_append_sheet(wb, noteWs, 'Instructions');
+  
+  XLSX.writeFile(wb, 'Master_Data_Template.xlsx');
+  showNotification('success', 'Template downloaded: Master_Data_Template.xlsx');
+}
+```
+
+---
+
+## 5. UPDATE DOWNLOAD HISTORY — INCLUDE NEW COLUMNS
+
+When downloading a master data history entry, include the new columns in the export:
+
+```javascript
+const columnOrder = [
+  'fgMaterialCode',
+  'fgItemDescription',
+  'sfg1MaterialCode',
+  'sfgItemDescription',
+  'category',
+  'color',
+  'form',
+  'diameter',
+  'changeover',
+  'fgWeight',
+  'batchFm1',
+  'batchFm2',
+  'batchFm3',
+  'batchPmx',
+  'label1',
+  'label2',
+  'thread',
+  'sacksCode',
+  'sacksDesc',
+  'tagsCode',
+  'tagsDesc',
+  'l1Rate',
+  'l2Rate',
+  'l3Rate',
+  'l4Rate',
+  'l5Rate',
+  'l6Rate',
+  'l7Rate'
+];
+
+const headerMap = {
+  ...existingHeaderMap,
+  category: 'Category',
+  color: 'Color',
+  diameter: 'Diameter',
+  changeover: 'Changeover'
+};
+```
+
+---
+
+## 6. UPDATE CHATBOT SYSTEM PROMPT
+
+Include the new fields in the chatbot's knowledge:
+
+```
+Master Data fields include:
+- Product Details: FG Material Code, FG Item Description, SFG1 Material Code, SFG Item Description, Category, Color
+- Production Parameters: Form, Diameter, Changeover (hours), FG Weight
+- Batch Sizes: per feedmill (FM1, FM2, FM3, PMX)
+- Labeling: Label 1, Label 2
+- Packaging: Thread, Sacks Code/Desc, Tags Code/Desc
+- Run Rates: per line (L1-L7) in MT/hr
+
+Changeover times come from the Master Data and vary by product form:
+- P / MP forms = typically 0.17 hrs
+- C forms = typically 0.33 hrs
+- Others = typically 0.00 hrs
+```
+
+---
+
+## VERIFICATION
+
+### Master data parsing
+1. ✅ New file with 28 columns (including Diameter, Changeover, Category, Color) parses correctly
+2. ✅ Old file without new columns still parses — new fields default to empty
+3. ✅ All 28 columns displayed in the master data table
+
+### Header groups
+4. ✅ Product Details: FG Material Code, FG Item Description, SFG1 Material Code, SFG Item Description, Category, Color (6 cols)
+5. ✅ Production Parameters: Form, Diameter, Changeover, FG Weight (4 cols)
+6. ✅ Batch Sizes: Batch FM1, FM2, FM3, PMX (4 cols)
+7. ✅ Labeling: Label 1, Label 2 (2 cols)
+8. ✅ Packaging: Thread, Sacks Code, Sacks Desc, Tags Code, Tags Desc (5 cols)
+9. ✅ Run Rates: L1-L7 Rate (7 cols)
+
+### Order table — Category, Color, Diameter
+10. ✅ Item description cell shows: Product Name / Category | Color | Diameter
+11. ✅ If Color is empty, separator and Color are hidden
+12. ✅ If Diameter is empty, separator and Diameter are hidden
+13. ✅ Category pulled from master data by material code
+14. ✅ Color pulled from master data by material code
+15. ✅ Diameter pulled from master data by material code
+
+### Order table — Changeover
+16. ✅ Changeover auto-populated from master data, not hardcoded 0.17
+17. ✅ Changeover cell is read-only in order table
+18. ✅ Production time calculation uses master data changeover
+19. ✅ No hardcoded 0.17 remaining in codebase
+20. ✅ Fallback to 0.17 only if master data has no changeover value
+
+### Re-apply rules
+21. ✅ Re-apply includes Category, Color, Diameter, Changeover
+22. ✅ Done orders not updated
+23. ✅ Cancel PO orders not updated
+24. ✅ In Production orders not updated
+25. ✅ On-going orders not updated
+26. ✅ Plotted, Planned, Hold, Cut, Custom — updated
+
+### Download template
+27. ✅ Template includes all 28 columns
+28. ✅ Sample row includes Diameter, Changeover, Category, Color examples
+29. ✅ Instructions sheet updated with new column descriptions
+30. ✅ Changeover reference values included in instructions
+
+### New order creation
+31. ✅ Creating a new order with a material code auto-populates Category, Color, Diameter, Changeover
+32. ✅ Changeover immediately used in production time calculation
+```

@@ -1,0 +1,593 @@
+```
+Implement AI-generated, strategy-specific Sequence Insights in the Auto-Sequence After table.
+
+---
+
+## OBJECTIVE
+
+Upgrade the "Sequence Insight" column so that the insight shown for each order is:
+- AI-generated
+- strategy-specific
+- based on actual sequencing context
+- refreshed when the user switches between Standard, AI Balanced, and AI Profit-Optimized
+
+Right now, the insight appears generic/system-generated and feels fixed to the row. That is incorrect.
+
+The same order should be able to show different reasoning depending on the selected strategy:
+- Standard → chronology / urgency / protected rules
+- AI Balanced → material grouping / changeover reduction / date placement
+- AI Profit-Optimized → profit rate / margin / runtime / changeover
+
+---
+
+## 1. DO NOT USE ONE SHARED `_sequenceInsight`
+
+The current issue likely comes from storing one generic insight field on the order, such as:
+```javascript
+order._sequenceInsight = '...'
+```
+
+This must be replaced.
+
+Store insight **per strategy**.
+
+### Recommended structure:
+```javascript
+order._strategyInsights = {
+  standard: {
+    short: '',
+    long: ''
+  },
+  ai_balanced: {
+    short: '',
+    long: ''
+  },
+  ai_profit: {
+    short: '',
+    long: ''
+  }
+};
+```
+
+If another structure fits the codebase better, that is fine, but the logic must ensure:
+- insights are stored separately for each strategy
+- switching strategy changes the insight shown in the table
+
+---
+
+## 2. GENERATE INSIGHTS PER STRATEGY RESULT
+
+After each strategy result is built:
+- Standard
+- AI Balanced
+- AI Profit-Optimized
+
+generate Sequence Insights for the orders in that strategy output.
+
+This means:
+- Standard orders get Standard insight
+- AI Balanced orders get Balanced insight
+- AI Profit-Optimized orders get Profit insight
+
+Do not reuse one strategy’s insight for another strategy.
+
+---
+
+## 3. BUILD A BATCH AI INSIGHT GENERATOR
+
+To avoid too many API calls, generate insights in batch per strategy.
+
+### Suggested function:
+```javascript
+async function generateStrategyInsights({
+  strategyId,
+  ordersByLine,
+  changeoverRules,
+  masterData,
+  n10dData,
+}) {
+  // returns updated ordersByLine with _strategyInsights[strategyId]
+}
+```
+
+This function should:
+1. flatten or group orders by line
+2. build row context for each order
+3. call Azure OpenAI in batch
+4. receive `{ order_id, short, long }` per order
+5. write results back into `order._strategyInsights[strategyId]`
+
+---
+
+## 4. BUILD ROW CONTEXT FOR EACH ORDER
+
+Each row’s insight must be grounded in real context.
+
+### Create a helper like:
+```javascript
+function buildOrderInsightContext({
+  order,
+  previousOrder,
+  nextOrder,
+  strategyId,
+  line,
+  lineOrders,
+  index,
+  changeoverRules,
+}) {
+  const effectiveAvailDate = normalizeDate(order._aiSuggestedDate || order.target_avail_date);
+  const protectedReason = getProtectedReason(order);
+
+  const previousChangeover = previousOrder
+    ? calculateChangeoverBetween(previousOrder, order, changeoverRules, line)
+    : 0;
+
+  const nextChangeover = nextOrder
+    ? calculateChangeoverBetween(order, nextOrder, changeoverRules, line)
+    : 0;
+
+  const productionHours = calculateProductionHours(order, line);
+  const changeoverHours = previousOrder
+    ? calculateChangeoverBetween(previousOrder, order, changeoverRules, line)
+    : 0;
+
+  const margin = parseFloat(order._margin || 0) || 0;
+  const totalHours = productionHours + changeoverHours;
+  const profitRate = totalHours > 0 ? margin / totalHours : 0;
+
+  return {
+    strategy: strategyId,
+    line,
+    position: index + 1,
+    totalOrders: lineOrders.length,
+
+    order_id: order.id,
+    material_code_fg: order.material_code_fg,
+    item_description: order.item_description,
+
+    category: order.category,
+    color: order.color,
+    diameter: order.diameter,
+    form: order.form,
+    materialSignature: getMaterialSignature(order),
+
+    effectiveAvailDate,
+    originalAvailDate: normalizeDate(order._originalAvailDate || order.target_avail_date),
+    estimatedCompletionDate: order.estimated_completion_date || order._estimatedCompletion || null,
+
+    n10dStatus: order._n10dStatus || order.inferred_target_label || '',
+    protectedReason,
+
+    previousOrder: previousOrder
+      ? {
+          order_id: previousOrder.id,
+          item_description: previousOrder.item_description,
+          materialSignature: getMaterialSignature(previousOrder),
+          effectiveAvailDate: normalizeDate(previousOrder._aiSuggestedDate || previousOrder.target_avail_date),
+        }
+      : null,
+
+    nextOrder: nextOrder
+      ? {
+          order_id: nextOrder.id,
+          item_description: nextOrder.item_description,
+          materialSignature: getMaterialSignature(nextOrder),
+          effectiveAvailDate: normalizeDate(nextOrder._aiSuggestedDate || nextOrder.target_avail_date),
+        }
+      : null,
+
+    previousChangeover: Number(previousChangeover.toFixed(2)),
+    nextChangeover: Number(nextChangeover.toFixed(2)),
+
+    productionHours: Number(productionHours.toFixed(2)),
+    changeoverHours: Number(changeoverHours.toFixed(2)),
+    margin: Number(margin.toFixed(2)),
+    profitRate: Number(profitRate.toFixed(2)),
+
+    aiDateReason: order._aiDateReason || order._aiReasoning || '',
+  };
+}
+```
+
+Use the real existing helpers where possible.
+
+---
+
+## 5. ADD A PROTECTED-REASON HELPER
+
+```javascript
+function getProtectedReason(order) {
+  if (isMTOOrder(order)) return 'MTO';
+
+  const status = String(order._n10dStatus || order.inferred_target_label || '').toLowerCase();
+
+  if (status === 'critical') return 'Critical';
+  if (status === 'urgent') return 'Urgent';
+  if (status === 'monitor') return 'Monitor';
+  if (status.includes('prio replenish')) return 'Prio Replenish';
+
+  return null;
+}
+```
+
+---
+
+## 6. GENERATE INSIGHTS USING AZURE OPENAI
+
+Create a prompt builder for row-level batch insight generation.
+
+### Suggested function:
+```javascript
+function buildStrategyInsightsPrompt({ strategyId, lineContexts }) {
+  return `
+You are generating row-level sequencing explanations for a production scheduling system.
+
+The selected strategy is: ${strategyId}
+
+For each order, generate:
+1. "short" → concise one-line explanation for table display
+2. "long" → expanded explanation for the "more" view
+
+The explanation must reflect the CURRENT selected strategy and the actual order context.
+
+### Strategy behavior:
+- standard:
+  explain placement mainly by chronology, urgency, protected rules, and avail date
+- ai_balanced:
+  explain placement mainly by material compatibility, reduced changeover, safe-window date choice, and smoother line flow
+- ai_profit:
+  explain placement mainly by profit rate, margin, production hours, changeover hours, and why it was prioritized or deferred among safe orders
+
+### Rules:
+- Do not invent data
+- Use the actual row context provided
+- Keep "short" concise
+- Make "long" richer and more specific
+- If strategy is ai_profit, include the profit-rate formula in the long explanation:
+  Profit Rate = Margin ÷ (Production Hours + Changeover Hours)
+- If order is protected, mention the protected reason clearly
+- If material grouping influenced placement, explain it
+- If date adjustment influenced placement, explain it
+- Refer to neighboring orders when helpful
+
+### Output format:
+Return valid JSON only:
+{
+  "results": [
+    {
+      "order_id": "123",
+      "short": "Placed here to reduce changeover with similar Swine · Brown material.",
+      "long": "This order was positioned near adjacent Swine · Brown products to reduce cleaning and setup time. The selected date remains inside its safe window and supports smoother sequencing on the line."
+    }
+  ]
+}
+
+### Order contexts:
+${JSON.stringify(lineContexts, null, 2)}
+`;
+}
+```
+
+---
+
+## 7. STRATEGY-SPECIFIC EXPECTATIONS FOR THE AI
+
+### A. Standard
+The AI should explain:
+- earlier/later avail date
+- protected actual date
+- urgency / criticality
+- chronological placement
+
+### Good examples:
+- short: `"Placed earlier due to earlier avail date and higher urgency."`
+- long: `"This order remained ahead of later-dated orders because the standard sequence follows chronology and urgency first. Its target date is earlier than the orders below it, so the sequence keeps it higher in priority."`
+
+---
+
+### B. AI Balanced
+The AI should explain:
+- reduced changeover
+- grouped with nearby compatible material
+- safer/lighter-load date placement
+- smoother production flow
+
+### Good examples:
+- short: `"Placed here to align with compatible material and reduce changeover."`
+- long: `"This order was positioned near similar material to reduce cleaning and setup time between runs. Its date was also selected within the safe window to support smoother line utilization without compromising protected orders."`
+
+---
+
+### C. AI Profit-Optimized
+The AI should explain:
+- profit rate
+- why it was earlier/later than other eligible orders
+- formula using real values
+- still mention safety constraints if relevant
+
+### Good examples:
+- short: `"Prioritized here due to higher profit rate among safe flexible orders."`
+- long: `"This order was prioritized because it delivers stronger value per line-hour than other safe flexible options. Profit Rate = 18.00 ÷ (1.59 + 0.83) = 7.44 profit/hr. It was scheduled earlier while still respecting protected dated orders and safe sequencing rules."`
+
+---
+
+## 8. BATCH GENERATE PER LINE / PER STRATEGY
+
+Use batch generation so you do NOT make one AI call per row.
+
+Example approach:
+- for each strategy
+- for each line
+- build row contexts for all orders on that line
+- call AI once
+- map back results
+
+### Suggested implementation:
+```javascript
+async function generateStrategyInsights({
+  strategyId,
+  ordersByLine,
+  changeoverRules,
+  masterData,
+  n10dData,
+}) {
+  const updated = structuredClone(ordersByLine);
+
+  for (const [line, orders] of Object.entries(updated)) {
+    if (!orders || orders.length === 0) continue;
+
+    const lineContexts = orders.map((order, index) => {
+      const previousOrder = index > 0 ? orders[index - 1] : null;
+      const nextOrder = index < orders.length - 1 ? orders[index + 1] : null;
+
+      return buildOrderInsightContext({
+        order,
+        previousOrder,
+        nextOrder,
+        strategyId,
+        line,
+        lineOrders: orders,
+        index,
+        changeoverRules,
+      });
+    });
+
+    const prompt = buildStrategyInsightsPrompt({ strategyId, lineContexts });
+    const response = await callAzureOpenAI(prompt);
+    const parsed = parseInsightResponse(response);
+
+    const resultMap = new Map(
+      (parsed.results || []).map(r => [String(r.order_id), r])
+    );
+
+    updated[line] = orders.map(order => {
+      const aiInsight = resultMap.get(String(order.id));
+
+      return {
+        ...order,
+        _strategyInsights: {
+          ...(order._strategyInsights || {}),
+          [strategyId]: {
+            short: aiInsight?.short || 'Position determined by current sequencing strategy.',
+            long: aiInsight?.long || 'This order was placed based on the selected sequencing strategy and current schedule context.',
+          },
+        },
+      };
+    });
+  }
+
+  return updated;
+}
+```
+
+---
+
+## 9. ADD A RESPONSE PARSER
+
+```javascript
+function parseInsightResponse(responseText) {
+  try {
+    const match = responseText.match(/\{[\s\S]*\}/);
+    if (!match) return { results: [] };
+    return JSON.parse(match[0]);
+  } catch (error) {
+    console.error('Failed to parse AI insight response:', error);
+    return { results: [] };
+  }
+}
+```
+
+---
+
+## 10. GENERATE INSIGHTS WHEN EACH STRATEGY IS BUILT
+
+When generating strategies:
+- Standard
+- AI Balanced
+- AI Profit-Optimized
+
+call `generateStrategyInsights(...)` for each one.
+
+### Example:
+```javascript
+strategies.standard.orders = await generateStrategyInsights({
+  strategyId: 'standard',
+  ordersByLine: strategies.standard.orders,
+  changeoverRules,
+  masterData,
+  n10dData,
+});
+
+strategies.ai_balanced.orders = await generateStrategyInsights({
+  strategyId: 'ai_balanced',
+  ordersByLine: strategies.ai_balanced.orders,
+  changeoverRules,
+  masterData,
+  n10dData,
+});
+
+strategies.ai_profit.orders = await generateStrategyInsights({
+  strategyId: 'ai_profit',
+  ordersByLine: strategies.ai_profit.orders,
+  changeoverRules,
+  masterData,
+  n10dData,
+});
+```
+
+This ensures each strategy gets its own AI-generated insights.
+
+---
+
+## 11. SHOW INSIGHT BASED ON CURRENTLY SELECTED STRATEGY
+
+In the After table renderer, do not read a single `_sequenceInsight`.
+
+Instead read:
+```javascript
+const strategyKey = selectedStrategyId; // 'standard' | 'ai_balanced' | 'ai_profit'
+const insight = order._strategyInsights?.[strategyKey];
+```
+
+Then display:
+- `insight.short` in the cell
+- `insight.long` in the “more” expansion
+
+### Example:
+```jsx
+const currentInsight = order._strategyInsights?.[selectedStrategyId] || {
+  short: 'Position determined by current sequencing strategy.',
+  long: 'This order was placed based on the currently selected strategy.',
+};
+
+<td className="as-col-insight">
+  <span className="sequence-insight-short">{currentInsight.short}</span>
+  <button
+    type="button"
+    className="sequence-insight-more"
+    onClick={() => openInsightModal(currentInsight.long)}
+  >
+    more
+  </button>
+</td>
+```
+
+If you already use inline expand/collapse instead of modal, just wire the same `long` value into that.
+
+---
+
+## 12. ENSURE INSIGHT CHANGES WHEN USER SWITCHES STRATEGY
+
+When the user switches:
+- Standard
+- AI Balanced
+- AI Profit-Optimized
+
+the After table should already be using the selected strategy’s orders, and now must also show that same strategy’s insight.
+
+No stale insight should remain from previous strategy selection.
+
+---
+
+## 13. KEEP SHORT TEXT CONCISE
+
+The `short` text must fit row display.
+The `long` text can be richer.
+
+### Good target:
+- short = 1 sentence
+- long = 2–4 sentences with actual explanation
+
+Do not overcrowd the visible cell.
+
+---
+
+## 14. FAIL SAFELY
+
+If AI insight generation fails:
+- keep strategy output intact
+- fall back to a minimal strategy-aware system message
+
+### Example fallback:
+```javascript
+function getFallbackInsight(strategyId, order) {
+  if (strategyId === 'standard') {
+    return {
+      short: 'Placed according to chronology and priority rules.',
+      long: 'This order was positioned using the standard sequencing logic based on date and scheduling priority.',
+    };
+  }
+
+  if (strategyId === 'ai_balanced') {
+    return {
+      short: 'Placed to support smoother flow and lower changeover.',
+      long: 'This order was positioned using AI balanced sequencing to improve flow while respecting scheduling constraints.',
+    };
+  }
+
+  if (strategyId === 'ai_profit') {
+    return {
+      short: 'Placed to improve profitability while staying schedule-safe.',
+      long: 'This order was positioned using AI profit-optimized sequencing to improve profitability while respecting scheduling constraints.',
+    };
+  }
+
+  return {
+    short: 'Placed by sequencing logic.',
+    long: 'This order was placed by the current sequencing strategy.',
+  };
+}
+```
+
+---
+
+## 15. OPTIONAL: INCLUDE NUMERIC VALUES IN LONG INSIGHT FOR PROFIT
+
+For `ai_profit`, the long insight should ideally include:
+- margin
+- production hours
+- changeover hours
+- computed profit rate
+
+Example:
+- Margin: 18.00
+- Production Hours: 1.59
+- Changeover Hours: 0.83
+- Profit Rate = 18.00 ÷ (1.59 + 0.83) = 7.44 profit/hr
+
+This should be AI-generated using actual provided context.
+
+---
+
+## VERIFICATION
+
+### Strategy-specific behavior
+1. ✅ Sequence Insight is stored per strategy, not as one shared field
+2. ✅ Standard, AI Balanced, and AI Profit-Optimized each have separate insight text
+3. ✅ Switching strategy changes the Sequence Insight column accordingly
+4. ✅ No stale insight remains from previous strategy selection
+
+### AI-generated reasoning
+5. ✅ Insight text is generated by Azure OpenAI, not only static templates
+6. ✅ Standard insight explains chronology / urgency / protected order logic
+7. ✅ Balanced insight explains material grouping / changeover reduction / date placement
+8. ✅ Profit insight explains margin / production hours / changeover / profit rate
+
+### Context awareness
+9. ✅ Insight uses actual row context
+10. ✅ Insight considers neighboring orders
+11. ✅ Insight uses actual dates, statuses, material compatibility, and changeover values
+12. ✅ Profit insight uses real master data margin and computed profit rate
+
+### UI behavior
+13. ✅ Short text appears in the Sequence Insight cell
+14. ✅ Long text appears under “more”
+15. ✅ Insight updates when strategy changes
+16. ✅ Table remains readable and not overcrowded
+
+### Reliability
+17. ✅ Batch generation is used to avoid one AI call per row
+18. ✅ Failure falls back safely to strategy-aware default text
+19. ✅ Existing strategy generation remains intact
+20. ✅ Users can now clearly understand why an order is placed in its current position
+```

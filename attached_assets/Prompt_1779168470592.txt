@@ -1,0 +1,245 @@
+Please add an **Upload** button to the **Demand Profile** page so users can upload historical demand data files.
+
+This upload feature should support both of the following spreadsheet structures and parse them correctly into the app.
+
+---
+
+## REQUIRED UI CHANGE
+
+Add an **Upload Demand Data** button in the Demand Profile page, ideally near the top filter/control area.
+
+Recommended placement:
+- near Search SKU / Time Grain / Year / Month controls
+
+Optional but recommended:
+- also add a **Download Template** button if easy
+
+---
+
+## PURPOSE
+
+The uploaded demand file will serve as the historical demand data source for the Demand Profile page.
+
+The app should parse the uploaded spreadsheet and normalize it into a consistent internal structure that the page can use for:
+- the detailed demand table
+- the monthly heatmap / demand profile table
+- summary cards
+- insights
+
+---
+
+## SUPPORTED FILE STRUCTURES
+
+### FORMAT A — 5-YEAR WIDE FORMAT
+
+Support files structured like:
+
+- FG Material Code
+- FG Item Description
+- SFG1 Material Code
+- SFG Item Description
+- Jan-2021
+- Feb-2021
+- Mar-2021
+- ...
+- Dec-2025
+
+Example:
+Each SKU appears once, and each month-year is a separate demand column.
+
+### Parsing behavior
+Please unpivot these month-year columns into normalized demand records such as:
+- fg_material_code
+- fg_item_description
+- sfg1_material_code
+- sfg_item_description
+- year
+- month
+- demand_qty_mt
+
+Example:
+`Jan-2021 = 147.285`
+should become:
+- year = 2021
+- month = January
+- demand_qty_mt = 147.285
+
+---
+
+### FORMAT B — 1-YEAR WIDE FORMAT
+
+Support files structured like:
+
+- FG Material Code
+- FG Item Description
+- SFG1 Material Code
+- SFG Item Description
+- January
+- February
+- March
+- ...
+- December
+
+Example:
+Each SKU appears once, and each month is a separate demand column for one year only.
+
+### Parsing behavior
+Please also unpivot these month columns into normalized demand records.
+
+Because this format does not include the year in the month column names, the app should do one of the following:
+- ask the user to specify the year during upload
+- or clearly infer/store the selected year in a reliable way
+
+Preferred behavior:
+If a 1-year file is uploaded, prompt the user to select the year before confirming import.
+
+---
+
+## NORMALIZED INTERNAL STRUCTURE
+
+Regardless of upload format, convert the uploaded file into a consistent internal structure such as:
+
+- fg_material_code
+- fg_item_description
+- sfg1_material_code
+- sfg_item_description
+- year
+- month
+- demand_qty_mt
+
+This normalized structure should be the source for Demand Profile calculations and rendering.
+
+---
+
+## VALIDATION RULES
+
+Please validate the uploaded file before importing.
+
+### Required base columns
+- FG Material Code
+- FG Item Description
+- SFG1 Material Code
+- SFG Item Description
+
+### Supported demand columns
+Either:
+- month-year columns like `Jan-2021`
+or
+- month-only columns like `January`
+
+### Numeric validation
+- demand cells should be numeric
+- blank demand cells may be treated as 0 or null, but should not break parsing
+
+### Error handling
+If the file does not match a supported structure, show a clear error message such as:
+- Unsupported demand upload format
+- Missing required columns
+- Invalid month columns
+- Non-numeric demand values detected
+
+---
+
+## IMPORT UX
+
+Recommended upload flow:
+
+1. User clicks **Upload Demand Data**
+2. User selects file
+3. App detects whether the file is:
+   - 5-year wide format
+   - 1-year wide format
+4. If 1-year wide format is detected:
+   - prompt user to select the year
+5. Show a simple preview summary before import, such as:
+   - number of SKUs detected
+   - number of demand periods detected
+   - format detected
+6. User confirms import
+7. Demand Profile page refreshes using the uploaded data
+
+---
+
+## DATA REPLACEMENT / STORAGE BEHAVIOR
+
+Please define the uploaded demand data as the source for the Demand Profile page.
+
+If needed, add safe handling such as:
+- replace existing uploaded demand dataset
+or
+- import as the current active demand dataset
+
+At minimum, do not break the page if a new file is uploaded.
+
+---
+
+## PAGE INTEGRATION
+
+After successful upload:
+- summary cards should update
+- the detailed demand table should update
+- the monthly heatmap table should update
+- filters should work against the uploaded data
+
+---
+
+## DO NOT BREAK EXISTING PAGE FEATURES
+
+Please make sure this upload feature does not break:
+- current filters
+- current summary cards
+- current detailed demand table
+- current heatmap / monthly profile table
+- time grain switching
+- search functionality
+
+This should extend the Demand page, not regress it.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log:
+
+```javascript
+console.debug('[Demand Upload File Detected]', {
+  fileName,
+  detectedFormat, // 'wide_5_year' | 'wide_1_year'
+  rowCount,
+  columnCount,
+});
+```
+
+```javascript
+console.debug('[Demand Upload Parse Result]', {
+  detectedFormat,
+  skuCount,
+  normalizedRowCount,
+  selectedYearForOneYearFormat,
+});
+```
+
+```javascript
+console.debug('[Demand Upload Validation]', {
+  missingColumns,
+  invalidColumns,
+  invalidValueCount,
+  canImport,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Demand Profile page includes an **Upload Demand Data** button
+2. ✅ The app accepts the 5-year wide format with columns like `Jan-2021 ... Dec-2025`
+3. ✅ The app accepts the 1-year wide format with columns like `January ... December`
+4. ✅ 5-year format is correctly unpivoted into normalized year/month demand records
+5. ✅ 1-year format is correctly unpivoted into normalized year/month demand records
+6. ✅ For 1-year format, the app prompts for year selection if needed
+7. ✅ Uploaded data appears correctly in the detailed demand table
+8. ✅ Uploaded data appears correctly in the monthly heatmap table
+9. ✅ Summary cards update correctly after upload
+10. ✅ Invalid file structures show clear validation errors
+11. ✅ No console errors or parsing crashes occur during upload

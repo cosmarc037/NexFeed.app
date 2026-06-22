@@ -1,0 +1,209 @@
+Please update the **Line 5 (Powermix) source-order combination behavior** so that **Line 5 source orders can still combine on Line 5**, even though they remain fixed to Line 5 and do not participate in cross-line movement.
+
+---
+
+## 1. ALLOW LINE 5 SOURCE ORDERS TO COMBINE ON LINE 5
+
+Currently, Line 5 (Powermix) source orders are not being combined during auto-sequence, mainly because Powermix does not participate in the same auto-sequence / optimization modal flow that triggers the combine logic for other lines.
+
+Please update this behavior.
+
+### New intended rule
+Line 5 source orders should still be allowed to:
+- **combine with other compatible Line 5 source orders**
+- **on Line 5 itself**
+
+### Expected result
+Powermix source orders should no longer be excluded from combination just because Line 5 does not use the regular cross-line auto-sequence flow.
+
+---
+
+## 2. KEEP LINE 5 SOURCE ORDERS FIXED TO LINE 5
+
+This update is **not** meant to make Line 5 source orders movable across lines.
+
+### Important
+Line 5 source orders should remain:
+- fixed to `Line 5`
+- not eligible for cross-line movement
+- not eligible to be moved to other lines during auto-sequence
+- not eligible for other-line orders to move into Line 5 unless there is a separate approved rule for that
+
+### Expected result
+Line 5 source orders can combine, but only **within Line 5**.
+
+---
+
+## 3. APPLY COMBINATION ONLY WITHIN LINE 5 FOR POWERMIX SOURCE ORDERS
+
+Please make sure the new combine behavior for Line 5 source orders is limited to:
+- same-line combination on `Line 5`
+
+### Expected result
+The app may combine:
+- Line 5 source order + Line 5 source order
+
+But it should not:
+- move Line 5 source orders to other lines for combining
+- move outside orders into Line 5 for combining
+- treat Line 5 as part of the normal cross-line auto-sequence movement universe
+
+---
+
+## 4. PRESERVE THE GENERATED-VS-SOURCE COMBINATION GUARDRAIL
+
+Please keep the existing hard guardrail that:
+- generated orders must never combine with source orders
+
+### Important
+This request is only to allow:
+- **source + source** combinations on Line 5
+
+It must **not** allow:
+- generated + source combinations
+- even if they appear on the same line
+- even if material values seem compatible
+
+### Expected result
+The app should still reject:
+- Powermix-generated orders + normal source orders
+
+while allowing:
+- Line 5 source orders + Line 5 source orders
+
+---
+
+## 5. PRESERVE VALID GENERATED-TO-GENERATED COMBINATION RULES
+
+Please keep the existing behavior where:
+- generated orders may combine with other generated orders
+when their combination rules are valid
+
+### Expected result
+This change should not interfere with:
+- generated-to-generated combination logic
+- source-to-source logic on other lines
+- the generated/source hard block
+
+---
+
+## 6. APPLY NORMAL SAME-CLASS COMBINATION RULES TO LINE 5 SOURCE ORDERS
+
+When combining Line 5 source orders on Line 5, please still apply the app’s normal compatible same-class combination rules such as:
+- same source-order class / normal-source class
+- valid matching logic used for source orders
+- combine cap
+- any existing source-order compatibility restrictions
+
+### Expected result
+Line 5 source orders should not combine indiscriminately.
+They should combine only when they meet the normal same-class source-order combination rules.
+
+---
+
+## 7. APPLY THE CURRENT COMBINE CAP TO LINE 5 SOURCE-ORDER COMBINATIONS
+
+Please use the current combination cap rule when combining Line 5 source orders.
+
+### Expected result
+Line 5 source-order combinations should still respect the current max allowed combined volume cap used by the app.
+
+If the combine cap is currently:
+- `200 MT`
+
+then Line 5 source-order combinations should also respect that same cap unless there is a separate approved cap for Powermix.
+
+---
+
+## 8. IMPLEMENT THIS EVEN IF LINE 5 DOES NOT USE THE NORMAL AUTO-SEQUENCE MODAL
+
+Because Powermix does not use the same standard cross-line auto-sequence flow, please ensure Line 5 source-order combination is still supported through an appropriate same-line logic path.
+
+### Goal
+The lack of a normal auto-sequence modal for Line 5 should not prevent valid same-line combination of Line 5 source orders.
+
+### Expected result
+Line 5 source-order combination should work through an appropriate same-line combine mechanism, even if Powermix is not part of the full cross-line optimization UI.
+
+---
+
+## 9. KEEP LINE 5 OUT OF CROSS-LINE MOVEMENT WHILE ALLOWING SAME-LINE COMBINE
+
+Please preserve this distinction clearly:
+
+### Line 5 source orders
+- can combine on Line 5
+- cannot move to other lines
+- are not part of cross-line movement optimization
+
+### Expected result
+This update enables same-line operational efficiency for Powermix without changing the line-movement rules.
+
+---
+
+## IMPORTANT
+
+Please implement this business rule:
+
+> **Line 5 (Powermix) source orders can combine with other compatible Line 5 source orders on Line 5 itself.**
+
+But:
+- they must remain fixed to Line 5
+- they must not participate in cross-line movement
+- generated orders must still never combine with source orders
+
+This is a same-line combine enhancement for Powermix source orders, not a cross-line movement change.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log same-line combine eligibility for Line 5 source orders.
+
+```javascript
+console.debug('[Line 5 Source Combine Check]', {
+  line: 5,
+  orderAId,
+  orderBId,
+  orderAType,
+  orderBType,
+  sameLine: true,
+  eligibleForLine5SourceCombine,
+});
+```
+
+```javascript
+console.debug('[Line 5 Source Combine Result]', {
+  line: 5,
+  combinedOrderIds,
+  totalCombinedVolume,
+  withinCap,
+  combined: true,
+});
+```
+
+```javascript
+console.debug('[Line 5 Generated/Source Guardrail]', {
+  line: 5,
+  orderAType,
+  orderBType,
+  blockedReason:
+    orderAType !== orderBType
+      ? 'generated_and_source_orders_cannot_combine'
+      : null,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Line 5 source orders can combine with other compatible Line 5 source orders
+2. ✅ Line 5 source-order combinations happen only on Line 5
+3. ✅ Line 5 source orders remain fixed to Line 5 and are not moved across lines
+4. ✅ Cross-line movement behavior for Line 5 remains unchanged
+5. ✅ Generated orders still cannot combine with source orders
+6. ✅ Valid generated-to-generated combination behavior remains intact
+7. ✅ Normal same-class combination rules still apply to Line 5 source orders
+8. ✅ Line 5 source-order combinations still respect the current combine cap
+9. ✅ No UI errors or console errors are introduced

@@ -1,0 +1,151 @@
+Please revisit and fix the **combined-order sequencing basis** in the **Auto-Sequence** feature so that for combined orders, the app uses the **lead order as the canonical basis** for sequencing and avail-date logic.
+
+---
+
+## 1. USE THE LEAD ORDER AS THE CANONICAL BASIS FOR COMBINED-ORDER SEQUENCING
+
+There appears to be an issue where combined orders may be sequenced using the avail dates or metadata of sub-orders, which can distort the final placement.
+
+### Required rule
+For a combined order / combined production entity, please use the **lead order** as the canonical basis for sequencing.
+
+### This should apply especially to:
+- avail date logic
+- AI rank context
+- final rank / sequencing placement
+- date-based ordering behavior
+- any combined-entity metadata used during preview/apply sequencing
+
+### Expected result
+Combined orders should behave like one unified production entity, with the lead order acting as the single canonical reference.
+
+---
+
+## 2. DO NOT LET SUB-ORDER AVAIL DATES OVERRIDE THE COMBINED ENTITY’S SEQUENCING BASIS
+
+The current behavior suggests the app may be using sub-order avail dates when deciding where a combined order should land.
+
+### Current problem
+A combined entity may be pushed earlier or positioned incorrectly because one or more sub-orders have dates that are being used as the basis instead of the lead order.
+
+### Required behavior
+Once orders are combined, the sequencing logic should not let sub-order avail dates override the combined entity’s canonical sequencing basis.
+
+### Expected result
+The combined entity should not jump forward/backward in sequence because of sub-order dates if the lead order is the intended canonical reference.
+
+---
+
+## 3. MAKE COMBINED ORDERS BEHAVE AS ONE UNIFIED SEQUENCING ENTITY
+
+Please ensure that once orders are combined, they are treated as one unified sequencing entity in practice.
+
+### Goal
+The app should not sequence the combined order as if its members are still independent timing anchors.
+
+### Expected result
+The AI/resequencing logic should treat the combined group as one entity, using the lead order as the reference point.
+
+---
+
+## 4. ALIGN AI RANK / FINAL RANK LOGIC FOR COMBINED ORDERS WITH THE LEAD ORDER BASIS
+
+Please make sure the AI vs Final sequencing logic is also aligned with this rule.
+
+### Required behavior
+If a combined order appears in:
+- AI Rank
+- Final Rank
+- explanation tables
+- preview rows
+
+then the canonical combined entity should be represented using the lead order’s sequencing basis rather than sub-order date leakage.
+
+### Expected result
+The combined order’s rank and placement become easier to understand and less misleading.
+
+---
+
+## 5. PRESERVE CORRECT DATE-BASED ORDERING FOR COMBINED ENTITIES
+
+If a combined entity is placed according to avail-date logic, the date used for that combined entity should come from the correct canonical basis.
+
+### Required behavior
+Do not derive the combined entity’s sequencing date from arbitrary sub-order values if the lead order is meant to represent the combined group.
+
+### Expected result
+Combined entities sort correctly and consistently according to the lead-order-based date logic.
+
+---
+
+## 6. APPLY THIS TO PREVIEW AND FINAL APPLY-TO-SCHEDULE BEHAVIOR
+
+Please make sure this lead-order-based rule applies to both:
+- auto-sequence preview
+- final apply-to-schedule
+
+### Expected result
+The previewed placement and final applied placement for combined orders should both follow the lead-order sequencing basis.
+
+---
+
+## IMPORTANT
+
+Please implement this rule for **combined orders** in Auto-Sequence:
+
+> Once orders are combined, the app should use the **lead order as the canonical basis** for sequencing and avail-date logic.
+
+This means:
+- do not let sub-order avail dates drive the combined entity’s placement
+- treat the combined order as one unified sequencing entity
+- use the lead order as the main reference for rank, date, and placement logic
+
+This should help prevent cases where combined orders are placed earlier/later than expected because the app is reading sub-order dates instead of the lead order.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log the canonical sequencing basis for combined entities.
+
+```javascript
+console.debug('[Combined Order Sequencing Basis]', {
+  combinedEntityId,
+  leadOrderId,
+  subOrderIds,
+  canonicalBasis: 'lead_order',
+  leadOrderAvailDate,
+  subOrderAvailDates,
+  usedAvailDateForSequencing,
+});
+```
+
+```javascript
+console.debug('[Combined Order AI vs Final Rank Basis]', {
+  combinedEntityId,
+  leadOrderId,
+  aiRank,
+  finalRank,
+  sequencingBasisUsesLeadOrder: true,
+});
+```
+
+```javascript
+console.debug('[Combined Order Apply Consistency]', {
+  combinedEntityId,
+  previewUsedLeadOrderBasis: true,
+  appliedUsedLeadOrderBasis: true,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Combined orders use the lead order as the canonical sequencing basis
+2. ✅ Sub-order avail dates no longer override the combined entity’s placement logic
+3. ✅ Combined orders behave like one unified sequencing entity
+4. ✅ AI Rank / Final Rank logic for combined orders uses the lead-order basis
+5. ✅ Combined entities sort correctly using the canonical date logic
+6. ✅ Preview and apply both follow the same lead-order-based sequencing rule
+7. ✅ No UI errors or console errors are introduced

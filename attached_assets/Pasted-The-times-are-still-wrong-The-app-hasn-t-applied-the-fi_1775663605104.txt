@@ -1,0 +1,45 @@
+The times are still wrong. The app hasn't applied the fix yet. Let me verify against what the app shows vs what it SHOULD show:
+
+**Order 1: 24 MT, Rate 19.40, CO 0.83**
+- Start: 08:00 AM
+- Production: 24 / 19.40 = 1.237 hrs
+- Completion: 08:00 + 1.237 = **09:14 AM**
+- App shows: 09:14 AM ✅
+
+**Order 2: 80 MT, Rate 19.10, CO 0.83**
+- Start should be: 09:14 AM + 0.83 hrs (Order 1's CO) = **10:04 AM**
+- Production: 80 / 19.10 = 4.188 hrs
+- Completion should be: 10:04 + 4.188 = **02:15 PM**
+- App shows: **01:36 PM** ❌
+
+**Order 3: 3 MT, Rate 19.31, CO 0.17**
+- Start should be: 02:15 PM + 0.83 hrs (Order 2's CO) = **03:05 PM**
+- Production: 3 / 19.31 = 0.155 hrs
+- Completion should be: 03:05 + 0.155 = **03:14 PM**
+- App shows: **01:55 PM** ❌
+
+**Order 4: 39 MT, Rate 19.51, CO 0.17**
+- Start should be: 03:14 PM + 0.17 hrs (Order 3's CO) = **03:24 PM**
+- Production: 39 / 19.51 = 1.999 hrs
+- Completion should be: 03:24 + 1.999 = **05:24 PM**
+- App shows: **04:06 PM** ❌
+
+**Order 5: 80 MT, Rate 19.14, CO 0.83**
+- Start should be: 05:24 PM + 0.17 hrs (Order 4's CO) = **05:34 PM**
+- Production: 80 / 19.14 = 4.179 hrs
+- Completion should be: 05:34 + 4.179 = **09:45 PM**
+- App shows: **08:27 PM** ❌
+
+**Summary — the app is NOT adding the previous order's changeover as a gap.** It appears to be cascading as: next order start = previous completion (no changeover gap).
+
+The previous prompt I provided has the correct fix. It hasn't been applied yet. The correct completion times should be:
+
+| Order | Volume | Rate | CO | Correct Start | Correct Completion | App Shows |
+|---|---|---|---|---|---|---|
+| 1 | 24 MT | 19.40 | 0.83 | 08:00 AM | 09:14 AM | 09:14 AM ✅ |
+| 2 | 80 MT | 19.10 | 0.83 | 10:04 AM | 02:15 PM | 01:36 PM ❌ |
+| 3 | 3 MT | 19.31 | 0.17 | 03:05 PM | 03:14 PM | 01:55 PM ❌ |
+| 4 | 39 MT | 19.51 | 0.17 | 03:24 PM | 05:24 PM | 04:06 PM ❌ |
+| 5 | 80 MT | 19.14 | 0.83 | 05:34 PM | 09:45 PM | 08:27 PM ❌ |
+
+Please apply the previous prompt's fix — the `recalculateCompletionDates` function needs to add `previousChangeover` between orders.

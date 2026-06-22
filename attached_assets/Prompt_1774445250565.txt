@@ -1,0 +1,180 @@
+```
+Implement the following fix to the Safety Stock Insights:
+
+---
+
+## FIX: TOPIC HEADINGS STILL INLINE WITH CONTENT
+
+The topic headings are still appearing on the same line as the content. The AI is not putting a line break after the heading.
+
+---
+
+### THE PROBLEM
+
+Current output:
+```
+📊 Overview In total, we have 20 products under review...
+🔴 Urgent Production Immediate attention is needed for...
+🟢 Stock Sufficient The products with adequate inventory...
+```
+
+Expected output:
+```
+📊 Overview
+In total, we have 20 products under review...
+
+🔴 Urgent Production
+Immediate attention is needed for...
+
+🟢 Stock Sufficient
+The products with adequate inventory...
+```
+
+---
+
+### FIX 1: UPDATE AI PROMPT
+
+Add this as the FIRST rule in the prompt, repeated for emphasis:
+
+```
+MOST IMPORTANT FORMATTING RULE — READ THIS CAREFULLY:
+
+Every topic heading MUST be followed by a newline character (\n).
+The content paragraph MUST start on the NEXT line.
+
+DO THIS:
+📊 **Overview**\n
+In total, we have 20 products...
+
+🔴 **Urgent Production**\n
+Immediate attention is needed...
+
+DO NOT DO THIS:
+📊 **Overview** In total, we have 20 products...
+🔴 **Urgent Production** Immediate attention is needed...
+
+This rule applies to EVERY topic heading in the output. 
+No exceptions. The heading is ALWAYS on its own line.
+```
+
+---
+
+### FIX 2: POST-PROCESSING — FORCE LINE BREAK AFTER HEADINGS
+
+Even if the AI ignores the rule, force a line break after every topic heading using post-processing:
+
+```javascript
+function forceHeadingLineBreaks(text) {
+  // Pattern: emoji + space + **heading text** + space + content
+  // Force a \n after the closing **
+  
+  // Match: emoji(s) + bold heading + immediate content (no line break)
+  text = text.replace(
+    /([\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F600}-\u{1F64F}\u{1F680}-\u{1F6FF}\u{2702}-\u{27B0}\u{FE00}-\u{FEFF}\u{1F900}-\u{1F9FF}\u{200D}\u{20E3}\u{E0020}-\u{E007F}\u{2B50}\u{2705}\u{274C}\u{1F4CA}\u{1F534}\u{1F7E1}\u{1F7E2}]+\s*\*\*[^*]+\*\*)(\s*)(?!\n|<br>)/gu,
+    '$1\n'
+  );
+  
+  return text;
+}
+```
+
+Or a simpler approach — target the known headings:
+
+```javascript
+function forceHeadingLineBreaks(text) {
+  const headings = [
+    'Overview',
+    'Urgent Production',
+    'Upcoming Production',
+    'Stock Sufficient',
+    'SAP Order Match',
+    'Production Needed',
+    'Extended Production'
+  ];
+  
+  headings.forEach(heading => {
+    // Match: any prefix + **heading** + space + content (no line break)
+    const regex = new RegExp(
+      `(\\*\\*${heading}\\*\\*)[ \\t]+(?!\\n)`,
+      'g'
+    );
+    text = text.replace(regex, '$1\n');
+  });
+  
+  return text;
+}
+```
+
+---
+
+### FIX 3: HTML RENDERING — ENSURE \n CONVERTS TO <br>
+
+After forcing line breaks, ensure the markdown parser converts them:
+
+```javascript
+function parseAIText(rawText) {
+  let html = rawText;
+  
+  // Force heading line breaks first
+  html = forceHeadingLineBreaks(html);
+  
+  // Convert **bold** to <strong>
+  html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+  
+  // Convert \n\n to paragraph break
+  html = html.replace(/\n\n/g, '<br><br>');
+  
+  // Convert \n to line break
+  html = html.replace(/\n/g, '<br>');
+  
+  // Convert --- to horizontal rule
+  html = html.replace(/---/g, '<hr>');
+  
+  // Clean up
+  html = html.replace(/<br><br><br>/g, '<br><br>');
+  html = html.replace(/^<br>/, '');
+  
+  return html;
+}
+```
+
+---
+
+### EXPECTED RESULT AFTER FIX
+
+```
+📊 Overview
+In total, we have 20 products under review, with 17 requiring 
+production to meet demand. Currently, the total balance to 
+produce stands at approximately -403 MT, indicating a significant 
+deficit in our inventory levels.
+
+─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
+
+🔴 Urgent Production
+Immediate attention is needed for several products targeting 
+within the next three days. Poultry Sol Broiler Starter Cr MD 
+50kg is the most pressing, with a demand of 127.8 MT and an 
+inventory of 376.4 MT, resulting in a buffer of 66%.
+
+─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
+
+🟢 Stock Sufficient
+The products with adequate inventory levels include Ave Max 
+Duck Layex 50 kg, Gall 21 Chicken Layer P (Breeder) 50Kg, 
+and Salto Baby Stag w/Grits 1kg.
+
+─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
+
+✅ SAP Order Match
+All orders have been successfully matched in SAP, with 20 of 
+20 products accounted for.
+```
+
+---
+
+### APPLY ONLY TO
+
+- ✅ Safety Stock Insights
+- ❌ Do NOT touch any other AI output
+```

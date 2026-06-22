@@ -1,0 +1,123 @@
+Implement the following changes to the NexFeed application:
+
+---
+
+## 1. DEFAULT START DATE AND TIME FOR FIRST UPLOAD
+
+When a file is uploaded from scratch (no existing orders in the application), the system has no basis for scheduling since there are no prior orders to cascade from.
+
+**Default behavior for first order per line:**
+- The FIRST order (Prio 1) in each feedmill line defaults to:
+  - Start Date: The current date (date of upload) in MM/DD/YYYY format
+  - Start Time: 8:00 AM
+- All subsequent orders in the same line cascade from there as normal:
+  - Order 2 Start Date/Time = Order 1 Completion Date + Changeover Time
+  - Order 3 Start Date/Time = Order 2 Completion Date + Changeover Time
+  - And so on.
+
+**When this applies:**
+- Only when there are NO existing orders in the feedmill line prior to the upload.
+- If there are already existing orders in the line and a new file is uploaded (appending new orders), the new orders cascade from the last existing order's Completion Date — the 8:00 AM default does NOT apply.
+
+**User override:**
+- The default Start Date and Start Time are editable. If the user changes the first order's Start Date or Start Time, all subsequent orders in the line recascade accordingly.
+
+---
+
+## 2. COMBINED ORDERS — DRAG AND DROP BEHAVIOR
+
+Reinforce and clarify the drag-and-drop behavior for combined order groups:
+
+**Parent (lead) row:**
+- The lead row IS draggable. The user can initiate a drag from anywhere on the lead row (except interactive elements as previously defined).
+- When the lead row is dragged, ALL child rows in the group move together as a single block.
+- The block maintains its internal order: lead row first, then child rows in their original sequence below.
+
+**Child rows:**
+- Child rows are NOT individually draggable. They cannot be picked up or reordered independently.
+- Cursor on child rows: Default cursor (no `grab` cursor). No drag handle icon displayed on child rows.
+- If a user attempts to drag a child row, nothing happens — no drag operation initiates.
+
+**Drop behavior:**
+- When the lead row is dropped at a new position, the entire group (lead + all children) is placed at that position.
+- Prio numbers re-sequence automatically for all orders in the line.
+- The scheduling cascade recalculates Start Date/Time and Completion Date for all affected orders.
+
+**Visual feedback during drag:**
+- The drag preview shows the lead row AND all child rows as a grouped block (slightly elevated with shadow).
+- The drop target indicator (line or highlight showing where the group will be placed) accounts for the full height of the group, not just the lead row.
+
+---
+
+## 3. LINE 5 (POWERMIX) — ADDITIONAL PLANNED ORDER AND PRODUCTION ORDER FIELDS
+
+Line 5 exists exclusively in the Powermix tab. It has additional order reference fields beyond the standard FG/SFG and FG1/SFG1.
+
+**Planned Order column — Powermix tab:**
+
+Header changes to: `[FG | SFG | PMX]`
+
+Cell display (3 lines):
+- Line 1: FG value (bold, Dark Grey #2e343a) with label "FG:" prefix in lighter grey
+- Line 2: SFG value with label "SFG:" prefix in lighter grey
+- Line 3: PMX value with label "PMX:" prefix in lighter grey
+
+**Production Order column — Powermix tab:**
+
+Header changes to: `[FG1 | SFG1 | SFGPMX]`
+
+Cell display (3 lines):
+- Line 1: FG1 value (user-entered, blank on upload) with label "FG1:" prefix in lighter grey
+- Line 2: SFG1 value (user-entered, blank on upload) with label "SFG1:" prefix in lighter grey
+- Line 3: SFGPMX value (user-entered, blank on upload) with label "SFGPMX:" prefix in lighter grey
+
+**SAP parsing for Line 5 (Powermix):**
+
+When parsing the uploaded SAP file, for orders assigned to Line 5:
+- SAP column "FG" → maps to FG (Planned Order) — same as all other lines
+- SAP column "SFG" → maps to SFG (Planned Order) — same as all other lines
+- SAP column "SFG1" → maps to PMX (Planned Order) — this is UNIQUE to Line 5
+
+For all other lines (Lines 1–4, across Feedmill 1, 2, 3):
+- SAP column "SFG1" remains stored temporarily in a hidden internal field (as per previous change). It is NOT mapped to PMX or any visible column.
+
+**Production Order fields for Line 5 — all user-entered:**
+- FG1: Blank on upload, editable text field
+- SFG1: Blank on upload, editable text field
+- SFGPMX: Blank on upload, editable text field
+
+**Editability by status (same as FG1 and SFG1):**
+
+Field      Plotted  InProd  On-going*  Done  Cut  Combine  Hold  Cancel
+---------- ------   ------  ---------  ----  ---  -------  ----  ------
+FG1        E        E       E          R     E    E        E     R
+SFG1       E        E       E          R     E    E        E     R
+SFGPMX     E        E       E          R     E    E        E     R
+
+**PMX and SFGPMX visibility:**
+- PMX (Planned Order Line 3) and SFGPMX (Production Order Line 3) are ONLY visible on the Powermix tab.
+- On Feedmill 1, 2, and 3 tabs, the Planned Order column header remains `[FG | SFG]` (2 lines) and the Production Order column header remains `[FG1 | SFG1]` (2 lines). PMX and SFGPMX do not appear.
+
+**Column count:**
+- Powermix tab: No new columns added — PMX and SFGPMX are additional lines within the existing Planned Order and Production Order columns. Column count unchanged.
+- Feedmill 1, 2, 3 tabs: Unchanged.
+
+---
+
+## 4. RENAME "ACTIONS" COLUMN TO "HISTORY" AND CENTER-ALIGN
+
+**Column header:**
+- Rename from "Actions" to "History"
+
+**Alignment:**
+- The column header "History" is center-aligned.
+- The content within the History column (the history button/icon) is also center-aligned within the cell.
+
+**This applies across all tabs where the column is visible (all feedmill tabs and Powermix).**
+
+**Updated column order (left to right):**
+[Readiness (headless)] | Prio | FPR | Planned Order [FG | SFG] | Production Order [FG1 | SFG1] | Material Code (SFG) | Material Code (FG) | Item Description | Form | Volume (MT) | Batch Size | Number of Batches | Number of Bags | Production Time | HA Info | HA Prep | Status | Start Date | Start Time | Avail Date | Completion Date | FPR Notes | Special Remarks | Threads | Sacks | Markings | Tags | End Date | History
+
+Powermix-specific column headers:
+- Planned Order: [FG | SFG | PMX]
+- Production Order: [FG1 | SFG1 | SFGPMX]

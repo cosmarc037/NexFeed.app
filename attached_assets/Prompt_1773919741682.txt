@@ -1,0 +1,187 @@
+```
+Implement the following changes to the NexFeed application:
+
+---
+
+## UPLOAD HISTORY — DELETE FILE WITH CONFIRMATION DIALOG
+
+Add a delete button to each upload history entry in both the Knowledge Base and Next 10 Days pages. Deleting requires a confirmation dialog before proceeding.
+
+---
+
+### DELETE BUTTON — PLACEMENT
+
+Each upload history entry now has TWO action buttons on the right side:
+
+```
+📄 Dummy 10 Days.xlsx    Active                    ↓  🗑
+   Uploaded: 03/19/2026 04:22 PM · 20 products
+
+📄 Dummy 10 Days.xlsx                              ↓  🗑
+   Uploaded: 03/18/2026 08:15 AM · 20 products
+```
+
+| Button | Position | Styling |
+|---|---|---|
+| ↓ Download | Right-aligned | Grey icon (#9ca3af). Orange on hover (#fd5108). Cursor: pointer. |
+| 🗑 Delete | Right of download | Grey icon (#9ca3af). Red on hover (#e53935). Cursor: pointer. |
+
+**Button spacing:** 12px gap between download and delete icons.
+
+**Button size:** Same icon size as download button (~16px).
+
+---
+
+### DELETE CONFIRMATION DIALOG
+
+When user clicks the 🗑 delete button, a confirmation dialog appears BEFORE the file is deleted.
+
+**Dialog layout:**
+
+```
+╔══════════════════════════════════════════════════════╗
+║  🗑 Delete Upload                                     ║
+║                                                       ║
+║  Are you sure you want to delete this file?           ║
+║                                                       ║
+║  File:       Dummy 10 Days.xlsx                       ║
+║  Uploaded:   03/18/2026 08:15 AM                      ║
+║  Records:    20 products                              ║
+║                                                       ║
+║  ⚠ This action cannot be undone. The file and its    ║
+║  data will be permanently removed.                    ║
+║                                                       ║
+║              [Cancel]    [Delete]                      ║
+╚══════════════════════════════════════════════════════╝
+```
+
+**Dialog details:**
+
+| Element | Styling |
+|---|---|
+| Title "🗑 Delete Upload" | 16px, font-weight 600, dark text (#1a1a1a) |
+| Description | 13px, grey (#6b7280) |
+| File name | 13px, font-weight 600, dark text (#1a1a1a) |
+| Upload date | 13px, grey (#6b7280) |
+| Record count | 13px, grey (#6b7280) |
+| Warning section background | Light red (#fef2f2) |
+| Warning section border | 1px solid #fecaca |
+| Warning section border-radius | 6px |
+| Warning section padding | 10px 12px |
+| Warning icon ⚠ | Red (#e53935) |
+| Warning text | 12px, dark red (#991b1b) |
+
+**Buttons:**
+
+| Button | Styling |
+|---|---|
+| [Cancel] | Grey outlined. Border: 1px solid #d1d5db. Text: grey (#374151), 13px. Hover: slightly darker border. Closes dialog, no action. |
+| [Delete] | Red filled (#e53935). Text: white, 13px, font-weight 600. Hover: darker red (#c62828). Confirms deletion. |
+
+---
+
+### DELETE BEHAVIOR — WHAT HAPPENS ON CONFIRM
+
+**Deleting a NON-ACTIVE file:**
+1. The file entry is removed from the upload history list.
+2. The file data is deleted from storage.
+3. No impact on the current active data — the active file remains in use.
+4. Toast notification:
+   ```
+   ✅ File deleted: Dummy 10 Days.xlsx (03/18/2026)
+   ```
+   - Light grey background, dark text, auto-dismiss 3 seconds.
+
+**Deleting the ACTIVE file:**
+1. The file entry is removed from the upload history list.
+2. The file data is deleted from storage.
+3. The currently active data is CLEARED:
+   - For Knowledge Base: product master data is cleared. Orders may lose auto-populated fields.
+   - For Next 10 Days: stock level data is cleared. Target dates are removed from orders. AI Stock Insights reset to empty state.
+4. If other uploads exist in the history, the NEXT most recent file automatically becomes "Active."
+5. If NO other uploads exist, the page reverts to empty state (no data, upload prompt shown).
+6. Toast notification:
+   ```
+   ✅ Active file deleted: Dummy 10 Days.xlsx
+   Next most recent file is now active.
+   ```
+   Or if no other files:
+   ```
+   ✅ Active file deleted. No stock level data available.
+   Upload a new file to continue.
+   ```
+
+**Additional warning for ACTIVE file deletion:**
+
+When the user tries to delete the ACTIVE file, the confirmation dialog shows an extra warning:
+
+```
+╔══════════════════════════════════════════════════════╗
+║  🗑 Delete Upload                                     ║
+║                                                       ║
+║  Are you sure you want to delete this file?           ║
+║                                                       ║
+║  File:       Dummy 10 Days.xlsx                       ║
+║  Uploaded:   03/19/2026 04:22 PM                      ║
+║  Records:    20 products                              ║
+║  Status:     Active ✅                                ║
+║                                                       ║
+║  ⚠ This is the currently ACTIVE file. Deleting it    ║
+║  will remove all stock level data and target dates    ║
+║  from production orders. This action cannot be undone.║
+║                                                       ║
+║  The next most recent upload will become active,      ║
+║  or the page will revert to empty state if no other   ║
+║  uploads exist.                                       ║
+║                                                       ║
+║              [Cancel]    [Delete]                      ║
+╚══════════════════════════════════════════════════════╝
+```
+
+- The "Status: Active ✅" line is shown in green (#43a047).
+- The warning section is larger and more prominent for active files.
+- The [Delete] button remains red.
+
+---
+
+### APPLIES TO BOTH PAGES
+
+This delete functionality applies to BOTH:
+
+1. **Knowledge Base** upload history
+   - Delete button on each entry.
+   - Same confirmation dialog.
+   - Same active/non-active logic.
+   - Warning for active: "Deleting will remove product master data used for auto-populating order details."
+
+2. **Next 10 Days** upload history
+   - Delete button on each entry.
+   - Same confirmation dialog.
+   - Same active/non-active logic.
+   - Warning for active: "Deleting will remove stock level data and target dates from production orders."
+
+**Each page's upload history is independent.** Deleting a Knowledge Base file does NOT affect Next 10 Days files, and vice versa.
+
+---
+
+### EDGE CASES
+
+**Edge case 1 — Only one file in history and it's active:**
+- Deleting it clears all data.
+- Page reverts to empty/upload state.
+- Upload history section shows: "No uploads yet."
+
+**Edge case 2 — Delete non-active file while active file exists:**
+- Active file and its data are unaffected.
+- Only the history entry and stored file are removed.
+
+**Edge case 3 — Multiple non-active files:**
+- Each can be deleted independently.
+- Active file remains unchanged.
+
+**Edge case 4 — Delete active file with other files in history:**
+- Active file is deleted.
+- The next most recent file automatically becomes active.
+- Its data is loaded and applied (re-parsed and re-calculated).
+- Toast: "Previous upload (03/18/2026) is now active."
+```

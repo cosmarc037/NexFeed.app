@@ -1,0 +1,209 @@
+Please revisit and fix the **generated / approved pre-order behavior** in the **Fulfillment (Demo)** workspace.
+
+---
+
+# 1. REVISIT AND FIX THE PRE-ORDER FPR GENERATION
+
+The generated/approved pre-order FPR is still not consistently using the correct current date basis.
+
+### Current issue
+The app is still showing incorrect or stale FPR values for generated pre-orders.
+
+### Required rule
+Generated pre-orders must use the **current PH date** in this format:
+
+- `YYMMDD`
+
+### Example
+If the current date in **PH time** is:
+- `May 29, 2026`
+
+then the generated pre-order FPR must be:
+- `260529`
+
+### Expected result
+Please revisit the generated pre-order FPR logic and ensure it is always regenerated correctly using **Philippine time**, not stale prior values.
+
+---
+
+# 2. GENERATED PRE-ORDERS MUST NOT APPEAR AS COMBINED ORDERS
+
+The approved/generated pre-order is still visually highlighted like a combined order.
+
+### Current issue
+In the screenshot, the generated pre-order row is still highlighted in blue and appears to behave as if it is a combined order / lead order.
+
+### Required behavior
+Generated pre-orders should be inserted as:
+- **single standalone orders**
+- not combined orders
+- not lead/sub-order groups
+- not visually styled as combined rows
+
+### Important
+Even if the source/original order came from a combined order or lead structure, the generated pre-order must not inherit:
+- combined row styling
+- lead order behavior
+- sub-order relationships
+- lead badge behavior unless explicitly intended elsewhere
+
+### Expected result
+Approved pre-orders should appear as normal single orders with their own `Pre-order` badge, but without combined-order styling or grouping behavior.
+
+---
+
+# 3. PLACE THE APPROVED PRE-ORDER INTO THE SEQUENCE BASED ON THE AI-SUGGESTED AVAIL DATE
+
+Right now, when the user approves a generated pre-order, the app simply appends it to the last row.
+
+### Current issue
+This causes confusion because the suggestion includes an **AI-Suggested Avail Date**, but the approved order is not inserted according to that suggested placement.
+
+### Required behavior
+When the generated pre-order is approved, the app should insert it into the sequence based on the:
+- **AI-Suggested Avail Date**
+- and the relevant sequence placement logic for that line
+
+### Goal
+The final placement of the approved pre-order should align with the same scheduling rationale shown in the suggestion.
+
+### Expected result
+The approved pre-order should not just be added at the bottom by default.
+It should be placed where the sequence suggests it belongs.
+
+---
+
+# 4. KEEP THE APPROVED PRE-ORDER’S FINAL POSITION CONSISTENT WITH THE AI SUGGESTION
+
+Please ensure consistency between:
+- the pre-order suggestion card
+- the AI-Suggested Avail Date
+- and the final inserted row position after approval
+
+### Expected result
+If the suggestion indicates the pre-order best fits around a certain date/position, then approval should insert it accordingly, not at an unrelated last position.
+
+### Goal
+Avoid confusion where the pre-order recommendation says one thing but the sequence behaves differently.
+
+---
+
+# 5. UPDATE THE `PRE-ORDER` BADGE STYLE TO A SOFTER YELLOW DESIGN
+
+The current `Pre-order` badge styling is too strong.
+
+Please redesign the badge so it visually behaves more like the softer style used by the red `Cut` badge example.
+
+### New preferred style
+For the `Pre-order` badge:
+- use a **light yellow background**
+- use **yellow text**
+- keep it readable
+- avoid a harsh/saturated solid fill
+
+### Goal
+Make the badge feel lighter, cleaner, and more consistent with the soft badge style used elsewhere in the app.
+
+### Expected result
+The `Pre-order` badge should have a soft yellow look rather than a heavy solid yellow block.
+
+---
+
+# 6. PRESERVE THE BADGE IN THE FPR COLUMN, BUT IMPROVE THE DESIGN
+
+Please keep the `Pre-order` badge in the FPR column as previously requested.
+
+### Important
+Do not remove the badge placement.
+Only improve its styling.
+
+### Expected result
+Approved generated pre-orders still display the `Pre-order` label in the FPR column, but with the updated softer visual design.
+
+---
+
+# 7. APPLY THESE FIXES TO APPROVED GENERATED PRE-ORDERS IN THE DEMO WORKSPACE
+
+These fixes should apply specifically to the **Fulfillment (Demo)** generated/approved pre-order flow.
+
+### Scope
+This includes:
+- generated pre-order FPR
+- generated pre-order row structure
+- generated pre-order insertion placement
+- generated pre-order badge styling
+
+### Expected result
+The demo workspace behaves more consistently and intuitively when users approve pre-order suggestions.
+
+---
+
+# IMPORTANT
+
+Please fix the following generated pre-order issues in **Fulfillment (Demo)**:
+
+- generated pre-order FPR must use the correct current **PH date**
+- approved pre-orders must not appear as combined orders
+- approved pre-orders must be inserted into the sequence based on the **AI-Suggested Avail Date**, not simply appended to the last row
+- the `Pre-order` badge in the FPR column should be redesigned to a softer yellow style:
+  - light yellow background
+  - yellow text
+  - similar softness to the current `Cut` badge styling
+
+---
+
+# DEBUG LOGGING
+
+Temporarily log generated pre-order insertion and styling behavior.
+
+```javascript
+console.debug('[Demo Pre-Order FPR Recheck]', {
+  suggestionId,
+  timezone: 'Asia/Manila',
+  currentPhDate,
+  generatedFpr,
+});
+```
+
+```javascript
+console.debug('[Demo Pre-Order Structure Check]', {
+  suggestionId,
+  insertedAsSingleOrder: true,
+  combinedStylingApplied: false,
+  leadBadgeApplied: false,
+});
+```
+
+```javascript
+console.debug('[Demo Pre-Order Insertion Placement]', {
+  suggestionId,
+  aiSuggestedAvailDate,
+  insertedPriority,
+  insertedAtBottomOnly: false,
+  placementBasedOnAiSuggestion: true,
+});
+```
+
+```javascript
+console.debug('[Demo Pre-Order Badge Styling]', {
+  suggestionId,
+  badgeText: 'Pre-order',
+  backgroundStyle: 'light-yellow',
+  textStyle: 'yellow',
+});
+```
+
+---
+
+# VERIFICATION
+
+1. ✅ Generated pre-order FPR uses the current PH date in `YYMMDD` format
+2. ✅ Generated pre-order no longer shows stale/incorrect FPR values
+3. ✅ Approved pre-orders are inserted as single standalone orders
+4. ✅ Approved pre-orders do not inherit combined-order styling
+5. ✅ Approved pre-orders do not incorrectly appear as lead/combined rows
+6. ✅ Approved pre-orders are inserted into the sequence based on the AI-Suggested Avail Date
+7. ✅ Approved pre-orders are no longer simply appended to the last row by default
+8. ✅ The `Pre-order` badge remains in the FPR column
+9. ✅ The `Pre-order` badge now uses a soft yellow style with light yellow background and yellow text
+10. ✅ No UI errors or console errors are introduced

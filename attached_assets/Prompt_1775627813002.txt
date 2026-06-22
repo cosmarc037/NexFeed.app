@@ -1,0 +1,257 @@
+```
+Implement the following change to the Master Data page:
+
+---
+
+## ADD SEARCH BAR IN EDIT MODE
+
+When the user clicks "Edit Table" and enters edit mode, show a search bar above the table so users can quickly find specific products by material code, description, or any field while editing.
+
+---
+
+### PLACEMENT
+
+```
+353 rows                                          [Discard]  [Save Changes]
+
+🔍 [Search by material code, description...]   Showing X of 353 rows
+
+┌────┬────┬──────────────────────┬───────────────────────────┬─────────────
+│ #  │ ☐  │ FG MATERIAL CODE *   │ FG ITEM DESCRIPTION *     │ ...
+```
+
+The search bar appears between the row count / action buttons and the table header, only when in edit mode.
+
+---
+
+### COMPONENT
+
+```jsx
+function MasterDataPage() {
+  const [isEditMode, setIsEditMode] = useState(false);
+  const [editSearchTerm, setEditSearchTerm] = useState('');
+  
+  // Clear search when exiting edit mode
+  useEffect(() => {
+    if (!isEditMode) {
+      setEditSearchTerm('');
+    }
+  }, [isEditMode]);
+  
+  // Use the edit search when in edit mode, otherwise use the main search
+  const activeSearchTerm = isEditMode ? editSearchTerm : mainSearchTerm;
+  
+  // Filter data based on active search
+  const filteredData = useMemo(() => {
+    const dataToFilter = sortedDisplayData;
+    
+    if (!activeSearchTerm || !activeSearchTerm.trim()) return dataToFilter;
+    
+    const term = activeSearchTerm.toLowerCase().trim();
+    
+    return dataToFilter.filter(row => {
+      const searchableFields = [
+        row.fgMaterialCode,
+        row.fgItemDescription,
+        row.sfg1MaterialCode,
+        row.sfgItemDescription,
+        row.form,
+        row.batchFm1,
+        row.batchFm2,
+        row.batchFm3,
+        row.batchPmx,
+        row.fgWeight,
+        row.thread,
+        row.sacksCode,
+        row.sacksDesc,
+        row.tagsCode,
+        row.tagsDesc,
+        row.label1,
+        row.label2,
+        row.l1Rate,
+        row.l2Rate,
+        row.l3Rate,
+        row.l4Rate,
+        row.l5Rate,
+        row.l6Rate,
+        row.l7Rate
+      ];
+      
+      return searchableFields.some(field => {
+        if (!field) return false;
+        return String(field).toLowerCase().includes(term);
+      });
+    });
+  }, [sortedDisplayData, activeSearchTerm]);
+  
+  return (
+    <div>
+      {/* Page header */}
+      <div className="master-data-header">
+        <h2>Master Data</h2>
+        <p>Upload and manage master data for auto-populating order details</p>
+      </div>
+      
+      {/* Actions row */}
+      <div className="master-data-actions-row">
+        <div className="master-data-left">
+          {!isEditMode && (
+            <span className="master-data-row-count">{filteredData.length} rows</span>
+          )}
+          {isEditMode && (
+            <span className="master-data-row-count">
+              {filteredData.length} of {sortedDisplayData.length} rows
+            </span>
+          )}
+        </div>
+        <div className="master-data-right">
+          {isEditMode ? (
+            <>
+              <button className="btn-discard" onClick={handleDiscard}>Discard</button>
+              <button className="btn-save" onClick={handleSave}>Save Changes</button>
+            </>
+          ) : (
+            <>
+              <button className="master-data-link-btn" onClick={handleDownloadTemplate}>Download Template</button>
+              <span className="master-data-divider">|</span>
+              <button className="master-data-link-btn" onClick={() => setIsEditMode(true)}>Edit Table</button>
+              <button className="btn-reapply">Re-apply to Existing Orders</button>
+              <button className="btn-upload">Upload Master Data</button>
+            </>
+          )}
+        </div>
+      </div>
+      
+      {/* Edit mode search bar */}
+      {isEditMode && (
+        <div className="master-data-edit-search">
+          <div className="edit-search-wrapper">
+            <span className="edit-search-icon">🔍</span>
+            <input
+              type="text"
+              className="edit-search-input"
+              placeholder="Search by material code, description, or any field..."
+              value={editSearchTerm}
+              onChange={(e) => setEditSearchTerm(e.target.value)}
+              autoFocus={false}
+            />
+            {editSearchTerm && (
+              <button 
+                className="edit-search-clear"
+                onClick={() => setEditSearchTerm('')}
+              >
+                ✕
+              </button>
+            )}
+          </div>
+          <span className="edit-search-count">
+            Showing {filteredData.length} of {sortedDisplayData.length} rows
+          </span>
+        </div>
+      )}
+      
+      {/* Table */}
+      <table className="master-data-table">
+        {/* ... headers and body using filteredData ... */}
+      </table>
+    </div>
+  );
+}
+```
+
+---
+
+### STYLING
+
+```css
+.master-data-edit-search {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 0;
+  margin-bottom: 8px;
+}
+
+.edit-search-wrapper {
+  display: flex;
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  padding: 0 12px;
+  width: 400px;
+  transition: border-color 0.15s;
+}
+
+.edit-search-wrapper:focus-within {
+  border-color: #fd5108;
+  box-shadow: 0 0 0 2px rgba(253, 81, 8, 0.1);
+}
+
+.edit-search-icon {
+  font-size: 14px;
+  color: #9ca3af;
+  margin-right: 8px;
+  flex-shrink: 0;
+}
+
+.edit-search-input {
+  flex: 1;
+  border: none;
+  outline: none;
+  font-size: 13px;
+  padding: 8px 0;
+  color: #374151;
+  background: transparent;
+}
+
+.edit-search-input::placeholder {
+  color: #9ca3af;
+}
+
+.edit-search-clear {
+  background: none;
+  border: none;
+  color: #9ca3af;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 4px;
+  margin-left: 4px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.15s, background 0.15s;
+}
+
+.edit-search-clear:hover {
+  color: #374151;
+  background: #f3f4f6;
+}
+
+.edit-search-count {
+  font-size: 12px;
+  color: #6b7280;
+  white-space: nowrap;
+}
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Search bar appears only in edit mode
+2. ✅ Search bar disappears when exiting edit mode
+3. ✅ Search term clears when exiting edit mode
+4. ✅ Search filters rows by material code (FG and SFG)
+5. ✅ Search filters rows by item description
+6. ✅ Search filters rows by any column value
+7. ✅ "Showing X of Y rows" count updates as user types
+8. ✅ Clear button (✕) appears when search has text
+9. ✅ Clicking clear resets search and shows all rows
+10. ✅ Filtered rows are still editable
+11. ✅ Editing a filtered row works correctly
+12. ✅ Row position stays stable while searching
+13. ✅ Search is case-insensitive
+14. ✅ Search bar has focus ring in orange when active
+```

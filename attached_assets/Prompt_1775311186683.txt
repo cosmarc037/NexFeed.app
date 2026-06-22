@@ -1,0 +1,904 @@
+```
+Implement the following fixes to the Tour feature:
+
+---
+
+## FIX 1: USE data-tour ATTRIBUTES INSTEAD OF CSS CLASS SELECTORS
+
+CSS class selectors are unreliable — they may not exist or may be different across pages. Instead, add `data-tour` attributes to target elements throughout the app.
+
+### ADD data-tour ATTRIBUTES TO ALL TOUR TARGET ELEMENTS
+
+**OVERVIEW PAGE:**
+
+```jsx
+{/* Smart Production Insight */}
+<div data-tour="overview-insights">
+  <h3>✨ Smart Production Insight</h3>
+  ...
+</div>
+
+{/* Metric cards */}
+<div data-tour="overview-metrics">
+  <div>Total Orders: 46</div>
+  <div>Active Orders: 45</div>
+  <div>Complete Orders: 0</div>
+  <div>Urgent Orders: 0</div>
+</div>
+
+{/* Line Status Monitoring header */}
+<div data-tour="overview-line-monitoring">
+  <h2>Line Status Monitoring</h2>
+</div>
+
+{/* Month selector and Export */}
+<div data-tour="overview-month-export">
+  <select>April 2026</select>
+  <button>Export Report</button>
+</div>
+
+{/* Feedmill cards — first one */}
+<div data-tour="overview-feedmill-cards">
+  <div>Feedmill 1</div>
+  <div>Feedmill 2</div>
+  ...
+</div>
+
+{/* Shutdown button — inside any feedmill card */}
+<button data-tour="overview-shutdown">Shutdown</button>
+```
+
+**ORDERS PAGE:**
+
+```jsx
+{/* Feedmill tabs */}
+<div data-tour="orders-feedmill-tabs">
+  <button>Feedmill 1</button>
+  <button>Feedmill 2</button>
+  ...
+</div>
+
+{/* Line tabs */}
+<div data-tour="orders-line-tabs">
+  <button>All</button>
+  <button>Line 1</button>
+  <button>Line 2</button>
+</div>
+
+{/* Search bar */}
+<div data-tour="orders-search">
+  <input placeholder="Search by item, material code, FPR..." />
+  <button>Filters</button>
+</div>
+
+{/* Metrics cards */}
+<div data-tour="orders-metrics">
+  <div>Total Orders</div>
+  <div>Active Orders</div>
+  ...
+</div>
+
+{/* Production Insights */}
+<div data-tour="orders-insights">
+  Production Insights (5 insights)
+</div>
+
+{/* Alerts & Reminders */}
+<div data-tour="orders-alerts">
+  Alerts & Reminders (5 alerts)
+</div>
+
+{/* Add Order button */}
+<button data-tour="orders-add-order">+ Add Order</button>
+
+{/* Auto-Sequence button */}
+<button data-tour="orders-auto-sequence">Auto-Sequence</button>
+
+{/* Smart Combine panel trigger */}
+<div data-tour="orders-smart-combine">Smart Combine</div>
+
+{/* Order table header groups */}
+<th data-tour="orders-header-details">ORDER DETAILS</th>
+<th data-tour="orders-header-production">PRODUCTION PARAMETERS</th>
+<th data-tour="orders-header-mixer">MIXER DETAILS</th>
+<th data-tour="orders-header-operator">OPERATOR</th>
+<th data-tour="orders-header-scheduling">SCHEDULING</th>
+<th data-tour="orders-header-product-insights">PRODUCT INSIGHTS</th>
+<th data-tour="orders-header-notes">NOTES</th>
+
+{/* Drag handle on first order row */}
+<span data-tour="orders-drag-handle">⋮⋮</span>
+
+{/* Upload SAP Orders button */}
+<button data-tour="orders-upload-sap">Upload SAP Orders</button>
+
+{/* Export button */}
+<button data-tour="orders-export">Export</button>
+```
+
+**ANALYTICS PAGE:**
+
+```jsx
+{/* Key metric cards */}
+<div data-tour="analytics-metrics">
+  <div>Total Volume: 2029 MT</div>
+  <div>Avg Order Size: 44 MT</div>
+  <div>Completed: 0</div>
+  <div>Total Orders: 46</div>
+</div>
+
+{/* Volume by Category chart */}
+<div data-tour="analytics-volume-category">
+  <h3>Volume by Category (MT)</h3>
+  ...
+</div>
+
+{/* Orders by Feedmill Line chart */}
+<div data-tour="analytics-orders-line">
+  <h3>Orders by Feedmill Line</h3>
+  ...
+</div>
+
+{/* Top 5 Most Ordered Items chart */}
+<div data-tour="analytics-top-items">
+  <h3>Top 5 Most Ordered Items</h3>
+  ...
+</div>
+
+{/* Smart Insight sections */}
+<div data-tour="analytics-smart-insight">
+  <h3>Smart Insight</h3>
+  ...
+</div>
+```
+
+**ORDER HISTORY PAGE:**
+
+```jsx
+{/* Completed Orders tab */}
+<button data-tour="history-completed-tab">Completed Orders (0)</button>
+
+{/* Cancelled Orders tab */}
+<button data-tour="history-cancelled-tab">Cancelled Orders (1)</button>
+
+{/* Line tabs */}
+<div data-tour="history-line-tabs">
+  <button>All</button>
+  <button>Line 1</button>
+  ...
+</div>
+
+{/* History order table */}
+<table data-tour="history-table">
+  ...
+</table>
+```
+
+**N10D PAGE:**
+
+```jsx
+{/* Upload N10D button */}
+<button data-tour="n10d-upload">Upload Next 10 Days</button>
+
+{/* Re-apply button */}
+<button data-tour="n10d-reapply">Re-apply to Existing Orders</button>
+
+{/* Download N10D button */}
+<button data-tour="n10d-download">Download N10D</button>
+
+{/* Search bar */}
+<div data-tour="n10d-search">
+  <input placeholder="Search by code, description, or category..." />
+</div>
+
+{/* N10D table */}
+<table data-tour="n10d-table">
+  ...
+</table>
+
+{/* Product Details header */}
+<th data-tour="n10d-header-product">PRODUCT DETAILS</th>
+
+{/* Next 10 Days header */}
+<th data-tour="n10d-header-days">NEXT 10 DAYS</th>
+
+{/* Tracking header */}
+<th data-tour="n10d-header-tracking">TRACKING</th>
+
+{/* Safety Stock Insights */}
+<div data-tour="n10d-safety-insights">
+  <h3>Safety Stock Insights</h3>
+  ...
+</div>
+
+{/* Upload History */}
+<div data-tour="n10d-history">
+  <h3>Upload History</h3>
+  ...
+</div>
+```
+
+**KNOWLEDGE BASE PAGE:**
+
+```jsx
+{/* Upload KB button */}
+<button data-tour="kb-upload">Upload Knowledge Base</button>
+
+{/* Re-apply button */}
+<button data-tour="kb-reapply">Re-apply to Existing Orders</button>
+
+{/* Edit mode toggle */}
+<button data-tour="kb-edit-mode">Edit</button>
+
+{/* KB table */}
+<table data-tour="kb-table">
+  ...
+</table>
+
+{/* History section */}
+<div data-tour="kb-history">
+  <h3>History</h3>
+  ...
+</div>
+```
+
+**CONFIGURATIONS PAGE:**
+
+```jsx
+{/* Configurations content */}
+<div data-tour="config-page">
+  <h2>Configurations</h2>
+  ...
+</div>
+```
+
+**SIDEBAR:**
+
+```jsx
+<a data-tour="sidebar-overview">Overview</a>
+<a data-tour="sidebar-orders">Orders</a>
+<a data-tour="sidebar-analytics">Analytics</a>
+<a data-tour="sidebar-configurations">Configurations</a>
+<a data-tour="sidebar-order-history">Order History</a>
+<a data-tour="sidebar-knowledge-base">Knowledge Base</a>
+<a data-tour="sidebar-n10d">Next 10 Days</a>
+```
+
+**HEADER:**
+
+```jsx
+<button data-tour="header-take-tour">Take a tour</button>
+<button data-tour="header-help">Help</button>
+<button data-tour="header-user">User</button>
+```
+
+**CHAT BUBBLE:**
+
+```jsx
+<button data-tour="chat-bubble">💬</button>
+```
+
+---
+
+## FIX 2: PROPER PAGE DETECTION
+
+```javascript
+function getCurrentPage() {
+  const path = window.location.pathname;
+  const hash = window.location.hash;
+  
+  // Adjust these to match your actual routing
+  if (path.includes('/overview') || hash.includes('overview')) return 'overview';
+  if (path.includes('/orders') || hash.includes('orders')) return 'orders';
+  if (path.includes('/analytics') || hash.includes('analytics')) return 'analytics';
+  if (path.includes('/order-history') || hash.includes('order-history') || hash.includes('orderHistory')) return 'orderHistory';
+  if (path.includes('/knowledge-base') || hash.includes('knowledge-base') || hash.includes('knowledgeBase')) return 'knowledgeBase';
+  if (path.includes('/next-10-days') || hash.includes('next-10-days') || hash.includes('n10d') || hash.includes('nextTenDays')) return 'n10d';
+  if (path.includes('/configurations') || hash.includes('configurations')) return 'configurations';
+  
+  // Fallback — check which sidebar item is active
+  const activeSidebar = document.querySelector('.sidebar-item.active, .sidebar-item-active, [class*="active"]');
+  if (activeSidebar) {
+    const text = activeSidebar.textContent.toLowerCase();
+    if (text.includes('overview')) return 'overview';
+    if (text.includes('order') && text.includes('history')) return 'orderHistory';
+    if (text.includes('order')) return 'orders';
+    if (text.includes('analytics')) return 'analytics';
+    if (text.includes('knowledge')) return 'knowledgeBase';
+    if (text.includes('next 10') || text.includes('n10d')) return 'n10d';
+    if (text.includes('config')) return 'configurations';
+  }
+  
+  // Check page heading as last resort
+  const heading = document.querySelector('h1, h2');
+  if (heading) {
+    const text = heading.textContent.toLowerCase();
+    if (text.includes('dashboard overview')) return 'overview';
+    if (text.includes('all orders') || text.includes('orders for')) return 'orders';
+    if (text.includes('analytics')) return 'analytics';
+    if (text.includes('order history') || text.includes('completed orders')) return 'orderHistory';
+    if (text.includes('knowledge base')) return 'knowledgeBase';
+    if (text.includes('next 10 days')) return 'n10d';
+    if (text.includes('configuration')) return 'configurations';
+  }
+  
+  return 'orders'; // Default fallback
+}
+```
+
+---
+
+## FIX 3: UPDATE ALL TOUR STEP SELECTORS TO USE data-tour
+
+### UPDATED STEP FORMAT
+
+All steps now use `[data-tour="..."]` selectors:
+
+```javascript
+// Example step
+{
+  target: '[data-tour="orders-feedmill-tabs"]',
+  title: 'Feedmill Tabs',
+  description: '...',
+  position: 'bottom'
+}
+```
+
+### OVERVIEW TOUR STEPS
+
+```javascript
+const OVERVIEW_TOUR_STEPS = [
+  {
+    target: '[data-tour="overview-insights"]',
+    title: 'Smart Production Insight',
+    description: 'AI-generated insights about your overall production. Click to expand and see optimization suggestions, potential issues, and recommendations.',
+    position: 'bottom'
+  },
+  {
+    target: '[data-tour="overview-metrics"]',
+    title: 'Overview Metrics',
+    description: 'Quick summary of your production across all feedmills — total orders, active orders, completed orders, and urgent orders requiring attention.',
+    position: 'bottom'
+  },
+  {
+    target: '[data-tour="overview-line-monitoring"]',
+    title: 'Line Status Monitoring',
+    description: 'Monitor all feedmills and production lines at a glance. See volume, run rates, and capacity utilization for each line.',
+    position: 'bottom'
+  },
+  {
+    target: '[data-tour="overview-month-export"]',
+    title: 'Month & Export',
+    description: 'Select a month to view production data for that period. Click "Export Report" to download a PDF or Excel summary of the production overview.',
+    position: 'bottom'
+  },
+  {
+    target: '[data-tour="overview-feedmill-cards"]',
+    title: 'Feedmill Cards',
+    description: 'Each card represents a feedmill with its lines. See total volume, run rate per line, progress bars for capacity, and category breakdown showing Completed, In Progress, On Hold, Cancelled, and Scheduled volumes.',
+    position: 'top'
+  },
+  {
+    target: '[data-tour="overview-shutdown"]',
+    title: 'Shutdown Simulation',
+    description: 'Simulate a line shutdown to see the impact on production. Useful for planning maintenance — shows which orders would be delayed and by how much.',
+    position: 'top'
+  }
+];
+```
+
+### ANALYTICS TOUR STEPS
+
+```javascript
+const ANALYTICS_TOUR_STEPS = [
+  {
+    target: '[data-tour="analytics-metrics"]',
+    title: 'Key Metrics',
+    description: 'High-level production KPIs — total volume across all orders, average order size, completed count, and total order count.',
+    position: 'bottom'
+  },
+  {
+    target: '[data-tour="analytics-volume-category"]',
+    title: 'Volume by Category',
+    description: 'Horizontal bar chart showing production volume breakdown by product category — Poultry, Hogs, Gamefowl, and others. Helps identify which categories dominate production.',
+    position: 'bottom'
+  },
+  {
+    target: '[data-tour="analytics-orders-line"]',
+    title: 'Orders by Feedmill Line',
+    description: 'Donut chart showing how orders are distributed across production lines. Helps identify overloaded or underutilized lines for better workload balancing.',
+    position: 'bottom'
+  },
+  {
+    target: '[data-tour="analytics-top-items"]',
+    title: 'Top 5 Most Ordered Items',
+    description: 'Bar chart showing the most frequently ordered products. Useful for identifying high-demand items that may need prioritized production.',
+    position: 'top'
+  },
+  {
+    target: '[data-tour="analytics-smart-insight"]',
+    title: 'Smart Insights',
+    description: 'AI-powered analysis of your production data. Provides actionable recommendations like which lines to rebalance, which products to prioritize, and optimization opportunities.',
+    position: 'top'
+  }
+];
+```
+
+### ORDER HISTORY TOUR STEPS
+
+```javascript
+const ORDER_HISTORY_TOUR_STEPS = [
+  {
+    target: '[data-tour="history-completed-tab"]',
+    title: 'Completed Orders',
+    description: 'View all orders that have been marked as Done and rotated out of the active production queue. These are your finished production records.',
+    position: 'bottom'
+  },
+  {
+    target: '[data-tour="history-cancelled-tab"]',
+    title: 'Cancelled Orders',
+    description: 'View all orders that were cancelled. These orders were removed from production and archived here for reference.',
+    position: 'bottom'
+  },
+  {
+    target: '[data-tour="history-line-tabs"]',
+    title: 'Filter by Line',
+    description: 'Filter historical orders by production line. View all lines at once or focus on a specific line\'s history.',
+    position: 'bottom'
+  },
+  {
+    target: '[data-tour="history-table"]',
+    title: 'Order History Table',
+    description: 'Detailed table of archived orders showing all order details, production parameters, and completion information. Use this to review past production performance.',
+    position: 'top'
+  }
+];
+```
+
+### N10D TOUR STEPS
+
+```javascript
+const N10D_TOUR_STEPS = [
+  {
+    target: '[data-tour="n10d-upload"]',
+    title: 'Upload Next 10 Days',
+    description: 'Upload your daily stock level data (Excel file). This data drives production prioritization by analyzing inventory levels against demand forecasts for the next 10 days.',
+    position: 'bottom'
+  },
+  {
+    target: '[data-tour="n10d-reapply"]',
+    title: 'Re-apply to Existing Orders',
+    description: 'After uploading new N10D data, click this to refresh all order availability dates, stock status icons, product insights, and Summary column across the app.',
+    position: 'bottom'
+  },
+  {
+    target: '[data-tour="n10d-download"]',
+    title: 'Download N10D',
+    description: 'Download the current N10D data as an Excel file for offline analysis or sharing with team members.',
+    position: 'bottom'
+  },
+  {
+    target: '[data-tour="n10d-search"]',
+    title: 'Search Products',
+    description: 'Search for specific products by material code, description, or category to quickly find their stock status.',
+    position: 'bottom'
+  },
+  {
+    target: '[data-tour="n10d-header-product"]',
+    title: 'Product Details',
+    description: 'Material code, category, item description, and Due for Loading (DFL) — the total demand volume for each product.',
+    position: 'bottom'
+  },
+  {
+    target: '[data-tour="n10d-header-days"]',
+    title: 'Next 10 Days Demand',
+    description: 'Daily demand breakdown. Red-highlighted cells indicate where cumulative demand exceeds available inventory. Hover over any cell to see cumulative demand vs inventory.',
+    position: 'bottom'
+  },
+  {
+    target: '[data-tour="n10d-header-tracking"]',
+    title: 'Tracking',
+    description: 'Inventory level, balance to produce, completion and availability dates, and product status — Critical (red), Urgent (orange), Monitor (yellow), or Sufficient (green).',
+    position: 'bottom'
+  },
+  {
+    target: '[data-tour="n10d-safety-insights"]',
+    title: 'Safety Stock Insights',
+    description: 'AI-generated analysis of stock levels. Categorizes products by urgency — Critical products need immediate production, Urgent within 1-3 days, Monitor within the week, and Sufficient products are well-stocked.',
+    position: 'top'
+  },
+  {
+    target: '[data-tour="n10d-history"]',
+    title: 'Upload History',
+    description: 'Track all N10D file uploads. View which file is currently active, revert to previous uploads, or download past versions.',
+    position: 'top'
+  }
+];
+```
+
+### KNOWLEDGE BASE TOUR STEPS — UNCHANGED BUT WITH data-tour SELECTORS
+
+```javascript
+const KNOWLEDGE_BASE_TOUR_STEPS = [
+  {
+    target: '[data-tour="kb-upload"]',
+    title: 'Upload Knowledge Base',
+    description: 'Upload your master product data Excel file containing material codes, batch sizes, run rates, and formulations. This data auto-populates when creating new orders.',
+    position: 'bottom'
+  },
+  {
+    target: '[data-tour="kb-reapply"]',
+    title: 'Re-apply to Orders',
+    description: 'After editing the Knowledge Base, click this to update all existing orders with the latest product data.',
+    position: 'bottom'
+  },
+  {
+    target: '[data-tour="kb-edit-mode"]',
+    title: 'Edit Mode',
+    description: 'Toggle edit mode to manually modify cells. Edited cells are highlighted in yellow. Duplicate material codes are highlighted in red. Click Save to create a history entry.',
+    position: 'bottom'
+  },
+  {
+    target: '[data-tour="kb-table"]',
+    title: 'Product Data Table',
+    description: 'Master product data including material codes, descriptions, forms, batch sizes per feedmill, and production run rates per line.',
+    position: 'top'
+  },
+  {
+    target: '[data-tour="kb-history"]',
+    title: 'History',
+    description: 'Track all changes — file uploads, manual edits, and reverts. Each entry stores a complete snapshot. Revert to any previous version or download any version as Excel.',
+    position: 'top'
+  }
+];
+```
+
+### CONFIGURATIONS TOUR STEPS
+
+```javascript
+const CONFIGURATIONS_TOUR_STEPS = [
+  {
+    target: '[data-tour="config-page"]',
+    title: 'Configurations',
+    description: 'Manage production order configurations, feedmill settings, line parameters, and operational settings for the scheduling system.',
+    position: 'bottom'
+  }
+];
+```
+
+### ORDERS TOUR STEPS — UPDATED SELECTORS
+
+```javascript
+const ORDERS_TOUR_STEPS = [
+  {
+    target: '[data-tour="orders-feedmill-tabs"]',
+    title: 'Feedmill Tabs',
+    description: 'Switch between feedmills. FM1 (Lines 1-2), FM2 (Lines 3-4), FM3 (Lines 6-7), Powermix (Line 5). Each feedmill has its own production queue.',
+    position: 'bottom'
+  },
+  {
+    target: '[data-tour="orders-line-tabs"]',
+    title: 'Line Tabs',
+    description: 'View orders per line or all lines together in the "All" tab. Each line has its own production queue sorted by priority.',
+    position: 'bottom'
+  },
+  {
+    target: '[data-tour="orders-search"]',
+    title: 'Search & Filters',
+    description: 'Search across all lines by item name, material code, FPR, or status. The search applies to all line tables in the "All" tab.',
+    position: 'bottom'
+  },
+  {
+    target: '[data-tour="orders-metrics"]',
+    title: 'Metrics at a Glance',
+    description: 'Real-time counts of total orders, active orders, urgent orders, and orders lacking details that need attention.',
+    position: 'bottom'
+  },
+  {
+    target: '[data-tour="orders-insights"]',
+    title: 'Production Insights',
+    description: 'AI-generated insights about your production schedule. Expand to see optimization suggestions and potential issues.',
+    position: 'bottom'
+  },
+  {
+    target: '[data-tour="orders-alerts"]',
+    title: 'Alerts & Reminders',
+    description: 'Important notifications about upcoming deadlines, stock alerts, and scheduling conflicts that need your attention.',
+    position: 'bottom'
+  },
+  {
+    target: '[data-tour="orders-add-order"]',
+    title: 'Add New Order',
+    description: 'Create a production order. Enter a material code and the Knowledge Base auto-fills product details like description, form, batch size, and run rate.',
+    position: 'bottom'
+  },
+  {
+    target: '[data-tour="orders-header-details"]',
+    title: 'Order Details',
+    description: 'Core order information — priority, FPR, planned orders (FG/SFG), material codes, and item description with category.',
+    position: 'bottom'
+  },
+  {
+    target: '[data-tour="orders-header-operator"]',
+    title: 'Order Status',
+    description: 'Set the order lifecycle status — Plotted, Planned, Hold, Cut, In Production, On-going, Done, or Cancel PO. Status controls what can be moved and auto-sequenced.',
+    position: 'bottom'
+  },
+  {
+    target: '[data-tour="orders-header-scheduling"]',
+    title: 'Scheduling',
+    description: 'Set start date, start time, view availability date and completion date. Non-dated orders get dates from N10D stock data.',
+    position: 'bottom'
+  },
+  {
+    target: '[data-tour="orders-header-product-insights"]',
+    title: 'Product Insights',
+    description: 'Stock status summaries auto-generated from N10D data. Click ✨ to enhance with AI-powered actionable recommendations.',
+    position: 'bottom'
+  },
+  {
+    target: '[data-tour="orders-auto-sequence"]',
+    title: 'Auto-Sequence',
+    description: 'Automatically sort movable orders by availability dates. Critical orders go first. Locked orders (Done, In Production, Planned) stay in place.',
+    position: 'left'
+  },
+  {
+    target: '[data-tour="orders-smart-combine"]',
+    title: 'Smart Combine',
+    description: 'Find and combine orders with matching product details (material code, form, batch size, line, SCADA). Reduces changeover time and improves efficiency.',
+    position: 'left'
+  },
+  {
+    target: '[data-tour="chat-bubble"]',
+    title: 'Smart Assistant',
+    description: 'Your AI production planning assistant. Ask about orders, stock levels, line capacity, or execute actions like combining orders — all from chat.',
+    position: 'left'
+  }
+];
+```
+
+### FULL APP TOUR — NAVIGATES BETWEEN PAGES
+
+```javascript
+const FULL_APP_TOUR_STEPS = [
+  // === SIDEBAR ===
+  {
+    target: '[data-tour="sidebar-overview"]',
+    title: 'Overview',
+    description: 'Bird\'s-eye view of all feedmills and lines. See production volumes, capacity utilization, and category breakdowns.',
+    position: 'right',
+    page: 'overview'
+  },
+  {
+    target: '[data-tour="sidebar-orders"]',
+    title: 'Orders',
+    description: 'Your main workspace for managing production orders. View, create, edit, sequence, and combine orders across all lines.',
+    position: 'right',
+    page: 'orders'
+  },
+  {
+    target: '[data-tour="sidebar-analytics"]',
+    title: 'Analytics',
+    description: 'Production analytics with charts, KPIs, and AI-powered insights for data-driven planning decisions.',
+    position: 'right',
+    page: 'analytics'
+  },
+  {
+    target: '[data-tour="sidebar-order-history"]',
+    title: 'Order History',
+    description: 'Archive of completed and cancelled orders. Track production history across all lines.',
+    position: 'right',
+    page: 'orderHistory'
+  },
+  {
+    target: '[data-tour="sidebar-knowledge-base"]',
+    title: 'Knowledge Base',
+    description: 'Master product data — material codes, batch sizes, run rates. Auto-populates order details and drives production calculations.',
+    position: 'right',
+    page: 'knowledgeBase'
+  },
+  {
+    target: '[data-tour="sidebar-n10d"]',
+    title: 'Next 10 Days',
+    description: 'Daily stock level data for production prioritization. Analyzes inventory vs demand and flags Critical, Urgent, Monitor, and Sufficient products.',
+    position: 'right',
+    page: 'n10d'
+  },
+  
+  // === OVERVIEW PAGE HIGHLIGHTS ===
+  {
+    target: '[data-tour="overview-feedmill-cards"]',
+    title: 'Feedmill Overview Cards',
+    description: 'Each feedmill card shows total volume, line-level progress, run rates, and category breakdown. FM1 has Lines 1-2, FM2 has Lines 3-4, FM3 has Lines 6-7, Powermix has Line 5.',
+    position: 'top',
+    page: 'overview'
+  },
+  
+  // === ORDERS PAGE HIGHLIGHTS ===
+  {
+    target: '[data-tour="orders-feedmill-tabs"]',
+    title: 'Feedmill & Line Navigation',
+    description: 'Switch between feedmills and lines. The "All" tab shows all lines for a feedmill. Each line has its own sortable production queue.',
+    position: 'bottom',
+    page: 'orders'
+  },
+  {
+    target: '[data-tour="orders-auto-sequence"]',
+    title: 'Auto-Sequence',
+    description: 'One-click intelligent sorting — Critical orders first, then chronological by availability date. Locked orders stay in place.',
+    position: 'left',
+    page: 'orders'
+  },
+  
+  // === N10D HIGHLIGHTS ===
+  {
+    target: '[data-tour="n10d-upload"]',
+    title: 'Stock Level Data',
+    description: 'Upload daily stock data to drive production prioritization. The system analyzes 10-day demand against inventory to determine urgency.',
+    position: 'bottom',
+    page: 'n10d'
+  },
+  
+  // === KB HIGHLIGHTS ===
+  {
+    target: '[data-tour="kb-table"]',
+    title: 'Knowledge Base Data',
+    description: 'Master product data that auto-populates orders. Edit cells directly, track changes with history, and download any version.',
+    position: 'top',
+    page: 'knowledgeBase'
+  },
+  
+  // === CHAT ===
+  {
+    target: '[data-tour="chat-bubble"]',
+    title: 'Smart Assistant',
+    description: 'AI-powered chat assistant for production planning. Ask questions, get analysis, or execute actions — all through conversation.',
+    position: 'left'
+  }
+];
+```
+
+---
+
+## FIX 4: NAVIGATION HANDLER FOR FULL TOUR
+
+```javascript
+async function navigateToPage(pageName) {
+  const currentPage = getCurrentPage();
+  if (currentPage === pageName) return;
+  
+  // Trigger navigation — adjust to match your app's router
+  switch (pageName) {
+    case 'overview':
+      navigateTo('/overview'); // or your routing method
+      break;
+    case 'orders':
+      navigateTo('/orders');
+      break;
+    case 'analytics':
+      navigateTo('/analytics');
+      break;
+    case 'orderHistory':
+      navigateTo('/order-history');
+      break;
+    case 'knowledgeBase':
+      navigateTo('/knowledge-base');
+      break;
+    case 'n10d':
+      navigateTo('/next-10-days');
+      break;
+    case 'configurations':
+      navigateTo('/configurations');
+      break;
+  }
+  
+  // Wait for page to render
+  await new Promise(resolve => setTimeout(resolve, 600));
+}
+```
+
+### UPDATED TOUR ENGINE — HANDLE PAGE NAVIGATION
+
+```javascript
+async function goToStep(index) {
+  const step = tourSteps[index];
+  
+  // Navigate to the step's page if needed
+  if (step.page) {
+    await navigateToPage(step.page);
+  }
+  
+  // Wait for element to appear
+  let retries = 0;
+  while (retries < 10) {
+    const element = document.querySelector(step.target);
+    if (element) break;
+    await new Promise(resolve => setTimeout(resolve, 200));
+    retries++;
+  }
+  
+  setCurrentStepIndex(index);
+}
+
+function nextStep() {
+  if (currentStepIndex < tourSteps.length - 1) {
+    goToStep(currentStepIndex + 1);
+  } else {
+    endTour();
+  }
+}
+
+function prevStep() {
+  if (currentStepIndex > 0) {
+    goToStep(currentStepIndex - 1);
+  }
+}
+```
+
+---
+
+## FIX 5: TOUR BUTTON COLOR — ORANGE
+
+```css
+.tour-btn-next {
+  background: #fd5108;
+  color: #ffffff;
+}
+
+.tour-btn-next:hover {
+  background: #e8490b;
+}
+
+.tour-btn-back {
+  color: #fd5108;
+  border: 1px solid #fd5108;
+}
+
+.tour-btn-back:hover {
+  background: #fff7ed;
+}
+
+.tour-tooltip-skip {
+  color: #fd5108;
+}
+```
+
+---
+
+## VERIFICATION
+
+### Page detection
+1. ✅ On Overview page → getCurrentPage() returns 'overview'
+2. ✅ On Orders page → returns 'orders'
+3. ✅ On Analytics page → returns 'analytics'
+4. ✅ On Order History → returns 'orderHistory'
+5. ✅ On Knowledge Base → returns 'knowledgeBase'
+6. ✅ On N10D → returns 'n10d'
+7. ✅ On Configurations → returns 'configurations'
+
+### Page-specific tours
+8. ✅ "This Page" on Overview → shows Overview tour steps (insights, metrics, feedmill cards, shutdown)
+9. ✅ "This Page" on Orders → shows Orders tour steps
+10. ✅ "This Page" on Analytics → shows Analytics tour steps (metrics, charts, smart insights)
+11. ✅ "This Page" on Order History → shows Order History steps (completed, cancelled, line tabs, table)
+12. ✅ "This Page" on N10D → shows N10D steps (upload, reapply, table, safety insights, history)
+13. ✅ "This Page" on KB → shows KB steps (upload, edit, table, history)
+14. ✅ N10D page does NOT show KB steps
+15. ✅ Order History does NOT show KB steps
+
+### Full app tour
+16. ✅ Navigates between pages as tour progresses
+17. ✅ Waits for page to load before showing tooltip
+18. ✅ Back button navigates to previous page if needed
+19. ✅ Skip ends tour regardless of current page
+
+### data-tour selectors
+20. ✅ All tour targets use [data-tour="..."] attributes
+21. ✅ Elements without data-tour → tooltip shows centered with message
+22. ✅ No reliance on CSS class names
+
+### Button colors
+23. ✅ Next/Finish button is orange (#fd5108)
+24. ✅ Back button has orange border and text
+25. ✅ Skip Tour text is orange
+```

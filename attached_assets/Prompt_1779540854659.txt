@@ -1,0 +1,211 @@
+Please fix the **downstream Start Date validation and default 8:00 AM behavior** for orders with a previous order in sequence.
+
+---
+
+## 1. FIX THE INVALID SAME-DATE START DATE BEHAVIOR
+
+There is currently a bug in the downstream scheduling logic.
+
+Right now, if the previous order’s completion date is the same day, the user is still able to manually select that same day as the next order’s **Start Date**. When this happens, the app then automatically fills **Start Time = 8:00 AM**, which creates an invalid start datetime that can occur before the previous order has completed.
+
+### Example of the bug
+Previous order completion:
+- `May 23, 2026, 11:49 PM`
+
+User manually selects for the next order:
+- `Start Date = May 23, 2026`
+
+The app then auto-fills:
+- `Start Time = 8:00 AM`
+
+Result:
+- `May 23, 2026, 8:00 AM`
+
+This is invalid because the next order starts **before** the previous order finishes.
+
+### Expected result
+For downstream orders, the user must **not** be allowed to manually select the same calendar date as the previous order’s completion date.
+
+---
+
+## 2. VALIDATE START DATE BEFORE APPLYING THE DEFAULT 8:00 AM TIME
+
+Please update the logic sequence so that the default time behavior only runs **after** the selected Start Date passes validation.
+
+### Correct logic sequence
+1. User selects a Start Date
+2. App validates whether the selected Start Date is allowed
+3. Only if the Start Date is valid:
+   - auto-fill `Start Time = 8:00 AM` when Start Time is blank
+
+### Important
+Do **not** auto-fill 8:00 AM first and validate later.
+
+The Start Date must be validated before the app resolves the start datetime.
+
+---
+
+## 3. FOR DOWNSTREAM ORDERS, DISALLOW THE SAME DATE AS THE PREVIOUS ORDER’S COMPLETION DATE
+
+For any order that has a **previous order**, when the user manually edits **Start Date**, the selected date must be rejected if it is:
+
+- the **same calendar date** as the previous order’s completion date
+- or any **past date**
+
+### Example
+If the previous order completes on:
+- `May 23, 2026, 11:49 PM`
+
+then the next order must not allow:
+- `May 23, 2026`
+
+for manual Start Date selection.
+
+If today is:
+- `May 23, 2026`
+
+then the next order must also not allow:
+- `May 19, 2026`
+- `May 20, 2026`
+- `May 21, 2026`
+- `May 22, 2026`
+
+### Expected result
+Manual Start Date for downstream orders must only allow:
+- dates later than the previous order’s completion date
+- and not any date in the past
+
+---
+
+## 4. KEEP THE EXISTING RULE: VALID START DATE + BLANK TIME = DEFAULT 8:00 AM
+
+Please preserve the existing rule that if the user manually selects a valid **Start Date** and leaves **Start Time** blank, the app should automatically use:
+
+- `Start Time = 8:00 AM`
+
+### Important
+This rule is still correct.
+
+The issue is only that it is currently being applied to an **invalid Start Date**.
+
+### Expected result
+For a valid downstream Start Date:
+- selected Start Date is kept
+- blank Start Time becomes `8:00 AM`
+
+---
+
+## 5. DO NOT CHANGE THE TIME-ONLY AUTO-RESOLUTION RULE
+
+Please keep the separate downstream rule for **Start Time only**:
+
+If the user enters a **Start Time** but leaves **Start Date** blank:
+- use the **same date** as the previous order’s completion date if the entered time is later than or equal to the previous completion time
+- use the **next date** if the entered time is earlier than the previous completion time
+
+### Important
+Do not merge this with manual Start Date logic.
+
+The intended rule distinction remains:
+
+- **Manual Start Date**
+  - cannot use the same date as previous completion date
+  - if valid and Start Time is blank, default to 8:00 AM
+
+- **Manual Start Time only**
+  - may resolve to the same date
+  - or may roll to the next date depending on the previous completion time
+
+---
+
+## 6. APPLY THIS ONLY TO ORDERS WITH A PREVIOUS ORDER
+
+This fix should apply only to:
+- the **2nd order onward**
+- or any order that has a previous order above it in the queue/sequence
+
+Do not change the already-implemented first-order default logic.
+
+---
+
+## 7. UX / VALIDATION EXPECTATION
+
+When the user tries to manually select a Start Date that is not allowed, the app should:
+- prevent the selection
+- or reject it clearly
+- and not silently proceed to fill `8:00 AM`
+
+### Goal
+The app should not allow a downstream order to produce a start datetime that begins before the previous order’s completion datetime.
+
+---
+
+## IMPORTANT
+
+Please preserve this intended behavior:
+
+- Users **cannot manually select** the same date as the previous order’s completion date
+- If they want same-date scheduling, they should edit **Start Time only**
+- The app should then automatically determine whether to use:
+  - the same date
+  - or the following date
+
+This fix is specifically for the bug where an invalid manually selected Start Date is currently being accepted and then assigned the default `8:00 AM`.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log Start Date validation before default time resolution.
+
+```javascript
+console.debug('[Downstream Start Date Validation Before Default Time]', {
+  orderId,
+  selectedStartDate,
+  previousCompletionDate,
+  todayDate,
+  isPastDate,
+  isSameAsPreviousCompletionDate,
+  isValidStartDate:
+    !isPastDate && !isSameAsPreviousCompletionDate,
+});
+```
+
+```javascript
+console.debug('[Downstream Start Date Default Time Applied]', {
+  orderId,
+  selectedStartDate,
+  selectedStartTime,
+  appliedDefaultTime: selectedStartTime ? false : true,
+  resolvedStartTime: selectedStartTime || '08:00 AM',
+});
+```
+
+```javascript
+console.debug('[Downstream Start Date Rejected]', {
+  orderId,
+  selectedStartDate,
+  previousCompletionDate,
+  rejectionReason:
+    isPastDate
+      ? 'past_date'
+      : isSameAsPreviousCompletionDate
+      ? 'same_as_previous_completion_date'
+      : 'unknown',
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ This fix applies only to **2nd orders onward** or orders with a previous order
+2. ✅ The existing first-order scheduling behavior remains unchanged
+3. ✅ A downstream order cannot manually select the **same date** as the previous order’s completion date
+4. ✅ A downstream order cannot manually select a **past date**
+5. ✅ The app validates the selected Start Date **before** applying the default 8:00 AM time
+6. ✅ The app does **not** auto-fill 8:00 AM for an invalid Start Date
+7. ✅ If the selected Start Date is valid and Start Time is blank, the app still defaults Start Time to **8:00 AM**
+8. ✅ The separate Start Time-only rule still works as intended
+9. ✅ The app no longer allows a downstream order to start before the previous order has completed
+10. ✅ No UI errors or console errors are introduced

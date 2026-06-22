@@ -1,0 +1,263 @@
+```
+Implement the following changes to the NexFeed application:
+
+---
+
+## NEXT 10 DAYS PAGE — MATCH KNOWLEDGE BASE LAYOUT
+
+Redesign the Next 10 Days page to match the look and feel of the Knowledge Base page, including the header bar with search, action buttons, product count, and upload history section.
+
+---
+
+### PAGE LAYOUT (TOP TO BOTTOM)
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  📊 Next 10 Days                                             │
+│  Upload daily stock level data for production prioritization │
+│                                                              │
+│  [↻ Re-apply to Existing Orders]   [↑ Upload Next 10 Days]  │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│  🔍 Search by code, description, or category...             │
+│  Showing 20 of 20 products                                   │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│  ✨ AI Stock Insights                            ↻ Refresh   │
+│  [AI-generated narrative insights]                           │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│  Stock Level Preview (20 products)                           │
+│  [Table with all columns]                                    │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│  Upload History                                              │
+│  [List of previously uploaded files]                         │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+### HEADER SECTION
+
+Match the Knowledge Base header exactly:
+
+```
+📊 Next 10 Days                    [↻ Re-apply to Existing Orders]  [↑ Upload Next 10 Days]
+Upload daily stock level data for production prioritization
+```
+
+**Page title:**
+- Icon: 📊 (or matching icon style from Knowledge Base's 📋 icon)
+- Title: "Next 10 Days" — 20px, font-weight 700, dark text (#1a1a1a)
+- Subtitle: "Upload daily stock level data for production prioritization" — 13px, grey (#6b7280)
+
+**Action buttons (top-right, same line as title):**
+
+**[↻ Re-apply to Existing Orders] button:**
+- Style: Grey/white outlined button with grey icon and text
+- Border: 1px solid #d1d5db
+- Text: Dark grey (#374151), 13px
+- Icon: ↻ refresh icon on the left
+- Hover: slightly darker border
+- Behavior: Re-runs the target date matching against current SAP orders. Useful when SAP orders changed but Next 10 Days data hasn't.
+
+**[↑ Upload Next 10 Days] button:**
+- Style: Orange filled button (#fd5108), white text
+- Icon: ↑ upload icon on the left
+- Text: "Upload Next 10 Days", 13px, font-weight 600
+- Hover: slightly darker orange (#e8490b)
+- Behavior: Opens file picker or triggers the upload drag-and-drop area
+
+---
+
+### SEARCH BAR
+
+Below the header, matching the Knowledge Base search bar:
+
+```
+🔍 Search by code, description, or category...    Showing 20 of 20 products
+```
+
+**Search input:**
+- Left-aligned, with 🔍 icon inside the input on the left
+- Placeholder: "Search by code, description, or category..."
+- Width: ~300px (same as Knowledge Base)
+- Border: 1px solid #d1d5db
+- Border radius: 6px
+- Font: 13px
+- On focus: orange border (#fd5108)
+
+**Product count:**
+- Right of the search bar (or below, same line)
+- Text: "Showing X of Y products" — orange text (#fd5108), 13px
+- Updates in real-time as user types in search
+
+**Search behavior:**
+- Filters the Stock Level Preview table in real-time
+- Searches across: Material Code, Category, Item Description
+- Case-insensitive
+- Partial match (typing "Elite" shows all Elite XP products)
+
+---
+
+### UPLOAD AREA — SIMPLIFIED
+
+Since we now have the orange "Upload Next 10 Days" button in the header, the drag-and-drop upload area can be:
+
+**Option A — Hidden by default, shows on button click:**
+- When user clicks "Upload Next 10 Days" button, the drag-and-drop zone appears/expands below the header.
+- After successful upload, the zone collapses.
+
+**Option B — Always visible but compact:**
+- A thin drag-and-drop strip below the search bar:
+  ```
+  ┌────────────────────────────────────────────────────┐
+  │  📁 Drop your Next 10 Days file here, or click to  │
+  │     browse — .xlsx, .xls, .csv                      │
+  └────────────────────────────────────────────────────┘
+  ```
+- Height: ~60px (compact, not the tall zone)
+- Light grey dashed border (#d1d5db)
+
+**Recommend Option A** — cleaner, less visual clutter. The upload area only appears when needed.
+
+---
+
+### AI STOCK INSIGHTS SECTION
+
+Remains as currently implemented:
+- White card with subtle border
+- ✨ AI Stock Insights header with Refresh button
+- Auto-generated narrative insights
+- Not collapsible
+- Positioned between search bar and stock level preview table
+
+---
+
+### STOCK LEVEL PREVIEW TABLE
+
+The table remains as currently styled (with the recent visual fixes). Remove the separate "Stock Level Preview (20 products)" header since the product count is now in the search bar section.
+
+**Updated table header:**
+- Remove the "Stock Level Preview (20 products) ↻ Refresh" bar above the table.
+- The table starts directly with the column group headers (PRODUCT DETAILS, NEXT 10 DAYS, TRACKING).
+- The "Refresh" for the table data is now the "Re-apply to Existing Orders" button in the page header.
+
+---
+
+### UPLOAD HISTORY SECTION
+
+Add an Upload History section below the Stock Level Preview table, matching the Knowledge Base's upload history.
+
+```
+Upload History
+─────────────────────────────────────────────────────
+📄 Dummy 10 Days.xlsx    Active
+   Uploaded: 03/19/2026 04:22 PM · 20 products        ↓
+
+📄 Dummy 10 Days.xlsx
+   Uploaded: 03/18/2026 08:15 AM · 20 products        ↓
+
+📄 Stock Levels March.xlsx
+   Uploaded: 03/17/2026 09:00 AM · 18 products        ↓
+```
+
+**Section title:**
+- "Upload History" — 16px, font-weight 600, dark text (#1a1a1a)
+- Margin top: 24px (space above from the table)
+
+**Upload history entries:**
+
+Each entry shows:
+
+| Element | Styling |
+|---|---|
+| 📄 File icon | Grey document icon |
+| File name | 13px, dark text (#1a1a1a), font-weight 500 |
+| "Active" badge | Only on the most recent/current upload. Green text (#43a047), 11px, font-weight 600. Small green badge. |
+| Upload timestamp | 12px, grey (#6b7280). Format: "Uploaded: MM/DD/YYYY HH:MM AM/PM" |
+| Product count | 12px, grey (#6b7280). "· X products" |
+| Download button (↓) | Grey icon, right-aligned. On hover: orange. Click: downloads the original uploaded file. |
+
+**Entry layout:**
+```
+📄 Dummy 10 Days.xlsx    Active                          ↓
+   Uploaded: 03/19/2026 04:22 PM · 20 products
+```
+
+- File icon + name + Active badge on the first line.
+- Upload details on the second line, indented.
+- Download button on the right side.
+- Subtle bottom border (#f3f4f6) between entries.
+- Padding: 12px per entry.
+
+**History behavior:**
+- Shows the last 5 uploads (or all if fewer than 5).
+- Most recent at the top.
+- Only the most recent upload has the "Active" badge.
+- Older uploads can be re-activated by clicking on them (optional — or just for reference).
+
+**Active upload:**
+- The "Active" upload is the one currently being used for target date calculations and production prioritization.
+- When a new file is uploaded, it automatically becomes "Active" and the previous one loses the badge.
+
+---
+
+### COMPLETE PAGE VISUAL
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ 📊 Next 10 Days                                             │
+│ Upload daily stock level data for         [Re-apply] [Upload]│
+│ production prioritization                                    │
+│                                                              │
+│ 🔍 Search by code, description...    Showing 20 of 20       │
+│                                                              │
+│ ┌──────────────────────────────────────────────────────────┐ │
+│ │ ✨ AI Stock Insights                        ↻ Refresh    │ │
+│ │                                                          │ │
+│ │ 20 products analyzed — 15 need production, 2 are stock   │ │
+│ │ sufficient... Gallimax 3 Maintenance is the most urgent  │ │
+│ │ with a target date of Mar 19...                          │ │
+│ └──────────────────────────────────────────────────────────┘ │
+│                                                              │
+│ ┌──────────────────────────────────────────────────────────┐ │
+│ │ PRODUCT DETAILS    │  NEXT 10 DAYS   │    TRACKING       │ │
+│ │ MAT CODE │CAT│ITEM │MAR18│MAR19│...  │INV│BAL│TGT│STATUS │ │
+│ │──────────┼───┼─────┼─────┼─────┼─────┼───┼───┼───┼──────│ │
+│ │ data...  │   │     │     │     │     │   │   │   │      │ │
+│ │ data...  │   │     │     │     │     │   │   │   │      │ │
+│ └──────────────────────────────────────────────────────────┘ │
+│                                                              │
+│ Upload History                                               │
+│ ─────────────────────────────────────────────────            │
+│ 📄 Dummy 10 Days.xlsx  Active                          ↓    │
+│    Uploaded: 03/19/2026 04:22 PM · 20 products               │
+│ 📄 Dummy 10 Days.xlsx                                  ↓    │
+│    Uploaded: 03/18/2026 08:15 AM · 20 products               │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+### STYLING CONSISTENCY WITH KNOWLEDGE BASE
+
+Ensure the following elements match the Knowledge Base page exactly:
+
+| Element | Match Knowledge Base |
+|---|---|
+| Page title size and weight | ✅ Same 20px bold |
+| Subtitle size and color | ✅ Same 13px grey |
+| Button styles (outline + filled) | ✅ Same border, colors, sizing |
+| Search bar style | ✅ Same width, border, icon, placeholder |
+| Product count text | ✅ Same orange text, position |
+| Table borders and spacing | ✅ Same minimal borders |
+| Upload History layout | ✅ Same entry format, Active badge, download icon |
+| Overall page padding | ✅ Same left/right margins |
+| Font family | ✅ Same throughout |
+```

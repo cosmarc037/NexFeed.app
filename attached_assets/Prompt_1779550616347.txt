@@ -1,0 +1,183 @@
+Please update the **shutdown status behavior** so that production-related statuses cannot be selected while a line is in shutdown.
+
+---
+
+## 1. BLOCK “IN PRODUCTION” AND “COMPLETED” STATUS CHANGES WHILE A LINE IS IN SHUTDOWN
+
+When a line is currently in **shutdown**, users must not be able to change an order’s status to:
+
+- `in_production`
+- `completed`
+
+### Reason
+If the line is shut down, the line is not operating. Therefore:
+- an order should not be marked as **ongoing / in production**
+- an order should not be marked as **done / completed**
+
+until the plant/line resumes operations.
+
+### Expected result
+While shutdown is active for a line:
+- `in_production` is not an allowed status option
+- `completed` is not an allowed status option
+
+---
+
+## 2. APPLY THIS TO ALL ORDERS ON THE SHUTDOWN LINE
+
+This status restriction should apply to orders on the shutdown line regardless of whether they are currently:
+
+- normal / active
+- not yet started
+- previously edited
+- otherwise eligible for manual status changes
+
+### Expected result
+As long as the line remains in shutdown, orders on that line cannot be newly moved into:
+- `in_production`
+- `completed`
+
+---
+
+## 3. DISABLE OR HIDE THE STATUS OPTIONS IN THE UI DURING SHUTDOWN
+
+Please update the status dropdown / action menu / status controls so that when a line is in shutdown:
+
+- `in_production` cannot be selected
+- `completed` cannot be selected
+
+### Suggested UI behavior
+You may implement this by:
+- disabling the options
+- hiding the options
+- greying them out
+- or showing a clear tooltip/message explaining that the line is in shutdown
+
+### Goal
+Prevent users from assigning production-related statuses to orders when production cannot happen on that line.
+
+---
+
+## 4. ENFORCE THE SAME RULE IN BACKEND / BUSINESS LOGIC
+
+Please also enforce this rule at the backend or business-rule layer.
+
+### Important
+Even if a user bypasses the UI or a manual request is triggered, the system must reject attempts to set an order on a shutdown line to:
+
+- `in_production`
+- `completed`
+
+### Expected result
+Shutdown status restrictions are enforced consistently in both:
+- frontend/UI behavior
+- backend/service/business logic
+
+---
+
+## 5. KEEP EXISTING DIVERSION EXCLUSIONS FOR ORDERS ALREADY IN PRODUCTION OR COMPLETED
+
+Please preserve the related rule that when a line goes into shutdown:
+
+- orders already marked `in_production` are not candidates for diversion
+- orders already marked `completed` are not candidates for diversion
+
+### Important
+This request adds a second restriction:
+- while shutdown is active, users also cannot newly assign `in_production` or `completed` to orders on that line
+
+### Expected result
+The shutdown flow should now enforce both:
+1. already ongoing/done orders are excluded from diversion
+2. no order on the shutdown line can be newly set to ongoing/done until operations resume
+
+---
+
+## 6. RE-ENABLE THESE OPTIONS ONLY AFTER OPERATIONS RESUME
+
+Once the shutdown ends and the line/plant resumes operations, the normal status options can be made available again.
+
+### Expected result
+After shutdown is lifted:
+- users can again set orders to `in_production`
+- users can again set orders to `completed`
+subject to the app’s normal workflow rules
+
+---
+
+## 7. DO NOT BREAK OTHER STATUS OR SHUTDOWN LOGIC
+
+Please preserve:
+- normal status changes when a line is not in shutdown
+- diversion handling for eligible orders
+- shutdown reason handling
+- revert/diversion history
+- existing completed/in-production history behavior outside shutdown restrictions
+
+This request is specifically to prevent invalid production status changes during an active shutdown.
+
+---
+
+## IMPORTANT
+
+Please enforce this business rule:
+
+If a line is in **shutdown**:
+- users cannot select `in_production`
+- users cannot select `completed`
+
+This applies even for orders that are not yet started.
+
+Also preserve the related rule that:
+- orders already marked `in_production` or `completed` should not be included in diversion
+
+These statuses should only become selectable again after the line has resumed operations.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log blocked status options and rejected shutdown-line status updates.
+
+```javascript
+console.debug('[Shutdown Status Option Restriction]', {
+  lineId,
+  orderId,
+  shutdownActive,
+  blockedStatuses: shutdownActive ? ['in_production', 'completed'] : [],
+});
+```
+
+```javascript
+console.debug('[Shutdown Status Change Rejected]', {
+  lineId,
+  orderId,
+  requestedStatus,
+  shutdownActive,
+  rejected:
+    shutdownActive &&
+    ['in_production', 'completed'].includes(requestedStatus),
+});
+```
+
+```javascript
+console.debug('[Shutdown Status Options Restored]', {
+  lineId,
+  shutdownActive,
+  allowedStatuses,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ While a line is in shutdown, users cannot set an order’s status to `in_production`
+2. ✅ While a line is in shutdown, users cannot set an order’s status to `completed`
+3. ✅ The UI hides or disables `in_production` and `completed` options for orders on shutdown lines
+4. ✅ Backend/business logic also rejects attempts to set `in_production` or `completed` during shutdown
+5. ✅ Orders already marked `in_production` are still excluded from diversion
+6. ✅ Orders already marked `completed` are still excluded from diversion
+7. ✅ Orders on a shutdown line can only be moved to those statuses after operations resume
+8. ✅ Normal status-change behavior still works for lines that are not in shutdown
+9. ✅ No UI errors or console errors are introduced

@@ -1,0 +1,228 @@
+```
+Please improve the **Daily utilization** section in the auto-sequence preview cards by adding the **average utilization rate** so users can understand how the comparison value (e.g. `+19.1%`, `-5.0%`) is derived.
+
+---
+
+## OBJECTIVE
+
+Right now, the Daily utilization section shows:
+- the comparison delta vs Standard (e.g. `+19.1%`, `-5.0%`)
+- the per-day utilization rows
+
+However, it does not show the actual **average utilization rate** of the strategy itself.
+
+This makes it harder for users to understand how the app concluded with:
+- `+19.1%`
+- `-5.0%`
+
+We want to add the average utilization rate as part of the expanded Daily utilization section.
+
+---
+
+## REQUIRED IMPROVEMENT
+
+Keep the current Daily utilization behavior, but add the strategy’s **average utilization rate** to the footer area of the expanded section.
+
+Example target display:
+
+```text
+Date             Orders      Hours        Util %
+May 11, 2026     2           6.5 hrs      27.2%
+May 22, 2026     4          16.6 hrs      69.2%
+
+Capacity utilization: Improved                48.2%
+```
+
+Where:
+- `48.2%` is the average of the valid dated utilization rows
+- it appears as a badge on the right side of the footer
+- it helps explain how the top-level delta was derived
+
+---
+
+## 1. KEEP THE TOP KPI DELTA AS-IS
+
+Do not remove or replace the existing KPI row value such as:
+- `+19.1%`
+- `-5.0%`
+- `0.0%`
+
+This top-level number should still represent:
+- the difference between the strategy’s average utilization and the Standard Sequence average utilization
+
+Example:
+- strategy average = `48.2%`
+- standard average = `29.1%`
+- displayed KPI delta = `+19.1%`
+
+Keep this logic.
+
+---
+
+## 2. ADD THE STRATEGY’S AVERAGE UTILIZATION RATE IN THE FOOTER
+
+At the bottom of the expanded Daily utilization block, keep the existing status label:
+- `Capacity utilization: Improved`
+- `Capacity utilization: Low`
+- `Capacity utilization: Baseline`
+
+Then add a badge on the right side showing the strategy’s own average utilization rate.
+
+### Examples
+- `Capacity utilization: Improved      48.2%`
+- `Capacity utilization: Low           24.1%`
+- `Capacity utilization: Baseline      29.1%`
+
+This badge should visually help users understand what the actual average is.
+
+---
+
+## 3. BADGE COLOR RULES
+
+The average utilization badge should follow the same visual status direction:
+
+- **green** when status is `Improved`
+- **red** when status is `Low`
+- **neutral / baseline style** when status is `Baseline`
+
+This should apply consistently across:
+- Standard Sequence
+- AI strategy cards
+
+---
+
+## 4. AVERAGE UTILIZATION MUST BE CALCULATED FROM VALID DATED ROWS ONLY
+
+When computing the average utilization rate for the footer badge:
+
+### Include:
+- only rows with a valid date
+
+### Exclude:
+- `(no date)` rows
+
+If a row appears as:
+- `(no date)`
+
+it should still be shown in the breakdown if needed, but it must **not** be included in the average utilization calculation.
+
+This is important.
+
+---
+
+## 5. USE THE SAME AVERAGE AS THE BASIS FOR THE DELTA
+
+The average shown in the footer badge must be the same average used to compute the top KPI delta.
+
+There must be no discrepancy between:
+- displayed badge average
+- internal average used for `+19.1%` / `-5.0%`
+
+The footer average should directly explain the KPI delta.
+
+---
+
+## 6. FORMAT TO 1 DECIMAL PLACE
+
+The average utilization badge should always be formatted to **1 decimal place**.
+
+### Example
+- `48.2%`
+- `29.1%`
+- `24.0%`
+
+Use the same precision consistently.
+
+---
+
+## 7. STANDARD SEQUENCE SHOULD ALSO SHOW ITS AVERAGE UTILIZATION
+
+The Standard Sequence card should also show the average utilization badge.
+
+Example:
+- `Capacity utilization: Baseline      29.1%`
+
+This is important because Standard serves as the baseline for comparison.
+
+Users should be able to see the baseline average directly.
+
+---
+
+## 8. KEEP THE EXISTING DAILY BREAKDOWN TABLE
+
+Do not remove the existing per-day table structure.
+
+Keep showing:
+- Date
+- Orders
+- Hours
+- Util %
+
+The requested enhancement is additive:
+- keep the rows
+- add the average utilization badge to the footer
+
+---
+
+## 9. FOOTER LAYOUT EXPECTATION
+
+The footer area should now have:
+- left side = capacity status text
+- right side = average utilization rate badge
+
+Example visual layout:
+
+```text
+Capacity utilization: Improved                      [48.2%]
+```
+
+Please make sure:
+- spacing is clean
+- the badge aligns nicely to the right
+- the footer remains readable inside the card width
+
+---
+
+## 10. ADD DEBUG LOGGING FOR THE AVERAGE UTILIZATION
+
+Temporarily log:
+
+```javascript
+console.debug('[Daily Utilization Average]', {
+  strategyId,
+  title: strategy.title,
+  validDatedRows: groupedRows
+    .filter(r => !!r.availDate)
+    .map(r => ({
+      availDate: r.availDate,
+      utilizationPercent: r.utilizationPercent,
+    })),
+  strategyAverageUtilization,
+  standardAverageUtilization,
+  deltaVsStandard,
+});
+```
+
+This helps verify:
+- the average is based only on valid dated rows
+- the badge value matches the actual average
+- the top KPI delta uses the same average
+
+---
+
+## VERIFICATION
+
+1. ✅ The Daily utilization section still shows the KPI delta vs Standard at the top
+2. ✅ The expanded section still shows the per-day breakdown table
+3. ✅ The footer now includes the strategy’s average utilization rate as a badge
+4. ✅ The average utilization badge is calculated from valid dated rows only
+5. ✅ `(no date)` rows are excluded from the average calculation
+6. ✅ The badge value is the same average used to compute the top KPI delta
+7. ✅ The badge is formatted to 1 decimal place
+8. ✅ Badge color reflects status:
+   - green = Improved
+   - red = Low
+   - neutral = Baseline
+9. ✅ Standard Sequence also shows its own average utilization badge
+10. ✅ Users can now clearly understand how values like `+19.1%` or `-5.0%` were derived
+```

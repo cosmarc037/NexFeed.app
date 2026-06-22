@@ -1,0 +1,340 @@
+```
+Fix the Scheduling Impact AI output to ALWAYS include the 3-5 sentence summary insight, and ensure it appears as a separate section below the grouped bullets:
+
+---
+
+## 1. UPDATE AI PROMPT — ENFORCE SUMMARY ALWAYS
+
+```javascript
+function buildSchedulingImpactPrompt(context, calculatedImpact) {
+  const hasEarlier = calculatedImpact.earlierOrders.length > 0;
+  const hasLater = calculatedImpact.laterOrders.length > 0;
+  const hasDeadlineMisses = calculatedImpact.deadlineMisses.length > 0;
+  
+  return `
+You are a production scheduling advisor for a feed manufacturing plant.
+Analyze the scheduling impact of combining orders on ${context.line}.
+
+COMBINED ORDER:
+  Product: ${context.combiningOrders[0]?.name}
+  Total Volume: ${context.combinedVolume} MT
+  Production Time: ${context.combinedProductionHours} hrs
+  Insertion Position: Priority ${context.insertionResult.prio}
+
+CALCULATED TIME SHIFTS (use as reference — these are accurate):
+${hasLater
+  ? 'Orders starting later:\n' + calculatedImpact.laterOrders.map(o => `  Prio ${o.prio}: ${o.name} — ${o.shiftFormatted} later (N10D: ${o.n10dStatus || 'N/A'})`).join('\n')
+  : 'Orders starting later: None'}
+
+${hasEarlier
+  ? 'Orders starting earlier:\n' + calculatedImpact.earlierOrders.map(o => `  Prio ${o.prio}: ${o.name} — ${o.shiftFormatted} earlier (N10D: ${o.n10dStatus || 'N/A'})`).join('\n')
+  : 'Orders starting earlier: None'}
+
+${hasDeadlineMisses
+  ? 'Orders at risk of missing avail date:\n' + calculatedImpact.deadlineMisses.map(o => `  Prio ${o.prio}: ${o.name} — new completion ${o.newCompletion} exceeds avail date ${o.availDate} (~${o.delayDays} days late) (N10D: ${o.n10dStatus || 'N/A'})`).join('\n')
+  : 'Orders at risk of missing avail date: None'}
+
+ORDER CONTEXT (N10D status, avail dates):
+${context.lineContext
+  .filter(o => !o.isBeingCombined)
+  .map(o => `  Prio ${o.prio}: ${o.name} | N10D: ${o.n10dStatus} | Avail: ${o.availDate} (${o.isDated ? 'DATED' : 'NON-DATED'})`)
+  .join('\n')}
+
+RESPONSE FORMAT:
+
+Your response has TWO parts: GROUPED BULLETS and SUMMARY. Both are MANDATORY.
+
+=== PART 1: GROUPED BULLETS ===
+
+ONLY include sections that have actual data. If a section has no orders, skip it entirely.
+
+GROUPING RULES — APPLY TO ALL SECTIONS:
+1. If multiple orders have the SAME time shift, GROUP them.
+   - Earlier: ✅ Prio [range] ([count] orders) — all start ~[time] earlier. Notable: [2-3 important ones with N10D status].
+   - Later: ⚠ Prio [range] ([count] orders) — all start ~[time] later. Notable: [2-3 important ones with N10D status].
+   - Deadline: ⛔ Prio [range] ([count] orders) — all exceed avail date by ~[X] days. Notable: [2-3 important ones].
+2. If orders have DIFFERENT time shifts, create multiple groups.
+3. If only 1-3 orders, list individually.
+4. Always mention N10D status for Critical and Urgent orders.
+5. Always mention avail dates for dated orders in later and deadline sections.
+
+TIME FORMAT:
+- 0.17 hrs = 10 min
+- 4.18 hrs = 4 hrs 11 min
+- 24.71 hrs = 1 day 43 min
+Do NOT use decimal hours.
+
+=== PART 2: SUMMARY (MANDATORY) ===
+
+After ALL the grouped bullet sections, you MUST write "---SUMMARY---" on its own line, followed by 3-5 sentences.
+
+This summary MUST ALWAYS be included regardless of the data. Even if there are only earlier orders and no delays.
+
+Summary rules:
+- Each sentence on its OWN LINE.
+- If only earlier orders (no delays, no deadline misses): be positive — mention the time savings, recommend proceeding.
+- If delays exist: assess severity, mention Critical/Urgent orders, note whether savings offset delays.
+- If deadline misses exist: highlight the most at-risk orders.
+- End with a clear recommendation (safe to proceed, proceed with caution, not recommended).
+- Do NOT repeat the grouped bullets.
+- Do NOT use markdown.
+
+EXAMPLE RESPONSE (do not copy — just shows the structure):
+
+Orders starting earlier:
+✅ Prio 3–18 (16 orders) — all start ~10 min earlier. Notable: Gall 21 Chicken Layer (Prio 5) is Critical.
+
+Orders starting later:
+⚠ Prio 7–15 (9 orders) — all start ~4 hrs 11 min later. Notable: Gallimax 3 Red Pellet (Prio 12), Ave Max Duck Growex (Prio 13).
+
+---SUMMARY---
+The combination results in a net positive for 16 downstream orders, each gaining ~10 minutes.
+However, 9 interspersed orders between the combined members will start approximately 4 hours later.
+Gallimax 3 Red Pellet (Prio 12) and Ave Max Duck Growex (Prio 13) are the most affected, though neither is Critical.
+The changeover savings from eliminating 9 changeovers partially offset the delays.
+Overall, it is safe to proceed — the delays are manageable and no avail dates are at risk.
+  `;
+}
+```
+
+---
+
+## 2. UPDATE RESPONSE PARSER — USE ---SUMMARY--- MARKER
+
+```javascript
+function parseSchedulingImpactResponse(response) {
+  let cleaned = response.trim();
+  
+  // Remove markdown
+  cleaned = cleaned.replace(/\*\*/g, '');
+  cleaned = cleaned.replace(/#{1,6}\s*/g, '');
+  cleaned = cleaned.replace(/\*([^*]+)\*/g, '$1');
+  cleaned = cleaned.replace(/_([^_]+)_/g, '$1');
+  
+  const result = {
+    earlierSection: [],
+    laterSection: [],
+    deadlineSection: [],
+    summary: []
+  };
+  
+  // Split by ---SUMMARY--- marker
+  let bulletsPart = cleaned;
+  let summaryPart = '';
+  
+  const summaryMarkerIndex = cleaned.indexOf('---SUMMARY---');
+  if (summaryMarkerIndex >= 0) {
+    bulletsPart = cleaned.substring(0, summaryMarkerIndex).trim();
+    summaryPart = cleaned.substring(summaryMarkerIndex + '---SUMMARY---'.length).trim();
+  } else {
+    // Fallback: try other markers
+    const altMarkers = ['SUMMARY:', 'Summary:', '---', '==='];
+    for (const marker of altMarkers) {
+      const idx = cleaned.lastIndexOf(marker);
+      if (idx >= 0 && idx > cleaned.length * 0.4) {
+        // Only use if it's in the latter half of the response
+        bulletsPart = cleaned.substring(0, idx).trim();
+        summaryPart = cleaned.substring(idx + marker.length).trim();
+        break;
+      }
+    }
+  }
+  
+  // If still no summary found, try to extract non-icon lines at the end
+  if (!summaryPart) {
+    const allLines = cleaned.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+    
+    // Find the last line that has an icon
+    let lastIconIndex = -1;
+    allLines.forEach((l, i) => {
+      if (l.startsWith('✅') || l.startsWith('⚠') || l.startsWith('⛔')) {
+        lastIconIndex = i;
+      }
+    });
+    
+    // Find last section header
+    let lastHeaderIndex = -1;
+    allLines.forEach((l, i) => {
+      if (l.toLowerCase().startsWith('orders starting') || l.toLowerCase().startsWith('orders at risk')) {
+        lastHeaderIndex = i;
+      }
+    });
+    
+    const lastContentIndex = Math.max(lastIconIndex, lastHeaderIndex);
+    
+    if (lastContentIndex >= 0 && lastContentIndex < allLines.length - 1) {
+      bulletsPart = allLines.slice(0, lastContentIndex + 1).join('\n');
+      summaryPart = allLines.slice(lastContentIndex + 1).join('\n');
+    }
+  }
+  
+  // Parse bullets part into sections
+  const bulletLines = bulletsPart.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+  let currentSection = null;
+  
+  bulletLines.forEach(line => {
+    const lower = line.toLowerCase();
+    
+    if (lower.startsWith('orders starting earlier')) {
+      currentSection = 'earlier';
+      return;
+    }
+    if (lower.startsWith('orders starting later')) {
+      currentSection = 'later';
+      return;
+    }
+    if (lower.startsWith('orders at risk')) {
+      currentSection = 'deadline';
+      return;
+    }
+    
+    if (line.startsWith('✅')) {
+      result.earlierSection.push(line);
+      currentSection = 'earlier';
+      return;
+    }
+    if (line.startsWith('⚠')) {
+      result.laterSection.push(line);
+      currentSection = 'later';
+      return;
+    }
+    if (line.startsWith('⛔')) {
+      result.deadlineSection.push(line);
+      currentSection = 'deadline';
+      return;
+    }
+  });
+  
+  // Parse summary
+  if (summaryPart) {
+    result.summary = summaryPart
+      .split('\n')
+      .map(l => l.trim())
+      .filter(l => l.length > 0 && !l.startsWith('---') && !l.startsWith('==='))
+      .slice(0, 5);
+  }
+  
+  return result;
+}
+```
+
+---
+
+## 3. UPDATE DISPLAY — SUMMARY ALWAYS SHOWS WITH SEPARATOR
+
+```jsx
+function SchedulingImpactAIDisplay({ response }) {
+  const hasEarlier = response.earlierSection.length > 0;
+  const hasLater = response.laterSection.length > 0;
+  const hasDeadline = response.deadlineSection.length > 0;
+  const hasSummary = response.summary.length > 0;
+  const hasBullets = hasEarlier || hasLater || hasDeadline;
+  
+  return (
+    <div className="scheduling-impact-ai">
+      {/* Earlier section */}
+      {hasEarlier && (
+        <div className="scheduling-impact-section">
+          <div className="scheduling-impact-label scheduling-impact-faster">
+            Orders starting earlier:
+          </div>
+          {response.earlierSection.map((line, index) => (
+            <SchedulingImpactLine key={`earlier-${index}`} line={line} type="earlier" />
+          ))}
+        </div>
+      )}
+      
+      {/* Later section */}
+      {hasLater && (
+        <div className="scheduling-impact-section">
+          <div className="scheduling-impact-label scheduling-impact-delayed">
+            Orders starting later:
+          </div>
+          {response.laterSection.map((line, index) => (
+            <SchedulingImpactLine key={`later-${index}`} line={line} type="later" />
+          ))}
+        </div>
+      )}
+      
+      {/* Deadline section */}
+      {hasDeadline && (
+        <div className="scheduling-impact-section">
+          <div className="scheduling-impact-label scheduling-impact-deadline">
+            Orders at risk of missing avail date:
+          </div>
+          {response.deadlineSection.map((line, index) => (
+            <SchedulingImpactLine key={`deadline-${index}`} line={line} type="deadline" />
+          ))}
+        </div>
+      )}
+      
+      {/* Summary — ALWAYS shown if available, with separator */}
+      {hasSummary && (
+        <div className={`scheduling-impact-ai-note ${hasBullets ? 'scheduling-impact-ai-note-separated' : ''}`}>
+          {response.summary.map((sentence, index) => (
+            <p key={index} className="scheduling-impact-ai-sentence">
+              {sentence}
+            </p>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+```
+
+---
+
+## 4. STYLING — SUMMARY WITH SEPARATOR
+
+```css
+.scheduling-impact-ai-note {
+  margin-top: 10px;
+}
+
+.scheduling-impact-ai-note-separated {
+  padding-top: 10px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.scheduling-impact-ai-sentence {
+  font-size: 12px;
+  color: #6b7280;
+  line-height: 1.6;
+  margin: 0 0 6px 0;
+}
+
+.scheduling-impact-ai-sentence:last-child {
+  margin-bottom: 0;
+}
+```
+
+---
+
+## VERIFICATION
+
+### Summary always appears
+1. ✅ Only earlier orders → summary appears with positive tone
+2. ✅ Only later orders → summary appears with concern
+3. ✅ Earlier + later → summary appears assessing both
+4. ✅ Earlier + later + deadline → summary appears with highest concern
+5. ✅ Only deadline misses → summary appears
+
+### Summary separated from bullets
+6. ✅ When bullets exist → separator line between bullets and summary
+7. ✅ When no bullets → summary shows without separator
+8. ✅ Summary is NOT inside any bullet section
+9. ✅ No ✅ or ⚠ icons on summary lines
+
+### Parsing
+10. ✅ ---SUMMARY--- marker correctly splits bullets from summary
+11. ✅ Fallback parsing works if AI doesn't use marker
+12. ✅ Summary capped at 5 sentences
+13. ✅ Empty lines and markers stripped from summary
+
+### Grouping still works
+14. ✅ Earlier orders grouped
+15. ✅ Later orders grouped
+16. ✅ Deadline orders grouped
+17. ✅ Sections only shown if they have data
+```

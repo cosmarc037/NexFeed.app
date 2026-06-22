@@ -1,0 +1,269 @@
+```
+Please revisit AI-powered sequencing so the AI optimizes the whole order sequence for actual changeover reduction, using the full set of order details and the changeover rules, instead of optimizing around one transition like red→non-red.
+
+---
+
+## OBJECTIVE
+
+The current behavior is that AI-powered sequences tend to:
+- focus heavily on a single transition, such as placing the red order last
+- describe optimization goals that center on one rule
+- ignore the rest of the sequence structure
+- produce a final order table that sometimes ends up with higher total changeover than Standard Sequence
+
+This defeats the point of AI sequencing.
+
+The goal is:
+- AI should reason about the whole sequence, not just one rule or one product
+- AI should use the real changeover rules
+- AI should produce a sequence whose total changeover is actually lower than Standard Sequence whenever feasible
+- AI strategy descriptions must match what the final table actually achieves
+
+---
+
+## CURRENT ISSUE
+
+From the screenshots:
+
+### Strategy card example (`Red Order Tail Buffer`, `Late Red End Placement`, etc.)
+Descriptions emphasize:
+- `places the red 3mm flexible order last`
+- `moves the red order later in the sequence`
+- `avoids red→non-red costly transition`
+
+### 3-Dimension Analysis
+Reasoning is clearly red-pellet-centric:
+- `A very expensive red to non-red transition (1.00 hr) dominates changeover costs; this can be eliminated by placing red order last.`
+
+### Result in the table
+- the red order is often placed last (or at least later)
+- but the rest of the sequence is not clustered well
+- total changeover is sometimes worse than Standard Sequence
+- time-saved is actually negative in many cases
+
+This shows the AI is not actually doing whole-sequence optimization.
+It is solving one penalty and ignoring the rest.
+
+---
+
+## REQUIRED BEHAVIOR
+
+AI-powered strategies must:
+1. treat the entire sequence as the optimization scope
+2. use the real changeover rules as a transition cost model
+3. consider all adjacent pairs, not just one rule
+4. only produce a strategy when the resulting total changeover is actually reduced vs Standard Sequence, or else not recommend it
+5. describe in the card only what the final table actually did
+
+Red-pellet placement can still be part of the reasoning, but it cannot dominate to the point that the rest of the sequence is ignored.
+
+---
+
+## 1. CHANGE THE AI OBJECTIVE FROM "FIX ONE RULE" TO "MINIMIZE TOTAL SEQUENCE CHANGEOVER"
+
+Update the AI strategy prompt so the optimization objective is:
+
+- minimize the total sum of changeover penalties across all adjacent order pairs in the final sequence
+- subject to:
+  - avail date feasibility
+  - Future Dispatches / urgency constraints
+  - MTO protection
+  - line eligibility
+  - movable/flexible constraints
+
+This must be the main goal, not "move red last".
+
+The AI should understand that:
+- red→non-red is just one penalty
+- the whole sequence has many adjacent pairs
+- the best strategy is whichever total sum is lowest
+
+---
+
+## 2. THE AI MUST SEE THE FULL ORDER SET IN CONTEXT
+
+Provide the AI, for each line, the full current lineup including for each order:
+- current position
+- item description
+- category
+- color
+- diameter
+- form
+- volume
+- production hours
+- avail date
+- Future Dispatches status
+- MTO protection flag
+- whether the order is movable/flexible
+- current adjacent changeover if available
+
+The AI should see the entire chain, not just rules.
+
+---
+
+## 3. THE AI MUST BE GIVEN THE REAL CHANGEOVER RULES AS A TRANSITION COST MATRIX
+
+Pass the actual Changeover Rules to the AI:
+- diameter transitions (e.g. 4mm → 3mm)
+- color transitions (Red → Any, Green → Any, Any → Red/Green, Yellow → Brown)
+- category transitions (different category)
+- stacking behavior
+- directional differences
+- feedmill-specific values (FM1, FM2, FM3)
+
+Instruct the AI that:
+- rules are directional
+- rules can stack
+- changeover cost is based on the following order’s properties
+
+Then instruct the AI to evaluate adjacent transitions explicitly using these rules.
+
+---
+
+## 4. CLUSTERING MUST BE WHOLE-SEQUENCE, NOT SINGLE-PRODUCT
+
+The AI’s reasoning should go beyond red pellet logic, such as:
+- group same-color runs where possible
+- keep same-diameter orders adjacent
+- avoid inserting unrelated categories/colors in the middle of compatible runs
+- treat red/green placement as a secondary effect of whole-sequence optimization, not as the primary driver
+- consider Yellow↔Brown as a cheaper bridging transition than Red→Any
+
+The 3-dimension analysis should reflect whole-sequence reasoning, not single-transition reasoning.
+
+---
+
+## 5. EVALUATE THE FINAL CANDIDATE SEQUENCE AGAINST STANDARD BEFORE ACCEPTING
+
+After the AI proposes a candidate sequence:
+- run the sequence through the app’s real changeover engine
+- compute the total changeover
+- compare to Standard Sequence
+- accept the AI strategy only if it truly reduces changeover
+- otherwise, adjust, regenerate, or exclude it from recommendation
+
+An AI strategy claiming to reduce changeover cannot have a worse total changeover than Standard.
+
+---
+
+## 6. DO NOT RECOMMEND STRATEGIES THAT PERFORM WORSE THAN STANDARD SEQUENCE
+
+If an AI strategy’s final changeover is not better than Standard Sequence:
+- it must not receive the Recommended badge
+- its description must not claim changeover reduction
+- its faithfulness should not be inflated
+- optionally, it should not be shown as selectable at all if it is not genuinely better
+
+Standard Sequence should win by default when AI cannot actually do better.
+
+---
+
+## 7. ALIGN STRATEGY DESCRIPTION WITH FINAL APPLIED TABLE
+
+The card description must only say what is actually visible in the final result.
+
+If the AI only achieved:
+- red later
+- minimal clustering gain
+
+then the description must say that.
+
+If the AI achieved:
+- whole-sequence clustering
+- lower changeover
+- clearer block grouping
+
+then the description may say that.
+
+Do not produce poetic descriptions that overstate the real result.
+
+Faithfulness must evaluate the description against the actual final table.
+
+---
+
+## 8. THE 3-DIMENSION ANALYSIS MUST EVALUATE THE WHOLE SEQUENCE
+
+Right now the 3-dimension analysis skews heavily to red-pellet reasoning.
+
+Please update it so:
+- it evaluates the entire sequence
+- it considers all significant transitions, not just red-related ones
+- changeover reduction is measured across total adjacent cost
+- the wording is not red-centric unless red is truly the dominant factor
+
+If other transitions contribute more to total changeover than the red rule, the analysis should reflect that.
+
+---
+
+## 9. IMPROVE EXECUTION FAITHFULNESS
+
+If the AI proposes a whole-sequence optimized order, the execution layer must apply it faithfully.
+
+The final table should visibly reflect:
+- improved clustering
+- lower total changeover
+- the described strategy
+
+Do not dilute the AI’s intended ordering into a weaker sequence.
+
+---
+
+## 10. DO NOT ALLOW DATE ORDER TO BREAK DURING AI REORDERING
+
+Date safety must remain a hard constraint.
+
+AI-powered sequencing must not:
+- push earlier avail-date orders behind later avail-date orders improperly
+- violate Future Dispatches or MTO protection
+- create invalid sequencing to chase changeover gains
+
+If the optimizer cannot lower changeover without breaking date flow, then the strategy should simply not be recommended.
+
+---
+
+## 11. ADD DEBUG LOGGING FOR WHOLE-SEQUENCE REASONING
+
+Temporarily log:
+
+```javascript
+console.debug('[AI Whole-Sequence Optimization]', {
+  lineId,
+  candidateOrdering: candidateOrders.map((o, index) => ({
+    position: index + 1,
+    orderId: o.id,
+    item: o.item_description,
+    color: o.color,
+    diameter: o.diameter,
+    category: o.category,
+    availDate: o.avail_date,
+    movable: o.movable,
+  })),
+  totalAdjacentChangeover,
+  standardSequenceChangeover,
+  deltaVsStandard,
+  strategyTitle,
+  strategyDescription,
+  faithfulness,
+});
+```
+
+This helps verify:
+- the AI evaluated the whole sequence
+- the final ordering beats Standard when it claims to
+- description and faithfulness match reality
+
+---
+
+## 12. VERIFICATION
+
+1. ✅ AI sequencing now optimizes the entire sequence, not just one rule (like red→non-red)
+2. ✅ The AI receives the full order context and the real changeover rules
+3. ✅ Clustering considers color, diameter, category, and stacked penalties across all adjacent pairs
+4. ✅ A candidate AI sequence is validated against Standard Sequence, and must actually reduce total changeover to be accepted
+5. ✅ AI strategies are never Recommended if their total changeover is worse than Standard
+6. ✅ Strategy description matches the actual final applied table, not just the intended idea
+7. ✅ 3-Dimension Analysis reflects whole-sequence reasoning, not red-pellet-centric reasoning
+8. ✅ Date flow (avail dates, Future Dispatches, MTO) remains a hard constraint and is not broken by AI reordering
+9. ✅ Faithfulness scores reflect real alignment between strategy description and final table
+10. ✅ Execution layer faithfully applies the AI’s intended ordering, so the visible table actually reflects the AI strategy
+```

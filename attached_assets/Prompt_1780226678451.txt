@@ -1,0 +1,188 @@
+Please update the **Suggested Pre-orders** section in the **Fulfillment (Demo)** workspace to use a cleaner, more compact table-like layout with the following formatting adjustments.
+
+---
+
+# 1. KEEP HEADER TITLES AS ONE-LINERS ONLY
+
+Please ensure the column header titles are displayed as **single-line labels** only.
+
+### Current issue
+Some headers wrap into multiple lines.
+
+### Expected behavior
+Each header title should stay on one line, as much as possible.
+
+### Goal
+Make the suggested pre-orders table easier to scan and visually cleaner.
+
+### Expected result
+Header titles appear in a compact one-line format without unnecessary wrapping.
+
+---
+
+# 2. DISPLAY VOLUME VALUES IN A SINGLE LINE
+
+Please make the **Volume** value display in a single line.
+
+### Current issue
+The value may appear like:
+- `80`
+- `MT`
+
+on separate lines.
+
+### Required format
+Please display it as:
+- `80 MT`
+
+### Expected result
+Volume values are shown on one line only.
+
+---
+
+# 3. REMOVE BATCHES / NUMBER OF BATCHES FROM THE SUGGESTED PRE-ORDER TABLE
+
+Please remove the display of:
+- number of batches
+- batches count
+
+from this suggested pre-order table layout.
+
+### Important
+Only keep:
+- **Batch Size**
+
+### Expected result
+The pre-order suggestion table becomes simpler and less crowded.
+
+---
+
+# 4. BOLD THE PRODUCTION TIME
+
+Please make the **Production Time** value visually emphasized by displaying it in **bold**.
+
+### Goal
+Help users quickly identify how long the suggested pre-order would take to produce.
+
+### Expected result
+Production time stands out more clearly than the supporting secondary details.
+
+---
+
+# 5. REMOVE THE `PRE-ORDER` TEXT FROM THE ITEM DESCRIPTION COLUMN
+
+Please remove the repeated `PRE-ORDER` text currently shown inside the item description area.
+
+### Important
+The pre-order identity is already being indicated elsewhere in the UI, so it does not need to be repeated in the item description cell.
+
+### Expected result
+The item description column should show just the item name/description without the extra `PRE-ORDER` line underneath it.
+
+---
+
+# 6. TOP-ALIGN THE CONTENTS IF POSSIBLE
+
+Please arrange the cell contents with **top alignment** where possible.
+
+### Goal
+Make multi-column rows feel more aligned and visually organized.
+
+### Expected result
+The values across the row align from the top rather than appearing vertically inconsistent.
+
+---
+
+# 7. REMOVE THE EXTRA LABELS `MT ON-HAND` AND `AI AVAIL DATE` FROM THE CELL CONTENTS
+
+Please remove the repeated supporting text inside the row values for:
+
+- `MT on-hand`
+- `AI avail date`
+
+### Reason
+These labels are already clear enough from the column headers and do not need to be repeated inside each row.
+
+### Expected result
+The cells should show just the value itself without repeating the same descriptor underneath.
+
+---
+
+# 8. RENAME / MOVE THE AVAIL DATE HEADER TO INDICATE AI-SUGGESTED AVAIL DATE
+
+Instead of showing `AI avail date` inside each row, please place the AI context directly in the column header.
+
+### Preferred behavior
+Use the header itself to indicate this field, for example:
+- `AI-Suggested Avail Date`
+
+### Expected result
+The row cell should show only the date value, while the header makes it clear that the date is AI-suggested.
+
+---
+
+# 9. KEEP THE TABLE-LIKE STRUCTURE, BUT MAKE IT CLEANER AND MORE COMPACT
+
+Please preserve the new table-style structure for Suggested Pre-orders, but simplify it using the formatting changes above.
+
+### Goal
+The section should look closer to the main order table:
+- compact
+- easier to scan
+- less repetitive
+- more visually aligned
+
+### Expected result
+The suggested pre-orders section remains table-based, but is cleaner and easier to compare across rows.
+
+---
+
+# IMPORTANT
+
+Please update the **Suggested Pre-orders** table layout as follows:
+
+- keep header titles as one-liners only
+- display volume in one line (example: `80 MT`)
+- remove batches count / number of batches
+- keep only batch size
+- bold the production time
+- remove the `PRE-ORDER` text from the item description cell
+- top-align the row contents if possible
+- remove repeated row-level labels like `MT on-hand` and `AI avail date`
+- place the AI date meaning in the header instead (for example: `AI-Suggested Avail Date`)
+
+---
+
+# DEBUG LOGGING
+
+Temporarily log the simplified suggested pre-order table rendering.
+
+```javascript
+console.debug('[Demo Suggested Pre-Orders Table Formatting]', {
+  oneLineHeaders: true,
+  oneLineVolume: true,
+  batchesRemoved: true,
+  batchSizeRetained: true,
+  productionTimeBold: true,
+  preOrderTextRemovedFromDescription: true,
+  topAligned: true,
+  repeatedCellLabelsRemoved: ['MT on-hand', 'AI avail date'],
+});
+```
+
+---
+
+# VERIFICATION
+
+1. ✅ Header titles appear on one line only
+2. ✅ Volume values display on one line (example: `80 MT`)
+3. ✅ Batches / number of batches are removed from the table
+4. ✅ Batch Size remains visible
+5. ✅ Production Time is bolded
+6. ✅ `PRE-ORDER` text is removed from the item description cell
+7. ✅ Row contents are top-aligned if supported
+8. ✅ `MT on-hand` is removed from row-level display
+9. ✅ `AI avail date` is removed from row-level display
+10. ✅ The AI context is moved into the avail-date header
+11. ✅ The table remains compact and easier to scan
+12. ✅ No UI errors or layout regressions are introduced

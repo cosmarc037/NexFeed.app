@@ -1,0 +1,222 @@
+```
+Fix the line actions — place below tables, no collapse, no container, same style as All Lines Summary:
+
+---
+
+## 1. UPDATE PlantLineTab — ACTIONS BELOW TABLES
+
+```jsx
+function PlantLineTab({ 
+  line, 
+  originalOrders, 
+  sequencedOrders, 
+  placementLog,
+  aiExplanations,
+  isLoadingAI,
+  useFallback
+}) {
+  const movedCount = sequencedOrders.filter(o => o._movement !== 'same').length;
+  const newFromOtherLines = sequencedOrders.filter(o => o._movement === 'new_to_line').length;
+  const combinedCount = sequencedOrders.filter(o => o._isCombined).length;
+  
+  // Get actions relevant to this line
+  const lineActions = getActionsForLine(placementLog, line);
+  
+  return (
+    <div className="plant-line-tab">
+      {/* Line stats */}
+      <div className="auto-sequence-stats" style={{ padding: '12px 24px' }}>
+        <StatBadge label="Before" value={originalOrders.length} />
+        <StatBadge label="After" value={sequencedOrders.length} />
+        {newFromOtherLines > 0 && (
+          <StatBadge label="From Other Lines" value={newFromOtherLines} color="blue" />
+        )}
+        <StatBadge label="Orders Moved" value={movedCount} color="orange" />
+        {combinedCount > 0 && (
+          <StatBadge label="Combined Groups" value={combinedCount} color="green" />
+        )}
+      </div>
+      
+      {/* Before and After comparison tables */}
+      <div className="auto-sequence-comparison">
+        <div className="auto-sequence-comparison-container">
+          <div className="auto-sequence-comparison-scroll">
+            {/* ... existing Before and After tables ... */}
+          </div>
+        </div>
+      </div>
+      
+      {/* Actions for this line — below tables, no container, no collapse */}
+      {lineActions.length > 0 && (
+        <div className="line-actions-plain">
+          <h3 className="plant-summary-title">📋 Actions on {line}</h3>
+          
+          {isLoadingAI && (
+            <div className="plant-actions-loading">Analyzing actions...</div>
+          )}
+          
+          {!isLoadingAI && lineActions.map((entry, actionIdx) => {
+            const globalIndex = placementLog.findIndex(p => p === entry);
+            
+            const explanation = (!useFallback && aiExplanations && aiExplanations[globalIndex])
+              ? aiExplanations[globalIndex]
+              : generateFallbackExplanation(entry);
+            
+            const isAI = !useFallback && aiExplanations && aiExplanations[globalIndex];
+            
+            const toScore = entry.lineScores?.find(ls => ls.line === entry.toLine);
+            
+            return (
+              <div key={actionIdx} className="plant-action-card">
+                {/* Header */}
+                <div className="plant-action-header">
+                  {entry.type === 'combined' ? (
+                    <>
+                      <span className="plant-action-icon">🔗</span>
+                      <span className="plant-action-title">
+                        Combined <strong>{entry.ordersCount}</strong> orders of <strong>{entry.product}</strong> ({entry.totalVolume} MT)
+                        {entry.fromLines.every(l => l === entry.toLine)
+                          ? ` in place on ${entry.toLine}`
+                          : ` from ${[...new Set(entry.fromLines)].map(l => getLineShortName(l)).join(', ')} → ${entry.toLine}`
+                        }
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="plant-action-icon">↗</span>
+                      <span className="plant-action-title">
+                        Moved <strong>{entry.product}</strong> ({entry.volume} MT) {getLineShortName(entry.fromLine)} → {entry.toLine}
+                      </span>
+                    </>
+                  )}
+                  {isAI && <span className="plant-action-ai-tag">AI</span>}
+                </div>
+                
+                {/* Explanation */}
+                <div className="plant-action-explanation">
+                  {explanation}
+                </div>
+                
+                {/* Bottom badges */}
+                <div className="plant-action-badges">
+                  {toScore && (
+                    <span className="plant-action-mt-badge plant-action-mt-increase">
+                      {getLineShortName(entry.toLine)} {toScore.totalMTBefore.toFixed(1)} MT → {toScore.totalMTAfter.toFixed(1)} MT
+                      <span className="plant-action-mt-diff">
+                        (+{(toScore.totalMTAfter - toScore.totalMTBefore).toFixed(1)} MT)
+                      </span>
+                    </span>
+                  )}
+                  
+                  {entry.type === 'combined' && entry.individualVolumes && (
+                    entry.individualVolumes.map((iv, subIdx) => (
+                      <span key={subIdx} className="plant-action-sub-chip">
+                        {getLineShortName(iv.fromLine)} · {iv.volume} MT
+                      </span>
+                    ))
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+```
+
+---
+
+## 2. STYLING — PLAIN, NO CONTAINER, SAME AS ALL LINES SUMMARY
+
+```css
+/* REMOVE old line-actions styles */
+/* DELETE: .line-actions-section, .line-actions-header, .line-actions-toggle,
+   .line-actions-body, .line-actions-count, .line-action-relationship,
+   .line-action-tag, .line-action-tag-incoming, .line-action-tag-outgoing,
+   .line-action-tag-both, .plant-action-card-source */
+
+/* Plain actions section — same as All Lines Summary */
+.line-actions-plain {
+  padding: 16px 24px;
+  flex-shrink: 0;
+}
+
+.line-actions-plain .plant-summary-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #1a1a1a;
+  margin-bottom: 12px;
+}
+
+/* Action cards inside — reuse existing styles */
+.line-actions-plain .plant-action-card {
+  background: #f9fafb;
+  border: 1px solid #f3f4f6;
+  border-radius: 8px;
+  padding: 14px 16px;
+  margin-bottom: 10px;
+}
+
+.line-actions-plain .plant-action-card:last-child {
+  margin-bottom: 0;
+}
+```
+
+---
+
+## 3. ENSURE plant-line-tab SCROLLS CORRECTLY
+
+```css
+/* Plant line tab — scrollable to see actions below tables */
+.plant-line-tab {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+/* Comparison section should not take all space — allow scrolling to actions */
+.plant-line-tab .auto-sequence-comparison {
+  flex-shrink: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding: 0 24px 16px 24px;
+  min-height: 400px;
+}
+```
+
+---
+
+## VERIFICATION
+
+### Placement
+1. ✅ Actions section is BELOW the before/after tables
+2. ✅ User scrolls down past tables to see actions
+
+### No container, no collapse
+3. ✅ No wrapping container with border/border-radius
+4. ✅ No collapse/expand toggle
+5. ✅ No header bar with click handler
+6. ✅ Just a title "📋 Actions on Line 3" and cards below
+
+### Same style as All Lines Summary
+7. ✅ Same title styling (plant-summary-title)
+8. ✅ Same action card styling (plant-action-card)
+9. ✅ Same header with icon + title + AI tag
+10. ✅ Same explanation box (plain text, white background)
+11. ✅ Same bottom badges (MT change + sub-order chips)
+
+### Correct filtering
+12. ✅ Only shows actions relevant to this line
+13. ✅ Actions where this line is destination → shown
+14. ✅ Actions where this line is source → shown
+15. ✅ Lines with no actions → no section shown
+
+### Cached AI
+16. ✅ Uses same aiExplanations from parent
+17. ✅ No new AI calls when viewing per-line actions
+18. ✅ Global index maps correctly to cached explanations
+```

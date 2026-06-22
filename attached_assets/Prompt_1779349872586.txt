@@ -1,0 +1,200 @@
+Please refine the **Smart Demand (MT)** feature in the **Monitoring > SKU Monitoring > Detailed Demand View** table.
+
+### BUSINESS INTENT
+
+We already have an existing **Historical Demand (MT)** column that displays the actual historical demand value.
+
+What we want now is **another historical-demand-based column**, called:
+
+- **Smart Demand (MT)**
+
+This new column should be **AI-powered**, meaning the AI should analyze the existing historical demand records and return a smart assessed demand value.
+
+This is **not** meant to be a recursive forecast that uses prior AI outputs.
+
+This is **not** meant to use current-year AI demand as historical input.
+
+This is essentially:
+- actual history in one column
+- AI-analyzed historical demand in another column
+
+---
+
+### CORE RULE
+
+**Smart Demand must be generated only from actual historical demand records.**
+
+The AI should analyze the historical demand pattern for the relevant focus month across all available historical years and return one numeric assessed value in MT.
+
+Do **not** use any previously generated Smart Demand values as part of the AI input.
+
+Do **not** feed AI-generated demand back into future analysis.
+
+---
+
+### EXAMPLE
+
+If the app is currently showing **May 2025** as the historical demand context, then for a given SKU the AI should analyze actual historical records such as:
+
+- May 2021
+- May 2022
+- May 2023
+- May 2024
+- May 2025
+
+Then return one AI-generated **Smart Demand (MT)** value based on those actual historical values.
+
+Again:
+- use actual historical demand only
+- do not include any prior Smart Demand values
+- do not recursively forecast from AI-generated results
+
+---
+
+### TABLE REQUIREMENT
+
+In the **Detailed Demand View** table, keep:
+
+- **Historical Demand (MT)** = actual historical value
+- **Smart Demand (MT)** = AI-analyzed historical demand value
+
+The Smart Demand column should display:
+- numeric value only
+- MT formatting
+- no reason text
+- no explanation
+- no tooltip required unless already standard
+
+---
+
+### AI REQUIREMENT
+
+The Smart Demand value must be generated through the project’s existing AI integration, such as the current **Azure OpenAI** setup already used elsewhere in the app.
+
+Do not implement this as a purely deterministic client-side weighted average and label it AI.
+
+Use actual AI processing, preferably through backend/server-side integration.
+
+---
+
+### MONTH FOCUS RULE
+
+The AI should analyze only the relevant focus month shown by the Monitoring page.
+
+So if the page context is for **May**, only use historical May records across available years for that SKU.
+
+Do not analyze unrelated months unless absolutely needed as fallback.
+
+This is to reduce waiting time and keep analysis aligned with the current page behavior.
+
+---
+
+### RETENTION / REUSE RULE
+
+Once Smart Demand is generated for a given:
+- SKU
+- focus month
+- historical dataset version/hash
+
+it should be saved and reused.
+
+Do not regenerate it on every page load.
+
+Only regenerate if:
+- the focus month changes
+- the SKU changes
+- the historical demand data changes
+- manual refresh/recompute is triggered
+
+Stored Smart Demand is for display/performance only and must remain separate from historical source data.
+
+---
+
+### DATA SEPARATION RULE
+
+Keep these strictly separate:
+
+1. **Historical Demand**
+   - actual source data
+   - used as AI input
+
+2. **Smart Demand**
+   - AI-generated output
+   - saved for reuse/display
+   - never reused as historical input
+
+This separation must be enforced in code.
+
+---
+
+### IMPLEMENTATION EXPECTATION
+
+Please update the implementation so that:
+
+- frontend requests Smart Demand for the visible SKU rows
+- backend checks whether a saved Smart Demand already exists for that SKU + month + historical-data version
+- if yes, return it
+- if no, call AI using actual historical demand records only
+- save the AI-generated Smart Demand
+- return it to the table
+
+If AI fails:
+- show `—`
+- do not silently pretend a deterministic fallback is AI
+
+If a fallback is implemented internally, it must not be misrepresented as AI-generated.
+
+---
+
+### DEBUG LOGGING
+
+Temporarily log:
+
+```javascript
+console.debug('[Smart Demand Historical Input]', {
+  sku,
+  focusMonth,
+  historicalRecordsCount,
+  includesOnlyActualHistoricalData: true,
+});
+```
+
+```javascript
+console.debug('[Smart Demand Cache Lookup]', {
+  sku,
+  focusMonth,
+  historicalDataHash,
+  foundExistingSmartDemand,
+});
+```
+
+```javascript
+console.debug('[Smart Demand AI Generated]', {
+  sku,
+  focusMonth,
+  smartDemandMT,
+  aiBacked: true,
+});
+```
+
+```javascript
+console.debug('[Smart Demand Source Separation Check]', {
+  sku,
+  smartDemandUsedAsHistoricalInput: false,
+});
+```
+
+---
+
+### VERIFICATION
+
+Please confirm the following:
+
+1. ✅ Historical Demand remains the actual recorded historical value  
+2. ✅ Smart Demand is a second column that is AI-powered  
+3. ✅ Smart Demand is generated only from actual historical demand records  
+4. ✅ Prior Smart Demand values are never reused as historical input  
+5. ✅ AI analysis is scoped to the relevant focus month only  
+6. ✅ Smart Demand is saved and reused to avoid regenerating every page load  
+7. ✅ Smart Demand is displayed as numeric MT only  
+8. ✅ Deterministic math alone is not being mislabeled as AI-generated

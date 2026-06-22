@@ -1,0 +1,53 @@
+### COMBINE FAILURE — DETAILED ERROR MESSAGING
+
+When a combine action fails for any reason, the error notification must include a clear, specific reason explaining why the combine failed. Do not show generic messages like "Failed to combine orders."
+
+**Error message format:**
+Title: "Unable to Combine Orders"
+Body: "[Specific reason explaining what went wrong]"
+
+**Possible failure reasons and their messages:**
+
+1. **Mismatched Material Code:**
+   "These orders cannot be combined because they have different Material Codes. All orders must share the same Material Code (FG) to be eligible for combining."
+
+2. **Mismatched Form:**
+   "These orders cannot be combined because they have different Form types. All orders must share the same Form to be eligible for combining."
+
+3. **Mismatched Batch Size:**
+   "These orders cannot be combined because they have different Batch Sizes. All orders must share the same Batch Size to be eligible for combining."
+
+4. **Mismatched Feedmill Line:**
+   "These orders cannot be combined because they are assigned to different feedmill lines. All orders must be on the same line to be eligible for combining."
+
+5. **Mismatched Category:**
+   "These orders cannot be combined because they belong to different Categories. All orders must share the same Category to be eligible for combining."
+
+6. **Fewer than 2 orders:**
+   "At least 2 orders are required to perform a combine action."
+
+7. **Order already combined:**
+   "One or more selected orders are already part of a combined group. Un-combine them first before creating a new combination."
+
+8. **Order status incompatible:**
+   "One or more selected orders have a status that prevents combining (e.g., Done, Cancel PO). Only orders with an active status can be combined."
+
+9. **Scheduling conflict (downstream deadline exceeded):**
+   "Combining these orders would cause the following downstream orders to exceed their Avail Date deadlines:"
+   • "FPR: [value] — New Completion: [date] exceeds Avail Date: [date] by [X] hours/days"
+   • "FPR: [value] — New Completion: [date] exceeds Avail Date: [date] by [X] hours/days"
+   "Resolve scheduling conflicts before combining. Consider reordering orders, adjusting volumes, or changing Start Dates."
+
+10. **Line capacity exceeded:**
+    "Combining these orders would result in a total volume of [X] MT, which exceeds the remaining capacity of [Line X] ([current] MT / 1,000 MT). Free up capacity before combining."
+
+11. **Unknown/unexpected error:**
+    "An unexpected error occurred while combining orders. Please try again. If the issue persists, contact support."
+    (This is the only case where a less specific message is acceptable — but it should still differ from a vague "Failed to combine.")
+
+**Error display:**
+- Show the error as a modal dialog (not just a toast) so the user can read the full reason.
+- Title uses Red (#e53935) text or a red warning icon.
+- Body text in Dark Grey (#2e343a), clearly readable.
+- Buttons: [OK] or [Close] to dismiss.
+- If multiple reasons apply (e.g., mismatched Material Code AND Form), list ALL applicable reasons in the body as a bullet list.

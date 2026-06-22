@@ -1,0 +1,119 @@
+```
+Implement the following fix to the NexFeed application:
+
+---
+
+## FIX: READINESS CHECK — EXCLUDE START DATE AND START TIME
+
+Remove Start Date and Start Time from the readiness check evaluation. Users should be able to produce orders without having a start date and time set. These are optional scheduling fields, not production readiness requirements.
+
+---
+
+### REMOVE FROM READINESS CHECK
+
+- ❌ Start Date — do NOT check, do NOT flag as missing
+- ❌ Start Time — do NOT check, do NOT flag as missing
+
+These fields should NEVER appear in:
+- The readiness indicator (green check / warning icon)
+- The "Missing or incomplete" list in the "Order Not Ready" dialog
+- Any readiness-related validation
+
+---
+
+### UPDATED READINESS CHECK — FIELDS TO EVALUATE
+
+Only these fields determine readiness:
+
+| Field | Check | Fail message |
+|---|---|---|
+| Production Order FG1 | Not empty AND valid 10-digit number | "Production Order FG1 — not set" or "— invalid format" |
+| Production Order SFG1 | Not empty AND valid 10-digit number | "Production Order SFG1 — not set" or "— invalid format" |
+| Production Order SFGPMX | Not empty AND valid 10-digit number (if required) | "Production Order SFGPMX — not set" |
+| HA Prep | Confirmed | "HA Prep — not confirmed" |
+| SCADA | Not empty | "SCADA — not set" |
+| PV | Not empty | "PV — not set" |
+| Completion Date | Not empty | "Completion Date — not set" |
+| Material Code (FG) | Not empty | "Material Code (FG) — not set" |
+| Batch Size | Not empty and greater than 0 | "Batch Size — not set" |
+
+### FIELDS EXCLUDED FROM READINESS CHECK
+
+| Field | Reason for exclusion |
+|---|---|
+| Start Date | Optional scheduling field — user can produce without it |
+| Start Time | Optional scheduling field — user can produce without it |
+| HA Info | Auto-populated from Number of Batches — always has value |
+| FPR Notes | Optional user notes — not a readiness requirement |
+| Special Remarks | Optional — not a readiness requirement |
+
+---
+
+### UPDATED READINESS FUNCTION
+
+```javascript
+function getReadinessStatus(order) {
+  const missing = [];
+  
+  // Production Orders — 10-digit number
+  if (!isValid10Digit(order.production_order_fg1)) {
+    missing.push('Production Order FG1 — not set');
+  }
+  if (!isValid10Digit(order.production_order_sfg1)) {
+    missing.push('Production Order SFG1 — not set');
+  }
+  if (order.requires_sfgpmx && !isValid10Digit(order.production_order_sfgpmx)) {
+    missing.push('Production Order SFGPMX — not set');
+  }
+  
+  // HA Prep
+  if (!order.ha_prep || order.ha_prep === 'Not confirmed') {
+    missing.push('HA Prep — not confirmed');
+  }
+  
+  // SCADA
+  if (!order.scada || String(order.scada).trim() === '') {
+    missing.push('SCADA — not set');
+  }
+  
+  // PV
+  if (!order.pv || String(order.pv).trim() === '') {
+    missing.push('PV — not set');
+  }
+  
+  // Completion Date
+  if (!order.completion_date) {
+    missing.push('Completion Date — not set');
+  }
+  
+  // Material Code (FG)
+  if (!order.material_code_fg || String(order.material_code_fg).trim() === '') {
+    missing.push('Material Code (FG) — not set');
+  }
+  
+  // Batch Size
+  if (!order.batch_size || order.batch_size <= 0) {
+    missing.push('Batch Size — not set');
+  }
+  
+  // ❌ NO check for Start Date
+  // ❌ NO check for Start Time
+  // ❌ NO check for HA Info (auto-populated)
+  
+  if (missing.length === 0) {
+    return { ready: true, icon: 'green_check', missing: [] };
+  } else {
+    return { ready: false, icon: 'warning', missing: missing };
+  }
+}
+```
+
+---
+
+### VERIFY AFTER FIX
+
+1. Create an order with ALL fields filled EXCEPT Start Date and Start Time.
+2. The readiness indicator should show GREEN CHECK ✅.
+3. Setting status to "In production" should change immediately — NO warning dialog.
+4. Start Date and Start Time should NOT appear anywhere in the "Missing or incomplete" list.
+```

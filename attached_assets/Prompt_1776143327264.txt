@@ -1,0 +1,388 @@
+```
+Fix the Auto-Sequence Preview comparison view:
+
+---
+
+## 1. WRAP TABLES IN A CONTAINER WITH PADDING
+
+```jsx
+{/* Comparison tables — inside a container */}
+<div className="auto-sequence-comparison">
+  <div className="auto-sequence-comparison-container">
+    <div className="auto-sequence-comparison-scroll">
+      
+      {/* BEFORE table panel */}
+      <div className="auto-sequence-table-panel">
+        <div className="auto-sequence-table-label auto-sequence-label-before">
+          <span className="auto-sequence-label-icon">📋</span>
+          Before
+        </div>
+        <div className="auto-sequence-table-wrapper">
+          <table className="auto-sequence-table auto-sequence-table-before">
+            {/* ... table content ... */}
+          </table>
+        </div>
+      </div>
+      
+      {/* Divider */}
+      <div className="auto-sequence-divider"></div>
+      
+      {/* AFTER table panel */}
+      <div className="auto-sequence-table-panel">
+        <div className="auto-sequence-table-label auto-sequence-label-after">
+          <span className="auto-sequence-label-icon">✨</span>
+          After — {movedCount} orders repositioned
+        </div>
+        <div className="auto-sequence-table-wrapper">
+          <table className="auto-sequence-table auto-sequence-table-after">
+            {/* ... table content ... */}
+          </table>
+        </div>
+      </div>
+      
+    </div>
+  </div>
+</div>
+```
+
+### CONTAINER STYLING
+
+```css
+.auto-sequence-comparison {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding: 16px 24px;
+}
+
+.auto-sequence-comparison-container {
+  flex: 1;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: #ffffff;
+}
+
+.auto-sequence-comparison-scroll {
+  display: flex;
+  overflow-x: auto;
+  flex: 1;
+}
+
+.auto-sequence-comparison-scroll::-webkit-scrollbar {
+  height: 8px;
+}
+
+.auto-sequence-comparison-scroll::-webkit-scrollbar-track {
+  background: #f3f4f6;
+}
+
+.auto-sequence-comparison-scroll::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 4px;
+}
+```
+
+---
+
+## 2. BEFORE TABLE — SAME LOOK AND FEEL AS AFTER TABLE + ADD AVAIL DATE & COMPLETION DATE
+
+```jsx
+<table className="auto-sequence-table auto-sequence-table-before">
+  <thead>
+    <tr>
+      <th className="as-col-prio">Prio</th>
+      <th className="as-col-fpr">FPR</th>
+      <th className="as-col-planned">Planned Order</th>
+      <th className="as-col-material">Material Code (FG)</th>
+      <th className="as-col-desc">Item Description</th>
+      <th className="as-col-form">Form</th>
+      <th className="as-col-volume">Volume (MT)</th>
+      <th className="as-col-batch">Batch Size</th>
+      <th className="as-col-batches">Batches</th>
+      <th className="as-col-prod">Production Time</th>
+      <th className="as-col-start-date">Start Date</th>
+      <th className="as-col-start-time">Start Time</th>
+      <th className="as-col-avail">Avail Date</th>
+      <th className="as-col-completion">Estimated Completion Date</th>
+    </tr>
+  </thead>
+  <tbody>
+    {originalOrders.map((order, index) => (
+      <tr key={order.id} className="auto-sequence-row-before">
+        <td className="as-col-prio">
+          <span className="as-prio-badge">{index + 1}</span>
+        </td>
+        <td className="as-col-fpr">{order.fpr}</td>
+        <td className="as-col-planned">
+          <div>{order.planned_order_fg}</div>
+          <div className="as-sub-text">{order.planned_order_sfg}</div>
+        </td>
+        <td className="as-col-material">{order.material_code_fg}</td>
+        <td className="as-col-desc">
+          <div className="as-desc-main">{order.item_description}</div>
+          <div className="as-sub-text">{order.category}</div>
+        </td>
+        <td className="as-col-form">{order.form}</td>
+        <td className="as-col-volume">
+          <strong>{order.volume}</strong> MT
+        </td>
+        <td className="as-col-batch">{order.batch_size}</td>
+        <td className="as-col-batches">{order.batches}</td>
+        <td className="as-col-prod">
+          <div><strong>{formatProductionTime(order.production_time)}</strong></div>
+          <div className="as-sub-text">CO: {formatProductionTime(order._changeoverTotal || order.changeover || 0)}</div>
+        </td>
+        <td className="as-col-start-date">{order.start_date ? formatDate(order.start_date) : '—'}</td>
+        <td className="as-col-start-time">{order.start_time || '—'}</td>
+        <td className="as-col-avail">
+          {formatAvailDate(order.target_avail_date)}
+        </td>
+        <td className="as-col-completion">
+          {order.completion_date || order._estimatedCompletionDate || '—'}
+        </td>
+      </tr>
+    ))}
+  </tbody>
+</table>
+```
+
+---
+
+## 3. AFTER TABLE — ADD AVAIL DATE & RENAME COMPLETION DATE
+
+```jsx
+<table className="auto-sequence-table auto-sequence-table-after">
+  <thead>
+    <tr>
+      <th className="as-col-drag"></th>
+      <th className="as-col-prio">Prio</th>
+      <th className="as-col-fpr">FPR</th>
+      <th className="as-col-planned">Planned Order</th>
+      <th className="as-col-material">Material Code (FG)</th>
+      <th className="as-col-desc">Item Description</th>
+      <th className="as-col-form">Form</th>
+      <th className="as-col-volume">Volume (MT)</th>
+      <th className="as-col-batch">Batch Size</th>
+      <th className="as-col-batches">Batches</th>
+      <th className="as-col-prod">Production Time</th>
+      <th className="as-col-start-date">Start Date</th>
+      <th className="as-col-start-time">Start Time</th>
+      <th className="as-col-avail">Avail Date</th>
+      <th className="as-col-completion">Estimated Completion Date</th>
+    </tr>
+  </thead>
+  <tbody>
+    {sequencedOrders.map((order) => (
+      <tr key={order.id} className="auto-sequence-row-after">
+        <td className="as-col-drag">
+          <span className="as-drag-handle">⠿</span>
+        </td>
+        <td className="as-col-prio">
+          <span className="as-prio-badge as-prio-badge-after">{order.prio}</span>
+        </td>
+        <td className="as-col-fpr">{order.fpr}</td>
+        <td className="as-col-planned">
+          <div>{order.planned_order_fg}</div>
+          <div className="as-sub-text">{order.planned_order_sfg}</div>
+        </td>
+        <td className="as-col-material">{order.material_code_fg}</td>
+        <td className="as-col-desc">
+          <div className="as-desc-with-movement">
+            <MovementIndicator movement={order._movement} delta={order._movementDelta} />
+            <div>
+              <div className="as-desc-main">{order.item_description}</div>
+              <div className="as-sub-text">{order.category}</div>
+            </div>
+          </div>
+        </td>
+        <td className="as-col-form">{order.form}</td>
+        <td className="as-col-volume">
+          <strong>{order.volume}</strong> MT
+        </td>
+        <td className="as-col-batch">{order.batch_size}</td>
+        <td className="as-col-batches">{order.batches}</td>
+        <td className="as-col-prod">
+          <div><strong>{formatProductionTime(order.production_time)}</strong></div>
+          <div className="as-sub-text">CO: {formatProductionTime(order._changeoverTotal || order.changeover || 0)}</div>
+        </td>
+        <td className="as-col-start-date">
+          {order.start_date ? (
+            formatDate(order.start_date)
+          ) : (
+            <span className="as-placeholder">Set start date</span>
+          )}
+        </td>
+        <td className="as-col-start-time">
+          {order.start_time ? (
+            order.start_time
+          ) : (
+            <span className="as-placeholder">Set time</span>
+          )}
+        </td>
+        <td className="as-col-avail">
+          {formatAvailDate(order.target_avail_date)}
+        </td>
+        <td className="as-col-completion">
+          {order.completion_date || order._estimatedCompletionDate || (
+            <span className="as-placeholder">Set completion</span>
+          )}
+        </td>
+      </tr>
+    ))}
+  </tbody>
+</table>
+```
+
+---
+
+## 4. HELPER — FORMAT AVAIL DATE FOR DISPLAY
+
+```javascript
+function formatAvailDate(targetAvailDate) {
+  if (!targetAvailDate) return '—';
+  
+  const isISO = /^\d{4}-\d{2}-\d{2}/.test(targetAvailDate);
+  
+  if (isISO && !isNaN(Date.parse(targetAvailDate))) {
+    return new Date(targetAvailDate).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric'
+    });
+  }
+  
+  const raw = targetAvailDate.toLowerCase().trim();
+  if (raw.includes('prio')) return 'prio replenish';
+  if (raw.includes('safety')) return 'safety stocks';
+  if (raw === 'stock_sufficient') return 'stock sufficient';
+  if (raw.includes('sched')) return 'for sched';
+  
+  return targetAvailDate;
+}
+```
+
+---
+
+## 5. BEFORE TABLE — MATCH AFTER TABLE STYLING
+
+```css
+/* Remove old muted styling for Before table */
+/* DELETE these: */
+.auto-sequence-table-before td {
+  color: #6b7280;
+}
+.auto-sequence-table-before .as-desc-main {
+  color: #4b5563;
+}
+.auto-sequence-table-before strong {
+  color: #4b5563;
+}
+
+/* Before table — SAME look and feel as After table */
+.auto-sequence-table-before {
+  background: #ffffff;
+}
+
+.auto-sequence-table-before td {
+  color: #374151;
+}
+
+.auto-sequence-table-before .as-desc-main {
+  color: #1a1a1a;
+  font-weight: 500;
+}
+
+.auto-sequence-table-before strong {
+  color: #1a1a1a;
+}
+
+.auto-sequence-row-before {
+  cursor: default;
+  background: #ffffff;
+}
+
+.auto-sequence-row-before:hover {
+  background: #fafafa;
+}
+
+/* Prio badge in Before — same style as After */
+.auto-sequence-table-before .as-prio-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: 700;
+  background: #f3f4f6;
+  color: #374151;
+  border: 1px solid #d1d5db;
+}
+```
+
+---
+
+## 6. ADDITIONAL COLUMN WIDTHS
+
+```css
+.as-col-avail { width: 110px; }
+.as-col-completion { width: 160px; }
+
+/* Update min-width for tables to accommodate new columns */
+.auto-sequence-table {
+  width: 100%;
+  min-width: 1100px;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+```
+
+---
+
+## VERIFICATION
+
+### Container
+1. ✅ Both tables wrapped in a container with border and border-radius
+2. ✅ Container has padding/margin from the edges of the modal
+3. ✅ Container has rounded corners (10px)
+4. ✅ Tables don't touch the edges of the preview
+
+### Before table matches After table
+5. ✅ Same font colors (dark text, not grey/muted)
+6. ✅ Same font sizes
+7. ✅ Same row heights
+8. ✅ Same prio badge style
+9. ✅ Same hover effect
+10. ✅ White background (not grey)
+
+### Before table columns
+11. ✅ Prio
+12. ✅ FPR
+13. ✅ Planned Order
+14. ✅ Material Code (FG)
+15. ✅ Item Description
+16. ✅ Form
+17. ✅ Volume (MT)
+18. ✅ Batch Size
+19. ✅ Batches
+20. ✅ Production Time
+21. ✅ Start Date
+22. ✅ Start Time
+23. ✅ Avail Date (NEW)
+24. ✅ Estimated Completion Date (NEW)
+
+### After table
+25. ✅ Same columns as Before + drag handle
+26. ✅ Avail Date column included
+27. ✅ Header renamed from "Completion Date" to "Estimated Completion Date"
+
+### Before table is read-only
+28. ✅ No drag handles
+29. ✅ No editable fields
+30. ✅ Cursor is default (not pointer/grab)
+```

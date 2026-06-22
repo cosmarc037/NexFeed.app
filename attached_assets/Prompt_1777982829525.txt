@@ -1,0 +1,472 @@
+```
+Perform a full terminology cleanup across the application and replace user-facing uses of “N10D” with “Future Dispatches”.
+
+---
+
+## OBJECTIVE
+
+We previously renamed “Next 10 Days” to “Future Dispatches”, but “N10D” is still appearing in various places across the application.
+
+We now want to remove user-facing uses of “N10D” and replace them with a clearer, more business-friendly term:
+
+## Preferred replacement:
+**Future Dispatches**
+
+This replacement should apply across the app wherever “N10D” is still shown to users, including:
+- UI labels
+- tabs
+- headers
+- tooltips
+- sequence insights
+- AI-generated insights
+- template-based/system-generated explanations
+- fallback messages
+- strategy descriptions
+- reasoning modals
+- empty states
+- validation messages
+- logs shown in UI/debug panels
+- exported text if applicable
+
+The goal is:
+- no user-facing text should still say “N10D”
+- the app should consistently use “Future Dispatches” or natural sentence variants where appropriate
+
+---
+
+## 1. GLOBAL RULE
+
+### Replace:
+- `N10D`
+- `n10d`
+- `N10D thresholds`
+- `N10D status`
+- `N10D data`
+- `N10D logic`
+- `N10D window`
+- `Next 10 Days` (if still visible to users)
+
+### With:
+- **Future Dispatches**
+- or a natural contextual phrase such as:
+  - `future dispatch status`
+  - `future dispatch logic`
+  - `future dispatch window`
+  - `future dispatch requirements`
+  - `upcoming dispatch needs`
+  - `dispatch outlook`
+
+Use the most natural phrase depending on the sentence.
+
+Important:
+- Internal variable names can remain unchanged if changing them is risky
+- But all user-facing text must stop showing “N10D”
+
+---
+
+## 2. MAIN DEFAULT TERM TO USE
+
+Use this as the standard user-facing label in most places:
+
+### **Future Dispatches**
+
+Examples:
+- tab name → `Future Dispatches`
+- section title → `Future Dispatches`
+- filter label → `Future Dispatches`
+- column helper / tooltip → `Future Dispatches`
+
+---
+
+## 3. SENTENCE-LEVEL REPLACEMENT RULES
+
+When “N10D” appears inside explanatory text, use more natural wording instead of blindly replacing it.
+
+### Examples
+
+#### Old:
+- `Sequenced strictly by availability dates and N10D thresholds.`
+#### New:
+- `Sequenced strictly by availability dates and future dispatch thresholds.`
+
+#### Old:
+- `This order was protected due to its N10D status.`
+#### New:
+- `This order was protected due to its future dispatch status.`
+
+#### Old:
+- `The standard sequence follows chronology and N10D priority.`
+#### New:
+- `The standard sequence follows chronology and future dispatch priority.`
+
+#### Old:
+- `N10D logic prevented this date change.`
+#### New:
+- `Future dispatch logic prevented this date change.`
+
+#### Old:
+- `Moved earlier due to N10D pressure.`
+#### New:
+- `Moved earlier due to future dispatch pressure.`
+
+#### Old:
+- `Based on N10D data`
+#### New:
+- `Based on future dispatch data`
+
+Where helpful, improve readability with:
+- `future dispatch requirements`
+- `upcoming dispatch needs`
+- `dispatch outlook`
+
+---
+
+## 4. SEARCH ALL USER-FACING TEXT SOURCES
+
+Do a full pass across the codebase for user-facing occurrences of:
+- `"N10D"`
+- `"n10d"`
+- `"Next 10 Days"`
+- `"next 10 days"`
+
+Check and update all of the following:
+
+### A. Static UI labels
+- tabs
+- headers
+- table labels
+- section titles
+- metric labels
+- cards
+- tooltips
+- helper text
+
+### B. Sequence Insights
+- row-level short insight
+- row-level long insight
+- “more/less” expanded content
+- modal text
+- AI-generated explanation wrappers
+
+### C. Template-based/system-generated explanations
+- fallback insight messages
+- static strategy descriptions
+- protected-order reasoning
+- recommendation reasoning
+- move explanations
+- validation/rejection messages
+
+### D. AI prompt templates
+Any prompt that tells the AI to talk about:
+- N10D
+- N10D status
+- N10D logic
+- N10D windows
+
+must be updated so the AI returns “Future Dispatches” terminology instead.
+
+### E. Reasoning / explanation sections
+- View AI reasoning
+- actions taken
+- move justifications
+- scheduling explanations
+- strategy descriptions
+
+### F. Exported / generated documents if any
+- CSV headings
+- report labels
+- summary narratives
+- PDFs or printable output if supported
+
+---
+
+## 5. UPDATE AI PROMPTS SO GENERATED TEXT ALSO USES FUTURE DISPATCHES
+
+This is critical.
+
+Even if the UI labels are updated, the AI may still generate “N10D” if the prompts still use that term.
+
+Update all relevant prompts to replace “N10D” with “Future Dispatches” or sentence-level equivalents.
+
+### Example old prompt wording:
+```text
+Consider avail dates, N10D statuses, urgency, and material compatibility.
+```
+
+### Replace with:
+```text
+Consider avail dates, future dispatch statuses, urgency, and material compatibility.
+```
+
+### Example old prompt wording:
+```text
+The standard sequence already follows chronology and N10D-driven ordering.
+```
+
+### Replace with:
+```text
+The standard sequence already follows chronology and future-dispatch-driven ordering.
+```
+
+### Example old prompt wording:
+```text
+Use N10D logic and protected-order rules.
+```
+
+### Replace with:
+```text
+Use future dispatch logic and protected-order rules.
+```
+
+The AI should stop seeing “N10D” in prompt instructions if we want it to stop generating the term.
+
+---
+
+## 6. UPDATE TEMPLATE-BASED / FALLBACK STRINGS
+
+Anywhere the app uses hardcoded fallback strings, replace “N10D” there too.
+
+### Example replacements
+
+#### Old:
+```javascript
+description: 'Sequenced strictly by availability dates and N10D thresholds.'
+```
+
+#### New:
+```javascript
+description: 'Sequenced strictly by availability dates and future dispatch thresholds.'
+```
+
+---
+
+#### Old:
+```javascript
+short: 'Placed according to chronology and N10D priority.'
+```
+
+#### New:
+```javascript
+short: 'Placed according to chronology and future dispatch priority.'
+```
+
+---
+
+#### Old:
+```javascript
+long: 'This order was positioned using standard sequencing logic based on date and N10D scheduling priority.'
+```
+
+#### New:
+```javascript
+long: 'This order was positioned using standard sequencing logic based on date and future dispatch scheduling priority.'
+```
+
+---
+
+#### Old:
+```javascript
+reason: 'Protected by N10D status'
+```
+
+#### New:
+```javascript
+reason: 'Protected by future dispatch status'
+```
+
+---
+
+## 7. KEEP INTERNAL DATA MODEL NAMES IF NEEDED
+
+To reduce risk, it is acceptable to keep internal variable and function names such as:
+- `n10dData`
+- `_n10dStatus`
+- `getN10DStatus()`
+- `applyN10DDateLogic()`
+
+if renaming them everywhere would be risky.
+
+However:
+- wrap them in user-facing label helpers
+- convert to “Future Dispatches” whenever displayed or sent to the AI
+
+Example:
+```javascript
+function getFutureDispatchLabel(status) {
+  return mapInternalN10DStatusToFutureDispatchStatus(status);
+}
+```
+
+So:
+- internal code can remain stable
+- UI/output becomes user-friendly
+
+---
+
+## 8. ADD A USER-FACING TERM HELPER IF USEFUL
+
+To reduce future inconsistency, add helper functions/constants for user-facing wording.
+
+### Suggested example:
+```javascript
+const USER_TERMS = {
+  futureDispatches: 'Future Dispatches',
+  futureDispatchStatus: 'future dispatch status',
+  futureDispatchPriority: 'future dispatch priority',
+  futureDispatchThresholds: 'future dispatch thresholds',
+  futureDispatchLogic: 'future dispatch logic',
+};
+```
+
+Then use these in:
+- UI labels
+- fallback strings
+- prompt builders
+- reasoning templates
+
+This reduces the chance of “N10D” creeping back in later.
+
+---
+
+## 9. USE NATURAL VARIANTS WHERE NEEDED
+
+Do not force “Future Dispatches” awkwardly into every sentence if another natural phrase reads better.
+
+### Preferred variants by context:
+
+#### General UI labels
+- `Future Dispatches`
+
+#### Status text
+- `future dispatch status`
+
+#### Logic / rule explanation
+- `future dispatch logic`
+- `future dispatch rules`
+
+#### Pressure / urgency explanation
+- `future dispatch pressure`
+- `upcoming dispatch needs`
+
+#### Planning-oriented narrative
+- `dispatch outlook`
+
+### Example:
+- “moved earlier due to upcoming dispatch needs”
+is often better than
+- “moved earlier due to future dispatches”
+
+Use judgment so the sentences read naturally.
+
+---
+
+## 10. UPDATE INSIGHT GENERATION OUTPUTS
+
+Sequence Insight must also stop showing “N10D”.
+
+This includes:
+- short insights
+- long insights
+- AI-generated row explanations
+- fallback text
+- strategy-level reasoning
+
+### Example:
+#### Old:
+- `Placed earlier due to N10D urgency.`
+#### New:
+- `Placed earlier due to future dispatch urgency.`
+
+#### Old:
+- `This order remained protected because of its N10D status.`
+#### New:
+- `This order remained protected because of its future dispatch status.`
+
+---
+
+## 11. UPDATE ACTIONS TAKEN / MOVE INSIGHTS
+
+If move explanations currently say:
+- `N10D`
+- `N10D priority`
+- `N10D logic`
+
+replace them.
+
+### Example:
+#### Old:
+- `This date was preserved due to N10D logic.`
+#### New:
+- `This date was preserved due to future dispatch logic.`
+
+#### Old:
+- `Moved earlier because of N10D demand pressure.`
+#### New:
+- `Moved earlier because of future dispatch pressure.`
+
+---
+
+## 12. UPDATE STRATEGY CARD DESCRIPTIONS / BASELINES
+
+Any strategy description still mentioning N10D must be updated.
+
+### Example:
+#### Old:
+- `Sequenced strictly by availability dates and N10D thresholds.`
+#### New:
+- `Sequenced strictly by availability dates and future dispatch thresholds.`
+
+#### Old:
+- `The standard sequence follows chronology and N10D priorities.`
+#### New:
+- `The standard sequence follows chronology and future dispatch priorities.`
+
+---
+
+## 13. OPTIONAL: ADD A SAFETY CHECK TO CATCH REMAINING N10D TEXT
+
+If feasible, add a development-only safeguard that logs if “N10D” still appears in user-facing rendered text or generated strings.
+
+Example:
+```javascript
+function assertNoLegacyN10DText(text, context) {
+  if (typeof text === 'string' && /n10d/i.test(text)) {
+    console.warn('[Legacy N10D Text Found]', { context, text });
+  }
+}
+```
+
+Use this during development on:
+- card descriptions
+- strategy reasoning
+- row insights
+- action summaries
+
+This helps catch leftovers.
+
+---
+
+## 14. VERIFICATION
+
+### UI cleanup
+1. ✅ Tabs no longer show “N10D”
+2. ✅ Headers and section titles no longer show “N10D”
+3. ✅ Tooltips and helper text no longer show “N10D”
+
+### Insight cleanup
+4. ✅ Sequence Insights no longer use “N10D”
+5. ✅ AI-generated insights now use “Future Dispatches” or natural variants
+6. ✅ Template/fallback insights no longer use “N10D”
+
+### Prompt cleanup
+7. ✅ AI prompts no longer instruct the model to use “N10D”
+8. ✅ AI-generated strategy descriptions and explanations now use updated terminology
+
+### Reasoning / explanation cleanup
+9. ✅ Actions Taken text no longer uses “N10D”
+10. ✅ Strategy reasoning no longer uses “N10D”
+11. ✅ Protected-order explanations no longer use “N10D”
+
+### Consistency
+12. ✅ User-facing wording is now consistently “Future Dispatches” or appropriate sentence-level variants
+13. ✅ Internal code may still use `n10d` safely, but it is no longer exposed to users

@@ -1,0 +1,640 @@
+```
+Add AI-powered Sequence Insight column to the After table:
+
+---
+
+## 1. GENERATE PER-ROW INSIGHTS — SINGLE BATCH AI CALL
+
+```javascript
+async function generateRowInsights(sequencedOrders, originalOrders, line, placementLog) {
+  const rows = sequencedOrders.map((order, index) => {
+    const newPrio = index + 1;
+    const originalIndex = originalOrders.findIndex(o => o.id === order.id);
+    const isNew = originalIndex === -1;
+    const originalPrio = originalIndex >= 0 ? originalIndex + 1 : null;
+    const isCombined = order._isCombined && order._combinedFrom;
+    const movedFromLine = order._movedFromLine || order._originalLine;
+    const movedFromDifferentLine = movedFromLine && normalizeLine(movedFromLine) !== normalizeLine(line);
+    
+    // Find relevant placement log entry
+    const logEntry = placementLog.find(entry => {
+      if (entry.type === 'combined' && isCombined) {
+        return entry.toLine === line && entry.product === order.item_description;
+      }
+      if (entry.type === 'moved' && movedFromDifferentLine) {
+        return entry.toLine === line && String(entry.materialCode) === String(order.material_code_fg);
+      }
+      return false;
+    });
+    
+    // Build context for this row
+    let context = '';
+    
+    if (isCombined) {
+      const subCount = order._combinedFrom.length;
+      const fromLines = [...new Set(order._combinedFrom.map(s => s.line))];
+      const allSameLine = fromLines.every(l => normalizeLine(l) === normalizeLine(line));
+      
+      context = `COMBINED: ${subCount} orders combined into ${order.volume} MT.`;
+      if (!allSameLine) {
+        context += ` Orders pulled from ${fromLines.map(l => getLineShortName(l)).join(', ')}.`;
+      } else {
+        context += ` Combined in place on ${getLineShortName(line)}.`;
+      }
+      if (logEntry) {
+        context += ` Changeovers saved: ${logEntry.changeoversSaved}. Time saved: ${logEntry.timeSaved.toFixed(2)} hrs.`;
+        context += ` Queue time: ${logEntry.lineScores.map(ls => `${getLineShortName(ls.line)}: ${ls.queueTimeBefore.toFixed(2)} hrs`).join(', ')}.`;
+      }
+    } else if (movedFromDifferentLine) {
+      context = `MOVED from ${getLineShortName(movedFromLine)} to ${getLineShortName(line)}.`;
+      if (logEntry) {
+        context += ` Queue times: ${logEntry.lineScores.map(ls => `${getLineShortName(ls.line)}: ${ls.totalMTBefore.toFixed(1)} MT ÷ ${ls.runRate} MT/hr = ${ls.queueTimeBefore.toFixed(2)} hrs`).join(', ')}.`;
+        context += ` ${getLineShortName(line)} had lowest queue time.`;
+      }
+    } else if (isNew) {
+      context = `NEW to this line.`;
+    } else if (originalPrio !== newPrio) {
+      const direction = originalPrio > newPrio ? 'up' : 'down';
+      const delta = Math.abs(originalPrio - newPrio);
+      context = `REPOSITIONED: moved ${direction} ${delta} position${delta > 1 ? 's' : ''} (Prio ${originalPrio} → ${newPrio}).`;
+    } else {
+      context = `UNCHANGED: stayed at Prio ${newPrio}.`;
+    }
+    
+    // Add avail date context
+    const availDate = order.target_avail_date;
+    if (availDate && /^\d{4}-\d{2}-\d{2}/.test(availDate)) {
+      context += ` Has avail date: ${new Date(availDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}.`;
+    } else if (order._category === 'B') {
+      context += ` N10D status: prio replenish.`;
+    } else if (order._category === 'D') {
+      context += ` N10D status: stock sufficient.`;
+    }
+    
+    // Add form context if relevant
+    if (index > 0) {
+      const prevOrder = sequencedOrders[index - 1];
+      if (prevOrder.form === order.form) {
+        context += ` Same form as previous order (${order.form}) — no form changeover.`;
+      } else {
+        context += ` Form change from ${prevOrder.form} to ${order.form}.`;
+      }
+    }
+    
+    return {
+      prio: newPrio,
+      product: order.item_description,
+      volume: order.volume,
+      form: order.form,
+      context
+    };
+  });
+  
+  // Build AI prompt
+  const prompt = `
+You are a production scheduling advisor. For each order in the sequence below, write a SHORT 1-2 sentence insight explaining why this order is at this position and any relevant action taken.
+
+LINE: ${line}
+LINE RUN RATE: ${getLineRunRate(line)} MT/hr
+
+ORDERS IN SEQUENCE:
+
+${rows.map(row => `
+PRIO ${row.prio}: ${row.product} (${row.volume} MT, ${row.form})
+Context: ${row.context}
+`).join('\n')}
+
+RULES:
+- Write 1-2 sentences MAX per order. Be concise.
+- No markdown, no bold, no bullet points.
+- Use short line names (L1, L2, etc.).
+- For UNCHANGED orders, just say why its position makes sense (e.g., "No change needed — same product group as adjacent orders").
+- For REPOSITIONED orders, explain what drove the position (avail date, N10D urgency, form grouping).
+- For MOVED orders, mention the queue time comparison briefly.
+- For COMBINED orders, mention how many orders merged, volume, changeovers saved.
+- Reference avail dates and N10D status when relevant.
+- Do NOT repeat the product name — the user can see it in the table.
+
+RESPONSE FORMAT:
+PRIO 1: [1-2 sentence insight]
+PRIO 2: [1-2 sentence insight]
+...
+  `;
+  
+  try {
+    const response = await callAI(prompt);
+    return parseRowInsights(response, sequencedOrders.length);
+  } catch (error) {
+    console.error('Row insights AI failed:', error);
+    return generateFallbackRowInsights(rows);
+  }
+}
+
+function parseRowInsights(response, orderCount) {
+  const insights = {};
+  const lines = response.split('\n').filter(l => l.trim());
+  
+  lines.forEach(line => {
+    const match = line.match(/^PRIO\s*(\d+)\s*:\s*(.+)$/i);
+    if (match) {
+      const prio = parseInt(match[1]);
+      const text = match[2].trim();
+      insights[prio] = text;
+    }
+  });
+  
+  // Fill gaps with empty
+  for (let i = 1; i <= orderCount; i++) {
+    if (!insights[i]) {
+      insights[i] = '';
+    }
+  }
+  
+  return insights;
+}
+
+function generateFallbackRowInsights(rows) {
+  const insights = {};
+  
+  rows.forEach(row => {
+    let text = '';
+    
+    if (row.context.startsWith('COMBINED')) {
+      text = row.context.replace('COMBINED: ', '');
+    } else if (row.context.startsWith('MOVED')) {
+      text = row.context.replace('MOVED ', 'Moved ');
+    } else if (row.context.startsWith('REPOSITIONED')) {
+      text = row.context.replace('REPOSITIONED: ', '');
+    } else if (row.context.startsWith('UNCHANGED')) {
+      text = 'No change in position.';
+    } else if (row.context.startsWith('NEW')) {
+      text = 'Newly assigned to this line.';
+    }
+    
+    insights[row.prio] = text;
+  });
+  
+  return insights;
+}
+```
+
+---
+
+## 2. INTEGRATE INTO PlantLineTab — GENERATE ON TAB LOAD
+
+```jsx
+function PlantLineTab({ 
+  line, 
+  originalOrders, 
+  sequencedOrders, 
+  placementLog,
+  aiExplanations,
+  isLoadingAI,
+  useFallback,
+  onUncombineSingle
+}) {
+  // Per-row insights — generated once per line tab
+  const [rowInsights, setRowInsights] = useState(null);
+  const [isLoadingRowInsights, setIsLoadingRowInsights] = useState(false);
+  
+  useEffect(() => {
+    if (sequencedOrders.length > 0 && !rowInsights) {
+      loadRowInsights();
+    }
+  }, [sequencedOrders]);
+  
+  async function loadRowInsights() {
+    setIsLoadingRowInsights(true);
+    const insights = await generateRowInsights(
+      sequencedOrders, originalOrders, line, placementLog
+    );
+    setRowInsights(insights);
+    setIsLoadingRowInsights(false);
+  }
+  
+  // ... existing stats, actions logic ...
+  
+  const lineActions = getActionsForLine(placementLog, line);
+  
+  return (
+    <div className="plant-line-tab">
+      {/* Stats */}
+      {/* ... existing ... */}
+      
+      {/* Before and After tables */}
+      <div className="auto-sequence-comparison">
+        <div className="auto-sequence-comparison-container">
+          <div className="auto-sequence-comparison-scroll">
+            {/* Before table — unchanged */}
+            <div className="auto-sequence-table-panel">
+              {/* ... existing before table ... */}
+            </div>
+            
+            <div className="auto-sequence-divider"></div>
+            
+            {/* After table — with new Sequence Insight column */}
+            <div className="auto-sequence-table-panel">
+              <div className="auto-sequence-table-label auto-sequence-label-after">
+                <span className="auto-sequence-label-icon">✨</span>
+                After — {sequencedOrders.length} orders
+                {/* ... existing subtitle ... */}
+              </div>
+              <div className="auto-sequence-table-wrapper">
+                <table className="auto-sequence-table auto-sequence-table-after">
+                  <thead>
+                    <tr>
+                      <th className="as-col-drag"></th>
+                      <th className="as-col-prio">Prio</th>
+                      <th className="as-col-fpr">FPR</th>
+                      <th className="as-col-planned">Planned Order</th>
+                      <th className="as-col-material">Material Code (FG)</th>
+                      <th className="as-col-desc">Item Description</th>
+                      <th className="as-col-form">Form</th>
+                      <th className="as-col-volume">Volume (MT)</th>
+                      <th className="as-col-batch">Batch Size</th>
+                      <th className="as-col-batches">Batches</th>
+                      <th className="as-col-prod">Production Time</th>
+                      <th className="as-col-start-date">Start Date</th>
+                      <th className="as-col-start-time">Start Time</th>
+                      <th className="as-col-avail">Avail Date</th>
+                      <th className="as-col-completion">Estimated Completion Date</th>
+                      <th className="as-col-insight">Sequence Insight</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sequencedOrders.map(order => (
+                      <PlantAfterRow
+                        key={order.id}
+                        order={order}
+                        onUncombineSingle={onUncombineSingle}
+                        insight={rowInsights?.[order.prio] || null}
+                        isLoadingInsight={isLoadingRowInsights}
+                      />
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      {/* Actions taken */}
+      {lineActions.length > 0 && (
+        <div className="line-actions-plain">
+          <h3 className="plant-summary-title">📋 Actions on {line}</h3>
+          {/* ... existing actions display ... */}
+        </div>
+      )}
+    </div>
+  );
+}
+```
+
+---
+
+## 3. UPDATE PlantAfterRow — ADD INSIGHT CELL
+
+```jsx
+function PlantAfterRow({ order, onUncombineSingle, insight, isLoadingInsight }) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [showFullInsight, setShowFullInsight] = useState(false);
+  
+  // Truncate insight for display
+  const MAX_DISPLAY_LENGTH = 80;
+  const displayInsight = insight && insight.length > MAX_DISPLAY_LENGTH
+    ? insight.substring(0, MAX_DISPLAY_LENGTH) + '...'
+    : insight;
+  const hasMore = insight && insight.length > MAX_DISPLAY_LENGTH;
+  
+  return (
+    <>
+      <tr className={`auto-sequence-row-after ${order._isCombined ? 'as-row-combined' : ''}`}>
+        {/* ... all existing cells unchanged ... */}
+        <td className="as-col-drag">
+          <span className="as-drag-handle">⠿</span>
+        </td>
+        <td className="as-col-prio">
+          <span className="as-prio-badge as-prio-badge-after">{order.prio}</span>
+        </td>
+        <td className="as-col-fpr">{order.fpr}</td>
+        <td className="as-col-planned">
+          <div>{order.planned_order_fg}</div>
+          <div className="as-sub-text">{order.planned_order_sfg}</div>
+        </td>
+        <td className="as-col-material">{order.material_code_fg}</td>
+        <td className="as-col-desc">
+          <div className="as-desc-with-movement">
+            {order._movedFromLine && order._movedFromLine !== order.line && (
+              <span className="as-line-badge" title={`This order came from ${order._movedFromLine}`}>
+                {getLineShortName(order._movedFromLine)}
+              </span>
+            )}
+            {order._isCombined && (
+              <button
+                className="as-combined-toggle"
+                onClick={() => setIsExpanded(!isExpanded)}
+                title={`${order._combinedFrom?.length || 0} orders combined`}
+              >
+                🔗
+              </button>
+            )}
+            {order._movement !== 'new_to_line' && (order._movement === 'up' || order._movement === 'down') && (
+              <MovementIndicator movement={order._movement} delta={order._movementDelta} />
+            )}
+            <div className="as-desc-content">
+              <div className="as-desc-main-row">
+                <span className="as-desc-main">{order.item_description}</span>
+                {order._isCombined && onUncombineSingle && (
+                  <span className="as-uncombine-inline">
+                    <span className="as-desc-arrow">▶</span>
+                    <button
+                      className="as-uncombine-btn"
+                      onClick={(e) => { e.stopPropagation(); onUncombineSingle(order); }}
+                      title="Uncombine this order"
+                    >
+                      ✕
+                    </button>
+                  </span>
+                )}
+              </div>
+              <div className="as-sub-text">{order.category}</div>
+              {order._isCombined && order._combinedFrom && (
+                <div className="as-combined-label">
+                  {order._combinedFrom.length} orders combined
+                  {order._combinedFromLines &&
+                   order._combinedFromLines.some(l => l !== order.line) && (
+                    <span> · from {order._combinedFromLines
+                      .filter(l => l !== order.line)
+                      .map(l => getLineShortName(l))
+                      .join(', ')
+                    }</span>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </td>
+        <td className="as-col-form">{order.form}</td>
+        <td className="as-col-volume"><strong>{order.volume}</strong> MT</td>
+        <td className="as-col-batch">{order.batch_size}</td>
+        <td className="as-col-batches">{order.batches}</td>
+        <td className="as-col-prod">
+          <div><strong>{formatProductionTime(order.production_time)}</strong></div>
+          <div className="as-sub-text">CO: {formatProductionTime(order._changeoverTotal || order.changeover || 0)}</div>
+        </td>
+        <td className="as-col-start-date">{order.start_date ? formatDate(order.start_date) : '—'}</td>
+        <td className="as-col-start-time">{order.start_time || '—'}</td>
+        <td className="as-col-avail">{formatAvailDate(order.target_avail_date)}</td>
+        <td className="as-col-completion">{order.completion_date || '—'}</td>
+        
+        {/* NEW: Sequence Insight column */}
+        <td className="as-col-insight">
+          {isLoadingInsight ? (
+            <span className="as-insight-loading">
+              <span className="as-insight-dot-1">·</span>
+              <span className="as-insight-dot-2">·</span>
+              <span className="as-insight-dot-3">·</span>
+            </span>
+          ) : insight ? (
+            <div className="as-insight-cell" title={insight}>
+              <span className="as-insight-icon">💡</span>
+              <span className="as-insight-text">{displayInsight}</span>
+              {hasMore && (
+                <button 
+                  className="as-insight-more"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowFullInsight(!showFullInsight);
+                  }}
+                >
+                  {showFullInsight ? 'less' : 'more'}
+                </button>
+              )}
+            </div>
+          ) : (
+            <span className="as-insight-empty">—</span>
+          )}
+          
+          {/* Full insight popover */}
+          {showFullInsight && insight && (
+            <div className="as-insight-popover">
+              <div className="as-insight-popover-content">
+                <span className="as-insight-icon">💡</span>
+                <span>{insight}</span>
+              </div>
+              <button 
+                className="as-insight-popover-close"
+                onClick={() => setShowFullInsight(false)}
+              >
+                ✕
+              </button>
+            </div>
+          )}
+        </td>
+      </tr>
+      
+      {/* Expanded sub-orders — insight column empty for sub-rows */}
+      {isExpanded && order._isCombined && order._combinedFrom && (
+        order._combinedFrom.map((subOrder, subIndex) => {
+          const cameFromDifferentLine = subOrder.line !== order.line;
+          return (
+            <tr key={`sub-${order.id}-${subIndex}`} className="as-row-combined-sub">
+              <td className="as-col-drag"></td>
+              <td className="as-col-prio"></td>
+              <td className="as-col-fpr"><span className="as-sub-fpr">{subOrder.fpr}</span></td>
+              <td className="as-col-planned">
+                <div className="as-sub-text">{subOrder.planned_order_fg || '—'}</div>
+                <div className="as-sub-text">{subOrder.planned_order_sfg || '—'}</div>
+              </td>
+              <td className="as-col-material"><span className="as-sub-text">{subOrder.material_code_fg || '—'}</span></td>
+              <td className="as-col-desc">
+                <div className="as-sub-desc">
+                  {cameFromDifferentLine && (
+                    <span className="as-line-badge as-line-badge-small" title={`Originally from ${subOrder.line}`}>
+                      {getLineShortName(subOrder.line)}
+                    </span>
+                  )}
+                  <div><div className="as-sub-text-dark">{subOrder.item_description || order.item_description}</div></div>
+                </div>
+              </td>
+              <td className="as-col-form"><span className="as-sub-text">{subOrder.form || order.form}</span></td>
+              <td className="as-col-volume"><span className="as-sub-text">{subOrder.volume} MT</span></td>
+              <td className="as-col-batch"><span className="as-sub-text">{subOrder.batch_size || '—'}</span></td>
+              <td className="as-col-batches"><span className="as-sub-text">{subOrder.batches || '—'}</span></td>
+              <td className="as-col-prod"><span className="as-sub-text">{subOrder.production_time ? formatProductionTime(subOrder.production_time) : '—'}</span></td>
+              <td className="as-col-start-date"><span className="as-sub-text">—</span></td>
+              <td className="as-col-start-time"><span className="as-sub-text">—</span></td>
+              <td className="as-col-avail"><span className="as-sub-text">{formatAvailDate(subOrder.target_avail_date) || '—'}</span></td>
+              <td className="as-col-completion"><span className="as-sub-text">—</span></td>
+              <td className="as-col-insight"></td>
+            </tr>
+          );
+        })
+      )}
+    </>
+  );
+}
+```
+
+---
+
+## 4. STYLING
+
+```css
+/* Sequence Insight column */
+.as-col-insight {
+  min-width: 200px;
+  max-width: 280px;
+  padding: 6px 10px;
+  position: relative;
+}
+
+.as-col-insight th {
+  font-size: 10px;
+}
+
+/* Insight cell */
+.as-insight-cell {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.as-insight-icon {
+  font-size: 11px;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.as-insight-text {
+  font-size: 10px;
+  color: #6b7280;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.as-insight-more {
+  background: none;
+  border: none;
+  color: #ea580c;
+  font-size: 9px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.as-insight-more:hover {
+  text-decoration: underline;
+}
+
+/* Loading dots animation */
+.as-insight-loading {
+  display: flex;
+  gap: 2px;
+  color: #9ca3af;
+  font-size: 14px;
+}
+
+.as-insight-dot-1,
+.as-insight-dot-2,
+.as-insight-dot-3 {
+  animation: insight-pulse 1.2s infinite;
+}
+
+.as-insight-dot-2 {
+  animation-delay: 0.2s;
+}
+
+.as-insight-dot-3 {
+  animation-delay: 0.4s;
+}
+
+@keyframes insight-pulse {
+  0%, 80%, 100% { opacity: 0.3; }
+  40% { opacity: 1; }
+}
+
+/* Empty insight */
+.as-insight-empty {
+  font-size: 10px;
+  color: #d1d5db;
+}
+
+/* Full insight popover */
+.as-insight-popover {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 50;
+  width: 320px;
+  padding: 12px 14px;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  margin-top: 4px;
+}
+
+.as-insight-popover-content {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 11px;
+  color: #374151;
+  line-height: 1.6;
+}
+
+.as-insight-popover-close {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  background: none;
+  border: none;
+  font-size: 12px;
+  color: #9ca3af;
+  cursor: pointer;
+  padding: 0;
+}
+
+.as-insight-popover-close:hover {
+  color: #374151;
+}
+
+/* Combined sub-row insight — empty */
+.as-row-combined-sub .as-col-insight {
+  background: transparent;
+}
+```
+
+---
+
+## VERIFICATION
+
+### Column added
+1. ✅ "Sequence Insight" column is the last column in the After table
+2. ✅ Header shows in the thead
+3. ✅ Each order row has an insight cell
+4. ✅ Sub-rows (expanded combined) have empty insight cell
+
+### AI-generated insights
+5. ✅ Single batch AI call per line tab
+6. ✅ Generates 1-2 sentence insight per order
+7. ✅ Covers: moved, combined, repositioned, unchanged
+8. ✅ References queue times, avail dates, N10D, changeovers
+9. ✅ Fallback if AI fails
+
+### Display
+10. ✅ Short text (80 chars) shown in cell with 💡 icon
+11. ✅ "more" link if text is longer
+12. ✅ Clicking "more" shows full text in popover
+13. ✅ Full text also shown on hover (title attribute)
+14. ✅ Loading dots animation while AI generates
+
+### Per line
+15. ✅ Insights generated once per line tab (not on every switch)
+16. ✅ Different insights for each line
+17. ✅ Cached — not regenerated when switching back
+```

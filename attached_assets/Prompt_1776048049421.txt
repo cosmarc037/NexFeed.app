@@ -1,0 +1,797 @@
+```
+Implement the following changes:
+
+---
+
+## 1. REMOVE CHANGEOVER COLUMN FROM MASTER DATA
+
+### REMOVE FROM COLUMN MAP
+
+```javascript
+const MASTER_DATA_COLUMN_MAP = {
+  'FG Material Code': 'fgMaterialCode',
+  'FG Item Description': 'fgItemDescription',
+  'SFG1 Material Code': 'sfg1MaterialCode',
+  'SFG Item Description': 'sfgItemDescription',
+  'Form': 'form',
+  'Diameter': 'diameter',
+  // REMOVED: 'Changeover': 'changeover',
+  'FG Weight': 'fgWeight',
+  'Category': 'category',
+  'Color': 'color',
+  'Batch FM1': 'batchFm1',
+  'Batch FM2': 'batchFm2',
+  'Batch FM3': 'batchFm3',
+  'Batch PMX': 'batchPmx',
+  'Label 1': 'label1',
+  'Label 2': 'label2',
+  'Thread': 'thread',
+  'Sacks Code': 'sacksCode',
+  'Sacks Desc': 'sacksDesc',
+  'Tags Code': 'tagsCode',
+  'Tags Desc': 'tagsDesc',
+  'L1 Rate': 'l1Rate',
+  'L2 Rate': 'l2Rate',
+  'L3 Rate': 'l3Rate',
+  'L4 Rate': 'l4Rate',
+  'L5 Rate': 'l5Rate',
+  'L6 Rate': 'l6Rate',
+  'L7 Rate': 'l7Rate'
+};
+```
+
+### REMOVE FROM MASTER DATA TABLE HEADER GROUPS
+
+Update the Production Parameters group — remove Changeover:
+
+```
+BEFORE:
+| PRODUCTION PARAMETERS | Form, Diameter, Changeover, FG Weight | 4 cols |
+
+AFTER:
+| PRODUCTION PARAMETERS | Form, Diameter, FG Weight | 3 cols |
+```
+
+```jsx
+<tr className="master-data-group-headers">
+  {isEditMode && <th rowSpan={2} className="md-select-header"><input type="checkbox" /></th>}
+  <th rowSpan={2} className="md-row-number-header">#</th>
+  <th colSpan={6} className="md-group-header md-group-product">PRODUCT DETAILS</th>
+  <th colSpan={3} className="md-group-header md-group-production">PRODUCTION PARAMETERS</th>
+  <th colSpan={4} className="md-group-header md-group-batch">BATCH SIZES</th>
+  <th colSpan={2} className="md-group-header md-group-labeling">LABELING</th>
+  <th colSpan={5} className="md-group-header md-group-packaging">PACKAGING</th>
+  <th colSpan={7} className="md-group-header md-group-rates">RUN RATES (MT/HR)</th>
+  {isEditMode && <th rowSpan={2} className="md-delete-header"></th>}
+</tr>
+
+<tr className="master-data-column-headers">
+  {/* Product Details */}
+  <th>FG Material Code</th>
+  <th>FG Item Description</th>
+  <th>SFG1 Material Code</th>
+  <th>SFG Item Description</th>
+  <th>Category</th>
+  <th>Color</th>
+  
+  {/* Production Parameters — NO Changeover */}
+  <th>Form</th>
+  <th>Diameter</th>
+  <th>FG Weight</th>
+  
+  {/* Batch Sizes */}
+  <th>Batch FM1</th>
+  <th>Batch FM2</th>
+  <th>Batch FM3</th>
+  <th>Batch PMX</th>
+  
+  {/* Labeling */}
+  <th>Label 1</th>
+  <th>Label 2</th>
+  
+  {/* Packaging */}
+  <th>Thread</th>
+  <th>Sacks Code</th>
+  <th>Sacks Desc</th>
+  <th>Tags Code</th>
+  <th>Tags Desc</th>
+  
+  {/* Run Rates */}
+  <th>L1 Rate</th>
+  <th>L2 Rate</th>
+  <th>L3 Rate</th>
+  <th>L4 Rate</th>
+  <th>L5 Rate</th>
+  <th>L6 Rate</th>
+  <th>L7 Rate</th>
+</tr>
+```
+
+### REMOVE FROM TABLE BODY ROWS
+
+```jsx
+<tbody>
+  {filteredData.map(row => (
+    <tr key={row._rowId}>
+      {/* ... */}
+      
+      {/* Production Parameters — NO Changeover */}
+      <td>{row.form}</td>
+      <td>{row.diameter}</td>
+      {/* REMOVED: <td>{row.changeover}</td> */}
+      <td>{row.fgWeight}</td>
+      
+      {/* ... rest of columns ... */}
+    </tr>
+  ))}
+</tbody>
+```
+
+---
+
+## 2. UPDATE DOWNLOAD TEMPLATE — REMOVE CHANGEOVER
+
+```javascript
+function handleDownloadTemplate() {
+  const templateHeaders = [
+    'FG Material Code',
+    'FG Item Description',
+    'SFG1 Material Code',
+    'SFG Item Description',
+    'Form',
+    'Diameter',
+    // REMOVED: 'Changeover',
+    'FG Weight',
+    'Category',
+    'Color',
+    'Batch FM1',
+    'Batch FM2',
+    'Batch FM3',
+    'Batch PMX',
+    'Label 1',
+    'Label 2',
+    'Thread',
+    'Sacks Code',
+    'Sacks Desc',
+    'Tags Code',
+    'Tags Desc',
+    'L1 Rate',
+    'L2 Rate',
+    'L3 Rate',
+    'L4 Rate',
+    'L5 Rate',
+    'L6 Rate',
+    'L7 Rate'
+  ];
+  
+  const sampleRow = {
+    'FG Material Code': '1000000000001 (example)',
+    'FG Item Description': 'Sample Product Name, 50kg (example)',
+    'SFG1 Material Code': '3000000000001 (example)',
+    'SFG Item Description': 'Sample SFG Description (example)',
+    'Form': 'MP (example)',
+    'Diameter': '4 (example)',
+    // REMOVED: 'Changeover'
+    'FG Weight': '50 (example)',
+    'Category': 'Poultry (example)',
+    'Color': 'Brown (example)',
+    'Batch FM1': '4 (example)',
+    'Batch FM2': '4 (example)',
+    'Batch FM3': '4 (example)',
+    'Batch PMX': '4 (example)',
+    'Label 1': '(example)',
+    'Label 2': '(example)',
+    'Thread': '(example)',
+    'Sacks Code': '(example)',
+    'Sacks Desc': '(example)',
+    'Tags Code': '(example)',
+    'Tags Desc': '(example)',
+    'L1 Rate': '20 (example)',
+    'L2 Rate': '20 (example)',
+    'L3 Rate': '10 (example)',
+    'L4 Rate': '10 (example)',
+    'L5 Rate': '10 (example)',
+    'L6 Rate': '10 (example)',
+    'L7 Rate': '10 (example)'
+  };
+  
+  // Updated Instructions sheet
+  const noteWs = XLSX.utils.aoa_to_sheet([
+    ['INSTRUCTIONS'],
+    [''],
+    ['This template contains the required columns for the Master Data upload.'],
+    ['The first data row contains example values — feel free to delete them and enter your own data.'],
+    ['All columns are optional except FG Material Code and FG Item Description.'],
+    [''],
+    ['Column Guide:'],
+    ['PRODUCT DETAILS: FG Material Code, FG Item Description, SFG1 Material Code, SFG Item Description, Category, Color'],
+    ['PRODUCTION PARAMETERS: Form, Diameter, FG Weight'],
+    ['BATCH SIZES: Batch FM1 (Feedmill 1), Batch FM2 (Feedmill 2), Batch FM3 (Feedmill 3), Batch PMX (Powermix)'],
+    ['LABELING: Label 1, Label 2'],
+    ['PACKAGING: Thread, Sacks Code, Sacks Desc, Tags Code, Tags Desc'],
+    ['RUN RATES: L1-L7 Rate (MT/hr per production line)'],
+    [''],
+    ['Note: Changeover times are automatically determined by the product Form'],
+    ['and managed in the Changeover Rules configuration page.']
+  ]);
+  
+  const dataWs = XLSX.utils.json_to_sheet([sampleRow], { header: templateHeaders });
+  dataWs['!cols'] = templateHeaders.map(h => ({ wch: Math.max(h.length + 4, 18) }));
+  
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, dataWs, 'Master Data');
+  XLSX.utils.book_append_sheet(wb, noteWs, 'Instructions');
+  
+  XLSX.writeFile(wb, 'Master_Data_Template.xlsx');
+  showNotification('success', 'Template downloaded: Master_Data_Template.xlsx');
+}
+```
+
+---
+
+## 3. ADD BASE CHANGEOVER RULES TO CHANGEOVER RULES PAGE
+
+### UPDATE DEFAULT RULES
+
+```javascript
+function getDefaultChangeoverRules() {
+  const saved = localStorage.getItem('changeover_rules');
+  if (saved) return JSON.parse(saved);
+  
+  return {
+    baseChangeover: {
+      p: 0.17,    // Exact "P"
+      mp: 0.17,   // Starts with "MP" (MP, MP-CS, etc.)
+      c: 0.33,    // Starts with "C" (C-L, C-M, C-S, etc.)
+      others: 0.00 // M, MX, etc.
+    },
+    additionalRules: [
+      {
+        id: 'diameter_change',
+        title: 'Change Pellet Diameter (4mm ↔ 3mm)',
+        reason: 'Change Die',
+        icon: '🔵',
+        type: 'diameter',
+        values: { fm1: 1.50, fm2: 1.00, fm3: 1.00 }
+      },
+      {
+        id: 'yellow_brown',
+        title: 'Change Color: Yellow ↔ Brown',
+        reason: 'Cleaning',
+        icon: '🟡',
+        type: 'color_yellow_brown',
+        values: { fm1: 0.33, fm2: 0.33, fm3: 0.33 }
+      },
+      {
+        id: 'red_to_any',
+        title: 'Change Color: Red → Any',
+        reason: 'Flushing and Cleaning',
+        icon: '🔴',
+        type: 'color_red_out',
+        values: { fm1: 1.00, fm2: 1.00, fm3: 1.00 }
+      },
+      {
+        id: 'green_to_any',
+        title: 'Change Color: Green → Any',
+        reason: 'Flushing and Cleaning',
+        icon: '🟢',
+        type: 'color_green_out',
+        values: { fm1: 1.00, fm2: 1.00, fm3: 1.00 }
+      },
+      {
+        id: 'any_to_red_green',
+        title: 'Change Color: Any → Red/Green',
+        reason: 'Cleaning',
+        icon: '🔴🟢',
+        type: 'color_to_red_green',
+        values: { fm1: 0.50, fm2: 0.50, fm3: 0.50 }
+      },
+      {
+        id: 'category_change',
+        title: 'Change Category (Different Category)',
+        reason: 'Cleaning',
+        icon: '📦',
+        type: 'category',
+        values: { fm1: 0.33, fm2: 0.33, fm3: 0.33 }
+      }
+    ]
+  };
+}
+```
+
+### MIGRATION — HANDLE OLD FORMAT
+
+```javascript
+function getDefaultChangeoverRules() {
+  const saved = localStorage.getItem('changeover_rules');
+  
+  if (saved) {
+    const parsed = JSON.parse(saved);
+    
+    // If old format (array), migrate to new format
+    if (Array.isArray(parsed)) {
+      return {
+        baseChangeover: { p: 0.17, mp: 0.17, c: 0.33, others: 0.00 },
+        additionalRules: parsed
+      };
+    }
+    
+    // New format already
+    return parsed;
+  }
+  
+  // Default
+  return {
+    baseChangeover: { p: 0.17, mp: 0.17, c: 0.33, others: 0.00 },
+    additionalRules: [
+      /* ... default rules as above ... */
+    ]
+  };
+}
+```
+
+---
+
+## 4. CHANGEOVER RULES PAGE — ADD BASE CHANGEOVER SECTION
+
+### COMPONENT
+
+```jsx
+function ChangeoverRulesPage() {
+  const [rules, setRules] = useState(getDefaultChangeoverRules());
+  const [hasChanges, setHasChanges] = useState(false);
+  
+  function handleBaseChangeoverChange(form, value) {
+    setRules(prev => ({
+      ...prev,
+      baseChangeover: {
+        ...prev.baseChangeover,
+        [form]: parseFloat(value) || 0
+      }
+    }));
+    setHasChanges(true);
+  }
+  
+  function handleAdditionalRuleChange(ruleId, feedmill, value) {
+    setRules(prev => ({
+      ...prev,
+      additionalRules: prev.additionalRules.map(rule => {
+        if (rule.id === ruleId) {
+          return {
+            ...rule,
+            values: { ...rule.values, [feedmill]: parseFloat(value) || 0 }
+          };
+        }
+        return rule;
+      })
+    }));
+    setHasChanges(true);
+  }
+  
+  function handleSave() {
+    saveChangeoverRules(rules);
+    setHasChanges(false);
+    
+    // Recalculate all changeovers
+    recalculateAllChangeovers(allOrders, rules);
+    recalculateCompletionDates(allOrders);
+    
+    showNotification('success', 'Changeover rules saved. All order changeovers have been recalculated.');
+  }
+  
+  return (
+    <div className="changeover-rules-page">
+      <div className="changeover-rules-header">
+        <div>
+          <h2>Changeover Rules</h2>
+          <p>Configure changeover times based on product form and transition rules</p>
+        </div>
+        <button
+          className="btn-save-changeover"
+          onClick={handleSave}
+          disabled={!hasChanges}
+        >
+          Save Changes
+        </button>
+      </div>
+      
+      <div className="changeover-rules-description">
+        <p>
+          Base changeover is determined by the product's form type. Additional changeover time
+          is added when consecutive orders differ in pellet diameter, color, or category.
+          All additions stack if multiple conditions apply.
+        </p>
+      </div>
+      
+      {/* BASE CHANGEOVER — AT THE TOP */}
+      <div className="changeover-section-label">Base Changeover (by Form)</div>
+      
+      <div className="changeover-rule-card">
+        <div className="changeover-rule-header">
+          <span className="changeover-rule-icon">⏱</span>
+          <div className="changeover-rule-info">
+            <span className="changeover-rule-title">Base Changeover Time</span>
+            <span className="changeover-rule-reason">
+              Auto-applied per order based on product form. P and MP variants = pellet changeover, C variants = crumble changeover, others = no changeover.
+            </span>
+          </div>
+        </div>
+        
+        <div className="changeover-rule-values">
+          <div className="changeover-rule-field">
+            <label>P</label>
+            <div className="changeover-input-wrapper">
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                value={rules.baseChangeover.p}
+                onChange={(e) => handleBaseChangeoverChange('p', e.target.value)}
+              />
+              <span className="changeover-input-unit">hrs</span>
+            </div>
+            <span className="changeover-field-hint">Exact "P"</span>
+          </div>
+          
+          <div className="changeover-rule-field">
+            <label>MP</label>
+            <div className="changeover-input-wrapper">
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                value={rules.baseChangeover.mp}
+                onChange={(e) => handleBaseChangeoverChange('mp', e.target.value)}
+              />
+              <span className="changeover-input-unit">hrs</span>
+            </div>
+            <span className="changeover-field-hint">MP, MP-CS, etc.</span>
+          </div>
+          
+          <div className="changeover-rule-field">
+            <label>C</label>
+            <div className="changeover-input-wrapper">
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                value={rules.baseChangeover.c}
+                onChange={(e) => handleBaseChangeoverChange('c', e.target.value)}
+              />
+              <span className="changeover-input-unit">hrs</span>
+            </div>
+            <span className="changeover-field-hint">C-L, C-M, C-S, etc.</span>
+          </div>
+        </div>
+        
+        <div className="changeover-others-note">
+          All other forms (M, MX, etc.) default to <strong>0.00 hrs</strong> — no base changeover.
+        </div>
+      </div>
+      
+      {/* ADDITIONAL RULES */}
+      <div className="changeover-section-label">Additional Changeover (by Transition)</div>
+      
+      <div className="changeover-rules-cards">
+        {rules.additionalRules.map(rule => (
+          <ChangeoverRuleCard
+            key={rule.id}
+            rule={rule}
+            onValueChange={handleAdditionalRuleChange}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+```
+
+### SECTION LABEL STYLING
+
+```css
+.changeover-section-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #6b7280;
+  margin: 20px 0 10px 0;
+}
+
+.changeover-section-label:first-of-type {
+  margin-top: 0;
+}
+
+.changeover-field-hint {
+  display: block;
+  font-size: 10px;
+  color: #9ca3af;
+  margin-top: 4px;
+}
+
+.changeover-others-note {
+  padding: 8px 18px 12px 18px;
+  font-size: 11px;
+  color: #6b7280;
+  border-top: 1px solid #f3f4f6;
+}
+
+.changeover-others-note strong {
+  color: #374151;
+}
+```
+
+---
+
+## 5. UPDATE BASE CHANGEOVER CALCULATION
+
+Replace the old lookup from master data with form-based logic:
+
+```javascript
+function getBaseChangeover(form, baseChangeoverRules) {
+  if (!form) return 0;
+  
+  const formUpper = form.trim().toUpperCase();
+  
+  // Exact "P"
+  if (formUpper === 'P') {
+    return baseChangeoverRules.p ?? 0.17;
+  }
+  
+  // Starts with "MP" (MP, MP-CS, etc.)
+  if (formUpper.startsWith('MP')) {
+    return baseChangeoverRules.mp ?? 0.17;
+  }
+  
+  // Starts with "C" (C-L, C-M, C-S, etc.)
+  if (formUpper.startsWith('C')) {
+    return baseChangeoverRules.c ?? 0.33;
+  }
+  
+  // Others (M, MX, etc.)
+  return baseChangeoverRules.others ?? 0;
+}
+```
+
+### UPDATE TOTAL CHANGEOVER CALCULATION
+
+```javascript
+function calculateTotalChangeover(order, followingOrder, changeoverRules) {
+  // Base changeover from form
+  const baseChangeover = getBaseChangeover(order.form, changeoverRules.baseChangeover);
+  
+  // Additional changeover from transition rules
+  const additional = calculateAdditionalChangeover(
+    order, followingOrder, changeoverRules.additionalRules
+  );
+  
+  const totalChangeover = baseChangeover + additional.total;
+  
+  return {
+    base: baseChangeover,
+    baseForm: order.form || '—',
+    additional: additional.total,
+    total: totalChangeover,
+    breakdown: additional.breakdown
+  };
+}
+```
+
+### UPDATE RECALCULATE ALL CHANGEOVERS
+
+```javascript
+function recalculateAllChangeovers(allOrders, changeoverRules) {
+  if (!changeoverRules) {
+    changeoverRules = getDefaultChangeoverRules();
+  }
+  
+  // Handle old format (array)
+  if (Array.isArray(changeoverRules)) {
+    changeoverRules = {
+      baseChangeover: { p: 0.17, mp: 0.17, c: 0.33, others: 0.00 },
+      additionalRules: changeoverRules
+    };
+  }
+  
+  const ordersByLine = {};
+  allOrders.forEach(order => {
+    if (!ordersByLine[order.line]) ordersByLine[order.line] = [];
+    ordersByLine[order.line].push(order);
+  });
+  
+  Object.keys(ordersByLine).forEach(line => {
+    const lineOrders = ordersByLine[line].sort((a, b) => a.prio - b.prio);
+    
+    lineOrders.forEach((order, index) => {
+      if (order.status === 'Done' || order.status === 'Cancel PO') return;
+      
+      // Get following active order
+      let followingOrder = null;
+      for (let j = index + 1; j < lineOrders.length; j++) {
+        if (lineOrders[j].status !== 'Done' && lineOrders[j].status !== 'Cancel PO') {
+          followingOrder = lineOrders[j];
+          break;
+        }
+      }
+      
+      const result = calculateTotalChangeover(order, followingOrder, changeoverRules);
+      
+      order._changeoverTotal = result.total;
+      order._changeoverBase = result.base;
+      order._changeoverBaseForm = result.baseForm;
+      order._changeoverAdditional = result.additional;
+      order._changeoverBreakdown = result.breakdown;
+      
+      // Also store base changeover as the order's changeover field
+      order.changeover = result.base;
+    });
+  });
+}
+```
+
+---
+
+## 6. UPDATE AUTO-POPULATE FROM MASTER DATA — REMOVE CHANGEOVER
+
+```javascript
+function autoPopulateFromMasterData(order, masterData) {
+  const product = masterData.find(
+    p => String(p.fgMaterialCode) === String(order.material_code_fg)
+  );
+  
+  if (!product) return order;
+  
+  const updatedOrder = { ...order };
+  
+  // Existing fields
+  if (product.fgItemDescription) updatedOrder.item_description = product.fgItemDescription;
+  if (product.sfg1MaterialCode) updatedOrder.material_code_sfg = product.sfg1MaterialCode;
+  if (product.sfgItemDescription) updatedOrder.sfg_item_description = product.sfgItemDescription;
+  if (product.form) updatedOrder.form = product.form;
+  if (product.fgWeight) updatedOrder.fg_weight = product.fgWeight;
+  if (product.thread) updatedOrder.thread = product.thread;
+  if (product.sacksCode) updatedOrder.sacks_code = product.sacksCode;
+  if (product.sacksDesc) updatedOrder.sacks_desc = product.sacksDesc;
+  if (product.tagsCode) updatedOrder.tags_code = product.tagsCode;
+  if (product.tagsDesc) updatedOrder.tags_desc = product.tagsDesc;
+  if (product.label1) updatedOrder.label_1 = product.label1;
+  if (product.label2) updatedOrder.label_2 = product.label2;
+  if (product.category) updatedOrder.category = product.category;
+  if (product.color) updatedOrder.color = product.color;
+  if (product.diameter) updatedOrder.diameter = product.diameter;
+  
+  // REMOVED: changeover from master data
+  // Changeover is now auto-calculated from form via changeover rules
+  const changeoverRules = getDefaultChangeoverRules();
+  updatedOrder.changeover = getBaseChangeover(updatedOrder.form, changeoverRules.baseChangeover);
+  
+  // Batch size and run rate — unchanged
+  // ... existing batch/rate logic ...
+  
+  return updatedOrder;
+}
+```
+
+---
+
+## 7. UPDATE CHANGEOVER TOOLTIP
+
+```jsx
+function ChangeoverCell({ order }) {
+  const hasAdditional = order._changeoverAdditional > 0;
+  const total = order._changeoverTotal ?? parseFloat(order.changeover) ?? 0;
+  
+  return (
+    <td className={`changeover-cell ${hasAdditional ? 'changeover-has-additional' : ''}`}>
+      <div className="changeover-value-wrapper">
+        <span className="changeover-total">{total.toFixed(2)} hr</span>
+        {hasAdditional && (
+          <span className="changeover-additional-badge">+{order._changeoverAdditional.toFixed(2)}</span>
+        )}
+      </div>
+      
+      <div className="changeover-tooltip">
+        <div className="changeover-tooltip-header">
+          Total Changeover: {total.toFixed(2)} hrs
+        </div>
+        <div className="changeover-tooltip-divider"></div>
+        <div className="changeover-tooltip-row">
+          <span className="changeover-tooltip-label">
+            Base ({order._changeoverBaseForm || order.form || '—'}):
+          </span>
+          <span className="changeover-tooltip-value">
+            {(order._changeoverBase ?? 0).toFixed(2)} hrs
+          </span>
+        </div>
+        {order._changeoverBreakdown && order._changeoverBreakdown.map((item, index) => (
+          <div key={index} className="changeover-tooltip-row changeover-tooltip-addition">
+            <span className="changeover-tooltip-label">
+              + {item.detail} ({item.rule}):
+            </span>
+            <span className="changeover-tooltip-value">
+              {item.value.toFixed(2)} hrs
+            </span>
+            <span className="changeover-tooltip-reason">
+              [{item.reason}]
+            </span>
+          </div>
+        ))}
+        {(!order._changeoverBreakdown || order._changeoverBreakdown.length === 0) && (
+          <div className="changeover-tooltip-row changeover-tooltip-none">
+            No additional changeover rules applied.
+          </div>
+        )}
+      </div>
+    </td>
+  );
+}
+```
+
+---
+
+## 8. REMOVE ALL REFERENCES TO MASTER DATA CHANGEOVER
+
+Search the entire codebase and remove:
+
+```javascript
+// REMOVE any of these:
+if (product.changeover) updatedOrder.changeover = product.changeover;
+order.changeover = parseFloat(product.changeover);
+normalized.changeover = ...;
+
+// REMOVE from any export/download column lists:
+'changeover': 'Changeover',
+```
+
+Replace any remaining hardcoded changeover lookups:
+
+```javascript
+// BEFORE (old — from master data):
+const changeover = parseFloat(order.changeover) ?? 0.17;
+
+// AFTER (new — from form rules):
+const changeoverRules = getDefaultChangeoverRules();
+const changeover = getBaseChangeover(order.form, changeoverRules.baseChangeover);
+```
+
+---
+
+## VERIFICATION
+
+### Master data
+1. ✅ Changeover column removed from master data table
+2. ✅ Changeover column removed from header groups (Production Parameters now 3 cols)
+3. ✅ Changeover removed from download template
+4. ✅ Changeover removed from template instructions
+5. ✅ Parsing still works with old files that have Changeover column (ignored)
+6. ✅ Parsing works with new files without Changeover column
+
+### Changeover Rules page
+7. ✅ Base Changeover section at the top with P, MP, C fields
+8. ✅ Each field has a hint (e.g., "MP, MP-CS, etc.")
+9. ✅ "Others default to 0.00 hrs" note displayed
+10. ✅ Base changeover values are editable
+11. ✅ Additional rules section below with existing 6 rules
+12. ✅ Saving recalculates all order changeovers
+13. ✅ Values persist in localStorage
+
+### Form-based changeover logic
+14. ✅ P → 0.17
+15. ✅ MP → 0.17
+16. ✅ MP-CS → 0.17 (starts with "MP")
+17. ✅ C-L → 0.33 (starts with "C")
+18. ✅ C-M → 0.33
+19. ✅ C-S → 0.33
+20. ✅ M → 0.00
+21. ✅ MX → 0.00
+22. ✅ Powermix (MX) → 0.00
+
+### Tooltip
+23. ✅ Shows "Base (MP): 0.17 hrs" using the form type
+24. ✅ Shows additional breakdown if rules apply
+25. ✅ Shows "No additional rules" if none apply
+
+### Migration
+26. ✅ Old localStorage format (array) migrates to new format with baseChangeover
+27. ✅ Old master data files with Changeover column don't break parsing
+```

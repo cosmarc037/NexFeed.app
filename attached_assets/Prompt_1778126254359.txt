@@ -1,0 +1,283 @@
+```
+Revisit and fix the row-level sequence insight for the Standard Sequence so it updates when “Apply Profitability (Margin)” changes the order positions.
+
+---
+
+## OBJECTIVE
+
+We added an “Apply Profitability (Margin)” action to the order preview.
+
+This feature re-sorts the Standard Sequence by prioritizing higher-margin orders while still respecting order dates and sequencing constraints.
+
+The reordering itself is working, but the row-level sequence insights are not updating accordingly.
+
+Currently:
+- the order positions change after profitability is applied
+- but the insights still explain the old pre-profitability sequence logic
+- so the insight text no longer matches the actual position of the order in the final Standard Sequence
+
+We need to make sure the row-level insight is aligned with what the Standard Sequence actually did after profitability was applied.
+
+---
+
+## PROBLEM TO FIX
+
+After profitability is applied:
+- order A may move above order B because it has a higher margin
+- but the insight still says something like:
+  - protected by avail date
+  - grouped by color/category
+  - due to MTO protection
+  - original ordinal explanation like Fourth/Fifth/Sixth
+
+This causes a mismatch because:
+- the final position changed
+- but the explanation did not
+
+The insight should always reflect the final sequence state currently being shown.
+
+---
+
+## REQUIRED BEHAVIOR
+
+When “Apply Profitability (Margin)” changes the Standard Sequence:
+- regenerate the row-level insights for the Standard Sequence
+- use the final profitability-adjusted order positions
+- explain why that order is now in that position
+
+The new explanation should still respect existing rules like:
+- availability date protection
+- Future Dispatches/date constraints
+- MTO constraints if applicable
+
+But if margin was the deciding factor within those allowed rules, the insight should say so.
+
+---
+
+## 1. TREAT "STANDARD SEQUENCE + PROFITABILITY APPLIED" AS A DISTINCT FINAL STATE
+
+Right now, the app appears to update only the row order, but not the reasoning.
+
+After profitability is applied, the Standard Sequence should be treated as a new final state:
+- same strategy card = Standard Sequence
+- but with profitability-adjusted ranking
+
+That means:
+- rows
+- ordinal positions
+- sequence insights
+must all be recomputed from the new final order arrangement
+
+Do not keep old row-level explanations from the pre-profitability state.
+
+---
+
+## 2. REGENERATE ROW-LEVEL INSIGHTS AFTER PROFITABILITY REORDERING
+
+After the profitability sort is applied:
+- rebuild the row-level sequence explanations for the new order list
+- update ordinal wording like:
+  - First
+  - Second
+  - Third
+  - etc.
+- update the reasoning based on the new actual neighboring context and final placement
+
+### Required flow
+```javascript
+const profitabilityAdjustedOrders = applyProfitabilityOrdering(standardSequenceOrders);
+
+const updatedInsights = generateStandardSequenceInsights({
+  orders: profitabilityAdjustedOrders,
+  profitabilityApplied: true,
+});
+```
+
+The UI should then render these new insights, not the stale ones.
+
+---
+
+## 3. INCLUDE PROFITABILITY AS A REASON ONLY WHEN IT ACTUALLY AFFECTED POSITION
+
+Do not blindly add “higher margin prioritized” to every row.
+
+Instead:
+- detect whether profitability changed the order’s relative placement
+- if yes, mention profitability/margin as part of the explanation
+- if no, keep the existing standard-sequence explanation
+
+### Example:
+If two orders had the same date constraints and were both eligible to swap, and the higher-margin one was moved ahead:
+- mention profitability as a deciding factor
+
+If an order stayed in place because date constraints were stricter than margin:
+- keep the explanation date-driven
+
+---
+
+## 4. PRESERVE DATE / MTO / FUTURE DISPATCHES PROTECTION IN THE EXPLANATION
+
+Profitability should not erase important scheduling constraints from the explanation.
+
+The insight should still reflect:
+- avail date protection
+- Future Dispatches protection
+- MTO constraints
+- sequence safety
+- grouping/changeover factors if still relevant
+
+But if profitability caused the final ordering among otherwise valid candidates, include it clearly.
+
+### Good example:
+```text
+Fifth, protected by avail date 2026-05-23, then prioritized ahead of lower-margin orders within the same allowable window.
+```
+
+### Another example:
+```text
+Seventh, kept within the 2026-05-23 availability boundary and promoted within that group due to higher margin.
+```
+
+This is much more aligned to the actual post-profitability ordering.
+
+---
+
+## 5. UPDATE ORDINAL POSITION TEXT AFTER REORDER
+
+The insight text currently includes wording like:
+- Fourth
+- Fifth
+- Sixth
+- Seventh
+- Eighth
+
+If profitability changes the order positions:
+- recompute the ordinal label
+- do not keep the old ordinal from the previous sequence state
+
+Example:
+- if an order used to be Fifth and becomes Third after profitability
+- the insight must now say Third, not Fifth
+
+---
+
+## 6. DETECT WHETHER PROFITABILITY WAS APPLIED TO THE STANDARD SEQUENCE
+
+Add an explicit flag/state, such as:
+```javascript
+profitabilityApplied = true
+```
+
+Then use that during insight generation.
+
+### Example:
+```javascript
+generateStandardSequenceInsights({
+  orders,
+  profitabilityApplied,
+});
+```
+
+This ensures the insight builder knows which mode it is describing:
+- plain Standard Sequence
+- Standard Sequence with Profitability applied
+
+---
+
+## 7. BUILD A PROFITABILITY-AWARE STANDARD INSIGHT TEMPLATE
+
+When profitability affects placement, use wording like:
+
+### Example patterns
+```text
+Third, protected by avail date 2026-05-23 and prioritized within the allowable window due to higher margin.
+```
+
+```text
+Fifth, kept within the same date-safe group and sequenced ahead of lower-margin orders after profitability was applied.
+```
+
+```text
+Second, remained constrained by availability date, but profitability influenced its placement among eligible orders.
+```
+
+### If profitability did NOT materially affect the row:
+Keep the normal standard-sequence explanation.
+
+---
+
+## 8. DO NOT LET THE INSIGHT CLAIM AN OLD POSITION OR OLD CAUSE
+
+A row should never:
+- stay in a new position
+- while keeping an explanation tied to its old position/order grouping
+
+The insight must describe the row as it exists now in the rendered list.
+
+---
+
+## 9. REGENERATE "MORE" / EXPANDED REASONING TOO
+
+If there is:
+- short insight
+- long insight
+- expanded “more” explanation
+
+all of them must be regenerated after profitability is applied.
+
+Do not update only the short text while leaving long reasoning stale.
+
+---
+
+## 10. ENSURE FAITHFULNESS / STANDARD CARD CONTEXT STAYS CONSISTENT
+
+If the Standard Sequence card remains selected while profitability is applied:
+- that is fine
+- but the explanation should make it clear that the standard sequencing still respected dates while profitability adjusted the order within those bounds
+
+This avoids confusion between:
+- standard strategy baseline
+- profitability-enhanced ordering
+
+---
+
+## 11. ADD DEBUG LOGGING TO VERIFY INSIGHT REGENERATION
+
+Temporarily log:
+
+```javascript
+console.debug('[Standard Sequence Insight Regeneration]', {
+  profitabilityApplied,
+  orders: orders.map((order, index) => ({
+    orderId: order.id,
+    newIndex: index,
+    margin: order._margin,
+    insight: order.sequenceInsight,
+  })),
+});
+```
+
+This helps verify:
+- insights are regenerated after reorder
+- ordinals are updated
+- profitability-aware rows mention margin when appropriate
+
+---
+
+## 12. VERIFICATION
+
+### Behavior
+1. ✅ Applying Profitability (Margin) reorders the Standard Sequence as before
+2. ✅ After reorder, row-level sequence insights are regenerated
+3. ✅ Insight text now matches the final row position and actual sequence logic
+
+### Explanation quality
+4. ✅ If profitability influenced placement, the insight says so
+5. ✅ Date protection / MTO / Future Dispatches constraints are still reflected where relevant
+6. ✅ Rows that did not move unnecessarily do not get fake profitability wording
+
+### Consistency
+7. ✅ Ordinal labels (First, Second, Third, etc.) are updated to the new positions
+8. ✅ Expanded “more” reasoning is also refreshed
+9. ✅ The final insight is aligned with what the Standard Sequence actually did
+```

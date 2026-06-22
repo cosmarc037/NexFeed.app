@@ -1,0 +1,105 @@
+```
+Hide the Smart Combine panel from the app:
+
+---
+
+## 1. HIDE THE SMART COMBINE BUTTON/TRIGGER
+
+Find wherever the Smart Combine button or panel trigger is rendered and conditionally hide it:
+
+```jsx
+// Option A: Comment out or wrap in a feature flag
+
+const SHOW_SMART_COMBINE_PANEL = false;
+
+// Wherever the Smart Combine button is rendered:
+{SHOW_SMART_COMBINE_PANEL && (
+  <button className="btn-smart-combine" onClick={openSmartCombine}>
+    ✨ Smart Combine
+  </button>
+)}
+```
+
+```jsx
+// Or if it's a sidebar button / floating button:
+{SHOW_SMART_COMBINE_PANEL && (
+  <div className="smart-combine-trigger">
+    {/* ... existing Smart Combine trigger ... */}
+  </div>
+)}
+```
+
+---
+
+## 2. HIDE THE PANEL ITSELF
+
+```jsx
+// If the panel renders conditionally based on a state:
+{SHOW_SMART_COMBINE_PANEL && showSmartCombinePanel && (
+  <SmartCombinePanel
+    orders={orders}
+    onCombine={handleCombine}
+    onClose={() => setShowSmartCombinePanel(false)}
+  />
+)}
+```
+
+---
+
+## 3. HIDE FROM THE ORDER TABLE (IF IT'S A SIDEBAR/TAB)
+
+Based on the snips, the Smart Combine appears as a vertical tab on the right side of the order table:
+
+```jsx
+// Find the vertical "Smart Combine" tab on the right edge of the table
+{SHOW_SMART_COMBINE_PANEL && (
+  <div className="smart-combine-side-tab" onClick={() => setShowSmartCombinePanel(true)}>
+    <span>Smart Combine</span>
+  </div>
+)}
+```
+
+---
+
+## 4. SINGLE FLAG — EASY TO RE-ENABLE LATER
+
+Place the flag at the top of the file or in a config:
+
+```javascript
+// config/featureFlags.js
+export const FEATURE_FLAGS = {
+  SMART_COMBINE_PANEL: false,  // Hidden — re-enable by setting to true
+  // ... other flags
+};
+```
+
+```jsx
+// Usage
+import { FEATURE_FLAGS } from './config/featureFlags';
+
+{FEATURE_FLAGS.SMART_COMBINE_PANEL && (
+  // All Smart Combine UI elements
+)}
+```
+
+---
+
+## VERIFICATION
+
+### Hidden
+1. ✅ Smart Combine button not visible in the UI
+2. ✅ Smart Combine side tab not visible on order table
+3. ✅ Smart Combine panel cannot be opened
+4. ✅ No references to Smart Combine visible to users
+
+### Not removed
+5. ✅ All Smart Combine code remains in the codebase
+6. ✅ SmartCombinePanel component file untouched
+7. ✅ Smart Combine logic/functions untouched
+8. ✅ Can be re-enabled by changing SHOW_SMART_COMBINE_PANEL to true
+
+### No side effects
+9. ✅ Combined orders already in DB still render correctly (blue highlight, expandable)
+10. ✅ Plant-level auto-sequence combine still works (separate from panel)
+11. ✅ Uncombine functionality still works if user needs to split existing combined orders
+```

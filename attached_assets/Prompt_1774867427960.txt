@@ -1,0 +1,458 @@
+```
+Implement the following changes to the N10D table hover tooltip:
+
+---
+
+## 1. REDESIGN TOOLTIP — TWO SECTIONS: ORDER DETAILS + SMART INSIGHT
+
+The tooltip should have two side-by-side sections:
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                                                                  │
+│  Elite XP GestaPro, Pellet 50kg                                  │
+│                                                                  │
+├─────────────────────────────┬────────────────────────────────────┤
+│                             │                                    │
+│  Order Details              │  ✨ Smart Insight                  │
+│                             │                                    │
+│  DFL:         28.4 MT       │  This product is currently in      │
+│  Inventory:   72.5 MT       │  Monitor status. The cumulative    │
+│  Ratio:       0.39          │  demand will exceed inventory      │
+│  Buffer:      60.8%         │  by April 8, giving approximately  │
+│  Status:      Monitor       │  6 days to schedule production.    │
+│                             │  Current buffer of 60.8% provides  │
+│  Completion:  Apr 7         │  a comfortable window, but         │
+│  Avail:       Apr 8         │  production should be planned      │
+│  Bal. to Prod: -2.1 MT     │  within the next week.             │
+│                             │                                    │
+│                             │                                    │
+└─────────────────────────────┴────────────────────────────────────┘
+```
+
+---
+
+### TOOLTIP LAYOUT
+
+```css
+.product-tooltip {
+  display: flex;
+  flex-direction: column;
+  background: #1a1a1a;
+  color: #ffffff;
+  border-radius: 10px;
+  min-width: 480px;
+  max-width: 560px;
+  z-index: 1000;
+  pointer-events: none;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+  animation: tooltipFadeIn 0.15s ease;
+}
+```
+
+### TOOLTIP HEADER — PRODUCT NAME
+
+```css
+.tooltip-header {
+  padding: 12px 16px;
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+  font-size: 12px;
+  font-weight: 700;
+  color: #ffffff;
+}
+```
+
+### TOOLTIP BODY — TWO COLUMNS
+
+```css
+.tooltip-body {
+  display: flex;
+  flex-direction: row;
+}
+
+.tooltip-left {
+  flex: 1;
+  padding: 12px 16px;
+  border-right: 1px solid rgba(255,255,255,0.1);
+}
+
+.tooltip-right {
+  flex: 1;
+  padding: 12px 16px;
+}
+```
+
+---
+
+### LEFT SIDE — ORDER DETAILS
+
+| Property | Value |
+|---|---|
+| Section label | "Order Details" — not shown, implied by content |
+| Grid | 2 columns (label: value) |
+| Label | 11px, rgba(255,255,255,0.5) |
+| Value | 11px, font-weight 600, white |
+| Row gap | 4px |
+
+Content:
+```
+DFL:           28.4 MT
+Inventory:     72.5 MT
+Ratio:         0.39          (colored: green/yellow/red)
+Buffer:        60.8%         (colored: green/yellow/red)
+Status:        Monitor       (colored by status)
+
+─ ─ ─ ─ ─ ─ ─ ─ ─ ─
+
+Completion:    Apr 7
+Avail:         Apr 8
+Bal. to Prod:  -2.1 MT       (colored: green if positive, red if negative)
+```
+
+### RIGHT SIDE — SMART INSIGHT
+
+| Property | Value |
+|---|---|
+| Section label | "✨ Smart Insight" |
+| Label font | 11px, font-weight 600, color rgba(255,255,255,0.8) |
+| Label margin-bottom | 6px |
+| Content font | 11px, font-weight 400, color rgba(255,255,255,0.7) |
+| Line height | 1.6 |
+| Max height | 120px |
+| Overflow | Hidden (truncate if too long) |
+
+---
+
+### 2. AI SMART INSIGHT — PER PRODUCT
+
+The AI generates a brief 2-3 sentence insight about the product based on its data. This should be pre-generated or cached, NOT called on every hover.
+
+### PRE-GENERATE INSIGHTS
+
+When the N10D data loads or refreshes, pre-generate a short insight for each product:
+
+```javascript
+function generateProductInsight(product, today) {
+  const dfl = product.due_for_loading;
+  const inventory = product.inventory;
+  const status = product.status;
+  const completionDate = product.completionDate;
+  const availDate = product.availDate;
+  const balToProd = product.balanceToProduce;
+  const buffer = inventory > 0 ? ((inventory - dfl) / inventory * 100).toFixed(1) : -100;
+  const ratio = inventory > 0 ? (dfl / inventory).toFixed(2) : '∞';
+  
+  // Calculate days until avail
+  let daysUntilAvail = null;
+  if (availDate) {
+    const avail = new Date(availDate);
+    daysUntilAvail = Math.ceil((avail - today) / (1000 * 60 * 60 * 24));
+  }
+  
+  // Build insight based on status
+  let insight = '';
+  
+  switch (status) {
+    case 'Critical':
+      insight = `This product is in Critical status — the required production volume (${dfl} MT) already exceeds current inventory (${inventory} MT). Immediate production is needed to prevent stockout. The deficit stands at ${Math.abs(balToProd).toFixed(1)} MT.`;
+      break;
+    
+    case 'Urgent':
+      insight = `This product is in Urgent status. Cumulative demand will exceed inventory by ${formatDate(availDate)}, approximately ${daysUntilAvail} days from now. With a buffer of only ${buffer}%, production should be scheduled immediately to avoid a shortfall.`;
+      break;
+    
+    case 'Monitor':
+      insight = `This product is in Monitor status. Demand will exceed inventory by ${formatDate(availDate)}, giving approximately ${daysUntilAvail} days to schedule production. Current buffer of ${buffer}% provides a window, but production should be planned within the coming week.`;
+      break;
+    
+    case 'Sufficient':
+      insight = `This product is Stock Sufficient. Current inventory (${inventory} MT) comfortably covers the required production volume (${dfl} MT) throughout the 10-day window. No immediate production action is needed.`;
+      break;
+  }
+  
+  return insight;
+}
+```
+
+### OR USE AI API
+
+If you prefer the AI to generate more nuanced insights:
+
+```javascript
+async function generateAllProductInsights(products, today) {
+  const insights = {};
+  
+  // Batch all products into one AI call
+  const prompt = `
+Generate a brief 2-3 sentence insight for each product below.
+Each insight should tell the planner what will happen to the 
+product and what action to take. Be specific with numbers and dates.
+
+Rules:
+- Maximum 3 sentences per product
+- Use the exact data provided
+- Be actionable — tell the planner what to do
+- Format dates as "April 7" not "2026-04-07"
+
+Products:
+${products.map(p => `
+${p.item_description}:
+DFL: ${p.due_for_loading} MT | Inventory: ${p.inventory} MT
+Status: ${p.status} | Buffer: ${p.buffer}%
+Completion: ${p.completionDate || 'N/A'} | Avail: ${p.availDate || 'N/A'}
+Bal to Prod: ${p.balanceToProduce} MT
+`).join('\n')}
+
+Output format — one line per product:
+[Product Name]: [insight text]
+  `;
+  
+  const response = await callAI(prompt);
+  // Parse response into key-value map
+  
+  return insights;
+}
+```
+
+### CACHE INSIGHTS
+
+```javascript
+// Generate once on data load
+const productInsights = {};
+
+function initializeInsights(products, today) {
+  products.forEach(product => {
+    productInsights[product.material_code_fg] = 
+      generateProductInsight(product, today);
+  });
+}
+
+// Use cached insight on hover
+function getInsight(materialCode) {
+  return productInsights[materialCode] || 'No insight available.';
+}
+```
+
+---
+
+### 3. CUMULATIVE SUM ON DAY CELL HOVER
+
+When the user hovers over a specific day cell (not the product name area), show the cumulative sum from DFL up to that day.
+
+### BEHAVIOR
+
+- Hover over **product name / details area** → full tooltip (Order Details + Smart Insight)
+- Hover over **specific day cell** → small cumulative sum tooltip on that cell
+
+### DAY CELL TOOLTIP
+
+```
+┌───────────────────────────┐
+│ Apr 5                     │
+│ Day value:    12.0 MT     │
+│ Cumulative:   284.6 MT    │
+│ Inventory:    376.4 MT    │
+│ Remaining:    91.8 MT     │
+│ ████████████████░░░░  75% │
+└───────────────────────────┘
+```
+
+### CALCULATION
+
+```javascript
+function getCumulativeSumAtDay(product, dayIndex, dailyColumns) {
+  const dfl = product.due_for_loading;
+  let cumulative = dfl; // Start with DFL
+  
+  for (let i = 0; i <= dayIndex; i++) {
+    const dayValue = parseFloat(product[dailyColumns[i].key]) || 0;
+    cumulative += dayValue;
+  }
+  
+  return cumulative;
+}
+```
+
+### DAY CELL TOOLTIP CONTENT
+
+```javascript
+function getDayCellTooltip(product, dayIndex, dailyColumns) {
+  const dfl = product.due_for_loading;
+  const inventory = product.inventory;
+  const dayValue = parseFloat(product[dailyColumns[dayIndex].key]) || 0;
+  const cumulative = getCumulativeSumAtDay(product, dayIndex, dailyColumns);
+  const remaining = inventory - cumulative;
+  const usagePct = inventory > 0 
+    ? Math.min(100, Math.round((cumulative / inventory) * 100)) 
+    : 100;
+  
+  return {
+    date: dailyColumns[dayIndex].date,
+    dayValue: dayValue,
+    cumulative: cumulative,
+    inventory: inventory,
+    remaining: remaining,
+    usagePct: usagePct,
+    isBreached: cumulative >= inventory
+  };
+}
+```
+
+### DAY CELL TOOLTIP STYLING
+
+| Property | Value |
+|---|---|
+| Background | Dark (#1a1a1a) |
+| Color | White |
+| Border-radius | 8px |
+| Padding | 10px 14px |
+| Min width | 200px |
+| Font size | 11px |
+| Position | Above the cell |
+| Z-index | 1000 |
+| Pointer events | None |
+
+### DAY CELL TOOLTIP — DATA ROWS
+
+| Label | Value | Color |
+|---|---|---|
+| Date header | "Apr 5" | White, 12px, font-weight 700 |
+| Day value | "12.0 MT" | White |
+| Cumulative | "284.6 MT" | White if under inventory, Red (#fca5a5) if over |
+| Inventory | "376.4 MT" | White |
+| Remaining | "91.8 MT" | Green (#86efac) if positive, Red (#fca5a5) if negative |
+
+### PROGRESS BAR
+
+Small progress bar showing how much of inventory is consumed:
+
+```css
+.cumulative-progress {
+  width: 100%;
+  height: 6px;
+  background: rgba(255,255,255,0.15);
+  border-radius: 3px;
+  margin-top: 6px;
+  overflow: hidden;
+}
+
+.cumulative-progress-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.2s ease;
+}
+```
+
+| Condition | Fill color |
+|---|---|
+| Under 50% of inventory | Green (#4ade80) |
+| 50-80% of inventory | Yellow (#fde047) |
+| 80-99% of inventory | Orange (#fb923c) |
+| 100%+ (breached) | Red (#f87171) |
+
+```
+Under 50%:   [███░░░░░░░░░░░░░░░░░]  35%
+50-80%:      [████████████░░░░░░░░]  65%
+80-99%:      [████████████████░░░░]  85%
+Breached:    [████████████████████]  112%
+```
+
+### PERCENTAGE LABEL
+
+| Property | Value |
+|---|---|
+| Font size | 10px |
+| Font weight | 600 |
+| Color | Same as progress bar fill |
+| Position | Right-aligned next to the bar |
+
+---
+
+### 4. TOOLTIP TRIGGER LOGIC
+
+```jsx
+function N10DTableRow({ product, dailyColumns, today }) {
+  const [hoverType, setHoverType] = useState(null); // 'product' or 'day'
+  const [hoveredDay, setHoveredDay] = useState(null);
+  const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
+  const timeoutRef = useRef(null);
+  
+  function handleProductHover(e) {
+    clearTimeout(timeoutRef.current);
+    timeoutRef.current = setTimeout(() => {
+      setHoverType('product');
+      setTooltipPos({ x: e.clientX + 12, y: e.clientY + 12 });
+    }, 300);
+  }
+  
+  function handleDayCellHover(e, dayIndex) {
+    clearTimeout(timeoutRef.current);
+    timeoutRef.current = setTimeout(() => {
+      setHoverType('day');
+      setHoveredDay(dayIndex);
+      setTooltipPos({ x: e.clientX, y: e.clientY - 10 });
+    }, 200); // Slightly faster for day cells
+  }
+  
+  function handleMouseLeave() {
+    clearTimeout(timeoutRef.current);
+    setHoverType(null);
+    setHoveredDay(null);
+  }
+  
+  return (
+    <>
+      <tr onMouseLeave={handleMouseLeave}>
+        {/* Product detail cells — trigger product tooltip */}
+        <td onMouseEnter={handleProductHover}>{product.material_code}</td>
+        <td onMouseEnter={handleProductHover}>{product.category}</td>
+        <td onMouseEnter={handleProductHover}>{product.item_description}</td>
+        <td onMouseEnter={handleProductHover}>{product.due_for_loading}</td>
+        
+        {/* Day cells — trigger day cumulative tooltip */}
+        {dailyColumns.map((col, index) => (
+          <td 
+            key={col.key}
+            onMouseEnter={(e) => handleDayCellHover(e, index)}
+            onMouseMove={(e) => setTooltipPos({ x: e.clientX, y: e.clientY - 10 })}
+          >
+            {product[col.key]}
+          </td>
+        ))}
+        
+        {/* Tracking cells — trigger product tooltip */}
+        <td onMouseEnter={handleProductHover}>{product.inventory}</td>
+        <td onMouseEnter={handleProductHover}>{product.balanceToProduce}</td>
+        <td onMouseEnter={handleProductHover}>{product.completionDate}</td>
+        <td onMouseEnter={handleProductHover}>{product.availDate}</td>
+        <td onMouseEnter={handleProductHover}>{product.status}</td>
+      </tr>
+      
+      {/* Product tooltip */}
+      {hoverType === 'product' && (
+        <ProductTooltip product={product} position={tooltipPos} />
+      )}
+      
+      {/* Day cumulative tooltip */}
+      {hoverType === 'day' && hoveredDay !== null && (
+        <DayCumulativeTooltip 
+          product={product} 
+          dayIndex={hoveredDay}
+          dailyColumns={dailyColumns}
+          position={tooltipPos}
+        />
+      )}
+    </>
+  );
+}
+```
+
+---
+
+### 5. APPLY ONLY TO
+
+- ✅ N10D table rows
+- ❌ Not on column headers
+- ❌ Not on the Tracking section header
+- ❌ Do NOT change any other tooltip in the app
+```

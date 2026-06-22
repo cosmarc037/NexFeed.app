@@ -1,0 +1,186 @@
+Please update the auto-sequence sorting logic so that the AI’s **rank** and **suggested/effective date** work **together**, instead of being treated as separate independent outputs.
+
+---
+
+## 1. MAKE `SUGGESTED / EFFECTIVE DATE` THE PRIMARY SORT KEY
+
+The AI currently assigns:
+- a `rank`
+- and a `suggested_date`
+
+But these are being treated too independently, which causes later-dated orders to appear above earlier-dated ones.
+
+### Required rule
+The final sequence should use:
+- **suggested/effective date as the primary sort key**
+
+### Goal
+Orders should first be grouped and ordered by the date the AI actually intends them to be produced.
+
+### Expected result
+Earlier suggested/effective dates appear before later suggested/effective dates.
+
+---
+
+## 2. USE `AI RANK` AS THE TIEBREAKER WITHIN THE SAME DATE
+
+Once orders are grouped by suggested/effective date, the AI’s rank should decide the order **within that same date bucket**.
+
+### Required rule
+If two or more orders share the same suggested/effective date, sort them by:
+- `AI Rank ASC`
+
+### Goal
+Preserve the AI’s sequencing logic within the same day, while keeping cross-date ordering coherent.
+
+### Expected result
+The AI still controls the relative order of same-date orders.
+
+---
+
+## 3. MAKE RANK AND SUGGESTED DATE WORK TOGETHER, NOT INDEPENDENTLY
+
+Right now, the problem appears to be that:
+- `rank` is treated as a global sequence signal
+- `suggested_date` is treated separately
+- and the two can contradict each other
+
+### New requirement
+Please make these two outputs work dependently:
+
+- **Suggested/effective date** decides the day bucket
+- **AI rank** decides the order inside that bucket
+
+### Goal
+Prevent contradictory outcomes like:
+- June 9 with Rank 3
+- June 5 with Rank 4
+where global rank sorting incorrectly puts June 9 before June 5
+
+### Expected result
+The final order becomes coherent and date-aware.
+
+---
+
+## 4. SORT USING THIS STRUCTURE
+
+Please use this final sorting model:
+
+1. **Primary key:** `suggested/effective date ASC`
+2. **Secondary key:** `AI rank ASC`
+
+### Example
+If the AI returns:
+- `Order A = June 3 = Rank 2`
+- `Order B = June 3 = Rank 1`
+- `Order C = June 4 = Rank 3`
+
+then the correct final visible order should be:
+1. `Order B = June 3`
+2. `Order A = June 3`
+3. `Order C = June 4`
+
+### Expected result
+The sequence becomes both:
+- chronologically coherent across dates
+- AI-driven within each date
+
+---
+
+## 5. USE THE AI’S OWN SUGGESTED/EFFECTIVE DATE, NOT JUST RAW AVAIL DATE
+
+Please make sure the primary date sort is based on the **AI’s effective/suggested date**, not only the original raw avail date.
+
+### Reason
+The AI may intentionally adjust dates based on:
+- Critical / Urgent / Monitor / Sufficient status
+- MTS flexibility
+- future dispatch needs
+- strategy logic
+
+### Goal
+The final sort should reflect the date the AI actually intends for production.
+
+### Expected result
+The sequence respects the AI’s chosen production timing, then uses AI rank within that timing.
+
+---
+
+## 6. KEEP THIS AI-DRIVEN WHILE MAKING THE FINAL ORDER COHERENT
+
+This change should still preserve AI-driven behavior.
+
+### Important
+This is not intended to replace the AI’s sequence with a separate strategy.
+
+Instead, it is intended to combine the AI’s two outputs correctly:
+- date
+- rank
+
+### Goal
+The final display should reflect the AI’s intended date-aware order, not a contradictory rank-only order.
+
+### Expected result
+The final preview feels both:
+- AI-generated
+- and logically ordered
+
+---
+
+## IMPORTANT
+
+Please make the final sorting logic work like this:
+
+- **Primary sort:** AI `suggested/effective date`
+- **Secondary sort:** AI `rank`
+
+This ensures the AI’s two outputs work together:
+
+- the date determines which day the order belongs to
+- the rank determines where it sits within that same day
+
+This is needed because the current behavior allows rank and date to contradict each other, causing later-dated orders to appear before earlier-dated ones.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log the final sort keys being used.
+
+```javascript
+console.debug('[Auto-Sequence Final Date+Rank Sort]', {
+  strategyId,
+  finalRows: finalRows?.map(r => ({
+    orderId: r.orderId || r.entityId,
+    suggestedDate: r.suggestedDate || r._aiSuggestedDate,
+    aiRank: r.aiRank || r._aiPosition,
+  })),
+  sortModel: ['suggestedDate ASC', 'aiRank ASC'],
+});
+```
+
+```javascript
+console.debug('[Auto-Sequence Date Bucket Ordering]', {
+  strategyId,
+  groupedBySuggestedDate: true,
+});
+```
+
+```javascript
+console.debug('[Auto-Sequence Same-Date AI Rank Ordering]', {
+  strategyId,
+  sameDateRowsOrderedByAiRank: true,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Suggested/effective date is the primary sort key
+2. ✅ AI rank is the tiebreaker within the same date
+3. ✅ Rank and date no longer contradict each other
+4. ✅ Later-dated orders no longer appear above earlier-dated ones
+5. ✅ AI-suggested/effective date is used instead of only raw avail date
+6. ✅ The final sequence remains AI-driven but becomes coherent
+7. ✅ No UI errors or console errors are introduced

@@ -1,0 +1,486 @@
+```
+Implement N10D date tracking and auto-update on new uploads:
+
+---
+
+## 1. UPDATE ORDER SCHEMA — ADD N10D TRACKING FIELDS
+
+```javascript
+// In order table/entity — add these fields:
+{
+  // Existing fields...
+  target_avail_date: '2026-04-23',  // Display date (either manual or from N10D)
+  
+  // NEW: Track the N10D source
+  inferred_target_date: '2026-04-23',  // Original date from N10D lookup
+  inferred_target_label: 'safety stocks',  // Original N10D status/label
+  date_source: 'n10d',  // 'n10d' | 'manual' | 'hard_date'
+  
+  // Track if user manually edited an N10D date
+  has_manual_override: false,  // If true, user edited the N10D date
+  manual_edit_date: null,  // The date user manually set
+  last_n10d_update: '2026-03-24T10:30:00Z',  // When this was last updated from N10D
+}
+```
+
+---
+
+## 2. UPDATE preSortOrders — STORE N10D INFO ON ORDERS
+
+When assigning dates from N10D, track the source:
+
+```javascript
+function preSortOrders(orders, n10dData, masterData) {
+  return orders.map(order => {
+    const materialCode = String(order.material_code_fg || '').trim();
+    
+    // Skip if already has a hard target date from SAP
+    if (order.target_avail_date && /^\d{4}-\d{2}-\d{2}/.test(String(order.target_avail_date))) {
+      return {
+        ...order,
+        _category: 'A',
+        _sortDate: new Date(order.target_avail_date),
+        _dateSource: 'hard_date',
+        date_source: 'hard_date',
+      };
+    }
+    
+    // Look up N10D data
+    if (n10dData && n10dData.length > 0 && materialCode) {
+      const n10dEntry = n10dData.find(n =>
+        String(n.material_code || n.material_code_fg || '').trim() === materialCode
+      );
+      
+      if (n10dEntry) {
+        const inferredDate = n10dEntry.inferred_target_date || n10dEntry.target_date;
+        const status = String(n10dEntry.status || n10dEntry.stock_status || '').trim();
+        
+        // Check if order already has a date from a PREVIOUS N10D upload
+        const hasExistingN10DDate = order.date_source === 'n10d' && order.inferred_target_date;
+        
+        if (inferredDate && /^\d{4}-\d{2}-\d{2}/.test(inferredDate)) {
+          // Has N10D date
+          const dateObj = new Date(inferredDate);
+          
+          // If user manually edited this N10D date, show warning but keep their edit
+          const displayDate = order.has_manual_override && order.manual_edit_date 
+            ? order.manual_edit_date 
+            : inferredDate;
+          
+          return {
+            ...order,
+            _category: status === 'Critical' ? 'C' : status === 'Urgent' ? 'B' : 'D',
+            _sortDate: new Date(displayDate),
+            _n10dStatus: status,
+            _availDateDisplay: status,
+            _dateSource: 'n10d',
+            date_source: 'n10d',
+            inferred_target_date: inferredDate,  // Store original N10D date
+            inferred_target_label: status,  // Store original label
+            target_avail_date: displayDate,  // Display date (may be manually overridden)
+            last_n10d_update: new Date().toISOString(),  // Track when this was updated
+            _hasUpdatedFromN10D: hasExistingN10DDate && inferredDate !== order.inferred_target_date,  // Flag if N10D changed
+            _n10dUpdateWarning: order.has_manual_override ? 'User has manually edited this date. New N10D date available.' : null,
+          };
+        }
+        
+        // No N10D date, but has status
+        if (status === 'Critical') {
+          return {
+            ...order,
+            _category: 'C',
+            _n10dStatus: status,
+            _availDateDisplay: status,
+            _dateSource: 'n10d',
+            date_source: 'n10d',
+            inferred_target_label: status,
+          };
+        }
+        
+        if (status === 'Urgent') {
+          return {
+            ...order,
+            _category: 'B',
+            _n10dStatus: status,
+            _availDateDisplay: status,
+            _dateSource: 'n10d',
+            date_source: 'n10d',
+            inferred_target_label: status,
+          };
+        }
+        
+        if (['Sufficient', 'Safe', 'OK'].includes(status)) {
+          return {
+            ...order,
+            _category: 'D',
+            _n10dStatus: status,
+            _availDateDisplay: status,
+            _dateSource: 'n10d',
+            date_source: 'n10d',
+            inferred_target_label: status,
+          };
+        }
+      }
+    }
+    
+    // Fallback
+    return {
+      ...order,
+      _category: 'E',
+      _dateSource: 'none',
+      date_source: order.date_source || 'none',
+    };
+  });
+}
+
+function isSameDay(dateA, dateB) {
+  if (!dateA || !dateB) return false;
+  if (isNaN(dateA.getTime()) || isNaN(dateB.getTime())) return false;
+  return dateA.getFullYear() === dateB.getFullYear() &&
+         dateA.getMonth() === dateB.getMonth() &&
+         dateA.getDate() === dateB.getDate();
+}
+```
+
+---
+
+## 3. UPDATE applySequencedResultsToDB — SAVE N10D TRACKING INFO
+
+When applying auto-sequence, save the N10D fields:
+
+```javascript
+async function applySequencedResultsToDB(sequencedResults) {
+  for (const [line, lineOrders] of Object.entries(sequencedResults)) {
+    let prioCounter = 1;
+    
+    for (const order of lineOrders) {
+      if (order.status === 'In Production' || order.status === 'On-going') continue;
+      
+      if (order._isCombined && order._combinedFrom) {
+        // Handle combined orders — update lead
+        // ...existing code...
+      } else {
+        // Regular order — save N10D tracking info
+        const updateData = {
+          feedmill_line: line,
+          priority_seq: prioCounter,
+          status: 'Planned',
+          parent_id: null,
+          
+          // NEW: N10D tracking fields
+          date_source: order._dateSource || 'none',
+          inferred_target_date: order.inferred_target_date || null,
+          inferred_target_label: order.inferred_target_label || null,
+          last_n10d_update: order.last_n10d_update || null,
+          has_manual_override: false,  // Reset on apply (user hasn't edited yet)
+          manual_edit_date: null,
+        };
+        
+        // Assign target date based on source
+        if (order._dateSource === 'hard_date') {
+          updateData.target_avail_date = order.target_avail_date;
+        } else if (order._dateSource === 'n10d') {
+          updateData.target_avail_date = order.inferred_target_date;
+        }
+        
+        try {
+          await updateOrderMutation.mutateAsync({
+            id: order.id,
+            data: updateData
+          });
+        } catch (error) {
+          console.error(`Update order ${order.id}:`, error);
+        }
+        
+        prioCounter++;
+      }
+    }
+  }
+  
+  await queryClient.invalidateQueries({ queryKey: ["orders"] });
+}
+```
+
+---
+
+## 4. HANDLE N10D UPLOAD — RECALCULATE AFFECTED ORDERS
+
+When new N10D data is uploaded to Future Dispatches:
+
+```javascript
+async function handleN10DUpload(newN10DData) {
+  try {
+    // Get all ACTIVE orders
+    const activeOrders = allOrders.filter(o =>
+      o.status !== 'Done' && 
+      o.status !== 'Cancel PO' && 
+      o.status !== 'In Production' && 
+      o.status !== 'On-going'
+    );
+    
+    const ordersToUpdate = [];
+    
+    for (const order of activeOrders) {
+      // Only process orders that got their date from N10D
+      if (order.date_source !== 'n10d') continue;
+      
+      const materialCode = String(order.material_code_fg || '').trim();
+      const n10dEntry = newN10DData.find(n =>
+        String(n.material_code || n.material_code_fg || '').trim() === materialCode
+      );
+      
+      if (!n10dEntry) continue;
+      
+      const newInferredDate = n10dEntry.inferred_target_date || n10dEntry.target_date;
+      const oldInferredDate = order.inferred_target_date;
+      const newStatus = String(n10dEntry.status || n10dEntry.stock_status || '').trim();
+      const oldStatus = order.inferred_target_label;
+      
+      // Check if N10D data has changed
+      const hasDateChange = newInferredDate && newInferredDate !== oldInferredDate;
+      const hasStatusChange = newStatus !== oldStatus;
+      
+      if (!hasDateChange && !hasStatusChange) continue;
+      
+      // If user manually edited, flag it but DON'T auto-update
+      if (order.has_manual_override) {
+        ordersToUpdate.push({
+          id: order.id,
+          needsWarning: true,
+          newDate: newInferredDate,
+          newStatus: newStatus,
+          oldDate: order.manual_edit_date,
+        });
+        continue;
+      }
+      
+      // Auto-update the order
+      const updateData = {
+        inferred_target_date: newInferredDate,
+        inferred_target_label: newStatus,
+        target_avail_date: newInferredDate,  // Update display date
+        last_n10d_update: new Date().toISOString(),
+      };
+      
+      ordersToUpdate.push({
+        id: order.id,
+        data: updateData,
+        wasUpdated: true,
+        oldDate: oldInferredDate,
+        newDate: newInferredDate,
+      });
+    }
+    
+    // Apply updates
+    let updatedCount = 0;
+    let warningCount = 0;
+    
+    for (const item of ordersToUpdate) {
+      if (item.needsWarning) {
+        // Just mark as needing attention — don't update
+        warningCount++;
+        // Optionally: save a flag to show warning icon
+        await updateOrderMutation.mutateAsync({
+          id: item.id,
+          data: {
+            _n10d_update_available: true,  // Show warning icon
+            _n10d_update_new_date: item.newDate,
+          }
+        });
+      } else if (item.wasUpdated) {
+        await updateOrderMutation.mutateAsync({
+          id: item.id,
+          data: item.data
+        });
+        updatedCount++;
+      }
+    }
+    
+    await queryClient.invalidateQueries({ queryKey: ["orders"] });
+    
+    if (updatedCount > 0) {
+      toast.success(`${updatedCount} order(s) updated from new N10D data`);
+    }
+    
+    if (warningCount > 0) {
+      toast.info(`${warningCount} order(s) have new N10D dates available (manually overridden)`);
+    }
+    
+  } catch (error) {
+    console.error('N10D upload error:', error);
+    toast.error(`N10D upload failed: ${error.message}`);
+  }
+}
+```
+
+---
+
+## 5. DISPLAY IN ORDER TABLE — SHOW N10D LABEL + SHOW WARNING ICON
+
+```jsx
+// In OrderTable.jsx — render avail date with N10D context
+
+function renderAvailDate(order) {
+  const isN10DDate = order.date_source === 'n10d';
+  const hasManualOverride = order.has_manual_override;
+  const hasN10DUpdate = order._n10d_update_available;
+  
+  return (
+    <div className="avail-date-cell">
+      {order.target_avail_date && /^\d{4}-\d{2}-\d{2}/.test(String(order.target_avail_date)) ? (
+        <>
+          <span className="avail-date-value">
+            {formatDate(order.target_avail_date)}
+          </span>
+          
+          {isN10DDate && (
+            <span className="avail-date-label">
+              {order.inferred_target_label || 'n10d'}
+            </span>
+          )}
+          
+          {/* Warning icon if user manually edited an N10D date and new data arrived */}
+          {hasManualOverride && hasN10DUpdate && (
+            <span
+              className="avail-date-warning"
+              title={`New N10D date available: ${formatDate(order._n10d_update_new_date)}\n\nYou manually edited this date. Click to update or keep your edit.`}
+            >
+              ⚠️
+            </span>
+          )}
+        </>
+      ) : (
+        <span className="avail-date-label">
+          {order.inferred_target_label || order.target_avail_date || '—'}
+        </span>
+      )}
+    </div>
+  );
+}
+```
+
+Styling:
+
+```css
+.avail-date-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.avail-date-value {
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.avail-date-label {
+  font-size: 10px;
+  color: var(--color-text-secondary);
+  font-style: italic;
+}
+
+.avail-date-warning {
+  font-size: 12px;
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity 0.2s;
+}
+
+.avail-date-warning:hover {
+  opacity: 1;
+}
+
+.dark-mode .avail-date-value {
+  color: var(--color-text);
+}
+
+.dark-mode .avail-date-label {
+  color: var(--color-text-secondary);
+}
+```
+
+---
+
+## 6. HANDLE MANUAL EDIT + UPDATE WARNING
+
+When user manually edits an N10D date:
+
+```javascript
+async function handleManualDateEdit(orderId, newDate) {
+  try {
+    const order = allOrders.find(o => o.id === orderId);
+    
+    if (!order || order.date_source !== 'n10d') return;
+    
+    // Mark as manually edited
+    await updateOrderMutation.mutateAsync({
+      id: orderId,
+      data: {
+        target_avail_date: newDate,
+        manual_edit_date: newDate,
+        has_manual_override: true,
+        _n10d_update_available: false,  // Clear the warning
+      }
+    });
+    
+    toast.success('Date updated. Will not auto-update from future N10D uploads.');
+  } catch (error) {
+    toast.error(`Update failed: ${error.message}`);
+  }
+}
+
+// When user clicks the warning icon to accept new N10D date
+async function handleAcceptN10DUpdate(orderId) {
+  try {
+    const order = allOrders.find(o => o.id === orderId);
+    
+    await updateOrderMutation.mutateAsync({
+      id: orderId,
+      data: {
+        target_avail_date: order._n10d_update_new_date,
+        has_manual_override: false,  // Reset override flag
+        _n10d_update_available: false,
+      }
+    });
+    
+    toast.success('Order date updated from N10D data');
+  } catch (error) {
+    toast.error(`Update failed: ${error.message}`);
+  }
+}
+```
+
+---
+
+## VERIFICATION
+
+### N10D tracking
+1. ✅ `date_source` field: 'hard_date' | 'n10d' | 'manual' | 'none'
+2. ✅ `inferred_target_date` stores original N10D date
+3. ✅ `inferred_target_label` stores original status (e.g., "safety stocks", "prio replenish")
+4. ✅ `target_avail_date` displays the effective date (may be different if manually edited)
+5. ✅ `last_n10d_update` tracks when N10D was applied
+
+### On new N10D upload
+6. ✅ Active orders checked (exclude Done, Cancelled, In Production, On-going)
+7. ✅ Orders with `date_source: 'n10d'` recalculated
+8. ✅ If user didn't manually edit: auto-update silently
+9. ✅ If user did manually edit: show warning icon, don't auto-update
+10. ✅ Toast shows: "X orders updated", "Y orders have new dates available"
+
+### Display in order table
+11. ✅ Shows actual date (e.g., "April 23, 2026")
+12. ✅ Shows N10D label below (e.g., "safety stocks", "prio replenish")
+13. ✅ Warning icon (⚠️) if manual override exists and new N10D data available
+14. ✅ Tooltip on warning explains the situation
+
+### User can accept new N10D
+15. ✅ Click warning icon to accept new date
+16. ✅ Manual override flag cleared
+17. ✅ Order will auto-update on future N10D uploads
+
+### Apply to schedule saves tracking
+18. ✅ All N10D fields persisted to DB
+19. ✅ `date_source`, `inferred_target_date`, `inferred_target_label` saved
+20. ✅ `last_n10d_update` timestamp recorded
+```

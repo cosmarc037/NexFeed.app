@@ -1,0 +1,274 @@
+```
+Fix the before/after table framing to accurately reflect changes:
+
+---
+
+## 1. FIX BEFORE TABLE — EXCLUDE CHILD ORDERS
+
+```javascript
+// When building the original snapshot, only include top-level orders
+// (same as how the After table is built)
+
+// In the snapshot building:
+const snapshot = {};
+allLines.forEach(line => {
+  const lineOrders = activeOrders
+    .filter(o => normalizeLine(o.feedmill_line) === line)
+    .filter(o => !o.parent_id) // ONLY top-level (leads + standalone)
+    .sort((a, b) => (a.priority_seq || 0) - (b.priority_seq || 0))
+    .map(o => ({ ...JSON.parse(JSON.stringify(o)) }));
+  
+  snapshot[line] = lineOrders;
+});
+setOriginalSnapshot(snapshot);
+```
+
+---
+
+## 2. FIX THE STATS BADGES — COMPARE ACCURATELY
+
+```javascript
+function calculatePlantSummary(originalSnapshot, sequencedResults, combinedOrders, placementLog, allLines) {
+  let totalBefore = 0;
+  let totalAfter = 0;
+  let totalMoved = 0;
+  let totalRepositioned = 0;
+  let totalCombinedGroups = 0;
+  let totalNewToLine = 0;
+  let totalUnchanged = 0;
+  
+  allLines.forEach(line => {
+    const before = originalSnapshot[line] || [];
+    const after = sequencedResults[line] || [];
+    
+    totalBefore += before.length;
+    totalAfter += after.length;
+    
+    after.forEach(order => {
+      if (order._movement === 'new_to_line') totalNewToLine++;
+      else if (order._movement === 'up' || order._movement === 'down') totalRepositioned++;
+      else totalUnchanged++;
+      
+      if (order._isCombined) totalCombinedGroups++;
+    });
+  });
+  
+  // Count orders that actually moved between lines
+  totalMoved = placementLog.filter(e => e.type === 'moved').length;
+  
+  // Determine if there are actual changes
+  const hasChanges = totalMoved > 0 || totalRepositioned > 0 || totalNewToLine > 0 ||
+    placementLog.some(e => e.type === 'combined' && !e._existedBefore);
+  
+  return {
+    totalOrdersBefore: totalBefore,
+    totalOrdersAfter: totalAfter,
+    ordersMovedBetweenLines: totalMoved,
+    ordersRepositioned: totalRepositioned,
+    ordersCombined: totalCombinedGroups,
+    ordersNewToLine: totalNewToLine,
+    ordersUnchanged: totalUnchanged,
+    hasChanges,
+  };
+}
+```
+
+---
+
+## 3. FIX THE HEADER LABELS — SHOW ACCURATE CONTEXT
+
+```jsx
+// Before table header
+<div className="auto-sequence-table-label auto-sequence-label-before">
+  <span className="auto-sequence-label-icon">📋</span>
+  Before — {originalOrders.length} orders
+</div>
+
+// After table header — dynamic based on actual changes
+function getAfterLabel(sequencedOrders, originalOrders) {
+  const afterCount = sequencedOrders.length;
+  const beforeCount = originalOrders.length;
+  
+  // Count actual changes
+  const repositioned = sequencedOrders.filter(o => 
+    o._movement === 'up' || o._movement === 'down'
+  ).length;
+  const newToLine = sequencedOrders.filter(o => o._movement === 'new_to_line').length;
+  const combined = sequencedOrders.filter(o => o._isCombined).length;
+  const unchanged = sequencedOrders.filter(o => o._movement === 'same').length;
+  
+  // Check if any combined orders are NEW (not already combined before)
+  const newCombined = sequencedOrders.filter(o => 
+    o._isCombined && !originalOrders.some(orig => 
+      orig.original_order_ids && orig.original_order_ids.length > 0 && orig.id === o.id
+    )
+  ).length;
+  
+  // Existing combined (already were combined before auto-sequence)
+  const existingCombined = combined - newCombined;
+  
+  const parts = [];
+  
+  if (afterCount !== beforeCount) {
+    parts.push(`${afterCount} orders`);
+  } else {
+    parts.push(`${afterCount} orders`);
+  }
+  
+  if (repositioned > 0) parts.push(`${repositioned} repositioned`);
+  if (newToLine > 0) parts.push(`${newToLine} from other lines`);
+  if (newCombined > 0) parts.push(`${newCombined} newly combined`);
+  if (existingCombined > 0 && newCombined === 0 && repositioned === 0 && newToLine === 0) {
+    parts.push(`${existingCombined} already combined`);
+  }
+  
+  if (repositioned === 0 && newToLine === 0 && newCombined === 0 && afterCount === beforeCount) {
+    parts.push('no changes');
+  }
+  
+  return parts.join(' · ');
+}
+
+// Usage:
+<div className="auto-sequence-table-label auto-sequence-label-after">
+  <span className="auto-sequence-label-icon">✨</span>
+  After — {getAfterLabel(sequencedOrders, originalOrders)}
+</div>
+```
+
+---
+
+## 4. FIX THE TOP STATS BADGES
+
+```jsx
+<div className="auto-sequence-stats">
+  <StatBadge label="Before" value={summaryStats.totalOrdersBefore} />
+  <StatBadge label="After" value={summaryStats.totalOrdersAfter} />
+  
+  {/* Only show if there are actual changes */}
+  {summaryStats.ordersMovedBetweenLines > 0 && (
+    <StatBadge label="Cross-Line Moves" value={summaryStats.ordersMovedBetweenLines} color="orange" />
+  )}
+  {summaryStats.ordersRepositioned > 0 && (
+    <StatBadge label="Repositioned" value={summaryStats.ordersRepositioned} color="blue" />
+  )}
+  {summaryStats.ordersCombined > 0 && (
+    <StatBadge label="Combined Groups" value={summaryStats.ordersCombined} color="green" />
+  )}
+  
+  {/* Show "No Changes" badge when nothing changed */}
+  {!summaryStats.hasChanges && (
+    <StatBadge label="Status" value="No Changes" color="gray" />
+  )}
+</div>
+```
+
+---
+
+## 5. FIX MOVEMENT INDICATOR — DETECT TRUE CHANGES
+
+When re-running auto-sequence on already-sequenced orders, the movement detection should compare properly:
+
+```javascript
+// When building the After table with movement indicators:
+const withMovement = afterOrders.map((order, newIndex) => {
+  const newPrio = newIndex + 1;
+  
+  // Find in original by ID
+  const originalOrder = originalLineOrders.find(o => o.id === order.id);
+  
+  // If order was already on this line with same prio — no change
+  if (originalOrder) {
+    const originalPrio = originalLineOrders.indexOf(originalOrder) + 1;
+    const delta = originalPrio - newPrio;
+    
+    // Check if the order data actually changed
+    const samePrio = delta === 0;
+    const sameLine = normalizeLine(originalOrder.feedmill_line) === normalizeLine(order.feedmill_line);
+    const sameVolume = Math.abs(
+      (parseFloat(originalOrder.volume_override || originalOrder.volume) || 0) - 
+      (parseFloat(order.volume) || 0)
+    ) < 0.01;
+    
+    if (samePrio && sameLine && sameVolume) {
+      return {
+        ...order,
+        prio: newPrio,
+        _originalPrio: originalPrio,
+        _movement: 'same',
+        _movementDelta: 0,
+      };
+    }
+    
+    return {
+      ...order,
+      prio: newPrio,
+      _originalPrio: originalPrio,
+      _movement: delta > 0 ? 'up' : delta < 0 ? 'down' : 'same',
+      _movementDelta: Math.abs(delta),
+    };
+  }
+  
+  // Not found in original line — it came from another line
+  return {
+    ...order,
+    prio: newPrio,
+    _originalPrio: -1,
+    _movement: 'new_to_line',
+    _movementDelta: 0,
+  };
+});
+```
+
+---
+
+## 6. ALSO FIX PER-LINE TAB BADGE — SHOW CHANGE COUNT
+
+```jsx
+// Line tabs should show change count, not just total
+{activeLines.map(line => {
+  const before = originalSnapshot[line] || [];
+  const after = sequencedResults[line] || [];
+  const changes = after.filter(o => o._movement !== 'same').length;
+  
+  return (
+    <button
+      key={line}
+      className={`plant-preview-tab ${activeTab === line ? 'active' : ''}`}
+      onClick={() => setActiveTab(line)}
+    >
+      {line}
+      {changes > 0 && (
+        <span className="plant-tab-badge">{changes}</span>
+      )}
+    </button>
+  );
+})}
+```
+
+---
+
+## VERIFICATION
+
+### Before table matches After table scope
+1. ✅ Before table excludes child orders (parent_id filter)
+2. ✅ Before count = top-level orders only (leads + standalone)
+3. ✅ Before and After count match when no changes are made
+
+### Accurate framing
+4. ✅ "After — 13 orders · no changes" when nothing changed
+5. ✅ "After — 13 orders · 2 repositioned · 1 newly combined" when changes exist
+6. ✅ "6 already combined" shown when existing combined orders weren't changed
+7. ✅ Distinguishes between "newly combined" and "already combined"
+
+### Stats badges accurate
+8. ✅ Before: 13, After: 13 (not 28 vs 13)
+9. ✅ "No Changes" badge when nothing changed
+10. ✅ Only shows "Combined Groups" badge for NEW combinations
+11. ✅ Cross-line moves only counted when orders actually moved
+
+### Movement indicators correct
+12. ✅ Re-running on same orders: all show "same" (no arrows)
+13. ✅ Same prio + same line + same volume = no change
+14. ✅ Tab badges only show count when actual changes on that line
+```

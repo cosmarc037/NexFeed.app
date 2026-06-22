@@ -1,0 +1,470 @@
+```
+Further improve the AI strategy generation and execution so that every AI-generated sequencing strategy FIRST evaluates these three dimensions, then decides which to emphasize, which to treat as secondary, and which — if justified by the actual line conditions — to deprioritize:
+
+1. Changeovers
+2. MTS advancement opportunities
+3. Profitability / profit score
+
+The AI should still have freedom to create its own strategy based on what it analyzes on the orders for that line. It must not be forced into fixed “changeover strategy”, “MTS strategy”, or “profit strategy” templates.
+
+Instead, the AI must:
+- evaluate all three dimensions
+- determine how relevant each one is for that line
+- explain what it prioritized and what it deprioritized
+- generate strategies based on that analysis
+- ensure the After table reflects the strategy it actually chose
+
+---
+
+## OBJECTIVE
+
+For every line, the AI must analyze these three scheduling dimensions before generating strategies:
+
+### 1. Changeovers
+Assess whether the line has meaningful opportunities to reduce changeovers by grouping compatible materials based on:
+- category
+- color
+- diameter
+- form
+- and the live Changeover Rules tab
+
+### 2. MTS advancement opportunities
+Assess whether eligible MTS/flexible orders can be moved earlier into safe windows to improve utilization and sequence efficiency.
+
+This includes:
+- filling lightly loaded earlier days
+- moving flexible orders earlier if safe
+- using days with only one order if another eligible order can safely be produced there
+- compressing the queue without delaying protected orders
+
+### 3. Profitability / profit score
+Assess whether profitability differences across eligible orders are meaningful enough to influence sequencing.
+
+This includes:
+- using margin / profit score context from master data
+- identifying whether higher-value safe sequencing opportunities exist
+- comparing profitability against scheduling tradeoffs
+
+The AI must evaluate all three, but it is allowed to decide that one or more are low-value for that line and should be deprioritized.
+
+---
+
+## 1. DO NOT FORCE ALL STRATEGIES TO USE ALL THREE EQUALLY
+
+Important rule:
+The AI should not be forced to always optimize all three dimensions equally.
+
+Instead:
+- it must analyze all three
+- then decide which dimensions matter most for that line
+- and may explicitly deprioritize one or more if justified
+
+This is intentional and desirable.
+
+### Required prompt instruction:
+```text
+Before generating strategies, always evaluate:
+1. changeover reduction opportunities
+2. MTS/flexible advancement opportunities
+3. profitability / profit score opportunities
+
+Then decide, based on the actual line conditions:
+- which dimension should be the primary emphasis
+- which should be secondary
+- which, if any, should be deprioritized
+
+You are allowed to deprioritize one or more dimensions if the line analysis justifies it, but you must explain why.
+```
+
+This preserves genuine AI freedom while still forcing a disciplined analysis.
+
+---
+
+## 2. CHANGEOVER ANALYSIS REQUIREMENT
+
+The AI must always assess:
+- whether compatible material grouping could reduce changeover
+- whether the line contains meaningful material continuity opportunities
+- whether the current baseline sequence is fragmented by category/color/diameter/form
+- whether changeover reduction is operationally meaningful on this line
+
+### Required prompt instruction:
+```text
+Evaluate whether changeover reduction is a meaningful opportunity on this line using the configured Changeover Rules and actual material compatibility in the orders.
+If it is not a strong lever for this line, you may deprioritize it, but you must explain why.
+```
+
+### Strategy output should include:
+```json
+"changeover_consideration": {
+  "relevance": "high",
+  "summary": "Several compatible poultry 4.000mm runs are separated in the standard lineup, creating a meaningful changeover reduction opportunity."
+}
+```
+
+Or if deprioritized:
+```json
+"changeover_consideration": {
+  "relevance": "low",
+  "summary": "This line has limited compatible grouping opportunities, so changeover reduction is not the strongest lever here."
+}
+```
+
+---
+
+## 3. MTS / FLEXIBLE ADVANCEMENT ANALYSIS REQUIREMENT
+
+The AI must always assess:
+- whether MTS/flexible orders can safely move earlier
+- whether lightly loaded earlier days exist
+- whether underused days can absorb eligible orders
+- whether earlier safe compression improves the line
+
+### Required prompt instruction:
+```text
+Evaluate whether MTS/flexible orders can be safely advanced into earlier dates to improve utilization and queue efficiency.
+If there are earlier lightly loaded days or days with only one order, consider whether another eligible order can safely be produced there.
+If this is not a meaningful lever on the line, you may deprioritize it, but you must explain why.
+```
+
+### Strategy output should include:
+```json
+"mts_advancement_consideration": {
+  "relevance": "medium",
+  "summary": "Two flexible orders can safely move earlier into underutilized dates, but the line has limited broader advancement room."
+}
+```
+
+Or if deprioritized:
+```json
+"mts_advancement_consideration": {
+  "relevance": "low",
+  "summary": "Most orders on this line are protected or tightly constrained, so MTS advancement has limited impact."
+}
+```
+
+---
+
+## 4. PROFITABILITY / PROFIT SCORE ANALYSIS REQUIREMENT
+
+The AI must always assess:
+- whether profit score differences are meaningful on the line
+- whether profitability can safely influence sequencing
+- whether profit score should be used as a tie-breaker or stronger sequencing lever
+
+### Required prompt instruction:
+```text
+Evaluate whether profitability / profit score is a meaningful differentiator on this line.
+If eligible orders have meaningful profit score spread and can be sequenced safely, profitability may influence the strategy.
+If profit score differences are weak or not operationally useful on this line, you may deprioritize profitability, but you must explain why.
+```
+
+### Strategy output should include:
+```json
+"profitability_consideration": {
+  "relevance": "high",
+  "summary": "Flexible orders on this line show meaningful profit score spread, making profitability a useful sequencing factor."
+}
+```
+
+Or if deprioritized:
+```json
+"profitability_consideration": {
+  "relevance": "low",
+  "summary": "Profit score variation across eligible orders is too small to justify changing the sequence materially."
+}
+```
+
+---
+
+## 5. REQUIRE THE AI TO DECLARE PRIMARY / SECONDARY / DEPRIORITIZED FACTORS
+
+For each strategy, require the AI to explicitly state:
+- primary emphasis
+- secondary emphasis
+- deprioritized factor(s)
+- why
+
+### Required output fields:
+```json
+{
+  "primary_emphasis": "MTS advancement",
+  "secondary_emphasis": "changeover reduction",
+  "deprioritized_factors": ["profitability"],
+  "deprioritization_reason": "Profit score spread across eligible orders is too small to justify extra disruption on this line."
+}
+```
+
+This ensures the strategy feels deliberate and grounded in line analysis.
+
+---
+
+## 6. REQUIRE A TRADEOFF SUMMARY
+
+Each strategy must explain the tradeoff it is making.
+
+### Required output field:
+```json
+"tradeoff_summary": "This strategy emphasizes earlier safe advancement of flexible orders to improve line utilization, while preserving compatible grouping where practical. Profitability was considered but deprioritized because profit score differences are not significant on this line."
+```
+
+This is important so the strategy does not feel templated.
+
+---
+
+## 7. UPDATE THE AI STRATEGY PROMPT STRUCTURE
+
+Modify the per-line AI prompt builder so the model receives:
+- line orders
+- standard sequence baseline
+- changeover rules
+- N10D / future dispatch context
+- master data profitability context
+- hard rules
+- requirement to evaluate all three dimensions first
+- freedom to deprioritize one or more dimensions if justified
+
+### Suggested function:
+```javascript
+function buildAILineStrategyPrompt({
+  line,
+  lineOrders,
+  standardSequence,
+  changeoverRules,
+  masterData,
+  n10dData,
+}) {
+  // return prompt
+}
+```
+
+### Required prompt block:
+```text
+You are analyzing one production line after the app has already:
+1. combined compatible orders
+2. assigned orders to this line
+3. applied N10D / future-dispatch logic
+4. built the Standard Sequence
+
+Your task is to generate exactly 2 AI sequencing strategies for this line.
+
+Before generating strategies, always evaluate:
+1. changeover reduction opportunities
+2. MTS/flexible advancement opportunities
+3. profitability / profit score opportunities
+
+Then decide:
+- which factor should be the primary emphasis
+- which should be secondary
+- which, if any, should be deprioritized
+
+You are allowed to deprioritize one or more dimensions if the actual line analysis justifies it, but you must explain why.
+
+Do not force all three dimensions equally if the line does not support that.
+The strategies must come from the actual line analysis, not from fixed templates.
+```
+
+---
+
+## 8. REQUIRE STRATEGY OUTPUT TO INCLUDE STRUCTURED MULTI-DIMENSION ANALYSIS
+
+Each strategy must return:
+
+```json
+{
+  "strategy_name": "...",
+  "subtitle": "AI-generated strategy",
+  "short_description": "...",
+  "line_specific_observation": "...",
+  "difference_from_standard": "...",
+  "distinct_focus": "...",
+
+  "changeover_consideration": {
+    "relevance": "high|medium|low",
+    "summary": "..."
+  },
+
+  "mts_advancement_consideration": {
+    "relevance": "high|medium|low",
+    "summary": "..."
+  },
+
+  "profitability_consideration": {
+    "relevance": "high|medium|low",
+    "summary": "..."
+  },
+
+  "primary_emphasis": "...",
+  "secondary_emphasis": "...",
+  "deprioritized_factors": ["..."],
+  "deprioritization_reason": "...",
+  "tradeoff_summary": "...",
+
+  "execution_intent": {
+    "primary_goal": "...",
+    "secondary_goal": "...",
+    "date_behavior": "...",
+    "grouping_behavior": "...",
+    "profit_behavior": "..."
+  },
+
+  "orders": [
+    { "order_id": "...", "suggested_date": "...", "priority_reason": "..." }
+  ]
+}
+```
+
+This gives the app enough structure to both display and execute the strategy faithfully.
+
+---
+
+## 9. ENSURE THE AFTER TABLE REFLECTS THE AI’S ACTUAL DECISION
+
+The selected AI strategy must be faithfully applied to the After table.
+
+This means:
+- if the AI emphasized changeover reduction, the table should visibly reflect compatible grouping
+- if the AI emphasized MTS advancement, the table should visibly show eligible orders moved into earlier safe dates
+- if the AI emphasized profitability, the table should reflect profit-aware sequencing where safe
+- if the AI deprioritized one factor, the table should not pretend that factor was central
+
+The preview table must reflect what the AI actually chose, not a generic hybrid heuristic.
+
+---
+
+## 10. UPDATE THE STRATEGY EXECUTION LAYER
+
+The strategy execution layer should use:
+- `primary_emphasis`
+- `secondary_emphasis`
+- `deprioritized_factors`
+- `execution_intent`
+- the three consideration summaries
+
+to decide how strongly to apply:
+- grouping logic
+- advancement logic
+- profit-aware refinement
+
+### Suggested helper functions:
+```javascript
+function applyChangeoverAwareRefinement({...}) {}
+function applyMTSAdvancementRefinement({...}) {}
+function applyProfitAwareRefinement({...}) {}
+```
+
+These should all be available, but the selected strategy determines:
+- which one dominates
+- which one is secondary
+- which one is minimized
+
+---
+
+## 11. UPDATE FAITHFULNESS SCORING TO MATCH THE SELECTED EMPHASIS
+
+Do not force faithfulness scoring to expect all three dimensions equally every time.
+
+Instead:
+- score faithfulness based on the strategy’s declared emphasis
+
+For example:
+- if profitability was deprioritized, low profitability impact should not heavily reduce faithfulness
+- if MTS advancement was primary, the score should strongly depend on whether advancement actually happened
+- if changeover reduction was primary, grouping/changeover improvement should carry more weight
+
+### Add weighting logic based on strategy emphasis:
+```javascript
+changeoverWeight
+mtsWeight
+profitWeight
+```
+
+Example:
+- primary emphasis = 0.40
+- secondary emphasis = 0.25
+- deprioritized factor = 0.05 to 0.10
+- difference from standard = 0.10
+- constraint execution quality = 0.10
+
+The exact weights may vary, but the faithfulness model must follow what the strategy itself claims to prioritize.
+
+---
+
+## 12. UPDATE "VIEW AI REASONING" CONTENT
+
+The AI reasoning view should clearly explain:
+- how the line was analyzed across all three dimensions
+- which factor was chosen as primary
+- which factor was chosen as secondary
+- which factor(s) were deprioritized and why
+- how that decision is reflected in the After table
+
+Example:
+- Changeovers: medium relevance — some compatible clustering opportunity exists
+- MTS advancement: high relevance — two flexible orders can move into earlier safe days
+- Profitability: low relevance — profit score spread is weak on this line
+- Strategy emphasis: MTS advancement first, changeover second, profitability deprioritized
+
+This will make the strategy much more explainable and less templated.
+
+---
+
+## 13. UPDATE ROW-LEVEL SEQUENCE INSIGHT
+
+The row-level Sequence Insight should also reflect the actual selected strategy emphasis.
+
+Examples:
+- If MTS advancement was primary:
+  - “Moved earlier into 02 May to use an underloaded safe day under the selected advancement-focused strategy.”
+- If changeover reduction was primary:
+  - “Placed near another compatible 4.000mm poultry run to reduce diameter changeover.”
+- If profitability was primary:
+  - “Kept ahead of other safe flexible orders due to stronger profit score under the selected strategy.”
+- If a factor was deprioritized:
+  - do not overstate it in the row insight
+
+Only describe what the final table actually reflects.
+
+---
+
+## 14. PRESERVE HARD RULES
+
+All of this must still respect:
+- MTO / actual dated order protection
+- critical / urgent / monitor logic
+- N10D / future dispatch rules
+- safe windows
+- chronology for protected orders
+
+The AI is free to decide what to emphasize, but it is not free to violate hard scheduling constraints.
+
+---
+
+## 15. VERIFICATION
+
+### AI behavior
+1. ✅ Every AI strategy evaluates changeovers
+2. ✅ Every AI strategy evaluates MTS/flexible advancement opportunities
+3. ✅ Every AI strategy evaluates profitability / profit score
+4. ✅ AI may deprioritize one or more dimensions if justified by the line analysis
+5. ✅ AI strategies no longer feel like fixed templates
+
+### Strategy output
+6. ✅ Each strategy declares primary emphasis
+7. ✅ Each strategy declares secondary emphasis
+8. ✅ Each strategy declares deprioritized factors
+9. ✅ Each strategy explains why factors were deprioritized
+10. ✅ Each strategy includes a tradeoff summary
+
+### Execution
+11. ✅ After table reflects the actual chosen emphasis of the strategy
+12. ✅ Changeover grouping is applied when emphasized
+13. ✅ MTS advancement is applied when emphasized
+14. ✅ Profit-aware sequencing is applied when emphasized
+15. ✅ Deprioritized factors are not falsely overrepresented in the preview
+
+### Faithfulness / insights
+16. ✅ Faithfulness scoring follows the strategy’s declared emphasis
+17. ✅ AI reasoning explains all three dimensions and the final tradeoff
+18. ✅ Row-level insights reflect the actual applied strategy behavior
+19. ✅ The overall experience feels AI-generated, line-specific, and analysis-driven

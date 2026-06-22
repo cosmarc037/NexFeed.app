@@ -1,0 +1,177 @@
+Please improve the **Auto-Sequence AI strategy generation** so the AI has explicit context about the app’s **deterministic refinement rules**, allowing it to propose rankings that are closer to the final applied sequence.
+
+---
+
+## 1. GIVE THE AI EXPLICIT CONTEXT ABOUT DETERMINISTIC REFINEMENT
+
+Right now, the AI can produce a valid ranking, but the app’s deterministic refinement layer may later change that ranking significantly.
+
+Please update the AI strategy-generation prompt/context so the AI is aware of the major deterministic refinement rules that the app will enforce after the AI ranking is returned.
+
+### Goal
+Reduce the gap between:
+- `AI Rank`
+- `Final Rank`
+
+### Expected result
+The AI should propose rankings that are already more compatible with the app’s real scheduling rules, so fewer large post-AI corrections are needed.
+
+---
+
+## 2. MAKE THE AI AWARE OF THE MOST IMPORTANT POST-AI SCHEDULING RULES
+
+Please include in the AI context the major rules that can materially affect final sequence placement, such as:
+
+- chronological avail-date prioritization / grouping
+- critical / MTO orders with protected or pinned timing
+- combined production entities being treated as one sequencing unit
+- completion-feasibility / deterministic sequencing adjustments
+- shutdown-line restrictions
+- in-production orders cannot be moved
+- line eligibility restrictions
+- source/generated-order dependencies where relevant
+- other rule classes that commonly override AI rank
+
+### Goal
+The AI should not optimize in isolation from the actual system behavior.
+
+### Expected result
+The AI ranking should better reflect the same priorities the deterministic layer will later enforce.
+
+---
+
+## 3. KEEP DETERMINISTIC REFINEMENT AUTHORITATIVE
+
+This request is **not** to remove the deterministic refinement layer.
+
+### Important
+The deterministic refinement logic should remain authoritative and continue protecting hard business rules.
+
+### Goal
+The improvement is to make the AI more constraint-aware, not to replace rule enforcement.
+
+### Expected result
+The AI becomes smarter and more aligned, while the app still safely enforces final scheduling constraints.
+
+---
+
+## 4. ASK THE AI TO MINIMIZE LATER DETERMINISTIC ADJUSTMENT
+
+Please update the AI strategy instructions so the AI is encouraged to propose a rank order that minimizes later rule-based correction.
+
+### Suggested intent
+The AI should aim to generate a sequence that:
+- already respects strong date priorities
+- already respects immovable / protected orders
+- already respects combined-entity logic
+- and therefore requires fewer rank changes during deterministic refinement
+
+### Expected result
+`AI Rank` and `Final Rank` should diverge less often and by fewer positions.
+
+---
+
+## 5. MAKE COMBINED ENTITIES EXPLICITLY PART OF THE AI CONTEXT
+
+Please ensure the AI understands that combined orders / combined production entities are sequenced as a **single unit**.
+
+### Goal
+Avoid the AI thinking in terms of independent child/sub-orders when the app will later treat the entity as one combined run.
+
+### Expected result
+The AI can rank combined entities more realistically and in a way that is less likely to be corrected later.
+
+---
+
+## 6. MAKE AVAIL-DATE PRIORITY MORE EXPLICIT TO THE AI
+
+Please ensure the AI is aware that avail-date-driven chronological placement is a strong factor in the final sequencing behavior.
+
+### Goal
+If a combined or standalone entity has an earlier effective avail date that strongly affects its final placement, the AI should take that into account when proposing its rank.
+
+### Expected result
+The AI is less likely to place a strong early-date entity at a much later rank if the deterministic layer will almost certainly move it forward anyway.
+
+---
+
+## 7. IMPROVE AI VS FINAL CONSISTENCY IN THE TRANSPARENCY TABLE
+
+After making the AI more aware of the deterministic refinement rules, the **AI vs Final Sequence** section should ideally show fewer confusing rank jumps.
+
+### Expected result
+Users should more often see:
+- smaller differences between `AI Rank` and `Final Rank`
+- and clearer alignment between AI intent and final sequence outcome
+
+### Goal
+Increase user trust in the AI sequencing feature.
+
+---
+
+## IMPORTANT
+
+Please improve the AI strategy-generation step so the AI has context about the app’s deterministic refinement rules.
+
+This includes awareness of:
+- chronological avail-date prioritization
+- critical / MTO constraints
+- combined production entities
+- completion-feasibility adjustments
+- shutdown / in-production / eligibility restrictions
+- and other major rule-based overrides
+
+The deterministic layer should still remain authoritative, but the AI should rank orders in a way that better anticipates these rules so `AI Rank` and `Final Rank` are more aligned.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log whether the AI prompt/context includes deterministic refinement rules.
+
+```javascript
+console.debug('[Auto-Sequence AI Constraint-Aware Prompt]', {
+  includesDeterministicRefinementContext: true,
+  includedRuleClasses: [
+    'chronological_avail_date',
+    'critical_or_mto',
+    'combined_entities',
+    'completion_feasibility',
+    'shutdown_lines',
+    'in_production_lock',
+    'line_eligibility',
+    'generated_source_dependencies',
+  ],
+});
+```
+
+```javascript
+console.debug('[Auto-Sequence AI vs Final Drift]', {
+  entityId,
+  aiRank,
+  finalRank,
+  rankDrift: finalRank - aiRank,
+  adjustedByRules: aiRank !== finalRank,
+});
+```
+
+```javascript
+console.debug('[Auto-Sequence Constraint-Aware AI Effect]', {
+  strategyName,
+  averageRankDriftBefore,
+  averageRankDriftAfter,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ AI receives explicit context about deterministic refinement rules
+2. ✅ AI is aware of major override rule classes
+3. ✅ Deterministic refinement remains authoritative
+4. ✅ AI aims to reduce later rule-based adjustment
+5. ✅ Combined entities are treated correctly in AI context
+6. ✅ Avail-date priority is made more explicit to the AI
+7. ✅ `AI Rank` and `Final Rank` become more aligned overall
+8. ✅ No UI errors or console errors are introduced

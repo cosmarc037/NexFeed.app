@@ -1,0 +1,222 @@
+```
+Fix the following issue in the shutdown/divert feature:
+
+---
+
+## FIX: BACKGROUND CELL HIGHLIGHT — ONLY YELLOW FOR OUTSIDE FEEDMILL DIVERSION
+
+The row background is still showing yellow for ALL divertible orders. It should ONLY be yellow if the order can be diverted to lines OUTSIDE the feedmill. Orders that can only go to the partner line within the same feedmill should have NO background change — just the normal white row with the "right-click to divert" note.
+
+---
+
+### THE RULE — SIMPLE AND CLEAR
+
+| Scenario | Background | Note |
+|---|---|---|
+| Order can divert to lines OUTSIDE feedmill (e.g., Line 4, Line 7) | ✅ YELLOW background | "⚠ Line shutdown — right-click to divert to other feedmill lines" |
+| Order can ONLY divert to partner line WITHIN feedmill (e.g., Line 2) | ❌ NO background change (white) | "↩ Line shutdown — right-click to divert" |
+| Order cannot divert anywhere | ❌ NO background change (white) | "🔒 Cannot be diverted — awaiting line resume" |
+
+### EXAMPLE
+
+Line 1 is shutdown. Line 2 is still running.
+
+```
+Order A: Has run rate on Line 4 and Line 7 → YELLOW background + note
+Order B: Has run rate ONLY on Line 2 (partner) → NO highlight, white background + note
+Order C: Has run rate on Line 2 AND Line 4 → YELLOW background + note (because it CAN go outside)
+Order D: Has NO run rate anywhere → NO highlight, white background + stuck note
+```
+
+---
+
+### FIX THE ROW CLASS LOGIC
+
+The issue is in the component that assigns the CSS class. Make absolutely sure ONLY `_canDivertOutsideFeedmill === true` triggers the yellow class:
+
+```jsx
+function OrderRow({ order, lineShutdowns }) {
+  const isLineShutdown = lineShutdowns[order.line]?.isShutdown === true;
+  
+  // Determine row state
+  let showYellowBackground = false;
+  let showDivertNote = false;
+  let showStuckNote = false;
+  let divertNoteText = '';
+  let divertNoteClass = '';
+  
+  if (isLineShutdown && order.status !== 'Done' && order.status !== 'Cancel PO') {
+    
+    if (order._canDivertOutsideFeedmill === true) {
+      // CAN go to lines outside feedmill → YELLOW BACKGROUND
+      showYellowBackground = true;
+      showDivertNote = true;
+      divertNoteText = '⚠ Line shutdown — right-click to divert to other feedmill lines';
+      divertNoteClass = 'divert-hint-outside';
+      
+    } else if (order._canDivertWithinFeedmill === true) {
+      // Can ONLY go to partner line → NO BACKGROUND CHANGE
+      showYellowBackground = false; // EXPLICITLY false
+      showDivertNote = true;
+      divertNoteText = '↩ Line shutdown — right-click to divert';
+      divertNoteClass = 'divert-hint-within';
+      
+    } else {
+      // Cannot divert anywhere
+      showYellowBackground = false;
+      showDivertNote = false;
+      showStuckNote = true;
+    }
+  }
+  
+  // Build row class — ONLY add yellow class if showYellowBackground is true
+  let rowClass = 'order-row';
+  if (showYellowBackground) {
+    rowClass += ' order-row-divertible-outside';
+  }
+  // DO NOT add any highlight class for white-background orders
+  
+  const canRightClick = showDivertNote; // Both yellow and white-with-note can right-click
+  
+  return (
+    <tr 
+      className={rowClass}
+      onContextMenu={(e) => {
+        if (canRightClick) {
+          e.preventDefault();
+          showDivertContextMenu(e, order);
+        }
+      }}
+    >
+      {/* ... other cells ... */}
+      <td className="item-description-cell">
+        <div className="item-desc-name">{order.item_description}</div>
+        <div className="item-desc-meta">
+          <span className="item-desc-category">{order.category}</span>
+          {order.color && (
+            <>
+              <span className="item-desc-separator">|</span>
+              <span className="item-desc-color">{order.color}</span>
+            </>
+          )}
+          {order.diameter && (
+            <>
+              <span className="item-desc-separator">|</span>
+              <span className="item-desc-diameter">{order.diameter}mm</span>
+            </>
+          )}
+        </div>
+        
+        {/* Divert note — for both yellow and white rows */}
+        {showDivertNote && (
+          <div className={`item-desc-divert-hint ${divertNoteClass}`}>
+            {divertNoteText}
+          </div>
+        )}
+        
+        {/* Stuck note — cannot divert */}
+        {showStuckNote && (
+          <div className="item-desc-divert-hint divert-hint-stuck">
+            🔒 Cannot be diverted — awaiting line resume
+          </div>
+        )}
+      </td>
+    </tr>
+  );
+}
+```
+
+### CSS — CONFIRM ONLY YELLOW CLASS HAS BACKGROUND
+
+```css
+/* ONLY this class gets yellow background */
+.order-row-divertible-outside {
+  background-color: #fefce8 !important;
+}
+
+/* NO other shutdown-related classes should change background */
+/* White-with-note rows use default background — no class needed */
+
+/* Divert hint for yellow rows */
+.divert-hint-outside {
+  color: #ca8a04;
+  font-size: 10px;
+  font-weight: 500;
+  margin-top: 2px;
+}
+
+/* Divert hint for white rows (within feedmill only) */
+.divert-hint-within {
+  color: #6b7280;
+  font-size: 10px;
+  font-weight: 500;
+  margin-top: 2px;
+}
+
+/* Stuck hint */
+.divert-hint-stuck {
+  color: #9ca3af;
+  font-size: 10px;
+  font-weight: 400;
+  font-style: italic;
+  margin-top: 2px;
+}
+```
+
+### ALSO CHECK — REMOVE ANY OTHER CLASSES THAT ADD BACKGROUND
+
+Search the entire codebase for any other CSS class or inline style that might be adding background color to shutdown order rows:
+
+```css
+/* REMOVE or ensure these do NOT exist: */
+
+/* WRONG — this would make all divertible rows yellow */
+.order-row-divertible {
+  background-color: #fefce8 !important;  /* REMOVE if exists */
+}
+
+/* WRONG — this would highlight within-feedmill rows */
+.order-row-divertible-within {
+  background-color: #fefce8 !important;  /* REMOVE if exists */
+}
+```
+
+Only `.order-row-divertible-outside` should have a yellow background. No other class.
+
+### ALSO CHECK INLINE STYLES
+
+Search for any inline `style={{ backgroundColor: ... }}` on order rows related to divert/shutdown:
+
+```jsx
+// WRONG — remove any inline background for divertible
+<tr style={{ backgroundColor: isDivertible ? '#fefce8' : undefined }}>
+
+// CORRECT — use class only
+<tr className={showYellowBackground ? 'order-row-divertible-outside' : ''}>
+```
+
+---
+
+## VERIFICATION
+
+Using the example from the snip (Line 1 shutdown, Line 2 running):
+
+### Salto Conditioner P 1kg (Bundle) — Gamefowl · Yellow · 3.00mm
+- Check master data: does it have run rate on Line 3, 4, 5, 6, or 7?
+- If YES → yellow background ✅
+- If NO (only Line 2) → white background, "↩ Line shutdown — right-click to divert" ✅
+
+### Elite XP Startex, Mini-pellet 50kg — Swine · Brown · 3.00mm
+- Check master data: does it have run rate on lines outside FM1?
+- If YES → yellow background ✅
+- If NO → white background ✅
+
+### Test cases
+1. ✅ Order with run rate on Line 4 → YELLOW background
+2. ✅ Order with run rate on Line 2 only → WHITE background + "right-click to divert"
+3. ✅ Order with run rate on Line 2 AND Line 4 → YELLOW background (because outside is available)
+4. ✅ Order with no run rate anywhere → WHITE background + "awaiting resume"
+5. ✅ Order on non-shutdown line → completely normal, no notes, no highlights
+6. ✅ No inline styles overriding the class-based approach
+7. ✅ No leftover `.order-row-divertible` class applying yellow to everything
+```

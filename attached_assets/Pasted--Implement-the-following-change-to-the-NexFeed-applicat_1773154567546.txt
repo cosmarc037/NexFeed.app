@@ -1,0 +1,142 @@
+```
+Implement the following change to the NexFeed application:
+
+---
+
+## COMBINE FEATURES — LINE-SPECIFIC ENFORCEMENT IN "ALL" TAB
+
+Since the "All" tab now displays separate tables per line, all combine features (Smart Combine, Manual Combine, and validation) must be strictly scoped to the specific line. Orders from different lines CANNOT be combined, even when viewed together in the "All" tab.
+
+---
+
+### 1. MANUAL COMBINE — LINE-SPECIFIC VALIDATION
+
+**Checkbox selection in "All" tab:**
+- When the user is in the "All" tab and selects orders using checkboxes for manual combining:
+  - The system checks that ALL selected orders belong to the SAME line.
+  - If selected orders span DIFFERENT lines (e.g., one from Line 1 table and one from Line 2 table):
+    - Block the combine action.
+    - Show error message: "Cannot combine orders from different lines. All selected orders must be on the same line. You have selected orders from Line [X] and Line [Y]."
+  - If all selected orders are from the same line: Proceed with normal combine validation (Material Code FG, Form, Batch Size, Category must match, volume within per-line limit, etc.).
+
+**Visual cue:**
+- When the user selects a checkbox in one line's table, checkboxes in the OTHER line's table are visually dimmed or disabled to indicate cross-line selection is not allowed.
+- If the user attempts to click a checkbox in the other line's table while orders are already selected in the first line's table:
+  - Option A: Deselect the previous selections and start fresh in the new line.
+  - Option B: Show a brief toast notification: "Selection cleared. You can only select orders within the same line for combining."
+  - Use Option B for clarity.
+
+---
+
+### 2. SMART COMBINE PANEL — LINE-SPECIFIC RECOMMENDATIONS
+
+**When opened from the "All" tab:**
+- The Smart Combine panel generates recommendations for EACH line independently.
+- Recommendations are grouped by line with a clear line header.
+
+**Panel layout:**
+
+```
+🔗 Smart Combine Recommendations
+
+─────────────────────────────────────
+📋 Line 1                   [X] groups found
+─────────────────────────────────────
+
+[Recommendation Card 1 for Line 1]
+[Recommendation Card 2 for Line 1]
+
+─────────────────────────────────────
+📋 Line 2                   [X] groups found
+─────────────────────────────────────
+
+[Recommendation Card 1 for Line 2]
+
+─────────────────────────────────────
+```
+
+**Line header:**
+- "📋 Line [X]" in bold, Dark Grey (#2e343a).
+- "[X] groups found" in Grey (#a1a8b3) to the right.
+- If a line has no combine recommendations: "📋 Line [X] — No recommendations" in Grey.
+
+**Filtering:**
+- Add a line filter at the top of the Smart Combine panel (in addition to existing New+Existing filter):
+  ```
+  Line: [All Lines] [Line 1] [Line 2]
+  ```
+  - "All Lines" (default): Shows recommendations for all lines in the feedmill, grouped by line.
+  - "Line 1": Shows only Line 1 recommendations.
+  - "Line 2": Shows only Line 2 recommendations.
+  - These line filter options correspond to the lines of the currently active feedmill tab.
+
+**When opened from a specific line tab (e.g., Line 1 tab):**
+- The Smart Combine panel shows recommendations ONLY for that specific line.
+- No line grouping headers needed (all recommendations are for the same line).
+- The line filter is not shown (already scoped to one line).
+
+---
+
+### 3. SMART COMBINE AI — CROSS-LINE MATCHING PREVENTION
+
+The Smart Combine AI must NEVER recommend combining orders from different lines, even if they share the same Material Code FG, Form, Batch Size, and Category.
+
+**Combine matching criteria (ALL must match — reiterated):**
+1. Material Code (FG) — same
+2. Form — same
+3. Batch Size — same
+4. Category — same
+5. **Line — same** ← critical, always enforced
+
+If two orders match on criteria 1-4 but are on different lines, they are NOT a combine candidate.
+
+---
+
+### 4. DRAG-AND-DROP — LINE-SPECIFIC IN "ALL" TAB
+
+In the "All" tab, drag-and-drop reordering is scoped to each line's table:
+
+- The user can drag and reorder rows WITHIN a line's table (e.g., reorder within Line 1's table).
+- The user CANNOT drag a row from one line's table to another line's table.
+- If the user attempts to drag a row outside its line's table boundaries:
+  - The drop is rejected (row snaps back to its original position).
+  - A brief toast notification: "Orders cannot be moved between lines. Drag within the same line to reorder."
+
+---
+
+### 5. COMBINE/UNCOMBINE ACTIONS — CASCADE WITHIN LINE ONLY
+
+When orders are combined or uncombined in the "All" tab:
+
+- The scheduling cascade recalculates ONLY for the affected line.
+- The other line's table and schedule are completely unaffected.
+- Example: Combining two orders in Line 1 recalculates Line 1's cascade (Prio numbers, Start Dates, Completion Dates). Line 2's table remains untouched.
+
+---
+
+### 6. VOLUME LIMIT — USES CORRECT LINE'S CAPACITY
+
+When validating combine volume limits in the "All" tab, the system uses the correct per-line capacity based on which line the orders belong to:
+
+| Line | Feedmill | Per-Line Capacity |
+|---|---|---|
+| Line 1 | Feedmill 1 | 20 MT |
+| Line 2 | Feedmill 1 | 20 MT |
+| Line 3 | Feedmill 2 | 10 MT |
+| Line 4 | Feedmill 2 | 10 MT |
+| Line 5 | Powermix | No limit |
+| Line 6 | Feedmill 3 | 10 MT |
+| Line 7 | Feedmill 3 | 10 MT |
+
+The system must not apply Feedmill 1's 20 MT limit to Feedmill 2 or 3 orders, and vice versa.
+
+---
+
+### 7. COMBINED ORDER HIGHLIGHTS — LINE-SPECIFIC
+
+Combined order highlighting (blue tints for lead and child rows) only applies within the correct line's table:
+
+- If orders in Line 1 are combined, only Line 1's table shows the blue highlights.
+- Line 2's table is unaffected.
+- The combined group connector lines and indentation are contained within the line's table boundaries.
+```

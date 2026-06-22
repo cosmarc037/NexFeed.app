@@ -1,0 +1,193 @@
+```
+Implement the following fix:
+
+---
+
+## FIX: AUTO-SEQUENCE — SORT ALL ORDERS CHRONOLOGICALLY REGARDLESS OF SOURCE
+
+The auto-sequence is still separating dated orders from N10D-dated orders and placing dated orders first. ALL orders must be sorted in ONE single chronological sort.
+
+---
+
+### THE PROBLEM
+
+Current sorting:
+```
+1. Gall 21 Chicken Layer — Mar 31 (N10D Critical)
+2. Gallimax 3 Maintenance — Mar 31 (N10D Urgent)
+3. Salto Conditioner — Apr 11 (DATED — placed here because dated orders grouped first)
+4. Gallimax Pigeon Pellet — Apr 9 (N10D Sufficient)
+5-9. Elite XP Startex — Apr 9 (N10D Sufficient)
+```
+
+The app is grouping: dated orders first → then N10D orders. This is WRONG.
+
+### CORRECT sorting:
+```
+1. Gall 21 Chicken Layer — Mar 31 (N10D Critical)
+2. Gallimax 3 Maintenance — Mar 31 (N10D Urgent)
+3. Gallimax Pigeon Pellet — Apr 9 (N10D Sufficient)
+4. Elite XP Startex 80 MT — Apr 9 (N10D Sufficient)
+5. Elite XP Startex 80 MT — Apr 9 (N10D Sufficient)
+6. Elite XP Startex 8 MT — Apr 9 (N10D Sufficient)
+7. Elite XP Startex 12 MT — Apr 9 (N10D Sufficient)
+8. Elite XP Startex 32 MT — Apr 9 (N10D Sufficient)
+9. Elite XP Startex 20 MT — Apr 9 (N10D Sufficient)
+10. Salto Conditioner — Apr 11 (DATED)
+```
+
+ALL orders in ONE list, sorted by date. No grouping by source.
+
+---
+
+### THE FIX
+
+Remove any separation of dated vs non-dated orders. Put them all in ONE array, give every order a sort date, then sort ONCE.
+
+```javascript
+function runAutoSequence(orders, n10dData, dailyColumns, today) {
+  // Step 1: Assign a sort date to EVERY order
+  const ordersWithDates = orders.map(order => {
+    const updatedOrder = { ...order };
+    
+    // Dated orders — use their avail date
+    if (order.avail_date && 
+        order.avail_date !== 'prio replenish' && 
+        order.avail_date !== 'safety stocks' &&
+        !order.avail_date.toLowerCase().includes('stock sufficient')) {
+      
+      updatedOrder._sortDate = parseDate(order.avail_date);
+      updatedOrder._dateSource = 'dated';
+      updatedOrder._displayAvailDate = order.avail_date;
+      return updatedOrder;
+    }
+    
+    // Non-dated orders — get date from N10D
+    const product = n10dData?.find(
+      p => String(p.material_code_fg) === String(order.material_code_fg)
+    );
+    
+    if (product) {
+      const status = getProductStatus(
+        product.due_for_loading,
+        product.inventory,
+        dailyColumns,
+        product,
+        today
+      );
+      
+      updatedOrder._n10dStatus = status;
+      
+      if (status === 'Critical') {
+        updatedOrder._sortDate = new Date(today);
+        updatedOrder._displayAvailDate = formatDateFull(today);
+      } else if (product.availDate) {
+        updatedOrder._sortDate = parseDate(product.availDate);
+        updatedOrder._displayAvailDate = formatDateFull(product.availDate);
+      } else if (dailyColumns && dailyColumns.length > 0) {
+        // Sufficient — use last day of 10-day window
+        const lastDay = dailyColumns[dailyColumns.length - 1].date;
+        updatedOrder._sortDate = parseDate(lastDay);
+        updatedOrder._displayAvailDate = formatDateFull(lastDay);
+      } else {
+        updatedOrder._sortDate = null;
+        updatedOrder._displayAvailDate = null;
+      }
+      
+      updatedOrder._dateSource = 'n10d';
+    } else {
+      updatedOrder._sortDate = null;
+      updatedOrder._dateSource = 'none';
+    }
+    
+    return updatedOrder;
+  });
+  
+  // Step 2: ONE SINGLE SORT — chronological, no grouping
+  ordersWithDates.sort((a, b) => {
+    const dateA = a._sortDate;
+    const dateB = b._sortDate;
+    
+    // Orders with dates before orders without
+    if (dateA && !dateB) return -1;
+    if (!dateA && dateB) return 1;
+    if (!dateA && !dateB) return 0;
+    
+    // Sort by date — earliest first
+    const dateDiff = dateA.getTime() - dateB.getTime();
+    if (dateDiff !== 0) return dateDiff;
+    
+    // Same date tiebreakers:
+    
+    // Tiebreaker 1: Higher N10D urgency first
+    const statusOrder = { 'Critical': 0, 'Urgent': 1, 'Monitor': 2, 'Sufficient': 3 };
+    const statusA = statusOrder[a._n10dStatus] ?? 2;
+    const statusB = statusOrder[b._n10dStatus] ?? 2;
+    if (statusA !== statusB) return statusA - statusB;
+    
+    // Tiebreaker 2: Higher volume first (longer production first for efficiency)
+    const volA = parseFloat(a.volume) || 0;
+    const volB = parseFloat(b.volume) || 0;
+    return volB - volA;
+  });
+  
+  // Step 3: Assign priorities
+  ordersWithDates.forEach((order, index) => {
+    order.prio = index + 1;
+  });
+  
+  return ordersWithDates;
+}
+```
+
+### KEY POINT — NO SEPARATION
+
+```javascript
+// WRONG — DO NOT DO THIS
+const datedOrders = orders.filter(o => isDated(o));
+const nonDatedOrders = orders.filter(o => !isDated(o));
+// ... sort separately ...
+result.push(...datedOrders);
+result.push(...nonDatedOrders);
+
+// CORRECT — ALL IN ONE
+const allOrders = orders.map(o => assignDate(o));
+allOrders.sort((a, b) => a._sortDate - b._sortDate);
+```
+
+Delete any code that:
+- Separates orders into dated vs non-dated arrays
+- Sorts them independently
+- Concatenates them back together
+- Places one group before another
+
+ALL orders go into ONE array, sorted ONCE by date.
+
+---
+
+### VERIFICATION
+
+After fix, the auto-sequence should show:
+
+```
+Prio 1:  Gall 21 Chicken Layer — Mar 31 (Critical, from N10D)
+Prio 2:  Gallimax 3 Maintenance — Mar 31 (Urgent, from N10D)
+Prio 3:  Gallimax Pigeon Pellet — Apr 9 (Sufficient, from N10D)
+Prio 4:  Elite XP Startex 80 MT — Apr 9 (Sufficient, from N10D)
+Prio 5:  Elite XP Startex 80 MT — Apr 9 (Sufficient, from N10D)
+Prio 6:  Elite XP Startex 32 MT — Apr 9 (Sufficient, from N10D)
+Prio 7:  Elite XP Startex 20 MT — Apr 9 (Sufficient, from N10D)
+Prio 8:  Elite XP Startex 12 MT — Apr 9 (Sufficient, from N10D)
+Prio 9:  Elite XP Startex 8 MT — Apr 9 (Sufficient, from N10D)
+Prio 10: Salto Conditioner — Apr 11 (Dated order)
+```
+
+NOT:
+```
+Prio 1:  Gall 21 — Mar 31
+Prio 2:  Gallimax 3 — Mar 31
+Prio 3:  Salto Conditioner — Apr 11 ← WRONG, Apr 11 > Apr 9
+Prio 4:  Gallimax Pigeon — Apr 9
+Prio 5-9: Elite XP — Apr 9
+```
+```

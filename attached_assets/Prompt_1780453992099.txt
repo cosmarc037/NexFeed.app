@@ -1,0 +1,195 @@
+Please improve the **Auto-Sequence AI** so it becomes more aware of **underloaded production days** and can use that context when proposing order placement, instead of relying too heavily on deterministic refinement to make those adjustments afterward.
+
+---
+
+## 1. GIVE THE AI EXPLICIT CONTEXT ABOUT CURRENT LINE/DAY LOAD
+
+Please provide the AI with structured workload context for each line and production day before it proposes the sequence.
+
+### Examples of context to provide
+- used production hours per day
+- remaining available hours per day
+- underloaded days
+- overloaded / near-full days
+- locked/in-production work already occupying capacity
+- overall day-by-day load profile for the selected line
+
+### Goal
+Allow the AI to recognize which days are lightly loaded and can absorb flexible work.
+
+### Expected result
+The AI can make more informed placement decisions instead of only relying on a later deterministic packing pass.
+
+---
+
+## 2. LET THE AI PREFER UNDERLOADED DAYS WHEN IT IS SAFE TO DO SO
+
+Please allow the AI to use the current load profile as part of its sequencing/placement logic.
+
+### Required behavior
+If an order is flexible and can be safely advanced without violating its deadline or other hard constraints, the AI should be able to prefer an underloaded day.
+
+### Goal
+Reduce the gap between:
+- what the AI originally suggests
+- and what the deterministic gap-filling refinement later changes
+
+### Expected result
+Fewer orders need to be re-positioned by deterministic refinement just to fill underloaded days.
+
+---
+
+## 3. PROVIDE CANDIDATE FEASIBLE DATES / WINDOWS TO THE AI WHERE POSSIBLE
+
+If possible, please give the AI more structured feasibility context per order, such as:
+- earliest feasible date
+- latest safe date
+- candidate days where the order could fit
+- approximate remaining capacity on those days
+
+### Goal
+Help the AI reason about date placement more intelligently, rather than only ranking rows abstractly.
+
+### Expected result
+The AI can better place flexible work into realistic earlier slots, especially on underloaded days.
+
+---
+
+## 4. KEEP HARD CONSTRAINTS ENFORCED, BUT GIVE THEM TO THE AI UPFRONT
+
+Please keep the existing deterministic hard constraints, but also expose them clearly to the AI ahead of time.
+
+### Examples
+- in-production orders cannot move
+- MTO / Critical / Urgent protections
+- mash-date windows
+- completion-feasibility requirements
+- line eligibility restrictions
+- shutdown-line rules
+- source/generated order dependencies where applicable
+
+### Goal
+The AI should already know the boundaries so it can make smarter initial placements.
+
+### Expected result
+The AI suggestions become more executable and need fewer downstream corrections.
+
+---
+
+## 5. USE LOAD-AWARE AI AS A FIRST-CLASS INPUT, NOT JUST A POST-AI FIX
+
+Right now, underloaded-day utilization seems to be happening mostly in deterministic refinement.
+
+Please improve the flow so that load awareness is part of the AI’s initial strategy generation, not only something applied afterward.
+
+### Goal
+Make the AI better at choosing sequence and date placement that already reflect load balancing opportunities.
+
+### Expected result
+The AI itself becomes better at recommending:
+- which orders to pull forward
+- which underloaded day to use
+- and how to do that while preserving deadline safety
+
+---
+
+## 6. REDUCE AI-RANK VS FINAL-RANK DRIFT CAUSED BY GAP FILLING
+
+A major reason for AI-vs-final mismatch is that flexible orders are later moved into underloaded days by deterministic packing/gap-filling.
+
+Please reduce that drift by making the AI aware of the load-balancing opportunity earlier.
+
+### Expected result
+Orders that are eventually moved into underloaded days by refinement should more often already be placed there by the AI in the initial proposal.
+
+---
+
+## 7. IF NEEDED, USE CURRENT LOAD PROFILE AS A HINT EVEN IF IT IS NOT THE FINAL LOAD
+
+It is acceptable that the AI may only know the **current** or **preliminary** load profile before its own placements are finalized.
+
+### Important
+Even if that load profile is not perfect, it is still useful as a planning hint.
+
+### Goal
+Give the AI enough visibility to make better decisions, even if the exact final post-placement load is not yet known.
+
+### Expected result
+The AI becomes directionally smarter about underloaded days, even without a perfect final simulation at that stage.
+
+---
+
+## 8. OPTIONALLY SUPPORT A MORE FEASIBILITY-AWARE OR ITERATIVE APPROACH IF PRACTICAL
+
+If practical, consider improving the sequencing flow with either:
+- candidate-slot / candidate-day inputs for each order
+- or a lightweight second-pass feedback loop after provisional placement
+
+### Goal
+Reduce the “chicken-and-egg” problem by giving the AI better information about what placements are realistically possible.
+
+### Expected result
+The AI can better identify feasible underloaded-day placements before deterministic refinement has to step in.
+
+---
+
+## IMPORTANT
+
+Please improve the Auto-Sequence AI so it has context on **underloaded production days** and can use that context when deciding where to place flexible orders.
+
+This means:
+- give the AI current line/day load information
+- let it recognize underloaded days
+- let it prefer those days when safe
+- provide candidate feasible windows where possible
+- reduce how often deterministic gap-filling has to correct the AI afterward
+
+The goal is not to remove deterministic refinement, but to make the AI smarter up front so its proposed sequence is closer to the final executable schedule.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log load-aware AI context and whether underloaded-day opportunities were considered.
+
+```javascript
+console.debug('[Auto-Sequence AI Load Context]', {
+  line,
+  dayLoadProfile,
+  underloadedDays,
+  overloadedDays,
+  lockedCapacityByDay,
+});
+```
+
+```javascript
+console.debug('[Auto-Sequence AI Underloaded-Day Placement]', {
+  entityId,
+  flexibleOrder,
+  candidateDates,
+  aiSuggestedDate,
+  aiUsedUnderloadedDayHint,
+});
+```
+
+```javascript
+console.debug('[Auto-Sequence AI vs Gap-Fill Drift]', {
+  entityId,
+  aiSuggestedDate,
+  finalDateAfterRefinement,
+  movedByGapFill: String(aiSuggestedDate) !== String(finalDateAfterRefinement),
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ The AI receives current line/day workload context
+2. ✅ The AI can identify underloaded days
+3. ✅ Flexible orders can be intentionally placed on underloaded days when safe
+4. ✅ Candidate feasible windows/dates are provided where practical
+5. ✅ Hard constraints remain enforced
+6. ✅ Gap-filling causes fewer AI-vs-final adjustments
+7. ✅ The AI becomes more aligned with the final executable schedule
+8. ✅ No UI errors or console errors are introduced

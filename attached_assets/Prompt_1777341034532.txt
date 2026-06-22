@@ -1,0 +1,506 @@
+```
+Improve AI-suggested dates so they follow operational rules instead of selecting dates blindly.
+
+---
+
+## OBJECTIVE
+
+Update the AI Balanced sequence so that AI-suggested dates are selected using a rule-based scoring heuristic inside the allowed date window, instead of simply copying N10D dates or choosing arbitrary dates.
+
+The AI should still analyze the orders, but the final suggested dates must be grounded by:
+- allowed date window
+- queue availability on each day
+- current production hours already assigned on each day
+- changeover reduction opportunity
+- no-delay validation for protected orders
+
+This should make AI-suggested dates more realistic and operationally useful.
+
+---
+
+## 1. ADD DATE-SUGGESTION HEURISTIC LAYER AFTER AI REORDERING
+
+```javascript
+function applyBalancedDateHeuristic(ordersByLine, changeoverRules, n10dData) {
+  const result = {};
+
+  Object.entries(ordersByLine).forEach(([line, orders]) => {
+    if (!orders || orders.length === 0) {
+      result[line] = [];
+      return;
+    }
+
+    // Build daily load map for this line
+    const dailyLoadMap = buildDailyLoadMap(orders, line);
+
+    const adjustedOrders = orders.map((order, index) => {
+      const protectedOrder = isProtectedOrder(order); 
+      // protected = MTO, Critical, Urgent, Monitor
+
+      if (protectedOrder) {
+        return {
+          ...order,
+          _aiSuggestedDate: normalizeDate(order.target_avail_date),
+          _aiDateReason: 'Protected order — date retained by hard rule',
+        };
+      }
+
+      // For flexible/sufficient orders only
+      const safeWindow = getBalancedSafeWindow(order, n10dData);
+      const suggestedDate = chooseBestBalancedDate({
+        order,
+        line,
+        index,
+        orders,
+        safeWindow,
+        dailyLoadMap,
+        changeoverRules,
+      });
+
+      return {
+        ...order,
+        target_avail_date: suggestedDate,
+        _aiSuggestedDate: suggestedDate,
+        _originalAvailDate: normalizeDate(order.target_avail_date),
+        _dateAdjustedByAI: normalizeDate(order.target_avail_date) !== suggestedDate,
+        _aiDateReason: `Balanced heuristic selected ${suggestedDate} based on line load, safe window, and changeover opportunity`,
+      };
+    });
+
+    // IMPORTANT: after dates are assigned, re-sort chronologically
+    const sorted = sortOrdersChronologically(adjustedOrders).map((o, i) => ({
+      ...o,
+      prio: i + 1,
+    }));
+
+    result[line] = sorted;
+  });
+
+  return result;
+}
+```
+
+---
+
+## 2. DEFINE PROTECTED VS FLEXIBLE ORDERS
+
+```javascript
+function isProtectedOrder(order) {
+  if (isMTOOrder(order)) return true;
+
+  const status = String(order._n10dStatus || order.inferred_target_label || '').toLowerCase();
+
+  if (status === 'critical') return true;
+  if (status === 'urgent') return true;
+  if (status === 'monitor') return true;
+  if (status.includes('prio replenish')) return true;
+
+  return false;
+}
+
+function isFlexibleOrder(order) {
+  if (isProtectedOrder(order)) return false;
+
+  const status = String(order._n10dStatus || order.inferred_target_label || '').toLowerCase();
+
+  return status === 'sufficient' || status.includes('stock sufficient');
+}
+```
+
+---
+
+## 3. BUILD SAFE WINDOW FOR AI BALANCED
+
+```javascript
+function getBalancedSafeWindow(order, n10dData) {
+  const today = startOfDay(new Date());
+  const earliest = addDays(today, 2); // buffer
+
+  const status = String(order._n10dStatus || order.inferred_target_label || '').toLowerCase();
+
+  // Protected orders should not be passed here, but keep safe fallback
+  if (isProtectedOrder(order)) {
+    const fixed = normalizeDate(order.target_avail_date) || formatISODate(today);
+    return { start: fixed, end: fixed };
+  }
+
+  // Flexible / sufficient orders:
+  // can go up to N10D target + 14 days
+  const n10dThreshold = resolveEffectiveN10DDate(order, n10dData);
+  const thresholdDate = n10dThreshold ? startOfDay(new Date(n10dThreshold)) : addDays(today, 10);
+  const latest = addDays(thresholdDate, 14);
+
+  return {
+    start: formatISODate(earliest),
+    end: formatISODate(latest),
+  };
+}
+
+function resolveEffectiveN10DDate(order, n10dData) {
+  if (order.inferred_target_date && isISODate(order.inferred_target_date)) {
+    return normalizeDate(order.inferred_target_date);
+  }
+
+  const materialCode = String(order.material_code_fg || '').trim();
+  const entry = (n10dData || []).find(n =>
+    String(n.material_code || n.material_code_fg || '').trim() === materialCode
+  );
+
+  if (!entry) return null;
+
+  const dt = entry.inferred_target_date || entry.target_date;
+  return isISODate(dt) ? normalizeDate(dt) : null;
+}
+```
+
+---
+
+## 4. BUILD DAILY LOAD MAP
+
+This lets AI choose a date that maximizes utilization on lightly loaded days.
+
+```javascript
+function buildDailyLoadMap(orders, line) {
+  const map = new Map();
+
+  orders.forEach(order => {
+    const dt = normalizeDate(order.target_avail_date || order._aiSuggestedDate);
+    if (!dt || !isISODate(dt)) return;
+
+    const volume = parseFloat(order.volume_override || order.volume || order.total_volume_mt || 0) || 0;
+    const runRate = getLineRunRate(normalizeLine(line));
+    const prodHours = runRate > 0 ? volume / runRate : 0;
+    const co = parseFloat(order.changeover || 0) || 0;
+    const totalHours = prodHours + co;
+
+    if (!map.has(dt)) {
+      map.set(dt, {
+        orderCount: 0,
+        totalHours: 0,
+      });
+    }
+
+    const bucket = map.get(dt);
+    bucket.orderCount += 1;
+    bucket.totalHours += totalHours;
+  });
+
+  return map;
+}
+```
+
+---
+
+## 5. CHOOSE THE BEST DATE INSIDE THE SAFE WINDOW
+
+This is the core heuristic.
+
+```javascript
+function chooseBestBalancedDate({
+  order,
+  line,
+  index,
+  orders,
+  safeWindow,
+  dailyLoadMap,
+  changeoverRules,
+}) {
+  const candidateDates = enumerateDates(safeWindow.start, safeWindow.end);
+
+  let bestDate = safeWindow.start;
+  let bestScore = -Infinity;
+
+  for (const candidateDate of candidateDates) {
+    const score = scoreBalancedCandidateDate({
+      order,
+      candidateDate,
+      line,
+      index,
+      orders,
+      dailyLoadMap,
+      changeoverRules,
+    });
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestDate = candidateDate;
+    }
+  }
+
+  return bestDate;
+}
+```
+
+---
+
+## 6. SCORE EACH CANDIDATE DATE
+
+Balanced sequence should favor:
+- dates with lighter load
+- dates that fill underused production days
+- dates that reduce changeover by grouping similar materials
+- earlier good dates when all else is equal
+
+```javascript
+function scoreBalancedCandidateDate({
+  order,
+  candidateDate,
+  line,
+  index,
+  orders,
+  dailyLoadMap,
+  changeoverRules,
+}) {
+  let score = 0;
+
+  const load = dailyLoadMap.get(candidateDate) || { orderCount: 0, totalHours: 0 };
+
+  // 1. Prefer lighter-loaded days
+  score += Math.max(0, 12 - load.totalHours) * 4;
+  score += Math.max(0, 4 - load.orderCount) * 2;
+
+  // 2. Reward grouping with nearby compatible materials
+  const compatibilityScore = estimateCompatibilityGain(order, candidateDate, orders, changeoverRules);
+  score += compatibilityScore * 10;
+
+  // 3. Prefer earlier dates slightly, but not if heavily loaded
+  const today = startOfDay(new Date());
+  const candidate = startOfDay(new Date(candidateDate));
+  const daysFromToday = Math.round((candidate - today) / (1000 * 60 * 60 * 24));
+  score += Math.max(0, 20 - daysFromToday) * 0.5;
+
+  // 4. Penalize overloaded days
+  if (load.totalHours > 16) score -= 20;
+  if (load.totalHours > 20) score -= 30;
+
+  return score;
+}
+```
+
+---
+
+## 7. ESTIMATE MATERIAL COMPATIBILITY GAIN
+
+This approximates whether placing an order on a candidate date helps group it with similar materials.
+
+```javascript
+function estimateCompatibilityGain(order, candidateDate, orders, changeoverRules) {
+  const sameDateOrders = orders.filter(o => {
+    const dt = normalizeDate(o._aiSuggestedDate || o.target_avail_date);
+    return dt === candidateDate && String(o.id) !== String(order.id);
+  });
+
+  if (sameDateOrders.length === 0) {
+    return 1; // neutral-positive if filling an empty/light day
+  }
+
+  let bestGain = 0;
+
+  sameDateOrders.forEach(other => {
+    const co = calculateChangeoverBetween(order, other, changeoverRules);
+
+    // lower changeover = better score
+    if (co <= 0.17) bestGain = Math.max(bestGain, 4);       // nearly same material
+    else if (co <= 0.50) bestGain = Math.max(bestGain, 3);  // close match
+    else if (co <= 0.83) bestGain = Math.max(bestGain, 2);  // moderate match
+    else bestGain = Math.max(bestGain, 0);                  // poor match
+  });
+
+  return bestGain;
+}
+```
+
+---
+
+## 8. ENFORCE CHRONOLOGICAL SORT AFTER DATE ASSIGNMENT
+
+Even after AI suggests dates, the final display must be sorted chronologically.
+
+```javascript
+function sortOrdersChronologically(orders) {
+  return [...orders].sort((a, b) => {
+    const dateA = normalizeDate(a._aiSuggestedDate || a.target_avail_date);
+    const dateB = normalizeDate(b._aiSuggestedDate || b.target_avail_date);
+
+    const isAReal = isISODate(dateA);
+    const isBReal = isISODate(dateB);
+
+    if (isAReal && isBReal) {
+      const diff = new Date(dateA) - new Date(dateB);
+      if (diff !== 0) return diff;
+    } else if (isAReal && !isBReal) {
+      return -1;
+    } else if (!isAReal && isBReal) {
+      return 1;
+    }
+
+    // tie-breaker: keep protected order priority
+    const rankA = getProtectedRank(a);
+    const rankB = getProtectedRank(b);
+    if (rankA !== rankB) return rankA - rankB;
+
+    return 0;
+  });
+}
+
+function getProtectedRank(order) {
+  if (isMTOOrder(order)) return 0;
+
+  const status = String(order._n10dStatus || order.inferred_target_label || '').toLowerCase();
+  if (status === 'critical') return 1;
+  if (status === 'urgent' || status.includes('prio replenish')) return 2;
+  if (status === 'monitor') return 3;
+  return 4;
+}
+```
+
+---
+
+## 9. UPDATE AI BALANCED FLOW TO USE THE DATE HEURISTIC
+
+```javascript
+async function generateAIBalancedSequence(enrichedByLine, n10dData, masterData, changeoverRules) {
+  const prompt = buildAIBalancedPrompt(enrichedByLine, changeoverRules);
+
+  let aiResult = { strategy: {}, reasoning: '', dateAdjustments: [] };
+
+  try {
+    const response = await callAzureOpenAI(prompt);
+    aiResult = parseAIResponse(response);
+  } catch (error) {
+    console.error('AI Balanced generation failed:', error);
+    return generateStandardSequence(enrichedByLine);
+  }
+
+  // First apply AI's sequence positions / material grouping
+  const aiReordered = applyAIReordering(enrichedByLine, aiResult);
+
+  // Then apply date heuristic so AI dates are operationally grounded
+  const finalOrders = applyBalancedDateHeuristic(aiReordered, changeoverRules, n10dData);
+
+  return {
+    id: 'ai_balanced',
+    name: 'AI Balanced',
+    theme: 'AI-Powered (Balanced)',
+    description: 'AI repositions orders to reduce changeovers and suggests practical production dates based on capacity and safe windows',
+    icon: '🤖',
+    color: 'purple',
+    orders: finalOrders,
+    metrics: calculateStrategyMetrics(finalOrders),
+    aiReasoning: aiResult.reasoning || '',
+    dateAdjustments: collectDateAdjustments(finalOrders),
+    isAIRecommended: false,
+  };
+}
+```
+
+---
+
+## 10. SHOW REASON IN UI TOOLTIP / INSIGHT
+
+```javascript
+function collectDateAdjustments(ordersByLine) {
+  const changes = [];
+
+  Object.values(ordersByLine).flat().forEach(order => {
+    const originalDate = normalizeDate(order._originalAvailDate);
+    const newDate = normalizeDate(order._aiSuggestedDate || order.target_avail_date);
+
+    if (originalDate && newDate && originalDate !== newDate) {
+      changes.push({
+        order_id: order.id,
+        original: originalDate,
+        new: newDate,
+        reason: order._aiDateReason || order._aiReasoning || 'AI balanced adjustment',
+      });
+    }
+  });
+
+  return changes;
+}
+```
+
+---
+
+## 11. HELPERS
+
+```javascript
+function startOfDay(date) {
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+function addDays(date, days) {
+  const d = new Date(date);
+  d.setDate(d.getDate() + days);
+  return d;
+}
+
+function formatISODate(date) {
+  return new Date(date).toISOString().split('T')[0];
+}
+
+function normalizeDate(value) {
+  if (!value) return null;
+  const s = String(value).trim();
+  if (!/^\d{4}-\d{2}-\d{2}/.test(s)) return null;
+  return s.substring(0, 10);
+}
+
+function isISODate(value) {
+  return !!normalizeDate(value);
+}
+
+function enumerateDates(start, end) {
+  const out = [];
+  const s = startOfDay(new Date(start));
+  const e = startOfDay(new Date(end));
+
+  for (let d = new Date(s); d <= e; d.setDate(d.getDate() + 1)) {
+    out.push(formatISODate(d));
+  }
+
+  return out;
+}
+```
+
+---
+
+## VERIFICATION
+
+### AI date logic is no longer blind
+1. ✅ AI-suggested dates are not selected randomly
+2. ✅ Dates are chosen inside the allowed safe window only
+3. ✅ MTO orders keep their exact original dates
+4. ✅ Critical orders stay today / ASAP
+5. ✅ Urgent / Monitor can move earlier but never later than their target date
+6. ✅ Sufficient orders can move up to N10D threshold + 14 days
+
+### Capacity-aware date selection
+7. ✅ AI prefers dates with fewer queued orders
+8. ✅ AI prefers dates with lower total assigned hours
+9. ✅ If a day has only one order and enough capacity, AI can place another safe order on that same day
+10. ✅ AI tries to maximize operational usage instead of blindly using the latest date
+
+### Changeover-aware date selection
+11. ✅ AI rewards dates where similar materials can be grouped
+12. ✅ AI considers material compatibility (category, color, diameter, form)
+13. ✅ AI favors dates that reduce total changeover cost
+14. ✅ Similar-material orders are more likely to be placed near each other
+
+### Final sorting
+15. ✅ After AI dates are assigned, results are sorted chronologically
+16. ✅ No case where 22 May appears before 05 May
+17. ✅ Protected orders still keep their priority rules when dates tie
+
+### Practical expected behavior
+18. ✅ If an order can be produced on May 11 safely and May 11 is lightly loaded, AI may suggest May 11
+19. ✅ AI does not blindly push everything to the deadline date
+20. ✅ AI suggestions now reflect utilization + compatibility + safe-window logic
+
+### UI / explainability
+21. ✅ Each changed date retains original date for comparison
+22. ✅ Each AI-suggested date can carry a reason/tooltip
+23. ✅ Date adjustments can be listed in strategy details
+```

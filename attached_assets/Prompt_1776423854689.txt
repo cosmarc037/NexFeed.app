@@ -1,0 +1,633 @@
+```
+Update the plant-level auto-sequence algorithm to process order-by-order with the new combine + place flow:
+
+---
+
+## 1. THE MAIN ALGORITHM — ORDER BY ORDER
+
+```javascript
+function plantLevelAutoSequence(allOrders, masterData, n10dData, allLines, changeoverRules) {
+  // Step 0: Filter active orders and deep copy
+  const activeOrders = allOrders
+    .filter(o => 
+      o.status !== 'Done' && 
+      o.status !== 'Cancel PO' && 
+      o.status !== 'In Production' && 
+      o.status !== 'On-going'
+    )
+    .map(o => ({ ...JSON.parse(JSON.stringify(o)) }));
+  
+  // Build working state — orders per line
+  const lineOrdersMap = {};
+  allLines.forEach(line => {
+    lineOrdersMap[line] = activeOrders
+      .filter(o => normalizeLine(o.feedmill_line) === line)
+      .sort((a, b) => (a.priority_seq || 0) - (b.priority_seq || 0))
+      .map(o => ({
+        ...o,
+        _originalLine: normalizeLine(o.feedmill_line),
+        _isPlanned: o.status === 'Planned',
+        _processed: false,
+      }));
+  });
+  
+  // Track MT per line
+  const lineTotalMT = {};
+  allLines.forEach(line => {
+    lineTotalMT[line] = (lineOrdersMap[line] || [])
+      .reduce((sum, o) => sum + (parseFloat(o.volume) || parseFloat(o.total_volume_mt) || 0), 0);
+  });
+  
+  const placementLog = [];
+  const combinedOrders = [];
+  const processedIds = new Set();
+  
+  // Process order by order: Line 1 Prio 1 → Line 7 last prio
+  for (const line of allLines) {
+    const lineOrders = lineOrdersMap[line] || [];
+    
+    for (const order of lineOrders) {
+      if (order._processed) continue;
+      if (processedIds.has(order.id)) continue;
+      
+      const orderVolume = parseFloat(order.volume) || parseFloat(order.total_volume_mt) || 0;
+      const orderMaterialCode = String(order.material_code_fg || '').trim();
+      const orderFormulaVersion = order.formula_version || '—';
+      
+      if (!orderMaterialCode) {
+        order._processed = true;
+        processedIds.add(order.id);
+        continue;
+      }
+      
+      // === PHASE 1: LOOK FOR MATCHABLE ORDERS ===
+      const matches = findMatchableOrders(
+        order, orderMaterialCode, orderFormulaVersion, 
+        allLines, lineOrdersMap, processedIds, masterData
+      );
+      
+      if (matches.length > 0) {
+        // === PHASE 2: COMBINE ORDERS ===
+        const combineResult = combineOrdersGreedy(
+          order, orderVolume, matches, MAX_COMBINE_MT
+        );
+        
+        if (combineResult.combinedOrders.length > 0) {
+          // === PHASE 3: CALCULATE QUEUE TIME AND PLACE ===
+          const placement = placeCombiledOrder(
+            order, combineResult, allLines, lineOrdersMap, 
+            lineTotalMT, masterData, processedIds
+          );
+          
+          // Record
+          combinedOrders.push(placement.combinedOrder);
+          if (placement.logEntry) {
+            placementLog.push(placement.logEntry);
+          }
+          
+          continue; // Move to next order
+        }
+      }
+      
+      // === NO MATCH OR COMBINE FAILED — STILL EVALUATE QUEUE TIME ===
+      const movePlacement = evaluateAndMoveOrder(
+        order, orderVolume, line, allLines, lineOrdersMap,
+        lineTotalMT, masterData, processedIds
+      );
+      
+      if (movePlacement.logEntry) {
+        placementLog.push(movePlacement.logEntry);
+      }
+    }
+  }
+  
+  // === PHASE 4: N10D TARGET DATES ===
+  const finalLineOrders = {};
+  allLines.forEach(line => {
+    const orders = lineOrdersMap[line] || [];
+    if (orders.length === 0) {
+      finalLineOrders[line] = [];
+      return;
+    }
+    
+    // Run preSortOrders to categorize and assign target dates
+    const categorized = preSortOrders(orders, n10dData, masterData);
+    
+    // Sort: dated first (by date), then N10D targeted (by inferred date), then rest
+    const sorted = sortOrdersByCategory(categorized);
+    
+    finalLineOrders[line] = sorted;
+  });
+  
+  // === PHASE 5: APPLY CHANGEOVERS ===
+  allLines.forEach(line => {
+    const orders = finalLineOrders[line] || [];
+    if (orders.length > 0) {
+      calculatePreviewChangeovers(orders, changeoverRules);
+    }
+  });
+  
+  return { lineOrdersMap: finalLineOrders, combinedOrders, placementLog };
+}
+```
+
+---
+
+## 2. FIND MATCHABLE ORDERS — SCAN ALL LINES
+
+```javascript
+function findMatchableOrders(order, materialCode, formulaVersion, allLines, lineOrdersMap, processedIds, masterData) {
+  const matches = [];
+  
+  for (const line of allLines) {
+    const lineOrders = lineOrdersMap[line] || [];
+    
+    for (const candidate of lineOrders) {
+      // Skip self
+      if (candidate.id === order.id) continue;
+      
+      // Skip already processed
+      if (candidate._processed || processedIds.has(candidate.id)) continue;
+      
+      // Skip non-active statuses
+      if (['Done', 'Cancel PO', 'In Production', 'On-going'].includes(candidate.status)) continue;
+      
+      // Match: same material code + formula version
+      const candidateMaterial = String(candidate.material_code_fg || '').trim();
+      const candidateFormula = candidate.formula_version || '—';
+      
+      if (candidateMaterial !== materialCode) continue;
+      if (candidateFormula !== formulaVersion) continue;
+      
+      const candidateVolume = parseFloat(candidate.volume) || parseFloat(candidate.total_volume_mt) || 0;
+      const candidateLine = normalizeLine(candidate.feedmill_line || candidate._originalLine);
+      
+      // Get historical run rate for this product on the candidate's line
+      const runRateOnLine = getProductRunRateOnLine(candidate, candidateLine, masterData);
+      
+      matches.push({
+        order: candidate,
+        volume: candidateVolume,
+        line: candidateLine,
+        isPlanned: candidate._isPlanned || candidate.status === 'Planned',
+        runRate: runRateOnLine,
+      });
+    }
+  }
+  
+  // Sort matches: lower MT first, then higher run rate as tiebreaker
+  matches.sort((a, b) => {
+    const volumeDiff = a.volume - b.volume;
+    if (Math.abs(volumeDiff) > 0.01) return volumeDiff;
+    
+    // Same volume — higher run rate wins
+    return (b.runRate || 0) - (a.runRate || 0);
+  });
+  
+  return matches;
+}
+
+function getProductRunRateOnLine(order, line, masterData) {
+  const materialCode = String(order.material_code_fg || '').trim();
+  
+  const mdEntry = masterData.find(md => 
+    String(md.material_code_fg || '').trim() === materialCode
+  );
+  
+  if (!mdEntry) return 0;
+  
+  // Get run rate for this specific line
+  const lineNumber = line.match(/\d+/)?.[0];
+  const runRateKey = `run_rate_line_${lineNumber}`;
+  
+  return parseFloat(mdEntry[runRateKey]) || 0;
+}
+```
+
+---
+
+## 3. COMBINE ORDERS GREEDILY — LOWER MT FIRST, 180 MT CAP
+
+```javascript
+const MAX_COMBINE_MT = 180;
+
+function combineOrdersGreedy(baseOrder, baseVolume, matches, maxMT) {
+  const combined = [];
+  let totalVolume = baseVolume;
+  
+  // matches already sorted: lower MT first, higher run rate tiebreaker
+  for (const match of matches) {
+    if (totalVolume + match.volume <= maxMT) {
+      combined.push(match);
+      totalVolume += match.volume;
+    }
+  }
+  
+  return {
+    combinedOrders: combined,
+    totalVolume: totalVolume,
+    baseOrder: baseOrder,
+    baseVolume: baseVolume,
+  };
+}
+```
+
+---
+
+## 4. PLACE COMBINED ORDER — QUEUE TIME CALCULATION
+
+```javascript
+function placeCombiledOrder(order, combineResult, allLines, lineOrdersMap, lineTotalMT, masterData, processedIds) {
+  const { combinedOrders, totalVolume, baseVolume } = combineResult;
+  
+  const allSubOrders = [
+    { order: order, volume: baseVolume, line: normalizeLine(order.feedmill_line || order._originalLine) },
+    ...combinedOrders.map(m => ({ order: m.order, volume: m.volume, line: m.line }))
+  ];
+  
+  // Check if ANY sub-order is Planned — if so, lock to that line
+  const plannedSubOrder = allSubOrders.find(s => s.order._isPlanned || s.order.status === 'Planned');
+  let destinationLine = null;
+  let wasLockedByPlanned = false;
+  
+  if (plannedSubOrder) {
+    // Lock to the Planned order's line
+    destinationLine = plannedSubOrder.line;
+    wasLockedByPlanned = true;
+  }
+  
+  // Remove ALL constituent orders from their lines
+  allSubOrders.forEach(sub => {
+    const sourceLine = sub.line;
+    lineTotalMT[sourceLine] = (lineTotalMT[sourceLine] || 0) - sub.volume;
+    lineOrdersMap[sourceLine] = (lineOrdersMap[sourceLine] || []).filter(o => o.id !== sub.order.id);
+    sub.order._processed = true;
+    processedIds.add(sub.order.id);
+  });
+  
+  // If not locked by Planned, evaluate queue times
+  let lineScores = [];
+  
+  if (!wasLockedByPlanned) {
+    // Get eligible lines (product can be produced here based on master data run rate > 0)
+    const eligibleLines = allLines.filter(line => 
+      canProduceOnLine(order, line, masterData)
+    );
+    
+    if (eligibleLines.length === 0) {
+      // Fallback: place on original line
+      destinationLine = normalizeLine(order.feedmill_line || order._originalLine);
+    } else {
+      // Calculate queue time for each eligible line
+      lineScores = eligibleLines.map(line => {
+        const currentMT = lineTotalMT[line] || 0;
+        const runRate = getLineRunRate(line);
+        const queueTime = runRate > 0 ? currentMT / runRate : Infinity;
+        const lineNumber = parseInt(line.match(/\d+/)?.[0] || '99');
+        
+        return {
+          line,
+          runRate,
+          totalMTBefore: currentMT,
+          queueTimeBefore: queueTime,
+          totalMTAfter: currentMT + totalVolume,
+          queueTimeAfter: runRate > 0 ? (currentMT + totalVolume) / runRate : Infinity,
+          lineNumber,
+        };
+      });
+      
+      // Sort: lowest queue time, then lowest line number
+      lineScores.sort((a, b) => {
+        const diff = a.queueTimeBefore - b.queueTimeBefore;
+        if (Math.abs(diff) > 0.001) return diff;
+        return a.lineNumber - b.lineNumber;
+      });
+      
+      destinationLine = lineScores[0].line;
+    }
+  }
+  
+  // Build combined order object
+  const baseSubOrder = allSubOrders[0];
+  const combinedOrder = {
+    ...JSON.parse(JSON.stringify(order)),
+    id: order.id,
+    volume: totalVolume,
+    total_volume_mt: totalVolume,
+    feedmill_line: destinationLine,
+    line: destinationLine,
+    status: 'Planned',
+    _isCombined: true,
+    _combinedFrom: allSubOrders.map(s => ({
+      id: s.order.id,
+      line: s.line,
+      fpr: s.order.fpr,
+      volume: s.volume,
+      total_volume_mt: s.volume,
+      item_description: s.order.item_description,
+      form: s.order.form,
+      material_code_fg: s.order.material_code_fg,
+      material_code_sfg: s.order.material_code_sfg,
+      planned_order_fg: s.order.planned_order_fg,
+      planned_order_sfg: s.order.planned_order_sfg,
+      batch_size: s.order.batch_size,
+      batches: s.order.batches,
+      production_time: s.order.production_time,
+      target_avail_date: s.order.target_avail_date,
+      category: s.order.category,
+    })),
+    _combinedFromLines: [...new Set(allSubOrders.map(s => s.line))],
+    _originalLine: normalizeLine(order.feedmill_line || order._originalLine),
+    _movedFromLine: normalizeLine(order.feedmill_line || order._originalLine) !== destinationLine
+      ? normalizeLine(order.feedmill_line || order._originalLine)
+      : null,
+  };
+  
+  // Recalculate batches
+  const batchSize = parseFloat(combinedOrder.batch_size) || 1;
+  combinedOrder.batches = Math.ceil(totalVolume / batchSize);
+  
+  // Place on destination line
+  lineTotalMT[destinationLine] = (lineTotalMT[destinationLine] || 0) + totalVolume;
+  if (!lineOrdersMap[destinationLine]) lineOrdersMap[destinationLine] = [];
+  lineOrdersMap[destinationLine].push(combinedOrder);
+  
+  // Build log entry
+  const fromLines = [...new Set(allSubOrders.map(s => s.line))];
+  const allSameLine = fromLines.length === 1 && fromLines[0] === destinationLine;
+  
+  const changeoversSaved = allSubOrders.length - 1;
+  const baseCO = getBaseChangeover(order.form, getDefaultChangeoverRules()?.baseChangeover);
+  
+  const logEntry = {
+    type: 'combined',
+    product: order.item_description,
+    materialCode: order.material_code_fg,
+    ordersCount: allSubOrders.length,
+    fromLines,
+    toLine: destinationLine,
+    totalVolume,
+    wasLockedByPlanned,
+    individualVolumes: allSubOrders.map(s => ({
+      id: s.order.id,
+      name: s.order.item_description,
+      volume: s.volume,
+      fromLine: s.line,
+      fpr: s.order.fpr,
+    })),
+    lineScores: lineScores.map(ls => ({
+      line: ls.line,
+      runRate: ls.runRate,
+      totalMTBefore: ls.totalMTBefore,
+      queueTimeBefore: ls.queueTimeBefore,
+      totalMTAfter: ls.totalMTAfter,
+      queueTimeAfter: ls.queueTimeAfter,
+    })),
+    bestLineReason: lineScores.length > 0 ? {
+      line: destinationLine,
+      runRate: lineScores[0]?.runRate || getLineRunRate(destinationLine),
+      queueTime: lineScores[0]?.queueTimeBefore || 0,
+      totalMTBefore: lineScores[0]?.totalMTBefore || 0,
+      totalMTAfter: lineScores[0]?.totalMTAfter || totalVolume,
+      queueTimeAfter: lineScores[0]?.queueTimeAfter || 0,
+    } : {
+      line: destinationLine,
+      runRate: getLineRunRate(destinationLine),
+      queueTime: 0,
+      totalMTBefore: 0,
+      totalMTAfter: totalVolume,
+      queueTimeAfter: totalVolume / getLineRunRate(destinationLine),
+    },
+    changeoversSaved,
+    baseChangeover: baseCO,
+    timeSaved: changeoversSaved * baseCO,
+  };
+  
+  return { combinedOrder, logEntry };
+}
+```
+
+---
+
+## 5. EVALUATE AND MOVE SINGLE ORDER (NO COMBINE)
+
+```javascript
+function evaluateAndMoveOrder(order, orderVolume, currentLine, allLines, lineOrdersMap, lineTotalMT, masterData, processedIds) {
+  // Skip if Planned — don't move Planned orders
+  if (order._isPlanned || order.status === 'Planned') {
+    order._processed = true;
+    processedIds.add(order.id);
+    return { logEntry: null };
+  }
+  
+  // Get eligible lines
+  const eligibleLines = allLines.filter(line =>
+    canProduceOnLine(order, line, masterData)
+  );
+  
+  if (eligibleLines.length === 0) {
+    order._processed = true;
+    processedIds.add(order.id);
+    return { logEntry: null };
+  }
+  
+  // Remove from current line first
+  lineTotalMT[currentLine] = (lineTotalMT[currentLine] || 0) - orderVolume;
+  lineOrdersMap[currentLine] = (lineOrdersMap[currentLine] || []).filter(o => o.id !== order.id);
+  
+  // Calculate queue times
+  const lineScores = eligibleLines.map(line => {
+    const currentMT = lineTotalMT[line] || 0;
+    const runRate = getLineRunRate(line);
+    const queueTime = runRate > 0 ? currentMT / runRate : Infinity;
+    const lineNumber = parseInt(line.match(/\d+/)?.[0] || '99');
+    
+    return {
+      line,
+      runRate,
+      totalMTBefore: currentMT,
+      queueTimeBefore: queueTime,
+      totalMTAfter: currentMT + orderVolume,
+      queueTimeAfter: runRate > 0 ? (currentMT + orderVolume) / runRate : Infinity,
+      lineNumber,
+    };
+  });
+  
+  lineScores.sort((a, b) => {
+    const diff = a.queueTimeBefore - b.queueTimeBefore;
+    if (Math.abs(diff) > 0.001) return diff;
+    return a.lineNumber - b.lineNumber;
+  });
+  
+  const bestLine = lineScores[0].line;
+  
+  // Place on best line
+  order.feedmill_line = bestLine;
+  order.line = bestLine;
+  order.status = 'Planned';
+  order._processed = true;
+  processedIds.add(order.id);
+  
+  lineTotalMT[bestLine] = (lineTotalMT[bestLine] || 0) + orderVolume;
+  if (!lineOrdersMap[bestLine]) lineOrdersMap[bestLine] = [];
+  lineOrdersMap[bestLine].push(order);
+  
+  // Only log if it actually moved
+  let logEntry = null;
+  if (bestLine !== currentLine) {
+    order._movedFromLine = currentLine;
+    
+    logEntry = {
+      type: 'moved',
+      product: order.item_description,
+      materialCode: order.material_code_fg,
+      fromLine: currentLine,
+      toLine: bestLine,
+      volume: orderVolume,
+      fpr: order.fpr,
+      lineScores: lineScores.map(ls => ({
+        line: ls.line,
+        runRate: ls.runRate,
+        totalMTBefore: ls.totalMTBefore,
+        queueTimeBefore: ls.queueTimeBefore,
+        totalMTAfter: ls.totalMTAfter,
+        queueTimeAfter: ls.queueTimeAfter,
+      })),
+      bestLineReason: {
+        line: bestLine,
+        runRate: lineScores[0].runRate,
+        queueTime: lineScores[0].queueTimeBefore,
+        totalMTBefore: lineScores[0].totalMTBefore,
+        totalMTAfter: lineScores[0].totalMTAfter,
+        queueTimeAfter: lineScores[0].queueTimeAfter,
+      },
+      fromLineReason: {
+        line: currentLine,
+        queueTime: lineScores.find(ls => ls.line === currentLine)?.queueTimeBefore || 0,
+        runRate: getLineRunRate(currentLine),
+      },
+    };
+  }
+  
+  return { logEntry };
+}
+```
+
+---
+
+## 6. N10D TARGET DATE ASSIGNMENT — REUSE preSortOrders
+
+```javascript
+function sortOrdersByCategory(orders) {
+  // Category A: has real avail date
+  const categoryA = orders.filter(o => {
+    const avail = o.target_avail_date;
+    return avail && /^\d{4}-\d{2}-\d{2}/.test(avail) && !isNaN(Date.parse(avail));
+  }).sort((a, b) => new Date(a.target_avail_date) - new Date(b.target_avail_date));
+  
+  // Category B: N10D targeted (has _targetDate from preSortOrders)
+  const categoryB = orders.filter(o => 
+    o._category === 'B' && o._targetDate
+  ).sort((a, b) => new Date(a._targetDate) - new Date(b._targetDate));
+  
+  // Category C: urgent non-dated
+  const categoryC = orders.filter(o => o._category === 'C');
+  
+  // Category D: stock sufficient
+  const categoryD = orders.filter(o => o._category === 'D');
+  
+  // Everything else
+  const remaining = orders.filter(o => 
+    !categoryA.includes(o) && 
+    !categoryB.includes(o) && 
+    !categoryC.includes(o) && 
+    !categoryD.includes(o)
+  );
+  
+  return [...categoryA, ...categoryB, ...categoryC, ...categoryD, ...remaining];
+}
+```
+
+---
+
+## 7. UPDATE APPLY — SET STATUS TO "Planned"
+
+```javascript
+// In applySequencedResultsToDB — for regular orders:
+await updateOrderMutation.mutateAsync({
+  id: order.id,
+  data: {
+    feedmill_line: line,
+    priority_seq: prioCounter,
+    parent_id: null,
+    volume_override: null,
+    original_order_ids: null,
+    status: 'Planned',  // <-- ADD THIS
+  }
+});
+
+// For combined lead (new record):
+const newLead = await createOrderMutation.mutateAsync({
+  data: {
+    // ... existing fields ...
+    status: 'Planned',  // <-- ADD THIS
+  }
+});
+
+// For children:
+await updateOrderMutation.mutateAsync({
+  id: sub.id,
+  data: {
+    parent_id: newLeadId,
+    feedmill_line: line,
+    priority_seq: null,
+    status: 'Planned',  // <-- ADD THIS
+  }
+});
+```
+
+---
+
+## VERIFICATION
+
+### Phase 1: Order-by-order processing
+1. ✅ Processes Line 1 Prio 1 → Line 7 last prio
+2. ✅ Skips Done, Cancelled, In Production, On-going
+3. ✅ Each order processed once (processedIds tracking)
+4. ✅ Queue times recalculated after every placement
+
+### Phase 1: Combine rules
+5. ✅ Matches by material code + formula version across ALL lines
+6. ✅ Lower MT matches prioritized first
+7. ✅ Same MT → higher run rate on that line wins
+8. ✅ 180 MT cap enforced
+9. ✅ Greedy: adds matches until cap reached
+
+### Phase 1: Planned status lock
+10. ✅ If ANY match is Planned → combined order stays on Planned order's line
+11. ✅ Planned orders are NOT moved to other lines
+12. ✅ Non-Planned orders can be moved based on queue time
+
+### Phase 2: Queue time placement
+13. ✅ ALL constituent orders removed from lines first
+14. ✅ Queue time = current line MT ÷ run rate
+15. ✅ Lowest queue time wins
+16. ✅ Tie-breaker: lowest line number
+17. ✅ Eligible lines only (master data run rate > 0)
+
+### Phase 3: N10D target dates
+18. ✅ preSortOrders reused for categorization
+19. ✅ Non-dated orders get inferred target dates from Future Dispatches
+20. ✅ Orders sorted: dated → N10D targeted → urgent → stock sufficient → rest
+
+### Phase 4: Status update on Apply
+21. ✅ All sequenced orders set to status = "Planned"
+22. ✅ Combined leads set to status = "Planned"
+23. ✅ Children set to status = "Planned"
+24. ✅ Users can see which orders underwent auto-sequence
+
+### Single order with no match
+25. ✅ Still evaluates queue time across eligible lines
+26. ✅ Moves to lowest queue time line if better
+27. ✅ Planned orders stay on their line (not moved)
+```

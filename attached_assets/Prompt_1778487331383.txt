@@ -1,0 +1,216 @@
+```
+Please improve the AI’s date suggestion logic so that if an order’s original Future Dispatch / Avail Date is already past due relative to the current scheduling context, the AI no longer uses that stale date as the active scheduling anchor for suggested production placement.
+
+---
+
+## IMPORTANT SCOPE
+
+This request should affect **only the AI’s internal date suggestion / scheduling decision logic**.
+
+Do **not**:
+- change the visible UI labels
+- overwrite the displayed Avail Date in the table
+- rewrite the original Future Dispatch date in the source data
+- alter the stored original target/avail date values
+
+The original date should remain visible and preserved in the data.
+
+This enhancement is only about how the AI interprets and uses that date when suggesting production placement.
+
+---
+
+## OBJECTIVE
+
+Right now, some orders have an Avail Date / Future Dispatch date such as:
+- `May 9`
+
+But if the current scheduling context is already:
+- `May 11`
+
+then that May 9 date is already overdue.
+
+In that case, the AI should not continue using the overdue date as if it were still the active schedulable day.
+
+Instead, the AI should roll forward and use:
+- the current scheduling date
+or
+- the next feasible date
+
+as the effective anchor for its date suggestion logic.
+
+---
+
+## REQUIRED BEHAVIOR
+
+If an order’s original Future Dispatch / Avail Date is already earlier than the current scheduling context, then:
+
+### Keep:
+- the original Avail Date / Future Dispatch date unchanged in the underlying data
+- the visible UI display unchanged
+
+### But:
+- the AI must treat that original date as overdue
+- the AI must stop using it as the effective date for scheduling suggestions
+- the AI must use the current feasible date / next feasible day as the new internal scheduling anchor
+
+---
+
+## 1. DETECT OVERDUE ORIGINAL DATES
+
+When the AI evaluates an order for sequencing/date placement, it should check whether the order’s original Future Dispatch / Avail Date is already in the past relative to the current scheduling context.
+
+### Example
+- original Avail Date = `May 9`
+- current scheduling date/context = `May 11`
+
+This means the original date is already overdue.
+
+The AI should recognize this explicitly.
+
+---
+
+## 2. ROLL FORWARD THE AI’S EFFECTIVE SCHEDULING DATE
+
+If the original date is overdue, then for AI suggestion logic the effective date should roll forward to:
+- the current scheduling day
+or
+- the next feasible day if the current day is not valid
+
+### Example
+- original Avail Date = `May 9`
+- today/current scheduling context = `May 11`
+
+Then:
+- original stored/displayed date remains `May 9`
+- but the AI’s effective scheduling anchor becomes `May 11`
+
+This prevents the AI from making stale date decisions.
+
+---
+
+## 3. DO NOT OVERWRITE THE ORIGINAL AVAIL / FUTURE DISPATCH DATE
+
+This is critical.
+
+The original Avail Date / Future Dispatch date should remain:
+- preserved in the order data
+- preserved in the visible UI
+- available for overdue/risk interpretation
+
+This enhancement is only for:
+- AI date suggestion logic
+- internal scheduling decision-making
+
+Not for:
+- changing what the user sees in the Avail Date field
+
+---
+
+## 4. APPLY THIS TO AI DATE SUGGESTIONS USED IN MTS FLEXIBILITY / PACKING LOGIC
+
+This roll-forward behavior should apply when the AI is deciding how to place orders on dates, especially for:
+- MTS advancement logic
+- best-fit day packing
+- date-flexible sequence construction
+
+The AI should not try to “schedule onto” a date that is already in the past.
+
+Instead it should use the rolled-forward current feasible date as the starting point for packing decisions.
+
+---
+
+## 5. OVERDUE DATES SHOULD BE TREATED AS RECOVERY SCHEDULING, NOT FUTURE PRESERVATION
+
+If a date is already overdue, the AI should shift from:
+- preserving the original date
+
+to:
+- recovering from the missed date using the earliest feasible current window
+
+So for internal suggestion logic:
+- past date = historical/overdue reference
+- current date = active production placement anchor
+
+This should improve realism and prevent stale scheduling suggestions.
+
+---
+
+## 6. THIS SHOULD WORK WITHOUT CHANGING VISIBLE TABLE FIELDS
+
+After the fix, it is acceptable for the table to still show:
+- Avail Date = `May 9`
+- Start Date = `May 11`
+
+That is fine.
+
+The requested change is not about display.
+
+The requested change is that:
+- the AI should internally use `May 11` as the effective anchor when generating/packing the schedule
+- not continue acting as if `May 9` is still the active possible scheduling date
+
+---
+
+## 7. KEEP ALL OTHER AI LOGIC INTACT
+
+Do not replace or rewrite:
+- AI strategy generation
+- 3-Dimension Analysis logic
+- current sequencing structure
+- recommendation logic
+- visible date fields
+
+Only improve the AI’s internal date interpretation for overdue source dates.
+
+---
+
+## 8. EXAMPLE OF EXPECTED BEHAVIOR
+
+### Current problematic behavior
+- Original Future Dispatch / Avail Date = `May 9`
+- Current scheduling context = `May 11`
+- AI still uses `May 9` as if it is the active anchor for production suggestion
+
+### Expected behavior
+- Original Avail Date remains `May 9` in the UI/data
+- AI recognizes it is overdue
+- AI uses `May 11` (or next feasible day) as the effective suggestion anchor
+- AI builds the schedule from there
+
+This is the intended fix.
+
+---
+
+## 9. ADD DEBUG LOGGING FOR OVERDUE DATE ROLLFORWARD
+
+Temporarily log:
+
+```javascript
+console.debug('[AI Overdue Date Rollforward]', {
+  orderId,
+  originalAvailDate,
+  currentSchedulingDate,
+  isOriginalDateOverdue,
+  effectiveAiSchedulingDate,
+  strategyTitle,
+});
+```
+
+This should help verify:
+- the AI is detecting overdue source dates
+- the AI is rolling forward the effective scheduling anchor
+- the original displayed date remains unchanged
+
+---
+
+## VERIFICATION
+
+1. ✅ The AI detects when an order’s original Future Dispatch / Avail Date is already past due
+2. ✅ The AI no longer uses that stale overdue date as the active scheduling anchor
+3. ✅ The AI rolls forward to the current feasible date / next feasible day for suggestion logic
+4. ✅ The original Avail Date / Future Dispatch date remains unchanged in the data
+5. ✅ The visible UI labels remain unchanged
+6. ✅ The improvement affects only AI date suggestion / scheduling logic
+7. ✅ Overdue orders are now scheduled from a realistic current recovery date instead of a stale past date
+8. ✅ All other AI sequencing logic remains intact
+```

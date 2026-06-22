@@ -1,0 +1,72 @@
+Please revert the recent AI Balanced sorting change partially.
+
+We want to KEEP the previous AI Balanced behavior for date suggestion and placement logic, because it was already closer to the expected behavior.
+
+The issue we only want to fix is the final ordering in the preview table.
+
+## What to keep
+Retain the previous AI Balanced logic that:
+- suggests dates for flexible orders based on safe windows
+- considers light-load days (example: if only one order is to be produced on a day, AI can suggest placing an eligible order on that same day)
+- considers line utilization
+- considers material compatibility and changeover reduction
+- allows practical AI date placement instead of blindly following the original N10D date
+
+Do NOT replace this heuristic with a stricter logic that makes the AI stop suggesting those practical dates.
+
+## What to fix only
+Fix only the final sorting/rendering of AI Balanced results so that the displayed rows are ordered correctly by the resulting effective avail date.
+
+That means:
+- use the AI-suggested date if present
+- otherwise use the order’s target_avail_date
+- then sort ascending by that final effective date for display
+- keep same-date tie-breaking by protected rank, then material compatibility, then stable input order
+
+## Important
+Do NOT change the earlier AI date-placement heuristic.
+Do NOT remove the “light-load day” behavior.
+Do NOT make the AI less flexible in suggesting dates.
+Do NOT turn AI Balanced into purely chronology-first planning.
+
+The goal is:
+- preserve the previous AI Balanced date suggestions
+- only fix the final sort so the visible table is chronologically correct
+
+## Expected behavior
+If AI previously suggested:
+- 28 Apr
+- 30 Apr
+- 14 May
+- 14 May
+- 22 May
+- 22 May
+
+then the final table should display exactly in that order.
+
+But if AI suggested:
+- 28 Apr
+- 30 Apr
+- 22 May
+- 05 May
+
+then the final display should reorder to:
+- 28 Apr
+- 30 Apr
+- 05 May
+- 22 May
+
+without changing the AI’s actual chosen dates.
+
+So again:
+- keep previous AI date placement behavior
+- fix only the final displayed order
+
+## Verification
+1. Previous AI Balanced heuristic is preserved
+2. Light-load day date suggestions are still working
+3. Flexible orders can still receive practical AI-suggested dates
+4. Final AI Balanced table is sorted by effective avail date ascending
+5. Same-date rows still use protected-rank tie-break
+6. Material compatibility is only used as a same-date tie-breaker
+7. No regression in AI date placement behavior

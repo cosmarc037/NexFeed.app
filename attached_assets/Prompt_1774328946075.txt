@@ -1,0 +1,244 @@
+```
+Implement the following fix to the NexFeed application:
+
+---
+
+## FIX: AUTO-SEQUENCE — FULFILLMENT PERCENTAGE TIEBREAKER NOT WORKING
+
+The auto-sequence is not applying the fulfillment percentage tiebreaker when orders share the same target date. Orders with the same target date are being sorted by some other criteria (possibly avail date type or original position) instead of by fulfillment percentage.
+
+---
+
+### THE BUG
+
+**Current (wrong) — Mar 28 orders sorted without fulfillment tiebreaker:**
+```
+Prio 3: Elite XP Startex 80MT     | Target: Mar 28 | Fulfillment: 29.7%
+Prio 4: Elite XP Startex 80MT     | Target: Mar 28 | Fulfillment: 29.7%
+Prio 5: Elite XP Startex 32MT     | Target: Mar 28 | Fulfillment: 29.7%
+Prio 6: Gallimax Pigeon Pellet    | Target: Mar 28 | Fulfillment: 9.2%  ← WRONG POSITION
+Prio 7: Elite XP Startex 20MT     | Target: Mar 28 | Fulfillment: 29.7%
+Prio 8: Elite XP Startex 12MT     | Target: Mar 28 | Fulfillment: 29.7%
+Prio 9: Elite XP Startex 8MT      | Target: Mar 28 | Fulfillment: 29.7%
+```
+
+Gallimax Pigeon Pellet has 9.2% fulfillment (most urgent among Mar 28 orders) but is placed at Prio 6 instead of Prio 3.
+
+**Expected (correct) — sorted by fulfillment % within same target date:**
+```
+Prio 3: Gallimax Pigeon Pellet    | Target: Mar 28 | Fulfillment: 9.2%   ← MOST URGENT
+Prio 4: Elite XP Startex 80MT     | Target: Mar 28 | Fulfillment: 29.7%
+Prio 5: Elite XP Startex 80MT     | Target: Mar 28 | Fulfillment: 29.7%
+Prio 6: Elite XP Startex 32MT     | Target: Mar 28 | Fulfillment: 29.7%
+Prio 7: Elite XP Startex 20MT     | Target: Mar 28 | Fulfillment: 29.7%
+Prio 8: Elite XP Startex 12MT     | Target: Mar 28 | Fulfillment: 29.7%
+Prio 9: Elite XP Startex 8MT      | Target: Mar 28 | Fulfillment: 29.7%
+```
+
+---
+
+### THE FIX
+
+Ensure the sort function actually calculates and compares fulfillment percentages. The issue is likely one of:
+
+1. The fulfillment data is not being fetched/passed to the sort function
+2. The sort has a secondary sort overriding the fulfillment comparison
+3. The fulfillment percentage is not being calculated correctly
+
+**Replace the entire auto-sequence sort function with this corrected version:**
+
+```javascript
+function sortNonDatedOrders(nonDatedOrders, next10DaysData) {
+  
+  // Step 1: Enrich each order with N10D data
+  const enrichedOrders = nonDatedOrders.map(order => {
+    const stockMatch = next10DaysData.find(
+      s => s.material_code === order.material_code_fg
+    );
+    
+    let effectiveDate = null;
+    let fulfillmentPct = 100; // default: fully fulfilled (lowest priority)
+    let stockStatus = 'none';
+    
+    if (stockMatch) {
+      if (stockMatch.target_date) {
+        effectiveDate = new Date(stockMatch.target_date);
+        stockStatus = 'needs_production';
+      } else if (stockMatch.status === 'stock_sufficient') {
+        stockStatus = 'stock_sufficient';
+      }
+      
+      // Calculate fulfillment percentage
+      if (stockMatch.inventory > 0) {
+        fulfillmentPct = (stockMatch.due_for_loading / stockMatch.inventory) * 100;
+      }
+    }
+    
+    // DEBUG — log to verify data is present
+    console.log('Order:', order.material_code_fg, 
+      'Product:', order.item_description,
+      'Target:', effectiveDate,
+      'Fulfillment:', fulfillmentPct.toFixed(1) + '%',
+      'Status:', stockStatus
+    );
+    
+    return {
+      ...order,
+      effectiveDate,
+      fulfillmentPct,
+      stockStatus
+    };
+  });
+  
+  // Step 2: Sort
+  enrichedOrders.sort((a, b) => {
+    
+    // Rule 0: Stock sufficient always last
+    if (a.stockStatus === 'stock_sufficient' && b.stockStatus !== 'stock_sufficient') return 1;
+    if (a.stockStatus !== 'stock_sufficient' && b.stockStatus === 'stock_sufficient') return -1;
+    if (a.stockStatus === 'stock_sufficient' && b.stockStatus === 'stock_sufficient') return 0;
+    
+    // Rule 0b: Orders with date before orders without date
+    if (a.effectiveDate && !b.effectiveDate) return -1;
+    if (!a.effectiveDate && b.effectiveDate) return 1;
+    
+    // Both have effective dates
+    if (a.effectiveDate && b.effectiveDate) {
+      
+      // Rule 1: Earlier date first
+      const dateCompare = a.effectiveDate.getTime() - b.effectiveDate.getTime();
+      if (dateCompare !== 0) return dateCompare;
+      
+      // Rule 2: SAME DATE — lower fulfillment % first (more urgent)
+      // This is the critical tiebreaker
+      const pctDiff = a.fulfillmentPct - b.fulfillmentPct;
+      if (Math.abs(pctDiff) > 0.01) { // use small epsilon for floating point
+        return pctDiff; // lower % comes first
+      }
+      
+      // Rule 3: Same date, same % — higher volume first
+      const volA = a.adjusted_volume || a.volume || 0;
+      const volB = b.adjusted_volume || b.volume || 0;
+      if (volA !== volB) {
+        return volB - volA; // higher volume first
+      }
+      
+      // All same — maintain original order
+      return 0;
+    }
+    
+    // Both have no dates — maintain original order
+    return 0;
+  });
+  
+  // DEBUG — log final sorted order
+  console.log('SORTED ORDER:');
+  enrichedOrders.forEach((o, i) => {
+    console.log(i + 1, o.item_description, 
+      'Date:', o.effectiveDate, 
+      'Fulfillment:', o.fulfillmentPct.toFixed(1) + '%',
+      'Volume:', o.adjusted_volume || o.volume
+    );
+  });
+  
+  return enrichedOrders;
+}
+```
+
+---
+
+### IMPORTANT: FULFILLMENT IS PER PRODUCT, NOT PER ORDER
+
+Multiple orders can share the same material code (e.g., 6 Elite XP Startex orders all have material code 1000000000241). They ALL share the same fulfillment percentage because the N10D data is per PRODUCT, not per order.
+
+```
+Material Code: 1000000000241 (Elite XP Startex)
+Due for Loading: 92.3
+Inventory: 310.6
+Fulfillment: 29.7%
+
+ALL 6 Elite XP Startex orders get: fulfillmentPct = 29.7%
+```
+
+```
+Material Code: 1000000000934 (Gallimax Pigeon Pellet)
+Due for Loading: 2.5
+Inventory: 27.3
+Fulfillment: 9.2%
+
+The 1 Gallimax Pigeon order gets: fulfillmentPct = 9.2%
+```
+
+Since 9.2% < 29.7%, Gallimax Pigeon sorts BEFORE all Elite XP Startex orders when they share the same target date.
+
+---
+
+### EXPECTED VERIFICATION
+
+After fix, console should show:
+
+```
+SORTED ORDER:
+1  Gallimax 3 Maintenance   Date: Mar 19  Fulfillment: 61.8%  Volume: 80
+2  Gallimax Pigeon Pellet    Date: Mar 28  Fulfillment: 9.2%   Volume: 24
+3  Elite XP Startex          Date: Mar 28  Fulfillment: 29.7%  Volume: 80
+4  Elite XP Startex          Date: Mar 28  Fulfillment: 29.7%  Volume: 80
+5  Elite XP Startex          Date: Mar 28  Fulfillment: 29.7%  Volume: 32
+6  Elite XP Startex          Date: Mar 28  Fulfillment: 29.7%  Volume: 20
+7  Elite XP Startex          Date: Mar 28  Fulfillment: 29.7%  Volume: 12
+8  Elite XP Startex          Date: Mar 28  Fulfillment: 29.7%  Volume: 8
+9  Gall 21 Chicken Layer     Date: null    Fulfillment: 3428%  Status: stock_sufficient
+```
+
+Then interleaved with dated orders:
+
+```
+Final sequence:
+Prio 1:  Gallimax 3 Maintenance    | Mar 19 | 61.8%
+Prio 2:  Salto Conditioner         | Mar 22 | dated order (unmoved)
+Prio 3:  Gallimax Pigeon Pellet    | Mar 28 | 9.2%
+Prio 4:  Elite XP Startex 80MT     | Mar 28 | 29.7%
+Prio 5:  Elite XP Startex 80MT     | Mar 28 | 29.7%
+Prio 6:  Elite XP Startex 32MT     | Mar 28 | 29.7%
+Prio 7:  Elite XP Startex 20MT     | Mar 28 | 29.7%
+Prio 8:  Elite XP Startex 12MT     | Mar 28 | 29.7%
+Prio 9:  Elite XP Startex 8MT      | Mar 28 | 29.7%
+Prio 10: Gall 21 Chicken Layer     | —      | Stock Sufficient
+```
+
+---
+
+### REMOVE ANY SECONDARY SORTS
+
+Search the codebase for any other .sort() calls in the auto-sequence flow that might be overriding the fulfillment sort:
+
+- ❌ Sort by avail date type (prio replenish before safety stocks)
+- ❌ Sort by original position
+- ❌ Sort by FPR number
+- ❌ Sort by status
+- ❌ Any sort that runs AFTER the main sort function
+
+**The ONLY sort that should exist for non-dated orders is the one defined above.**
+
+---
+
+### AI INSIGHTS — REFERENCE FULFILLMENT IN EXPLANATION
+
+When the auto-sequence places Gallimax Pigeon before Elite XP Startex:
+
+```
+📋 Sequence Rationale
+
+Gallimax Pigeon Pellet (24 MT) and Elite XP Startex 
+(6 orders, total 232 MT) both have a stock target date 
+of March 28. Gallimax Pigeon Pellet is placed first 
+because its warehouse fulfillment is only 9.2% — the 
+warehouse has loaded just 2.5 MT against a 27.3 MT 
+target, with 90.8% still needed.
+
+Elite XP Startex follows with 29.7% fulfillment 
+(92.3 MT of 310.6 MT target), meaning 70.3% still 
+needed — urgent but slightly less critical than 
+Gallimax Pigeon Pellet.
+```
+```

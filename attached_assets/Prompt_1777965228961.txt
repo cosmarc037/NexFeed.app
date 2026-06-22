@@ -1,0 +1,376 @@
+```
+Fix and improve the combination logic in auto-sequence so it uses the correct MT basis per order before combining, instead of always summing only raw volume.
+
+---
+
+## OBJECTIVE
+
+Update the auto-sequence combination behavior so the combined total MT is calculated using the correct per-order basis:
+
+1. If an order’s MT is app-adjusted (rounded up only because raw MT is not divisible by batch size), use the **raw volume** as the basis for combination
+2. If an order’s MT is manually adjusted by the user (`volume_override`), use the **override volume** as the basis for combination
+3. If an order’s MT is already divisible by batch size and therefore was not app-adjusted and not manually overridden, use the **current/base volume** as the basis for combination
+
+After summing those correct per-order basis volumes, apply the normal batch divisibility adjustment to the final combined order.
+
+---
+
+## PROBLEM TO FIX
+
+Current behavior:
+- combination sums only `total_volume_mt` (raw volume)
+- child order `volume_override` is ignored
+- if the main order has a stale `volume_override`, it can incorrectly carry into the combined order
+- this can produce incorrect combined MT and incorrect production hours
+
+This is not aligned with how users expect combining to behave.
+
+---
+
+## REQUIRED COMBINATION RULES
+
+### Rule 1 — App-adjusted order
+If an order was only rounded up by the app because its raw MT is not divisible by batch size:
+- use the **raw volume** as the combination basis
+
+### Rule 2 — User-adjusted / overridden order
+If an order was manually overridden by the user:
+- use the **override volume** as the combination basis
+
+### Rule 3 — Already divisible / no adjustment case
+If an order is already divisible by batch size and has no user override:
+- use that normal volume as the combination basis
+
+Then:
+- sum the chosen basis volumes
+- round the final combined total up to the nearest batch multiple
+- unless the final sum is already divisible
+
+---
+
+## EXAMPLES TO SUPPORT
+
+### Example 1
+Order A:
+- raw = 4 MT
+- batch size = 3
+- app adjusted effective = 6 MT
+- no user override
+
+Order B:
+- raw = 3 MT
+- batch size = 3
+- divisible already
+
+Combination basis:
+- A uses raw 4
+- B uses 3
+
+Combined basis total:
+- 4 + 3 = 7 MT
+
+Final combined effective:
+- 7 is not divisible by 3
+- round to 9 MT
+
+### Example 2
+Order A:
+- raw = 10 MT
+- batch size = 4
+- app-adjusted would be 12 MT
+- but user override = 8 MT
+
+Order B:
+- raw = 4 MT
+- batch size = 4
+
+Combination basis:
+- A uses override 8
+- B uses 4
+
+Combined basis total:
+- 8 + 4 = 12 MT
+
+Final combined effective:
+- already divisible by 4
+- remain 12 MT
+
+---
+
+## 1. ADD A HELPER TO DETERMINE COMBINATION BASIS PER ORDER
+
+Create a helper that decides which volume to use for each order before combination.
+
+### Suggested helper:
+```javascript
+function getCombinationBasisVolume(order) {
+  const rawVolume = parseFloat(order.total_volume_mt ?? order.volume ?? 0) || 0;
+  const batchSize = parseFloat(order.batch_size ?? order.batchSize ?? 0) || 0;
+  const overrideVolume = parseFloat(order.volume_override);
+
+  const hasUserOverride = !Number.isNaN(overrideVolume);
+  if (hasUserOverride) {
+    return {
+      basisVolume: overrideVolume,
+      basisType: 'user_override',
+      rawVolume,
+      batchSize,
+    };
+  }
+
+  if (batchSize > 0) {
+    const isDivisible = rawVolume % batchSize === 0;
+
+    if (!isDivisible) {
+      return {
+        basisVolume: rawVolume,
+        basisType: 'app_adjusted_use_raw',
+        rawVolume,
+        batchSize,
+      };
+    }
+  }
+
+  return {
+    basisVolume: rawVolume,
+    basisType: 'raw_divisible',
+    rawVolume,
+    batchSize,
+  };
+}
+```
+
+Important:
+- app-adjusted orders should still use raw as input to the combination
+- user override should override everything
+- already-divisible orders just use their normal/raw value
+
+---
+
+## 2. CHANGE COMBINE SUMMATION TO USE COMBINATION BASIS, NOT JUST RAW TOTAL_VOLUME_MT
+
+Current behavior likely looks like:
+```javascript
+const totalVolume =
+  mainOrder.total_volume_mt +
+  ordersToCombine.reduce((s, o) => s + (o.total_volume_mt || 0), 0);
+```
+
+Replace this with logic that uses `getCombinationBasisVolume(order)` for every order in the combine set.
+
+### Suggested implementation:
+```javascript
+function calculateCombinedBasisVolume(orders) {
+  return Number(
+    orders.reduce((sum, order) => {
+      const { basisVolume } = getCombinationBasisVolume(order);
+      return sum + basisVolume;
+    }, 0).toFixed(2)
+  );
+}
+```
+
+Then:
+```javascript
+const combineOrders = [mainOrder, ...ordersToCombine];
+const combinedBasisVolume = calculateCombinedBasisVolume(combineOrders);
+```
+
+---
+
+## 3. APPLY FINAL BATCH ADJUSTMENT ONLY AFTER THE BASIS SUM IS COMPUTED
+
+After you compute the combined basis sum:
+- apply the standard round-up logic to the final combined order total
+- do not round each order individually before summing (except user overrides, which are taken literally)
+
+### Suggested helper:
+```javascript
+function adjustVolumeToBatchCeiling(volume, batchSize) {
+  const v = parseFloat(volume || 0) || 0;
+  const b = parseFloat(batchSize || 0) || 0;
+
+  if (b <= 0) return Number(v.toFixed(2));
+
+  return Number((Math.ceil(v / b) * b).toFixed(2));
+}
+```
+
+Then:
+```javascript
+const finalCombinedVolume = adjustVolumeToBatchCeiling(combinedBasisVolume, combinedBatchSize);
+```
+
+Important:
+- `combinedBatchSize` should be the valid batch size for the combined order
+- do not carry stale override logic into the final combined order
+
+---
+
+## 4. DO NOT CARRY STALE VOLUME_OVERRIDE FROM THE MAIN ORDER INTO THE NEW COMBINED ORDER
+
+This is a known bug risk from the current logic.
+
+If the current implementation does:
+```javascript
+const combinedOrder = {
+  ...mainOrder,
+  total_volume_mt: totalVolume,
+};
+```
+
+then a stale `volume_override` from `mainOrder` may incorrectly remain on the new combined order.
+
+This must be fixed.
+
+### Required behavior:
+When creating the new combined order:
+- explicitly reset/remove inherited child/main order `volume_override`
+- only set a new combined override if the feature truly intends to support that explicitly
+- otherwise let the combined order use the newly computed final combined total
+
+### Example:
+```javascript
+const combinedOrder = {
+  ...mainOrder,
+  total_volume_mt: combinedBasisVolume,
+  volume_override: null, // or undefined
+  _combined_basis_volume: combinedBasisVolume,
+  _combined_effective_volume: finalCombinedVolume,
+};
+```
+
+If your effective volume logic uses `volume_override`, make sure it does NOT accidentally prioritize stale override values.
+
+---
+
+## 5. DEFINE THE FINAL COMBINED ORDER VOLUME FIELDS CLEARLY
+
+For the new combined order, store:
+- combined raw basis total
+- final effective combined total after batch adjustment
+- metadata showing how the total was derived
+
+### Suggested fields:
+```javascript
+combinedOrder.total_volume_mt = combinedBasisVolume;
+combinedOrder.volume_override = null; // unless explicitly set intentionally
+combinedOrder._combined_basis_volume = combinedBasisVolume;
+combinedOrder._combined_effective_volume = finalCombinedVolume;
+combinedOrder._combine_basis_breakdown = combineOrders.map(order => {
+  const result = getCombinationBasisVolume(order);
+  return {
+    order_id: order.id,
+    basisType: result.basisType,
+    rawVolume: result.rawVolume,
+    batchSize: result.batchSize,
+    usedVolume: result.basisVolume,
+  };
+});
+```
+
+This will help for debugging and UI explanation if needed.
+
+---
+
+## 6. ENSURE PRODUCTION HOURS USE THE FINAL COMBINED EFFECTIVE VOLUME
+
+After combination:
+- production hours should use the final combined effective volume
+- not the stale main-order override
+- not the raw basis total unless there was no ceiling adjustment
+
+Make sure the same effective volume source used elsewhere in the app is updated to respect the corrected combined order fields.
+
+### Example:
+```javascript
+function getEffectiveOrderVolume(order) {
+  const overrideVolume = parseFloat(order.volume_override);
+  if (!Number.isNaN(overrideVolume)) return overrideVolume;
+
+  const effectiveCombined = parseFloat(order._combined_effective_volume);
+  if (!Number.isNaN(effectiveCombined)) return effectiveCombined;
+
+  const rawVolume = parseFloat(order.total_volume_mt ?? 0) || 0;
+  const batchSize = parseFloat(order.batch_size ?? 0) || 0;
+
+  return adjustVolumeToBatchCeiling(rawVolume, batchSize);
+}
+```
+
+This prevents stale main-order override values from breaking the new combined hours.
+
+---
+
+## 7. APPLY THE SAME LOGIC IN AUTO-SEQUENCE COMBINATION, SMART COMBINE PREVIEW, AND FINAL COMMIT
+
+Make sure this fix is not only applied in one place.
+
+Wherever combination is used:
+- auto-sequence combine logic
+- SmartCombinePanel preview
+- final combine commit
+- downstream effective-volume calculations
+
+must all use the same rule set.
+
+Otherwise preview and final result may diverge.
+
+---
+
+## 8. UPDATE COMBINE PREVIEW / EXPLANATION TO SHOW THE CORRECT BASIS IF NEEDED
+
+If the UI shows combination reasoning, optionally make it more transparent.
+
+Example:
+- Order A raw 4 MT was app-adjusted individually, but raw 4 MT was used as the combination basis
+- Order B user override 8 MT was used as the combination basis
+- Combined basis total = 12 MT
+- Final combined effective = 12 MT
+
+This is optional for UI, but the logic should at least support the correct values internally.
+
+---
+
+## 9. ADD DEBUG LOGGING FOR COMBINATION BASIS
+
+Temporarily log:
+
+```javascript
+console.debug('[Combine Basis]', {
+  combineOrderIds: combineOrders.map(o => o.id),
+  breakdown: combineOrders.map(order => getCombinationBasisVolume(order)),
+  combinedBasisVolume,
+  combinedBatchSize,
+  finalCombinedVolume,
+});
+```
+
+This helps verify:
+- raw was used for app-adjusted-only orders
+- override was used for user-adjusted orders
+- stale overrides are no longer leaking into final result
+
+---
+
+## 10. VERIFICATION
+
+### Rule behavior
+1. ✅ App-adjusted-only orders use raw volume as the combination basis
+2. ✅ User-overridden orders use override volume as the combination basis
+3. ✅ Already-divisible orders use their normal/raw volume as the combination basis
+4. ✅ Final combined volume is rounded only after the basis sum is calculated
+
+### Bug fixes
+5. ✅ Child order overrides are no longer ignored during combination
+6. ✅ Stale main-order overrides are no longer inherited incorrectly into the combined order
+7. ✅ Production hours for the combined order use the correct final effective combined volume
+
+### Example checks
+8. ✅ Example 1 results in 7 MT basis total, then 9 MT final effective
+9. ✅ Example 2 results in 12 MT basis total, then remains 12 MT final effective
+
+### Consistency
+10. ✅ Auto-sequence combination uses the new logic
+11. ✅ SmartCombinePanel preview uses the same logic
+12. ✅ Final committed combined order matches preview behavior

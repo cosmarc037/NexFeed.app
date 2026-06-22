@@ -1,0 +1,315 @@
+The new **Smart Demand (MT)** column must be **AI-generated**, not a deterministic mathematical forecast computed only in the client.
+
+What is currently implemented is just a weighted/trend-based formula. That is not the intended feature.
+
+Please revise the implementation so that **Smart Demand (MT)** is generated using the app’s existing **AI capability / Azure OpenAI integration**, which is already present in the project and currently used by the **Smart Demand Insights panel** and the **AI chatbot**.
+
+---
+
+## REQUIRED CORRECTION
+
+Replace the current deterministic client-side forecast logic for **Smart Demand (MT)** with an **AI-generated demand estimate**.
+
+The Smart Demand value must come from an AI evaluation of the SKU’s historical demand across all available years.
+
+This means:
+
+- do **not** rely only on weighted averages or linear trend formulas in the frontend
+- do **not** calculate Smart Demand purely with local client-side math
+- do **not** keep the current implementation as the final behavior
+
+Instead:
+
+- send the relevant historical demand data for the SKU to the existing AI layer
+- have the AI return a forecasted demand value
+- display only that numeric value in the **Smart Demand (MT)** column
+
+---
+
+## BUSINESS INTENT
+
+The purpose of this task is specifically to introduce **AI-generated Smart Demand**, not just a traditional forecast formula.
+
+We already have historical demand visible in the Monitoring page.
+
+What we want now is an AI-produced forecast value that analyzes:
+
+- all available historical years
+- recurring month behavior
+- trend direction
+- fluctuations over time
+- meaningful demand patterns in the data
+
+The result shown in the table should still be:
+
+- one numeric demand value in MT
+- no explanation text in the column
+- no tooltip required
+- no visible reasoning in the row
+
+But the number itself must come from AI.
+
+---
+
+## AI SOURCE REQUIREMENT
+
+Use the project’s existing **Azure OpenAI integration** or whichever existing AI service is already wired into:
+
+- Smart Demand Insights
+- AI chatbot
+- any shared AI service/helper already in the codebase
+
+Do not create a separate fake “AI” using pure math and label it AI.
+
+If there is an existing backend endpoint or service wrapper for Azure OpenAI, reuse that pattern.
+
+If needed, create a dedicated backend function or API endpoint for Smart Demand generation.
+
+---
+
+## REQUIRED ARCHITECTURE
+
+The Smart Demand calculation should move to an **AI-backed service flow**, such as:
+
+1. Frontend identifies the row/SKU and selected period
+2. Frontend sends the SKU historical demand context to a backend endpoint
+3. Backend calls Azure OpenAI using the project’s existing AI setup
+4. AI returns a forecasted numeric demand value
+5. Backend returns that value to frontend
+6. Frontend renders it in **Smart Demand (MT)**
+
+Do not call Azure OpenAI directly from insecure client-side code if that would expose secrets.
+
+Prefer server-side AI execution.
+
+---
+
+## INPUT DATA TO AI
+
+For each SKU, provide the AI with enough structured historical context to generate a useful forecast.
+
+Include at minimum:
+
+- SKU / FG code
+- item description if useful
+- selected month
+- selected year
+- all available historical demand records for that SKU
+- preferably grouped by year and month if available
+- any existing historical demand values already stored in the app’s uploaded dataset or backend data source
+
+Example structured input shape:
+
+```json
+{
+  "sku": "1000000002839",
+  "itemDescription": "PS Start Lay coarse mash 750kg totebag",
+  "selectedMonth": "May",
+  "selectedYear": 2025,
+  "historicalDemandRecords": [
+    { "year": 2020, "month": "May", "demandMT": 11230.4 },
+    { "year": 2021, "month": "May", "demandMT": 11810.2 },
+    { "year": 2022, "month": "May", "demandMT": 12140.6 },
+    { "year": 2023, "month": "May", "demandMT": 12090.9 },
+    { "year": 2024, "month": "May", "demandMT": 12479.9 }
+  ]
+}
+```
+
+If monthly granularity exists across more months, include those records too if that improves AI context.
+
+---
+
+## AI PROMPTING REQUIREMENT
+
+Create a backend AI prompt that instructs the model to:
+
+- analyze all available historical demand for the SKU
+- prioritize same-period historical behavior when relevant
+- consider trend and seasonality
+- produce a single forecasted demand value in MT
+- return only structured JSON
+- avoid verbose explanation in the actual API response unless needed internally
+
+Example intent for the AI prompt:
+
+- “You are forecasting product demand in metric tons.”
+- “Use the provided historical demand records for the SKU.”
+- “Estimate the demand for the selected month/year.”
+- “Consider long-term trend, recent trend, and recurring seasonal/monthly patterns.”
+- “Return one numeric Smart Demand value.”
+- “Do not return prose unless explicitly requested.”
+- “Return valid JSON only.”
+
+---
+
+## RESPONSE FORMAT REQUIREMENT
+
+The AI response should be parsed into a strict machine-readable format like:
+
+```json
+{
+  "smartDemandMT": 12840.5
+}
+```
+
+Optionally, backend may also keep internal metadata for logging:
+
+```json
+{
+  "smartDemandMT": 12840.5,
+  "model": "gpt-4o-mini",
+  "usedHistoricalRecords": 5
+}
+```
+
+But the frontend table should only display:
+
+- **12840.5**
+
+No explanation should be shown in the table cell.
+
+---
+
+## UI REQUIREMENT
+
+Keep the table UI simple.
+
+The **Detailed Demand View** table should have:
+
+- existing columns
+- new **Smart Demand (MT)** column
+- numeric display only
+
+No visible reasoning is needed in the row.
+
+If the AI call takes time:
+
+- show a lightweight loading state in the Smart Demand cell, such as `...` or a spinner
+- once loaded, replace it with the numeric value
+- if AI fails, show a safe fallback placeholder like `—` and log the failure
+
+Do not freeze the page while waiting for all AI calls.
+
+---
+
+## PERFORMANCE / BATCHING REQUIREMENT
+
+Do not make the page extremely slow by firing one expensive AI call per row without controls.
+
+Implement a scalable approach.
+
+Preferred options:
+
+### Option A
+Batch multiple SKUs into one backend AI request when feasible
+
+### Option B
+Precompute Smart Demand values server-side for visible rows only
+
+### Option C
+Cache AI results by:
+- SKU
+- selected month
+- selected year
+- historical data signature/hash
+
+At minimum:
+- avoid repeated identical AI calls for the same row context
+- avoid uncontrolled re-fetching on every render
+
+Use memoization and backend caching where possible.
+
+---
+
+## FALLBACK REQUIREMENT
+
+If the AI service is temporarily unavailable:
+
+- do not silently replace the result with the old deterministic formula and pretend it is AI
+- instead show a clear non-value placeholder like `—`
+- optionally log fallback status
+- if a fallback forecast is absolutely needed for continuity, it must be clearly marked internally as fallback/non-AI and must not be misrepresented as AI-generated
+
+The business requirement here is specifically AI-generated Smart Demand.
+
+---
+
+## IMPORTANT CORRECTION TO CURRENT BEHAVIOR
+
+The current deterministic method may remain only as an **internal emergency fallback**, if absolutely necessary, but it must not be the default Smart Demand implementation.
+
+Default behavior must be:
+
+- AI-generated
+- using Azure OpenAI or existing project AI service
+- backend-driven or securely mediated
+- numeric result displayed in the table
+
+---
+
+## DEBUG LOGGING
+
+Temporarily add logs to verify the AI path is truly being used.
+
+```javascript
+console.debug('[Smart Demand AI Request]', {
+  sku,
+  selectedMonth,
+  selectedYear,
+  historicalRecordCount,
+  aiProvider: 'Azure OpenAI',
+});
+```
+
+```javascript
+console.debug('[Smart Demand AI Response]', {
+  sku,
+  smartDemandMT,
+  responseReceived: true,
+});
+```
+
+```javascript
+console.debug('[Smart Demand AI Rendered]', {
+  sku,
+  smartDemandMT,
+  rendered: true,
+});
+```
+
+```javascript
+console.debug('[Smart Demand AI Failure]', {
+  sku,
+  errorMessage,
+  fallbackUsed: false,
+});
+```
+
+If any fallback is used, log it explicitly:
+
+```javascript
+console.debug('[Smart Demand Fallback Triggered]', {
+  sku,
+  fallbackType,
+  reason,
+  aiUnavailable: true,
+});
+```
+
+---
+
+## VERIFICATION
+
+Please confirm all of the following after updating:
+
+1. ✅ **Smart Demand (MT)** is no longer computed only by deterministic client-side math  
+2. ✅ The displayed Smart Demand value is generated through the project’s **AI integration**  
+3. ✅ Historical demand for all available years is included in the AI input  
+4. ✅ The frontend displays only a numeric value in MT  
+5. ✅ No visible reasoning/explanation is shown in the table  
+6. ✅ Azure OpenAI (or existing app AI service) is actually invoked for Smart Demand  
+7. ✅ Secrets are not exposed client-side  
+8. ✅ Repeated calls are cached or controlled for performance  
+9. ✅ AI errors do not break the page  
+10. ✅ The implementation does not falsely label deterministic math as AI-generated

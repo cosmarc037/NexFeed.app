@@ -1,0 +1,104 @@
+Please update the Monitoring / SKU Monitoring page with the following UI and table changes.
+
+---
+
+## 1. RENAME THE NAVIGATION AND PAGE TITLE
+
+Please rename:
+
+### In the left-navigation pane
+- `Demand` → **Monitoring**
+
+### In the opened page title / content header
+- `Demand Profile` → **SKU Monitoring**
+
+### Expected result
+Under Dashboard, the sidebar should now show:
+- Overview
+- Analytics
+- Monitoring
+
+When the user opens that page, the page title should display:
+- **SKU Monitoring**
+
+Do not change the route behavior unless necessary.
+This is mainly a labeling update.
+
+---
+
+## 2. RENAME THE TABLE COLUMNS
+
+Please update the table column labels as follows:
+
+- `Time period` → **Date**
+- `Delivered as of month` → **Delivered to Date**
+- `Coverage (%)` → **Completion (%)**
+
+Please update only the displayed labels and keep the underlying logic intact unless needed for alignment.
+
+---
+
+## 3. APPLY DEFAULT SORTING BY “ACCOUNTED FOR” DESCENDING
+
+Please automatically sort the table by the:
+- `accounted for` column
+
+in:
+- **descending** order
+
+### Goal
+Rows with the highest “accounted for” value should appear at the top of the table by default.
+
+This default sort should be applied automatically when the table loads, unless the user manually changes the sorting afterward.
+
+---
+
+## IMPORTANT
+
+Please preserve the current calculation logic and data behavior.
+This request is mainly for:
+- naming updates
+- cleaner business terminology
+- default table prioritization
+
+Do not break:
+- filters
+- time-grain behavior
+- demand calculations
+- delivered / lined-up / accounted-for logic
+- status logic
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log:
+
+```javascript
+console.debug('[SKU Monitoring Label Update]', {
+  sidebarLabel: 'Monitoring',
+  pageTitle: 'SKU Monitoring',
+});
+```
+
+```javascript
+console.debug('[SKU Monitoring Default Sort]', {
+  sortColumn: 'accountedFor',
+  sortDirection: 'desc',
+  rowCount,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ The left-navigation label is changed from `Demand` to `Monitoring`
+2. ✅ The page title is changed from `Demand Profile` to `SKU Monitoring`
+3. ✅ `Time period` is renamed to `Date`
+4. ✅ `Delivered as of month` is renamed to `Delivered to Date`
+5. ✅ `Coverage (%)` is renamed to `Completion (%)`
+6. ✅ The table is automatically sorted by `accounted for` in descending order on load
+7. ✅ User can still manually change sorting afterward if supported
+8. ✅ Existing demand/monitoring logic remains intact
+9. ✅ No UI or console errors are introduced

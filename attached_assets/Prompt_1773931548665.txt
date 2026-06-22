@@ -1,0 +1,350 @@
+```
+Implement the following changes to the NexFeed application:
+
+---
+
+## AUTO-SEQUENCE PREVIEW — IMPROVED DESIGN AND AI INSIGHTS
+
+Redesign the Auto-Sequence preview modal to be more visually engaging and include comprehensive AI insights.
+
+---
+
+### 1. MODAL HEADER — CLEANER DESIGN
+
+**Current:**
+```
+Auto-Sequence Preview — Feedmill 1 Line 1                    ✕
+Orders: 10 | With deadline: 9 | No deadline: 0 | Stock sufficient: 1 | Conflicts: 0
+```
+
+**Updated:**
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│                                                                │
+│  ✨ Auto-Sequence Preview                               ✕     │
+│  Feedmill 1 — Line 1                                          │
+│                                                                │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────┐│
+│  │ 10       │ │ 9        │ │ 0        │ │ 1        │ │ 0    ││
+│  │ Orders   │ │ Deadline │ │ No Date  │ │ Stk Suf  │ │Confl.││
+│  └──────────┘ └──────────┘ └──────────┘ └──────────┘ └──────┘│
+│                                                                │
+└────────────────────────────────────────────────────────────────┘
+```
+
+**Modal title:**
+- "✨ Auto-Sequence Preview" — 18px, font-weight 700, dark text (#1a1a1a)
+- ✨ sparkle icon in orange (#fd5108)
+- "Feedmill 1 — Line 1" — 13px, grey (#6b7280), below the title
+
+**Summary metric cards:**
+- 5 small metric cards in a horizontal row below the title.
+- Each card:
+  - Background: white
+  - Border: 1px solid #e5e7eb
+  - Border-radius: 8px
+  - Padding: 10px 16px
+  - Number: 18px, font-weight 700
+  - Label: 10px, grey (#6b7280), uppercase
+  - Width: auto, flex distribution
+
+| Card | Number Color | Label |
+|---|---|---|
+| Orders | Dark text (#1a1a1a) | ORDERS |
+| With Deadline | Blue (#3b82f6) | DEADLINE |
+| No Deadline | Grey (#9ca3af) | NO DATE |
+| Stock Sufficient | Green (#43a047) | STK SUF |
+| Conflicts | Red (#e53935) if > 0, grey if 0 | CONFLICTS |
+
+---
+
+### 2. AI INSIGHTS SECTION — COLLAPSIBLE, WHITE, ABOVE TABLE
+
+Below the summary cards and above the sequence table, add a comprehensive AI insights section.
+
+**Layout:**
+```
+┌────────────────────────────────────────────────────────────────┐
+│  🤖 Sequence Analysis                              ▲ Collapse │
+│                                                                │
+│  [AI insight content]                                          │
+│                                                                │
+└────────────────────────────────────────────────────────────────┘
+```
+
+**Container styling:**
+
+| Property | Value |
+|---|---|
+| Background | White (#ffffff) |
+| Border | 1px solid #e5e7eb |
+| Border-radius | 8px |
+| Padding | 16px 20px |
+| Margin | 16px 0 (above and below) |
+| Box shadow | None |
+
+**Header:**
+- "🤖 Sequence Analysis" — 14px, font-weight 600, dark text (#1a1a1a)
+- Collapse/expand toggle on the right: "▲ Collapse" / "▼ Expand" — 11px, grey (#9ca3af), cursor pointer
+- Default state: EXPANDED
+
+**Collapsed state:**
+```
+┌────────────────────────────────────────────────────────────────┐
+│  🤖 Sequence Analysis                              ▼ Expand   │
+└────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+### 3. AI INSIGHT CONTENT — TOPICS AND FORMAT
+
+The AI generates comprehensive insights covering these topics. Each topic is a separate section with a heading.
+
+**Font sizes:**
+- Topic headings: 12px, font-weight 600, dark text (#1a1a1a)
+- Topic body: 11px, regular, grey (#4b5563), line-height 1.6
+- Spacing between topics: 14px
+
+**Separator between topics:** Subtle dashed line (1px dashed #e5e7eb)
+
+---
+
+#### TOPIC A — Sequence Rationale
+
+Explains WHY the AI ordered the sequence this way.
+
+```
+📋 Sequence Rationale
+
+Gallimax 3 Maintenance was placed first (Prio 1) because 
+stock level data shows a target date of March 19 — the 
+earliest deadline among all orders. Warehouse loading will 
+reach the 74.9 MT inventory target by March 20 if this 
+order isn't produced beforehand.
+
+Salto Conditioner follows at Prio 2 with an actual avail 
+date of March 22, giving sufficient time after Gallimax 3 
+completes.
+
+Elite XP Startex orders (5 orders, 225 MT total) are 
+grouped from Prio 3–5 and 7–9 as they share the same 
+product line. Running them consecutively minimizes 
+changeover and maximizes throughput.
+
+Gall 21 Chicken Layer is placed last (Prio 10) as stock 
+levels show sufficient inventory — no urgent production 
+needed.
+```
+
+---
+
+#### TOPIC B — Production Impact
+
+Quantifies the impact of the proposed sequence.
+
+```
+⚡ Production Impact
+
+This sequence optimizes production for 10 orders totaling 
+459 MT on Line 1.
+
+• Total production time: ~47.8 hours
+• Estimated line utilization: 92%
+• Changeover events: 4 (vs. 7 in original sequence)
+• Changeover time saved: ~1.5 hours
+
+Grouping the 5 Elite XP Startex orders consecutively 
+eliminates 3 changeovers that would occur if they were 
+scattered throughout the schedule.
+```
+
+---
+
+#### TOPIC C — Time Savings
+
+Specific time savings compared to the original/current sequence.
+
+```
+⏱ Time Savings
+
+Compared to the current order sequence:
+
+• Total changeover reduced: 7 → 4 events (−3 changeovers)
+• Time saved: ~1.5 hours (~90 minutes)
+• Earlier completion for urgent orders:
+  - Gallimax 3 Maintenance: completes ~8 hours earlier 
+    (moved from Prio 10 to Prio 1)
+  - Gallimax Pigeon Pellet: completes ~3 hours earlier
+
+Overall, the proposed sequence completes all orders 
+~1.5 hours sooner than the current arrangement.
+```
+
+---
+
+#### TOPIC D — Deadline Compliance
+
+Shows which orders meet their deadlines and which don't.
+
+```
+📅 Deadline Compliance
+
+9 of 10 orders have deadlines (actual or stock-target):
+
+✅ Gallimax 3 Maintenance — Target: Mar 19 — On track
+✅ Salto Conditioner — Avail: Mar 22 — On track
+✅ Elite XP Startex (80 MT) — Target: Mar 28 — On track
+✅ Elite XP Startex (80 MT) — Target: Mar 28 — On track
+✅ Elite XP Startex (30 MT) — Target: Mar 28 — On track
+✅ Gallimax Pigeon Pellet — Target: Mar 28 — On track
+✅ Elite XP Startex (20 MT) — Target: Mar 28 — On track
+✅ Elite XP Startex (10 MT) — Target: Mar 28 — On track
+✅ Elite XP Startex (5 MT) — Target: Mar 28 — On track
+
+⬜ Gall 21 Chicken Layer — Stock sufficient, no deadline
+
+All orders with deadlines are projected to complete on time.
+```
+
+- ✅ Green for on track
+- ⚠ Amber for tight fit (within 12 hours)
+- ❌ Red for will miss deadline
+- ⬜ Grey for no deadline
+
+---
+
+#### TOPIC E — Risk Assessment
+
+Identifies potential risks or concerns.
+
+```
+⚠ Risk Assessment
+
+• Gallimax 3 Maintenance has the tightest deadline 
+  (Target: Mar 19). Any upstream delay could push it 
+  past its target. Recommend setting a start date 
+  immediately to lock in the schedule.
+
+• Elite XP Startex (225 MT total) represents 49% of 
+  total volume on this line. If any material or HA 
+  issue delays one order, it could cascade to all 5.
+
+• No start dates are currently set. Completion dates 
+  cannot be calculated until a start date is provided 
+  for at least Prio 1.
+```
+
+---
+
+#### TOPIC F — Recommendations
+
+Actionable next steps.
+
+```
+💡 Recommendations
+
+1. Set a start date for Prio 1 (Gallimax 3 Maintenance) 
+   immediately. Suggest starting no later than March 18, 
+   6:00 AM to meet the March 19 target.
+
+2. Consider combining the smaller Elite XP Startex orders 
+   (5 MT, 10 MT, 20 MT) to reduce changeovers further. 
+   Use Smart Combine for this.
+
+3. Monitor Gall 21 Chicken Layer stock levels — while 
+   currently sufficient, restocking may be needed in 
+   the next cycle.
+
+4. Click "Apply to Schedule" to apply this sequence, 
+   then set start dates to lock in completion times.
+```
+
+---
+
+### 4. SEQUENCE TABLE — VISUAL IMPROVEMENTS
+
+Below the AI insights, the sequence table with improved styling.
+
+**Table container:**
+
+| Property | Value |
+|---|---|
+| Background | White |
+| Border | 1px solid #e5e7eb |
+| Border-radius | 8px |
+| Overflow | Auto (scrollable) |
+| Max-height | 400px (scrollable if many orders) |
+
+**Table header:**
+- Sticky top when scrolling within the table.
+- Background: #f9fafb (very light grey)
+- Font: 10px, uppercase, grey (#6b7280), font-weight 600
+- Padding: 8px 12px
+
+**Table rows:**
+- Background: white
+- Border-bottom: 1px solid #f3f4f6
+- Hover: #fafafa
+- Padding: 10px 12px
+- Font: 12px, dark grey (#374151)
+
+**Left border color indicators:**
+- Each row has a 3px left border indicating its status:
+
+| Status | Color |
+|---|---|
+| Actual avail date — on track | Green (#43a047) |
+| Stock target date — on track | Blue (#3b82f6) |
+| Tight fit (within 12 hrs of deadline) | Amber (#f59e0b) |
+| Will miss deadline | Red (#e53935) |
+| No deadline (gap filler) | Light grey (#d1d5db) |
+| Stock sufficient | Dotted grey (#d1d5db) |
+
+**Prio number styling:**
+- Prio column: 12px, font-weight 700, dark text
+- Circle badge around the number:
+  - Width/height: 24px
+  - Border-radius: 50%
+  - Background: matches left border color (subtle tint version)
+  - Text: matches left border color (darker version)
+  - Example: Green circle with dark green "1" for on-track order
+
+**Avail Date column:**
+- Show the warning/check icons (⚠/✅) as defined for the main table
+- Tooltip on hover shows target date details
+
+---
+
+### 5. BOTTOM BUTTON BAR — CLEANER
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│ [🔄 Re-analyze]  [↩ Reset to Original]       [Cancel]  [Apply to Schedule] │
+└────────────────────────────────────────────────────────────────┘
+```
+
+**Button bar styling:**
+
+| Property | Value |
+|---|---|
+| Background | White |
+| Border-top | 1px solid #e5e7eb |
+| Padding | 12px 24px |
+| Position | Sticky bottom of the modal |
+
+**Buttons:**
+
+| Button | Style |
+|---|---|
+| 🔄 Re-analyze | Orange outline. Border: 1px solid #fd5108. Text: #fd5108, 12px. Hover: filled orange, white text. |
+| ↩ Reset to Original | Grey outline. Border: 1px solid #d1d5db. Text: #6b7280, 12px. Hover: darker border. |
+| Cancel | Grey outline. Same as Reset. |
+| Apply to Schedule | Orange filled (#fd5108). Text: white, 12px, font-weight 600. Hover: darker orange. |
+
+**Layout:**
+- Re-analyze and Reset on the LEFT side.
+- Cancel and Apply to Schedule on the RIGHT side.
+- Gap between left and right groups: flex spacer.
+```

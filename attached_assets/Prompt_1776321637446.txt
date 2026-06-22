@@ -1,0 +1,644 @@
+```
+Fix the upload flow — save to DB first, then auto-sequence on real DB orders:
+
+---
+
+## 1. UPDATED UPLOAD FLOW
+
+```javascript
+async function handleOrderUpload(file) {
+  try {
+    // Step 1: Parse the file
+    const parsedOrders = await parseOrderFile(file);
+    
+    if (parsedOrders.length === 0) {
+      toast.error('No orders found in the uploaded file.');
+      return;
+    }
+    
+    // Step 2: Check if Future Dispatches is uploaded
+    const n10dData = queryClient.getQueryData(["n10d"]) || [];
+    const hasN10D = n10dData.length > 0;
+    
+    // Step 3: Check if all lines were blank BEFORE upload
+    const existingOrders = queryClient.getQueryData(["orders"]) || [];
+    const existingActive = existingOrders.filter(
+      o => o.status !== 'Done' && o.status !== 'Cancel PO'
+    );
+    const allLinesWereBlank = existingActive.length === 0;
+    
+    // Step 4: Show loading overlay
+    setUploadState('saving');
+    
+    // Step 5: Save ALL orders to DB first — they get real IDs
+    const BATCH_SIZE = 10;
+    for (let i = 0; i < parsedOrders.length; i += BATCH_SIZE) {
+      const batch = parsedOrders.slice(i, i + BATCH_SIZE);
+      await Promise.all(
+        batch.map(order => createOrderMutation.mutateAsync({ data: order }))
+      );
+    }
+    
+    console.log(`Saved ${parsedOrders.length} orders to DB`);
+    
+    // Step 6: Refetch to get real DB orders with IDs
+    await queryClient.invalidateQueries({ queryKey: ["orders"] });
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
+    // Step 7: Now trigger auto-sequence on real DB orders
+    setUploadState('sequencing');
+    
+    setUploadContext({
+      allLinesWereBlank,
+      hasExistingOrders: !allLinesWereBlank,
+      hasN10D,
+      uploadedOrderCount: parsedOrders.length
+    });
+    
+    setUploadState(null);
+    setShowUploadAutoSequence(true);
+    
+  } catch (error) {
+    console.error('Upload error:', error);
+    setUploadState(null);
+    toast.error(`Upload failed: ${error.message}`);
+  }
+}
+```
+
+---
+
+## 2. UPLOAD LOADING OVERLAY
+
+```jsx
+function UploadLoadingOverlay({ state }) {
+  if (!state) return null;
+  
+  return (
+    <div className="upload-loading-overlay">
+      <div className="upload-loading-content">
+        <div className="auto-sequence-applying-spinner"></div>
+        {state === 'saving' && (
+          <>
+            <span className="upload-loading-text">Saving orders to database...</span>
+            <span className="upload-loading-sub">Please wait while orders are being processed.</span>
+          </>
+        )}
+        {state === 'sequencing' && (
+          <>
+            <span className="upload-loading-text">Preparing auto-sequence...</span>
+            <span className="upload-loading-sub">Analyzing orders for optimal line assignment.</span>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// In the parent component
+const [uploadState, setUploadState] = useState(null);
+
+{uploadState && <UploadLoadingOverlay state={uploadState} />}
+```
+
+---
+
+## 3. UPDATE UploadAutoSequencePreview — USE REAL DB ORDERS
+
+Since orders are now in the DB, the preview reads from the React Query cache — same as Auto-Sequence (All):
+
+```jsx
+function UploadAutoSequencePreview({
+  uploadContext,
+  masterData,
+  n10dData,
+  changeoverRules,
+  onApplySequence,
+  onUploadOnly,
+  onCancel
+}) {
+  const [isProcessing, setIsProcessing] = useState(true);
+  const [sequencedResults, setSequencedResults] = useState(null);
+  const [originalSnapshot, setOriginalSnapshot] = useState(null);
+  const [summaryStats, setSummaryStats] = useState(null);
+  const [placementLog, setPlacementLog] = useState([]);
+  const [isApplying, setIsApplying] = useState(false);
+  const [activeTab, setActiveTab] = useState('summary');
+  
+  // Combine state
+  const [isCombined, setIsCombined] = useState(false);
+  const [isCombining, setIsCombining] = useState(false);
+  const [preCombineSnapshot, setPreCombineSnapshot] = useState(null);
+  const [preCombinePlacementLog, setPreCombinePlacementLog] = useState([]);
+  const [preCombineStats, setPreCombineStats] = useState(null);
+  
+  // AI state
+  const [aiExplanations, setAiExplanations] = useState(null);
+  const [isLoadingAI, setIsLoadingAI] = useState(false);
+  const [useFallback, setUseFallback] = useState(false);
+  
+  const allLines = ALL_LINES_ORDERED.map(l => normalizeLine(l.line));
+  
+  // READ FROM DB — same as Auto-Sequence (All)
+  const { data: dbOrders = [] } = useQuery({
+    queryKey: ["orders"],
+    queryFn: () => Order.list("-created_date")
+  });
+  
+  const enrichedOrders = useMemo(() => {
+    // Same enrichment logic as the main app
+    return enrichOrders(dbOrders, masterData, n10dData);
+  }, [dbOrders, masterData, n10dData]);
+  
+  useEffect(() => {
+    if (enrichedOrders.length > 0) {
+      runSequenceOnly();
+    }
+  }, [enrichedOrders]);
+  
+  async function runSequenceOnly() {
+    setIsProcessing(true);
+    
+    const activeOrders = enrichedOrders.filter(
+      o => o.status !== 'Done' && o.status !== 'Cancel PO'
+    );
+    
+    // Save original snapshot — REAL DB orders
+    const snapshot = {};
+    allLines.forEach(line => {
+      snapshot[line] = activeOrders
+        .filter(o => normalizeLine(o.feedmill_line) === line)
+        .sort((a, b) => (a.priority_seq || 0) - (b.priority_seq || 0))
+        .map(o => ({ ...JSON.parse(JSON.stringify(o)) }));
+    });
+    setOriginalSnapshot(snapshot);
+    
+    // Run sequence only — same as plant level but no combine
+    const { lineOrdersMap, placementLog: log } = sequenceOnlyAcrossLines(
+      activeOrders, masterData, n10dData, allLines
+    );
+    
+    // Run per-line auto-sequence
+    const results = {};
+    allLines.forEach(line => {
+      const lineOrders = lineOrdersMap[line] || [];
+      if (lineOrders.length === 0) {
+        results[line] = [];
+        return;
+      }
+      
+      const sequenced = runAutoSequence(lineOrders, changeoverRules, masterData, n10dData);
+      const withChangeovers = calculatePreviewChangeovers(sequenced, changeoverRules);
+      
+      const originalLineOrders = snapshot[line] || [];
+      const withMovement = withChangeovers.map((order, newIndex) => {
+        const newPrio = newIndex + 1;
+        const originalIndex = originalLineOrders.findIndex(o => o.id === order.id);
+        let movement = 'same';
+        let movementDelta = 0;
+        
+        if (originalIndex >= 0) {
+          const originalPrio = originalIndex + 1;
+          movementDelta = originalPrio - newPrio;
+          if (movementDelta > 0) movement = 'up';
+          else if (movementDelta < 0) movement = 'down';
+        } else {
+          movement = 'new_to_line';
+        }
+        
+        return {
+          ...order,
+          prio: newPrio,
+          _originalPrio: originalIndex >= 0 ? originalIndex + 1 : -1,
+          _movement: movement,
+          _movementDelta: Math.abs(movementDelta)
+        };
+      });
+      
+      results[line] = withMovement;
+    });
+    
+    setSequencedResults(results);
+    setPlacementLog(log);
+    
+    const stats = calculatePlantSummary(snapshot, results, [], log, allLines);
+    setSummaryStats(stats);
+    
+    setIsProcessing(false);
+    
+    if (log.length > 0) {
+      generateAIExplanations(log);
+    }
+  }
+  
+  async function handleCombineOrders() {
+    if (isCombining) return;
+    setIsCombining(true);
+    
+    // Save pre-combine state
+    setPreCombineSnapshot(JSON.parse(JSON.stringify(sequencedResults)));
+    setPreCombinePlacementLog([...placementLog]);
+    setPreCombineStats({ ...summaryStats });
+    
+    // Get all sequenced orders
+    const allSequencedOrders = [];
+    Object.entries(sequencedResults).forEach(([line, orders]) => {
+      orders.forEach(o => {
+        allSequencedOrders.push({ ...o, line, feedmill_line: line });
+      });
+    });
+    
+    // Run combine — same function as Auto-Sequence (All)
+    const { lineOrdersMap, combinedOrders, placementLog: combinePlacementLog } = plantLevelCombineOnly(
+      allSequencedOrders, masterData, n10dData, allLines
+    );
+    
+    // Re-sequence each line
+    const results = {};
+    allLines.forEach(line => {
+      const lineOrders = lineOrdersMap[line] || [];
+      if (lineOrders.length === 0) {
+        results[line] = [];
+        return;
+      }
+      
+      const sequenced = runAutoSequence(lineOrders, changeoverRules, masterData, n10dData);
+      const withChangeovers = calculatePreviewChangeovers(sequenced, changeoverRules);
+      
+      const originalLineOrders = originalSnapshot[line] || [];
+      const withMovement = withChangeovers.map((order, newIndex) => {
+        const newPrio = newIndex + 1;
+        const originalIndex = originalLineOrders.findIndex(o => o.id === order.id);
+        let movement = 'same';
+        let movementDelta = 0;
+        
+        if (originalIndex >= 0) {
+          const originalPrio = originalIndex + 1;
+          movementDelta = originalPrio - newPrio;
+          if (movementDelta > 0) movement = 'up';
+          else if (movementDelta < 0) movement = 'down';
+        } else {
+          movement = 'new_to_line';
+        }
+        
+        return {
+          ...order,
+          prio: newPrio,
+          _originalPrio: originalIndex >= 0 ? originalIndex + 1 : -1,
+          _movement: movement,
+          _movementDelta: Math.abs(movementDelta)
+        };
+      });
+      
+      results[line] = withMovement;
+    });
+    
+    setSequencedResults(results);
+    
+    const mergedLog = [...placementLog, ...combinePlacementLog];
+    setPlacementLog(mergedLog);
+    
+    const stats = calculatePlantSummary(originalSnapshot, results, combinedOrders, mergedLog, allLines);
+    setSummaryStats(stats);
+    
+    setIsCombined(true);
+    setIsCombining(false);
+    
+    setAiExplanations(null);
+    setUseFallback(false);
+    if (mergedLog.length > 0) {
+      generateAIExplanations(mergedLog);
+    }
+  }
+  
+  function handleUncombineAll() {
+    if (!preCombineSnapshot) return;
+    
+    setSequencedResults(JSON.parse(JSON.stringify(preCombineSnapshot)));
+    setPlacementLog([...preCombinePlacementLog]);
+    setSummaryStats({ ...preCombineStats });
+    
+    setIsCombined(false);
+    setPreCombineSnapshot(null);
+    setPreCombinePlacementLog([]);
+    setPreCombineStats(null);
+    
+    setAiExplanations(null);
+    setUseFallback(false);
+    if (preCombinePlacementLog.length > 0) {
+      generateAIExplanations(preCombinePlacementLog);
+    }
+  }
+  
+  function handleUncombineSingle(line, combinedOrder) {
+    // Same as before — unchanged
+  }
+  
+  async function generateAIExplanations(log) {
+    setIsLoadingAI(true);
+    try {
+      const prompt = buildActionsPrompt(log);
+      const response = await callAI(prompt);
+      const parsed = parseActionsResponse(response, log);
+      if (Object.keys(parsed).length >= log.length * 0.5) {
+        setAiExplanations(parsed);
+      } else {
+        setUseFallback(true);
+      }
+    } catch {
+      setUseFallback(true);
+    }
+    setIsLoadingAI(false);
+  }
+  
+  const activeLines = allLines.filter(line =>
+    (originalSnapshot?.[line]?.length || 0) > 0 ||
+    (sequencedResults?.[line]?.length || 0) > 0
+  );
+  
+  return (
+    <div className="auto-sequence-overlay" onClick={e => e.stopPropagation()}>
+      <div className="auto-sequence-modal" onClick={e => e.stopPropagation()}>
+        {/* Header */}
+        <div className="auto-sequence-header">
+          <div>
+            <h2>✨ Auto-Sequence — Post Upload</h2>
+            <span className="auto-sequence-subtitle">
+              {uploadContext.allLinesWereBlank
+                ? 'All lines were blank — orders auto-assigned to optimal lines'
+                : 'Orders uploaded — review proposed sequence'
+              }
+            </span>
+          </div>
+          <button className="auto-sequence-close" onClick={onCancel} disabled={isApplying}>✕</button>
+        </div>
+        
+        {/* N10D Warning */}
+        {!uploadContext.hasN10D && (
+          <div className="upload-as-warning-banner">
+            <span className="upload-as-warning-icon">⚠️</span>
+            <div className="upload-as-warning-content">
+              <span className="upload-as-warning-title">Future Dispatches not uploaded</span>
+              <span className="upload-as-warning-text">
+                It's recommended to upload Future Dispatches first before uploading orders, 
+                so the app can properly assess demand and stock status for optimal sequencing.
+              </span>
+            </div>
+            <button 
+              className="upload-as-warning-dismiss" 
+              onClick={(e) => e.target.closest('.upload-as-warning-banner').style.display = 'none'}
+            >
+              ✕
+            </button>
+          </div>
+        )}
+        
+        {/* Processing */}
+        {isProcessing && (
+          <div className="upload-as-processing">
+            <div className="auto-sequence-applying-spinner"></div>
+            <span>Analyzing and sequencing orders...</span>
+          </div>
+        )}
+        
+        {!isProcessing && sequencedResults && summaryStats && (
+          <>
+            {/* Stats */}
+            <div className="auto-sequence-stats">
+              <StatBadge label="Orders" value={summaryStats.totalOrdersBefore} />
+              <StatBadge label="Lines Used" value={activeLines.length} />
+              {summaryStats.ordersMovedBetweenLines > 0 && (
+                <StatBadge label="Cross-Line Moves" value={summaryStats.ordersMovedBetweenLines} color="orange" />
+              )}
+              {isCombined && summaryStats.ordersCombined > 0 && (
+                <StatBadge label="Combined Groups" value={summaryStats.ordersCombined} color="green" />
+              )}
+            </div>
+            
+            {/* Tabs */}
+            <div className="plant-preview-tabs">
+              <button
+                className={`plant-preview-tab ${activeTab === 'summary' ? 'active' : ''}`}
+                onClick={() => setActiveTab('summary')}
+              >
+                📊 All Lines Summary
+              </button>
+              {activeLines.map(line => (
+                <button
+                  key={line}
+                  className={`plant-preview-tab ${activeTab === line ? 'active' : ''}`}
+                  onClick={() => setActiveTab(line)}
+                >
+                  {line}
+                </button>
+              ))}
+            </div>
+            
+            {/* Content */}
+            <div className="plant-preview-content">
+              {activeTab === 'summary' && (
+                <PlantSummaryTab
+                  summaryStats={summaryStats}
+                  placementLog={placementLog}
+                  aiExplanations={aiExplanations}
+                  isLoadingAI={isLoadingAI}
+                  useFallback={useFallback}
+                  onRefreshInsights={() => generateAIExplanations(placementLog)}
+                />
+              )}
+              {activeTab !== 'summary' && (
+                <PlantLineTab
+                  line={activeTab}
+                  originalOrders={originalSnapshot[activeTab] || []}
+                  sequencedOrders={sequencedResults[activeTab] || []}
+                  placementLog={placementLog}
+                  aiExplanations={aiExplanations}
+                  isLoadingAI={isLoadingAI}
+                  useFallback={useFallback}
+                  onUncombineSingle={(combinedOrder) => handleUncombineSingle(activeTab, combinedOrder)}
+                />
+              )}
+            </div>
+            
+            {/* Applying overlay */}
+            {isApplying && (
+              <div className="auto-sequence-applying-overlay">
+                <div className="auto-sequence-applying-content">
+                  <div className="auto-sequence-applying-spinner"></div>
+                  <span className="auto-sequence-applying-text">Applying to schedule...</span>
+                  <span className="auto-sequence-applying-sub">Please wait. Do not close this window.</span>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+        
+        {/* Footer */}
+        <div className="auto-sequence-footer">
+          <div className="auto-sequence-footer-left">
+            {!isCombined && !isProcessing && (
+              <button
+                className={`btn-combine-orders ${isCombining ? 'btn-combine-loading' : ''}`}
+                onClick={handleCombineOrders}
+                disabled={isCombining || isApplying}
+              >
+                {isCombining ? (
+                  <>
+                    <span className="btn-apply-spinner"></span>
+                    Combining...
+                  </>
+                ) : (
+                  '🔗 Combine Orders'
+                )}
+              </button>
+            )}
+            {isCombined && (
+              <button
+                className="btn-uncombine-orders"
+                onClick={handleUncombineAll}
+                disabled={isApplying}
+              >
+                ↩ Uncombine Orders
+              </button>
+            )}
+          </div>
+          <div className="auto-sequence-footer-right">
+            <button
+              className="btn-upload-only"
+              onClick={onUploadOnly}
+              disabled={isApplying || isCombining}
+            >
+              Upload Only
+            </button>
+            <button
+              className={`btn-apply ${isApplying ? 'btn-apply-loading' : ''}`}
+              onClick={() => {
+                if (isApplying) return;
+                setIsApplying(true);
+                onApplySequence(sequencedResults);
+              }}
+              disabled={isApplying || isProcessing || isCombining}
+            >
+              {isApplying ? (
+                <>
+                  <span className="btn-apply-spinner"></span>
+                  Applying...
+                </>
+              ) : (
+                'Apply to Schedule'
+              )}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+## 4. WIRE UP — APPLY USES handlePlantApply DIRECTLY
+
+```jsx
+{showUploadAutoSequence && uploadContext && (
+  <UploadAutoSequencePreview
+    uploadContext={uploadContext}
+    masterData={masterData}
+    n10dData={n10dData}
+    changeoverRules={changeoverRules}
+    onApplySequence={async (sequencedResults) => {
+      // SAME function as Auto-Sequence (All)
+      // Orders are already in DB with real IDs
+      await handlePlantApply(sequencedResults);
+      setShowUploadAutoSequence(false);
+    }}
+    onUploadOnly={() => {
+      // Orders already saved to DB — just close
+      setShowUploadAutoSequence(false);
+      toast.success('Orders uploaded. No sequencing applied.');
+    }}
+    onCancel={() => {
+      // Orders already saved to DB — just close
+      setShowUploadAutoSequence(false);
+    }}
+  />
+)}
+```
+
+---
+
+## 5. STYLING FOR UPLOAD LOADING OVERLAY
+
+```css
+.upload-loading-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(255, 255, 255, 0.95);
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.upload-loading-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.upload-loading-text {
+  font-size: 16px;
+  font-weight: 700;
+  color: #1a1a1a;
+}
+
+.upload-loading-sub {
+  font-size: 12px;
+  color: #6b7280;
+}
+```
+
+---
+
+## VERIFICATION
+
+### Upload flow — orders saved FIRST
+1. ✅ File parsed
+2. ✅ Orders saved to DB in batches (get real IDs)
+3. ✅ React Query refetches — orders now in cache with real IDs
+4. ✅ Loading overlay shown during save ("Saving orders to database...")
+5. ✅ Auto-sequence preview opens AFTER save completes
+
+### Preview reads from DB
+6. ✅ Uses useQuery(["orders"]) — same as main app
+7. ✅ enrichedOrders computed from DB data — same enrichment
+8. ✅ All order IDs are real DB IDs (no __pending_)
+9. ✅ Sequence algorithm runs on real DB orders
+
+### Apply uses SAME function
+10. ✅ onApplySequence calls handlePlantApply directly
+11. ✅ No separate upload apply function
+12. ✅ handlePlantApply uses applySequencedResultsToDB
+13. ✅ Same mutations: feedmill_line, priority_seq, volume_override, parent_id, original_order_ids
+
+### Combined orders work
+14. ✅ Lead order: volume_override set, original_order_ids set
+15. ✅ Children: parent_id set to lead's real DB ID
+16. ✅ Blue highlight renders after apply
+17. ✅ Expandable sub-orders visible
+
+### Upload Only
+18. ✅ Orders already in DB — just close preview
+19. ✅ No additional mutations needed
+20. ✅ Orders stay on SAP-assigned lines
+
+### User never sees unsequenced table
+21. ✅ Loading overlay during save
+22. ✅ Preview opens immediately after save
+23. ✅ Table only visible after preview is closed
+```

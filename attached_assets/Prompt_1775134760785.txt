@@ -1,0 +1,757 @@
+```
+Update the following filter configurations from the previous prompt:
+
+---
+
+## UPDATED COLUMN FILTER CONFIGURATIONS
+
+### ITEM DESCRIPTION — TWO SECTIONS IN ONE DROPDOWN
+
+```jsx
+function ItemDescriptionFilter({ column, orders, activeFilter, onApply, onClear, onClose }) {
+  const [selectedItems, setSelectedItems] = useState(
+    new Set(activeFilter?.items || [])
+  );
+  const [selectedCategories, setSelectedCategories] = useState(
+    new Set(activeFilter?.categories || [])
+  );
+  const [itemSearch, setItemSearch] = useState('');
+  
+  const allItems = [...new Set(orders.map(o => o.item_description).filter(Boolean))].sort();
+  const allCategories = [...new Set(orders.map(o => o.category).filter(Boolean))].sort();
+  
+  const filteredItems = allItems.filter(v => 
+    v.toLowerCase().includes(itemSearch.toLowerCase())
+  );
+  
+  return (
+    <div className="filter-dropdown" style={{ minWidth: '260px' }}>
+      <div className="filter-dropdown-header">
+        <span className="filter-dropdown-title">Filter: Item Description</span>
+        <button className="filter-close-btn" onClick={onClose}>✕</button>
+      </div>
+      
+      {/* Section 1: Category */}
+      <div className="filter-section">
+        <div className="filter-section-title">Category</div>
+        <div className="filter-options-list" style={{ maxHeight: '120px' }}>
+          {allCategories.map(cat => (
+            <label key={cat} className="filter-option">
+              <input
+                type="checkbox"
+                checked={selectedCategories.has(cat)}
+                onChange={() => {
+                  const next = new Set(selectedCategories);
+                  if (next.has(cat)) next.delete(cat);
+                  else next.add(cat);
+                  setSelectedCategories(next);
+                }}
+              />
+              <span>{cat}</span>
+            </label>
+          ))}
+        </div>
+      </div>
+      
+      <div className="filter-section-divider" />
+      
+      {/* Section 2: Item */}
+      <div className="filter-section">
+        <div className="filter-section-title">Item</div>
+        <div className="filter-search">
+          <input
+            type="text"
+            placeholder="Search items..."
+            value={itemSearch}
+            onChange={(e) => setItemSearch(e.target.value)}
+            className="filter-search-input"
+          />
+        </div>
+        <div className="filter-actions">
+          <button className="filter-action-btn" onClick={() => setSelectedItems(new Set(allItems))}>Select all</button>
+          <button className="filter-action-btn" onClick={() => setSelectedItems(new Set())}>Deselect all</button>
+        </div>
+        <div className="filter-options-list" style={{ maxHeight: '160px' }}>
+          {filteredItems.map(item => (
+            <label key={item} className="filter-option">
+              <input
+                type="checkbox"
+                checked={selectedItems.has(item)}
+                onChange={() => {
+                  const next = new Set(selectedItems);
+                  if (next.has(item)) next.delete(item);
+                  else next.add(item);
+                  setSelectedItems(next);
+                }}
+              />
+              <span>{item}</span>
+            </label>
+          ))}
+        </div>
+      </div>
+      
+      <div className="filter-dropdown-footer">
+        <button className="filter-clear-btn" onClick={() => { onClear(); onClose(); }}>Clear</button>
+        <button className="filter-apply-btn" onClick={() => {
+          onApply({
+            items: Array.from(selectedItems),
+            categories: Array.from(selectedCategories)
+          });
+          onClose();
+        }}>Apply</button>
+      </div>
+    </div>
+  );
+}
+```
+
+### PRODUCTION TIME — THREE SECTIONS IN ONE DROPDOWN
+
+```jsx
+function ProductionTimeFilter({ column, activeFilter, onApply, onClear, onClose }) {
+  const [prodMin, setProdMin] = useState(activeFilter?.prodMin || '');
+  const [prodMax, setProdMax] = useState(activeFilter?.prodMax || '');
+  const [coMin, setCoMin] = useState(activeFilter?.coMin || '');
+  const [coMax, setCoMax] = useState(activeFilter?.coMax || '');
+  const [rateMin, setRateMin] = useState(activeFilter?.rateMin || '');
+  const [rateMax, setRateMax] = useState(activeFilter?.rateMax || '');
+  
+  return (
+    <div className="filter-dropdown" style={{ minWidth: '240px' }}>
+      <div className="filter-dropdown-header">
+        <span className="filter-dropdown-title">Filter: Production</span>
+        <button className="filter-close-btn" onClick={onClose}>✕</button>
+      </div>
+      
+      {/* Production Hours */}
+      <div className="filter-section">
+        <div className="filter-section-title">Production Hours</div>
+        <div className="filter-range-inputs">
+          <div className="filter-range-field">
+            <label>Min</label>
+            <input type="number" step="0.01" placeholder="Min" value={prodMin}
+              onChange={(e) => setProdMin(e.target.value)} className="filter-number-input" />
+          </div>
+          <span className="filter-range-separator">—</span>
+          <div className="filter-range-field">
+            <label>Max</label>
+            <input type="number" step="0.01" placeholder="Max" value={prodMax}
+              onChange={(e) => setProdMax(e.target.value)} className="filter-number-input" />
+          </div>
+        </div>
+      </div>
+      
+      <div className="filter-section-divider" />
+      
+      {/* Changeover */}
+      <div className="filter-section">
+        <div className="filter-section-title">Changeover</div>
+        <div className="filter-range-inputs">
+          <div className="filter-range-field">
+            <label>Min</label>
+            <input type="number" step="0.01" placeholder="Min" value={coMin}
+              onChange={(e) => setCoMin(e.target.value)} className="filter-number-input" />
+          </div>
+          <span className="filter-range-separator">—</span>
+          <div className="filter-range-field">
+            <label>Max</label>
+            <input type="number" step="0.01" placeholder="Max" value={coMax}
+              onChange={(e) => setCoMax(e.target.value)} className="filter-number-input" />
+          </div>
+        </div>
+      </div>
+      
+      <div className="filter-section-divider" />
+      
+      {/* Run Rate */}
+      <div className="filter-section">
+        <div className="filter-section-title">Run Rate</div>
+        <div className="filter-range-inputs">
+          <div className="filter-range-field">
+            <label>Min</label>
+            <input type="number" step="0.01" placeholder="Min" value={rateMin}
+              onChange={(e) => setRateMin(e.target.value)} className="filter-number-input" />
+          </div>
+          <span className="filter-range-separator">—</span>
+          <div className="filter-range-field">
+            <label>Max</label>
+            <input type="number" step="0.01" placeholder="Max" value={rateMax}
+              onChange={(e) => setRateMax(e.target.value)} className="filter-number-input" />
+          </div>
+        </div>
+      </div>
+      
+      <div className="filter-dropdown-footer">
+        <button className="filter-clear-btn" onClick={() => { onClear(); onClose(); }}>Clear</button>
+        <button className="filter-apply-btn" onClick={() => {
+          onApply({
+            prodMin: prodMin ? parseFloat(prodMin) : null,
+            prodMax: prodMax ? parseFloat(prodMax) : null,
+            coMin: coMin ? parseFloat(coMin) : null,
+            coMax: coMax ? parseFloat(coMax) : null,
+            rateMin: rateMin ? parseFloat(rateMin) : null,
+            rateMax: rateMax ? parseFloat(rateMax) : null,
+          });
+          onClose();
+        }}>Apply</button>
+      </div>
+    </div>
+  );
+}
+```
+
+### HA INFO — THREE SECTIONS (HA Number Range, SCADA Text, PV Text)
+
+```jsx
+function HAInfoFilter({ column, activeFilter, onApply, onClear, onClose }) {
+  const [haMin, setHaMin] = useState(activeFilter?.haMin || '');
+  const [haMax, setHaMax] = useState(activeFilter?.haMax || '');
+  const [scadaText, setScadaText] = useState(activeFilter?.scadaText || '');
+  const [pvText, setPvText] = useState(activeFilter?.pvText || '');
+  
+  return (
+    <div className="filter-dropdown" style={{ minWidth: '240px' }}>
+      <div className="filter-dropdown-header">
+        <span className="filter-dropdown-title">Filter: HA Info</span>
+        <button className="filter-close-btn" onClick={onClose}>✕</button>
+      </div>
+      
+      {/* HA — Number Range */}
+      <div className="filter-section">
+        <div className="filter-section-title">HA</div>
+        <div className="filter-range-inputs">
+          <div className="filter-range-field">
+            <label>Min</label>
+            <input type="number" placeholder="Min" value={haMin}
+              onChange={(e) => setHaMin(e.target.value)} className="filter-number-input" />
+          </div>
+          <span className="filter-range-separator">—</span>
+          <div className="filter-range-field">
+            <label>Max</label>
+            <input type="number" placeholder="Max" value={haMax}
+              onChange={(e) => setHaMax(e.target.value)} className="filter-number-input" />
+          </div>
+        </div>
+      </div>
+      
+      <div className="filter-section-divider" />
+      
+      {/* SCADA — Text Search */}
+      <div className="filter-section">
+        <div className="filter-section-title">SCADA</div>
+        <div className="filter-text-input-container">
+          <input type="text" placeholder="Search SCADA..." value={scadaText}
+            onChange={(e) => setScadaText(e.target.value)} className="filter-text-input" />
+        </div>
+      </div>
+      
+      <div className="filter-section-divider" />
+      
+      {/* PV — Text Search */}
+      <div className="filter-section">
+        <div className="filter-section-title">PV</div>
+        <div className="filter-text-input-container">
+          <input type="text" placeholder="Search PV..." value={pvText}
+            onChange={(e) => setPvText(e.target.value)} className="filter-text-input" />
+        </div>
+      </div>
+      
+      <div className="filter-dropdown-footer">
+        <button className="filter-clear-btn" onClick={() => { onClear(); onClose(); }}>Clear</button>
+        <button className="filter-apply-btn" onClick={() => {
+          onApply({
+            haMin: haMin ? parseFloat(haMin) : null,
+            haMax: haMax ? parseFloat(haMax) : null,
+            scadaText: scadaText,
+            pvText: pvText,
+          });
+          onClose();
+        }}>Apply</button>
+      </div>
+    </div>
+  );
+}
+```
+
+### HA PREP — MULTI-SELECT WITH SPECIFIC OPTIONS
+
+```javascript
+ha_prep: { 
+  type: 'multi-select', 
+  getValues: () => [
+    '-',
+    'On Going',
+    'Done',
+    'Issued 3F',
+    'Issued 2F',
+    'Need to Elevate',
+    'Sacks to Elevate'
+  ]
+}
+```
+
+### STATUS — FULL LIST WITH CORRECT DISPLAY NAMES
+
+```javascript
+status: { 
+  type: 'multi-select', 
+  getValues: () => [
+    'Plotted',
+    'Planned',
+    'Hold',
+    'Cut',
+    'In Production',
+    'On-going batching',
+    'On-going pelleting',
+    'On-going bagging',
+    'Done',
+    'Cancel PO',
+    'Uncombine',
+    'Merge Back',
+    'Custom'
+  ]
+}
+```
+
+For the "Custom" option in the filter engine:
+
+```javascript
+case 'multi-select': {
+  if (filter.values && filter.values.length > 0) {
+    if (columnKey === 'status') {
+      // Special handling for "Custom" option
+      const isCustom = isCustomStatus(value);
+      if (filter.values.includes('Custom') && isCustom) {
+        break; // Passes filter
+      }
+      if (!filter.values.includes(value) && !isCustom) return false;
+      if (!filter.values.includes(value) && isCustom && !filter.values.includes('Custom')) return false;
+    } else {
+      if (!filter.values.includes(value)) return false;
+    }
+  }
+  break;
+}
+```
+
+### AVAIL DATE — DATE RANGE + SUB-TEXT MULTI-SELECT
+
+```jsx
+function AvailDateFilter({ column, orders, activeFilter, onApply, onClear, onClose }) {
+  const [fromDate, setFromDate] = useState(activeFilter?.fromDate || null);
+  const [toDate, setToDate] = useState(activeFilter?.toDate || null);
+  const [selectedSubTexts, setSelectedSubTexts] = useState(
+    new Set(activeFilter?.subTexts || [])
+  );
+  
+  // Get all unique sub-texts from avail dates
+  const allSubTexts = [...new Set(orders.map(o => {
+    if (o._originalAvailDate) return o._originalAvailDate;
+    if (o.avail_date === 'prio replenish') return 'prio replenish';
+    if (o.avail_date === 'safety stocks') return 'safety stocks';
+    if (o.avail_date && o.avail_date.includes('TLD')) return 'TLD';
+    if (o.avail_date && o.avail_date.includes('Sufficient')) return 'Sufficient';
+    return null;
+  }).filter(Boolean))].sort();
+  
+  return (
+    <div className="filter-dropdown" style={{ minWidth: '260px' }}>
+      <div className="filter-dropdown-header">
+        <span className="filter-dropdown-title">Filter: Avail Date</span>
+        <button className="filter-close-btn" onClick={onClose}>✕</button>
+      </div>
+      
+      {/* Section 1: Date Range */}
+      <div className="filter-section">
+        <div className="filter-section-title">Date Range</div>
+        <div className="filter-date-inputs">
+          <div className="filter-date-field">
+            <label>From</label>
+            <DatePickerField value={fromDate} onChange={setFromDate} placeholder="Start" />
+          </div>
+          <div className="filter-date-field">
+            <label>To</label>
+            <DatePickerField value={toDate} onChange={setToDate} placeholder="End" />
+          </div>
+        </div>
+      </div>
+      
+      <div className="filter-section-divider" />
+      
+      {/* Section 2: Sub-text Multi-select */}
+      <div className="filter-section">
+        <div className="filter-section-title">Type</div>
+        <div className="filter-options-list" style={{ maxHeight: '120px' }}>
+          {allSubTexts.map(text => (
+            <label key={text} className="filter-option">
+              <input
+                type="checkbox"
+                checked={selectedSubTexts.has(text)}
+                onChange={() => {
+                  const next = new Set(selectedSubTexts);
+                  if (next.has(text)) next.delete(text);
+                  else next.add(text);
+                  setSelectedSubTexts(next);
+                }}
+              />
+              <span>{text}</span>
+            </label>
+          ))}
+        </div>
+      </div>
+      
+      <div className="filter-dropdown-footer">
+        <button className="filter-clear-btn" onClick={() => { onClear(); onClose(); }}>Clear</button>
+        <button className="filter-apply-btn" onClick={() => {
+          onApply({
+            fromDate: fromDate,
+            toDate: toDate,
+            subTexts: Array.from(selectedSubTexts)
+          });
+          onClose();
+        }}>Apply</button>
+      </div>
+    </div>
+  );
+}
+```
+
+### COMPLETION DATE — DATE RANGE + TIME RANGE
+
+```jsx
+function CompletionDateFilter({ column, activeFilter, onApply, onClear, onClose }) {
+  const [fromDate, setFromDate] = useState(activeFilter?.fromDate || null);
+  const [toDate, setToDate] = useState(activeFilter?.toDate || null);
+  const [fromTime, setFromTime] = useState(activeFilter?.fromTime || '');
+  const [toTime, setToTime] = useState(activeFilter?.toTime || '');
+  
+  return (
+    <div className="filter-dropdown" style={{ minWidth: '260px' }}>
+      <div className="filter-dropdown-header">
+        <span className="filter-dropdown-title">Filter: Completion Date</span>
+        <button className="filter-close-btn" onClick={onClose}>✕</button>
+      </div>
+      
+      {/* Section 1: Date Range */}
+      <div className="filter-section">
+        <div className="filter-section-title">Date Range</div>
+        <div className="filter-date-inputs">
+          <div className="filter-date-field">
+            <label>From</label>
+            <DatePickerField value={fromDate} onChange={setFromDate} placeholder="Start" />
+          </div>
+          <div className="filter-date-field">
+            <label>To</label>
+            <DatePickerField value={toDate} onChange={setToDate} placeholder="End" />
+          </div>
+        </div>
+      </div>
+      
+      <div className="filter-section-divider" />
+      
+      {/* Section 2: Time Range */}
+      <div className="filter-section">
+        <div className="filter-section-title">Time Range</div>
+        <div className="filter-time-inputs">
+          <div className="filter-time-field">
+            <label>From</label>
+            <input type="time" value={fromTime}
+              onChange={(e) => setFromTime(e.target.value)} className="filter-time-input" />
+          </div>
+          <span className="filter-range-separator">—</span>
+          <div className="filter-time-field">
+            <label>To</label>
+            <input type="time" value={toTime}
+              onChange={(e) => setToTime(e.target.value)} className="filter-time-input" />
+          </div>
+        </div>
+      </div>
+      
+      <div className="filter-dropdown-footer">
+        <button className="filter-clear-btn" onClick={() => { onClear(); onClose(); }}>Clear</button>
+        <button className="filter-apply-btn" onClick={() => {
+          onApply({
+            fromDate: fromDate,
+            toDate: toDate,
+            fromTime: fromTime,
+            toTime: toTime,
+          });
+          onClose();
+        }}>Apply</button>
+      </div>
+    </div>
+  );
+}
+```
+
+### END DATE — DATE RANGE + TIME RANGE
+
+Same as Completion Date filter but for End Date:
+
+```jsx
+function EndDateFilter({ column, activeFilter, onApply, onClear, onClose }) {
+  // Identical structure to CompletionDateFilter
+  // Just change title to "Filter: End Date"
+  // Same two sections: Date Range + Time Range
+}
+```
+
+---
+
+## UPDATED FILTER ENGINE
+
+```javascript
+function applyFilters(orders, activeFilters) {
+  if (Object.keys(activeFilters).length === 0) return orders;
+  
+  return orders.filter(order => {
+    for (const [columnKey, filter] of Object.entries(activeFilters)) {
+      
+      switch (columnKey) {
+        
+        case 'item_description': {
+          // Two filters: items and categories
+          if (filter.categories && filter.categories.length > 0) {
+            if (!filter.categories.includes(order.category)) return false;
+          }
+          if (filter.items && filter.items.length > 0) {
+            if (!filter.items.includes(order.item_description)) return false;
+          }
+          break;
+        }
+        
+        case 'production_time': {
+          // Three filters: production hours, changeover, run rate
+          const prodTime = parseFloat(order.production_time) || 0;
+          const changeover = parseFloat(order.changeover) || 0;
+          const runRate = parseFloat(order.run_rate) || 0;
+          
+          if (filter.prodMin !== null && filter.prodMin !== undefined && prodTime < filter.prodMin) return false;
+          if (filter.prodMax !== null && filter.prodMax !== undefined && prodTime > filter.prodMax) return false;
+          if (filter.coMin !== null && filter.coMin !== undefined && changeover < filter.coMin) return false;
+          if (filter.coMax !== null && filter.coMax !== undefined && changeover > filter.coMax) return false;
+          if (filter.rateMin !== null && filter.rateMin !== undefined && runRate < filter.rateMin) return false;
+          if (filter.rateMax !== null && filter.rateMax !== undefined && runRate > filter.rateMax) return false;
+          break;
+        }
+        
+        case 'ha_info': {
+          // Three filters: HA number, SCADA text, PV text
+          const ha = parseFloat(order.ha) || 0;
+          const scada = (order.scada || '').toString().toLowerCase();
+          const pv = (order.pv || '').toString().toLowerCase();
+          
+          if (filter.haMin !== null && filter.haMin !== undefined && ha < filter.haMin) return false;
+          if (filter.haMax !== null && filter.haMax !== undefined && ha > filter.haMax) return false;
+          if (filter.scadaText && filter.scadaText.trim() !== '') {
+            if (!scada.includes(filter.scadaText.toLowerCase())) return false;
+          }
+          if (filter.pvText && filter.pvText.trim() !== '') {
+            if (!pv.includes(filter.pvText.toLowerCase())) return false;
+          }
+          break;
+        }
+        
+        case 'status': {
+          if (filter.values && filter.values.length > 0) {
+            const orderStatus = order.status;
+            const isCustom = isCustomStatus(orderStatus);
+            
+            if (isCustom) {
+              if (!filter.values.includes('Custom')) return false;
+            } else {
+              if (!filter.values.includes(orderStatus)) return false;
+            }
+          }
+          break;
+        }
+        
+        case 'avail_date': {
+          // Date range filter
+          if (filter.fromDate || filter.toDate) {
+            const orderDate = isRealDate(order.avail_date) ? parseDate(order.avail_date) : null;
+            if (!orderDate) {
+              if (filter.fromDate || filter.toDate) {
+                // Has sub-text filter? Check that. Otherwise exclude.
+                if (!filter.subTexts || filter.subTexts.length === 0) return false;
+              }
+            } else {
+              if (filter.fromDate) {
+                const from = parseDate(filter.fromDate);
+                if (from && orderDate < from) return false;
+              }
+              if (filter.toDate) {
+                const to = parseDate(filter.toDate);
+                if (to && orderDate > to) return false;
+              }
+            }
+          }
+          
+          // Sub-text filter
+          if (filter.subTexts && filter.subTexts.length > 0) {
+            const subText = order._originalAvailDate || order.avail_date;
+            let matchesSubText = false;
+            
+            for (const st of filter.subTexts) {
+              if (subText && subText.toLowerCase().includes(st.toLowerCase())) {
+                matchesSubText = true;
+                break;
+              }
+            }
+            
+            if (!matchesSubText) return false;
+          }
+          break;
+        }
+        
+        case 'completion_date':
+        case 'end_date': {
+          const dateField = columnKey === 'completion_date' ? 'completion_date' : 'end_date';
+          const timeField = columnKey === 'completion_date' ? 'completion_time' : 'end_time';
+          
+          const orderDate = order[dateField] ? parseDate(order[dateField]) : null;
+          const orderTime = order[timeField] || '';
+          
+          // Date range
+          if (filter.fromDate || filter.toDate) {
+            if (!orderDate) return false;
+            if (filter.fromDate) {
+              const from = parseDate(filter.fromDate);
+              if (from && orderDate < from) return false;
+            }
+            if (filter.toDate) {
+              const to = parseDate(filter.toDate);
+              if (to && orderDate > to) return false;
+            }
+          }
+          
+          // Time range
+          if (filter.fromTime || filter.toTime) {
+            if (!orderTime) return false;
+            const timeValue = orderTime.replace(/\s+/g, '').toUpperCase();
+            if (filter.fromTime && timeValue < filter.fromTime) return false;
+            if (filter.toTime && timeValue > filter.toTime) return false;
+          }
+          break;
+        }
+        
+        // Default handlers for other columns remain the same
+        default: {
+          const config = COLUMN_FILTER_CONFIG[columnKey];
+          if (!config) continue;
+          
+          const value = order[columnKey];
+          
+          switch (config.type) {
+            case 'multi-select': {
+              if (filter.values && filter.values.length > 0) {
+                if (!filter.values.includes(value)) return false;
+              }
+              break;
+            }
+            case 'text-search': {
+              if (filter.text && filter.text.trim() !== '') {
+                const cellValue = (value || '').toString().toLowerCase();
+                if (!cellValue.includes(filter.text.toLowerCase())) return false;
+              }
+              break;
+            }
+            case 'number-range': {
+              const numValue = parseFloat(value) || 0;
+              if (filter.min !== null && filter.min !== undefined && numValue < filter.min) return false;
+              if (filter.max !== null && filter.max !== undefined && numValue > filter.max) return false;
+              break;
+            }
+            case 'date-range': {
+              if (!value || !isRealDate(value)) {
+                if (filter.from || filter.to) return false;
+                break;
+              }
+              const dateValue = parseDate(value);
+              if (filter.from && dateValue < parseDate(filter.from)) return false;
+              if (filter.to && dateValue > parseDate(filter.to)) return false;
+              break;
+            }
+            case 'toggle': {
+              if (filter.value && filter.value !== 'any') {
+                if (filter.value === 'checked' && !value) return false;
+                if (filter.value === 'unchecked' && value) return false;
+                if (filter.value === 'has_history' && (!order.history || order.history.length === 0)) return false;
+                if (filter.value === 'none' && order.history && order.history.length > 0) return false;
+              }
+              break;
+            }
+          }
+        }
+      }
+    }
+    
+    return true;
+  });
+}
+```
+
+---
+
+## UPDATED COLUMN FILTER CONFIG
+
+```javascript
+const COLUMN_FILTER_CONFIG = {
+  readiness: { type: 'multi-select', getValues: (orders) => [...new Set(orders.map(o => o.readiness).filter(Boolean))] },
+  prio: { type: 'number-range' },
+  fpr: { type: 'text-search' },
+  planned_order: { type: 'text-search' },
+  production_order: { type: 'text-search' },
+  material_code_sfg: { type: 'multi-select', getValues: (orders) => [...new Set(orders.map(o => o.material_code_sfg).filter(Boolean))] },
+  material_code_fg: { type: 'multi-select', getValues: (orders) => [...new Set(orders.map(o => o.material_code_fg).filter(Boolean))] },
+  item_description: { type: 'custom', component: 'ItemDescriptionFilter' },
+  form: { type: 'multi-select', getValues: (orders) => [...new Set(orders.map(o => o.form).filter(Boolean))] },
+  volume: { type: 'number-range' },
+  batch_size: { type: 'number-range' },
+  batches: { type: 'number-range' },
+  bags: { type: 'number-range' },
+  production_time: { type: 'custom', component: 'ProductionTimeFilter' },
+  ha_info: { type: 'custom', component: 'HAInfoFilter' },
+  ha_prep: { type: 'multi-select', getValues: () => ['-', 'On Going', 'Done', 'Issued 3F', 'Issued 2F', 'Need to Elevate', 'Sacks to Elevate'] },
+  status: { type: 'multi-select', getValues: () => ['Plotted', 'Planned', 'Hold', 'Cut', 'In Production', 'On-going batching', 'On-going pelleting', 'On-going bagging', 'Done', 'Cancel PO', 'Uncombine', 'Merge Back', 'Custom'] },
+  start_date: { type: 'date-range' },
+  start_time: { type: 'time-range' },
+  avail_date: { type: 'custom', component: 'AvailDateFilter' },
+  completion_date: { type: 'custom', component: 'CompletionDateFilter' },
+  summary: { type: 'text-search' },
+  fpr_notes: { type: 'text-search' },
+  special_remarks: { type: 'text-search' },
+  threads: { type: 'multi-select', getValues: (orders) => [...new Set(orders.map(o => o.threads).filter(Boolean))] },
+  sacks: { type: 'multi-select', getValues: (orders) => [...new Set(orders.map(o => o.sacks).filter(Boolean))] },
+  markings: { type: 'multi-select', getValues: (orders) => [...new Set(orders.map(o => o.markings).filter(Boolean))] },
+  tags: { type: 'multi-select', getValues: (orders) => [...new Set(orders.map(o => o.tags).filter(Boolean))] },
+  end_date: { type: 'custom', component: 'EndDateFilter' },
+  history: { type: 'toggle', options: [{ value: 'any', label: 'Any' }, { value: 'has_history', label: 'Has history' }, { value: 'none', label: 'None' }] }
+};
+```
+
+---
+
+## SECTION STYLING
+
+```css
+.filter-section {
+  padding: 4px 0;
+}
+
+.filter-section-title {
+  font-size: 10px;
+  font-weight: 600;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 4px 12px;
+}
+
+.filter-section-divider {
+  height: 1px;
+  background: #f3f4f6;
+  margin: 4px 0;
+}
+```
+```

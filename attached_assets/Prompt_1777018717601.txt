@@ -1,0 +1,366 @@
+```
+Fix: Retain changeovers for Done orders and exclude them from changeover calculations:
+
+---
+
+## 1. UPDATE calculatePreviewChangeovers — SKIP DONE ORDERS
+
+```javascript
+function calculatePreviewChangeovers(orders, changeoverRules) {
+  for (let i = 0; i < orders.length; i++) {
+    const currentOrder = orders[i];
+    
+    // DONE orders: keep existing changeover, don't recalculate
+    if (currentOrder.status === 'Done' || currentOrder.status === 'Cancel PO') {
+      // Keep the changeover as-is (don't modify)
+      currentOrder._changeoverCalculated = false;  // Flag that it wasn't recalculated
+      continue;
+    }
+    
+    // Last order on line: no changeover
+    if (i === orders.length - 1) {
+      currentOrder.changeover = 0;
+      currentOrder._changeoverTotal = 0;
+      currentOrder._changeoverDetails = 'Last order — no changeover';
+      currentOrder._changeoverCalculated = true;
+      continue;
+    }
+    
+    // Find next ACTIVE order (skip Done/Cancel orders)
+    let nextOrder = null;
+    for (let j = i + 1; j < orders.length; j++) {
+      if (orders[j].status !== 'Done' && orders[j].status !== 'Cancel PO') {
+        nextOrder = orders[j];
+        break;
+      }
+    }
+    
+    // No active order after this one: no changeover
+    if (!nextOrder) {
+      currentOrder.changeover = 0;
+      currentOrder._changeoverTotal = 0;
+      currentOrder._changeoverDetails = 'No active orders following — no changeover';
+      currentOrder._changeoverCalculated = true;
+      continue;
+    }
+    
+    // Calculate changeover based on NEXT ACTIVE order (not Done/Cancel)
+    const changeover = calculateChangeoverBetween(currentOrder, nextOrder, changeoverRules);
+    currentOrder.changeover = changeover;
+    currentOrder._changeoverTotal = changeover;
+    currentOrder._changeoverDetails = `CO: ${changeover.toFixed(2)} hrs`;
+    currentOrder._changeoverCalculated = true;
+  }
+}
+```
+
+---
+
+## 2. UPDATE cascadeSchedule — SKIP DONE ORDERS IN CHANGEOVER CALCULATION
+
+```javascript
+async function cascadeSchedule(orders, startIndex = 0) {
+  for (let i = startIndex; i < orders.length; i++) {
+    const order = orders[i];
+    
+    // DONE orders: skip calculation, keep as-is
+    if (order.status === 'Done' || order.status === 'Cancel PO' || order.status === 'In Production' || order.status === 'On-going') {
+      console.log(`[Cascade] Skip ${order.item_description} (status: ${order.status})`);
+      continue;
+    }
+    
+    // Calculate changeover to NEXT ACTIVE order (not Done/Cancel)
+    let changeover = 0;
+    let nextActiveOrder = null;
+    
+    for (let j = i + 1; j < orders.length; j++) {
+      if (orders[j].status !== 'Done' && orders[j].status !== 'Cancel PO' && orders[j].status !== 'In Production' && orders[j].status !== 'On-going') {
+        nextActiveOrder = orders[j];
+        break;
+      }
+    }
+    
+    if (nextActiveOrder) {
+      changeover = calculateChangeoverBetween(order, nextActiveOrder, changeoverRules);
+    }
+    
+    order.changeover = changeover;
+    
+    // Calculate production time
+    const volume = parseFloat(order.volume_override || order.volume || order.total_volume_mt) || 0;
+    const runRate = getLineRunRate(normalizeLine(order.feedmill_line));
+    const productionTime = runRate > 0 ? volume / runRate : 0;
+    
+    order.production_time = productionTime;
+    order._productionTimeHrs = productionTime.toFixed(2);
+    
+    // Estimated completion = start time + production time + changeover
+    const startTime = order.start_datetime ? new Date(order.start_datetime) : new Date();
+    const totalHours = productionTime + changeover;
+    const completionTime = new Date(startTime.getTime() + totalHours * 60 * 60 * 1000);
+    
+    order.estimated_completion_date = completionTime.toISOString();
+    
+    console.log(
+      `[Cascade] ${order.item_description?.substring(0, 30)} | ` +
+      `Volume: ${volume} MT | Run Rate: ${runRate}/hr | ` +
+      `Production: ${productionTime.toFixed(2)}h | Changeover: ${changeover.toFixed(2)}h | ` +
+      `Total: ${totalHours.toFixed(2)}h`
+    );
+  }
+}
+```
+
+---
+
+## 3. UPDATE ORDER TABLE DISPLAY — SHOW DONE ORDERS WITH LOCKED CHANGEOVER
+
+```jsx
+// In OrderTable.jsx — render changeover cell
+
+function renderChangeoverCell(order) {
+  const isDone = order.status === 'Done' || order.status === 'Cancel PO';
+  
+  return (
+    <td className={`order-cell changeover-cell ${isDone ? 'changeover-locked' : ''}`}>
+      <span className={`changeover-value ${isDone ? 'changeover-done' : ''}`}>
+        {order.changeover?.toFixed(2) || '0.00'} hrs
+      </span>
+      {isDone && (
+        <span className="changeover-lock-icon" title="Done orders retain changeover — not recalculated">
+          🔒
+        </span>
+      )}
+    </td>
+  );
+}
+```
+
+Styling:
+
+```css
+.changeover-cell {
+  position: relative;
+  min-width: 80px;
+}
+
+.changeover-value {
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.changeover-locked {
+  background: #f3f4f6;
+}
+
+.dark-mode .changeover-locked {
+  background: #2d3748;
+}
+
+.changeover-done {
+  color: #9ca3af;
+  opacity: 0.7;
+}
+
+.changeover-lock-icon {
+  margin-left: 4px;
+  font-size: 11px;
+  cursor: help;
+}
+```
+
+---
+
+## 4. UPDATE APPLYSEQUENCEDRESULTSTODB — PRESERVE DONE ORDER CHANGEOVERS
+
+```javascript
+async function applySequencedResultsToDB(sequencedResults) {
+  const combinedLeadMap = {};
+  const oldLeadsToDelete = new Set();
+  
+  for (const [line, lineOrders] of Object.entries(sequencedResults)) {
+    if (!lineOrders || lineOrders.length === 0) continue;
+    
+    // Filter: only process ACTIVE orders for placement
+    // Done/Cancel orders keep their current values
+    const activeOrders = lineOrders.filter(o =>
+      o.status !== 'Done' && o.status !== 'Cancel PO' && 
+      o.status !== 'In Production' && o.status !== 'On-going'
+    );
+    
+    let prioCounter = 1;
+    
+    for (const order of lineOrders) {
+      // Skip updating Done/Cancel/In Production/On-going orders
+      if (order.status === 'Done' || order.status === 'Cancel PO' || 
+          order.status === 'In Production' || order.status === 'On-going') {
+        console.log(`[Apply] Skipping ${order.item_description} (${order.status}) — preserve as-is`);
+        continue;
+      }
+      
+      // ... existing combined order handling ...
+      
+      if (!order._isCombined || !order._combinedFrom || order._combinedFrom.length <= 1) {
+        // Regular order
+        const updateData = {
+          feedmill_line: line,
+          priority_seq: prioCounter,
+          parent_id: null,
+          status: 'Planned',
+          changeover: order.changeover || 0,  // Preserve the calculated changeover
+        };
+        
+        try {
+          await updateOrderMutation.mutateAsync({
+            id: order.id,
+            data: updateData
+          });
+          prioCounter++;
+        } catch (err) {
+          console.error(`Update ${order.id}:`, err);
+        }
+      }
+    }
+  }
+  
+  // ... rest of apply logic ...
+}
+```
+
+---
+
+## 5. UPDATE ORDER DETAILS DISPLAY — SHOW CHANGEOVER STATUS
+
+```jsx
+// In OrderDetails.jsx — show changeover status
+
+function renderChangeoverInfo(order) {
+  const isDone = order.status === 'Done' || order.status === 'Cancel PO';
+  const isLocked = order.status === 'In Production' || order.status === 'On-going';
+  
+  return (
+    <div className="order-detail-section">
+      <label>Changeover</label>
+      <div className="changeover-info">
+        <span className="changeover-value">
+          {order.changeover?.toFixed(2) || '0.00'} hrs
+        </span>
+        
+        {isDone && (
+          <div className="changeover-status changeover-status-done">
+            <span className="status-icon">🔒</span>
+            <span className="status-text">
+              Retained from schedule — not recalculated for Done orders
+            </span>
+          </div>
+        )}
+        
+        {isLocked && (
+          <div className="changeover-status changeover-status-locked">
+            <span className="status-icon">🔐</span>
+            <span className="status-text">
+              Locked — order is {order.status.toLowerCase()}
+            </span>
+          </div>
+        )}
+        
+        {!isDone && !isLocked && (
+          <div className="changeover-status changeover-status-active">
+            <span className="status-icon">⚙️</span>
+            <span className="status-text">
+              Recalculated based on next order
+            </span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+```
+
+Styling:
+
+```css
+.changeover-info {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  background: var(--color-bg-secondary);
+  border-radius: 4px;
+}
+
+.changeover-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  padding: 4px 6px;
+  border-radius: 3px;
+}
+
+.changeover-status-done {
+  background: #f3f4f6;
+  color: #6b7280;
+}
+
+.dark-mode .changeover-status-done {
+  background: #2d3748;
+  color: #9ca3af;
+}
+
+.changeover-status-locked {
+  background: #fed7aa;
+  color: #92400e;
+}
+
+.dark-mode .changeover-status-locked {
+  background: #3d3200;
+  color: #fbbf24;
+}
+
+.changeover-status-active {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.dark-mode .changeover-status-active {
+  background: #1b3b1b;
+  color: #86efac;
+}
+
+.status-icon {
+  font-size: 12px;
+}
+
+.status-text {
+  flex: 1;
+}
+```
+
+---
+
+## VERIFICATION
+
+### Done orders
+1. ✅ Changeover retained as-is when order status = Done
+2. ✅ Done order changeover NOT recalculated on cascade
+3. ✅ Lock icon (🔒) shown on Done orders in table
+4. ✅ Status message: "Retained from schedule — not recalculated"
+
+### Changeover calculation
+5. ✅ Skips Done/Cancel/In Production/On-going orders in loop
+6. ✅ Finds next ACTIVE order to calculate changeover against
+7. ✅ If no active order after: changeover = 0
+8. ✅ If Done order is last: no changeover calculated for it
+
+### Apply to schedule
+9. ✅ Done orders not updated (preserve current state)
+10. ✅ Active orders get new changeovers
+11. ✅ Changeover values saved to DB
+
+### Order details
+12. ✅ Shows changeover status (Retained/Locked/Active)
+13. ✅ Different icon and color for each status
+14. ✅ Tooltip explains why it's retained/locked
+```

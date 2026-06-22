@@ -1,0 +1,126 @@
+Please simplify the **Add Order** flow so that the user no longer sees a second confirmation modal, and instead reviews the insertion position directly in the first **Add New Order** modal.
+
+---
+
+## 1. REMOVE THE SECOND `CONFIRM NEW ORDER` MODAL
+
+Right now, when the user clicks `+ Add Order`, the first **Add New Order** modal already generates an impact analysis.
+
+However, after clicking **Add Order**, another confirmation modal appears:
+- `Confirm New Order`
+
+Please remove this second confirmation modal.
+
+### Reason
+It creates unnecessary duplication and introduces potential mismatch issues between:
+- the first modal’s impact analysis / insertion position
+- and the second modal’s insertion recommendation / final details
+
+### Expected result
+The Add Order flow should complete directly from the first modal without opening a second confirmation modal.
+
+---
+
+## 2. KEEP THE INSERTION POSITION IN THE FIRST `ADD NEW ORDER` MODAL
+
+Please make sure the first **Add New Order** modal already contains the necessary insertion-position information for review.
+
+### Required behavior
+The user should be able to see in the first modal:
+- insertion position
+- impact analysis
+- downstream effects
+- deadline risk
+- and other relevant recommendation details
+
+### Goal
+The first modal should be the single source of truth for reviewing the add-order placement.
+
+### Expected result
+The user reviews everything in one place and confirms directly there.
+
+---
+
+## 3. DO NOT SHOW A SECOND INSERTION ANALYSIS AFTER THE FIRST ONE
+
+Please avoid generating a second insertion-position or recommendation block in another modal after the first modal already showed it.
+
+### Reason
+This creates a risk of mismatch where:
+- the first modal says one insertion position
+- the second modal says another
+- or the impact analysis differs between the two
+
+### Expected result
+There should only be one reviewed insertion recommendation for Add Order.
+
+---
+
+## 4. USE THE FIRST MODAL’S REVIEWED INSERTION POSITION AS THE FINAL SOURCE OF TRUTH
+
+When the user clicks **Add Order** from the first modal, the app should use the insertion result shown there as the final reviewed insertion recommendation.
+
+### Expected result
+The order should be added based on the insertion position already reviewed in the first modal, without passing through another confirmation layer that may recalculate differently.
+
+---
+
+## 5. KEEP THE ADD-ORDER FLOW CLEANER AND MORE CONSISTENT
+
+Please streamline the Add Order UX so it behaves more like a direct review-and-confirm flow:
+
+1. user opens `Add New Order`
+2. user enters order details
+3. app generates insertion position + impact analysis in the same modal
+4. user clicks `Add Order`
+5. order is inserted
+
+### Expected result
+The flow becomes simpler, clearer, and less error-prone.
+
+---
+
+## IMPORTANT
+
+Please remove the second **Confirm New Order** modal from the **Add Order** workflow.
+
+Instead:
+- keep the insertion position and impact analysis in the first **Add New Order** modal
+- let the user review and confirm directly there
+- and use that reviewed insertion result as the final source of truth
+
+This is needed to avoid mismatches between the first and second modal.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log the simplified Add Order flow.
+
+```javascript
+console.debug('[Add Order Flow Simplified]', {
+  secondConfirmationModalRemoved: true,
+  firstModalContainsInsertionPosition: true,
+  firstModalContainsImpactAnalysis: true,
+});
+```
+
+```javascript
+console.debug('[Add Order Final Insert Source]', {
+  orderId,
+  sourceOfTruth: 'first_add_order_modal',
+  secondConfirmationStepUsed: false,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ The second `Confirm New Order` modal is removed
+2. ✅ The first `Add New Order` modal contains the insertion position
+3. ✅ The first modal contains the impact analysis
+4. ✅ Add Order no longer shows duplicate insertion recommendation screens
+5. ✅ The order is inserted using the first modal’s reviewed recommendation
+6. ✅ The Add Order flow is simpler and more consistent
+7. ✅ No UI errors or console errors are introduced

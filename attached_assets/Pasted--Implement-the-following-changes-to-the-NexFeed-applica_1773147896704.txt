@@ -1,0 +1,156 @@
+```
+Implement the following changes to the NexFeed application:
+
+---
+
+## 1. UNCOMBINE — REMOVE AUTO-GENERATED NOTES FROM FPR NOTES
+
+When orders are uncombined, the system currently appends auto-generated remarks to the FPR Notes field of the affected orders. This should stop. Uncombine events should only be logged in the History column.
+
+**Current behavior (incorrect):**
+- When orders are uncombined, a note like "Uncombined from group: FPR A, FPR B — March 09, 2026 02:30 PM" is appended to each order's FPR Notes field.
+
+**Correct behavior:**
+- When orders are uncombined, NO auto-generated text is added to any order's FPR Notes field.
+- The FPR Notes field remains exactly as it was before the uncombine action.
+- If the lead order had a combine note ("Combined orders: FPR A, FPR B — March 09, 2026 02:30 PM"), that note is REMOVED from the lead order's FPR Notes upon uncombining (since the combine no longer exists).
+- The uncombine event is logged ONLY in the History column audit trail for each affected order:
+  - History entry: "Uncombined from group [Group ID]. Previously combined with FPR [A], FPR [B]. — [Timestamp] by [User]"
+
+**Combine behavior (unchanged — retain):**
+- When orders are combined, the auto-generated combine note ("Combined orders: FPR A, FPR B — [Timestamp]") is still appended to the LEAD order's FPR Notes. This is retained as previously defined.
+- The combine event is also logged in the History column for all orders in the group.
+
+**Summary:**
+
+| Action | FPR Notes | History Column |
+|---|---|---|
+| Combine | Auto-note added to LEAD order only ✅ | Logged for all orders in group ✅ |
+| Uncombine | NO auto-note added. Previous combine note removed from lead. ✅ | Logged for all affected orders ✅ |
+
+---
+
+## 2. COMBINE VOLUME LIMIT — PER-LINE HOURLY CAPACITY
+
+Set a maximum volume limit per individual order that can participate in a combine group, based on the per-line hourly production capacity of the feedmill.
+
+**Per-line hourly capacity:**
+
+| Feedmill | Lines | Per-Line Capacity | Per-Order Combine Limit |
+|---|---|---|---|
+| Feedmill 1 | Line 1, Line 2 | 20 MT/hour | 20 MT |
+| Feedmill 2 | Line 3, Line 4 | 10 MT/hour | 10 MT |
+| Feedmill 3 | Line 6, Line 7 | 10 MT/hour | 10 MT |
+| Powermix | Line 5 | No limit | No combine limit (mixing only, no production capacity constraint) |
+
+**Rule:**
+- An individual order can only be part of a combine group if its Volume (MT) is LESS THAN OR EQUAL TO the per-line hourly capacity for its assigned line.
+- This is a PER-ORDER check, not a per-group check. Each order in the group is validated individually.
+
+**Examples:**
+
+Feedmill 1, Line 1 (limit: 20 MT):
+- Order A: 15 MT ✅ Can be combined
+- Order B: 18 MT ✅ Can be combined
+- Order C: 25 MT ❌ Cannot be combined (exceeds 20 MT)
+- Combining A + B = 33 MT total is allowed (each individual order is ≤ 20 MT)
+
+Feedmill 2, Line 3 (limit: 10 MT):
+- Order A: 8 MT ✅ Can be combined
+- Order B: 12 MT ❌ Cannot be combined (exceeds 10 MT)
+
+**Smart Combine panel behavior:**
+- When generating recommendations, the AI excludes any order whose Volume exceeds the per-line capacity from combine groups.
+- If an order is excluded due to volume, it does not appear in any recommendation card.
+- At the top of the Smart Combine panel, if orders were excluded, show an info banner:
+  - "[X] order(s) excluded from combine recommendations due to volume exceeding per-line capacity ([Y] MT limit for [Line Z])."
+  - Clicking the banner expands a list of excluded orders with their FPR, Item Description, and Volume.
+
+**Manual combine validation:**
+- If the user attempts to manually combine orders and one or more orders exceed the per-line volume limit:
+  - Block the combine action.
+  - Show error message: "Cannot combine: [Item Description] (FPR: [value]) has a volume of [X] MT, which exceeds the per-line capacity of [Y] MT for [Line Z]. Orders must be [Y] MT or less to be eligible for combining."
+
+**Powermix (Line 5):**
+- No volume limit for combining. All orders on Line 5 are eligible for combining regardless of volume.
+
+---
+
+## 3. SMART COMBINE — ENHANCED ORDER DETAILS LAYOUT
+
+Update the individual order rows within each Smart Combine recommendation card to display additional fields (Completion Date, Production Hours) in a structured table-like layout.
+
+**Current order row layout:**
+```
+FPR: 260309                    80 MT  ×
+FG: 5875151            prio replenish
+SFG: 6012345
+```
+
+**Updated order row layout — 3-column table format:**
+
+```
+Column 1 (Left)       Column 2 (Center)         Column 3 (Right)
+─────────────────────────────────────────────────────────────────
+FPR: 260309           4.5 hours                  80 MT            ×
+FG: 5875151           March 21, 2026             March 22, 2026
+SFG: 6012345          06:00 PM
+```
+
+**Column definitions:**
+
+| Row | Column 1 (Left-aligned) | Column 2 (Center-aligned) | Column 3 (Right-aligned) |
+|---|---|---|---|
+| Line 1 | FPR: [value] | [Production Hours] hours | [Volume] MT |
+| Line 2 | FG: [value] | [Completion Date] | [Avail Date] |
+| Line 3 | SFG: [value] (if exists) | [Completion Time] | |
+| Line 4 | PMX: [value] (if exists, Powermix only) | | |
+
+**Column 2 details:**
+- **Line 1 — Production Hours:** Display as "[X.X] hours" or "[X] hours [Y] min" for clarity. Examples: "4.5 hours", "2 hours 15 min", "0.3 hours" (or "19 min" for very short production times — use minutes if less than 1 hour).
+- **Line 2 — Completion Date:** The expected completion date in format "MMMM DD, YYYY" (e.g., "March 21, 2026").
+- **Line 3 — Completion Time:** The expected completion time in 12-hour format "HH:MM AM/PM" (e.g., "06:00 PM").
+
+**Column 3 details:**
+- **Line 1 — Volume:** Bold text, "[X] MT".
+- **Line 2 — Avail Date:** 
+  - If valid date: Dark Grey text, "MMMM DD, YYYY" format.
+  - If non-date value: Orange text (#fd5108), displayed as-is ("prio replenish", "safety stocks", etc.).
+
+**Column 3 label:**
+- Below the Avail Date value, add a subtle grey label "Avail Date" in small text to distinguish it from the Completion Date in Column 2.
+
+**Updated example with all fields:**
+
+```
+─────────────────────────────────────────────────────────────────
+EXISTING ORDER                                              [Grey badge]
+FPR: 260309           4 hours 30 min             80 MT            ×
+FG: 5875151           March 21, 2026             March 22, 2026
+SFG: 6012345          06:00 PM                   Avail Date
+─────────────────────────────────────────────────────────────────
+NEW ORDER                                                   [Green badge]
+FPR: 260311           2 hours 15 min             60 MT            ×
+FG: 5878953           March 23, 2026             March 24, 2026
+SFG: 6012346          08:15 AM                   Avail Date
+─────────────────────────────────────────────────────────────────
+```
+
+**Example with non-date Avail Date:**
+
+```
+─────────────────────────────────────────────────────────────────
+FPR: 260309           19 min                     20 MT            ×
+FG: 5875151           March 10, 2026             prio replenish
+SFG: 6012345          08:19 AM                   Avail Date
+─────────────────────────────────────────────────────────────────
+```
+
+**× (remove) button:**
+- Positioned at the far right of Line 1, after the Volume.
+- Same behavior as before — click to exclude the order from the group.
+
+**Responsive behavior:**
+- If the panel width is narrow, Column 2 and Column 3 may compress but labels should not wrap (use `white-space: nowrap` and truncate with ellipsis + tooltip if needed).
+- Column 1 takes priority for space since FPR/FG/SFG values are critical identifiers.
+```

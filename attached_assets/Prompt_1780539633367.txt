@@ -1,0 +1,208 @@
+Please update the **Auto-Sequence AI** so that the **AI itself sorts the orders**, and so that **effective / suggested date** is treated as a **core ranking factor** in the AI’s ordering decision.
+
+---
+
+## 1. MAKE THE AI ITSELF SORT THE ORDERS
+
+Please make the AI responsible for sorting the orders, not just grouping or narrating them.
+
+### Required behavior
+The AI should return a ranked sequence that already represents the intended final order of the orders.
+
+### Goal
+The AI rank should be the actual basis for the sequence, not just a loose suggestion.
+
+### Expected result
+The visible order in the preview should come directly from the AI-ranked output.
+
+---
+
+## 2. TREAT EFFECTIVE / SUGGESTED DATE AS A CORE RANKING FACTOR
+
+Please make sure the AI gives **effective / suggested date** the same importance as the other major sequencing dimensions.
+
+### Important
+The AI should not treat date as secondary or optional.
+
+### The AI should consider, together:
+- effective / suggested production date
+- future-dispatch urgency / status
+- changeover impact
+- material / category / form / diameter grouping
+- production flow efficiency
+- other existing sequencing context already provided
+
+### Goal
+The AI rank should naturally reflect the correct date-aware order, not just material grouping or changeover optimization.
+
+### Expected result
+Orders with earlier effective/suggested dates should generally be ranked earlier unless the AI has a strong reason otherwise.
+
+---
+
+## 3. USE THE EFFECTIVE / SUGGESTED DATE, NOT JUST THE RAW AVAIL DATE
+
+Because the AI may adjust the intended production timing based on order status (for example MTS flexibility), please make the AI rank using the **effective / suggested date** of the order.
+
+### Important
+Do not rely only on the original raw avail date.
+
+### The AI should consider:
+- original avail date
+- urgency / dispatch status
+- whether the order can be advanced early
+- whether it can be delayed within its allowed window
+- and then determine the effective / suggested production date
+
+### Goal
+The final rank should reflect the actual intended production timing, not just the original date field.
+
+### Expected result
+The AI sorts using the date it actually thinks the order should be produced.
+
+---
+
+## 4. MAKE FUTURE-DISPATCH STATUS A CORE PART OF DATE-AWARE RANKING
+
+Please make sure the AI uses the order’s future-dispatch status in deciding both:
+- the effective / suggested date
+- and the final rank
+
+### Required interpretation
+- **Critical** → should be treated as immediate / today-priority where applicable
+- **Urgent** → should be prioritized early
+- **Monitor** → can be advanced proactively
+- **Sufficient / Flexible / MTS** → may move within the broader allowed planning window
+
+### Goal
+The AI should understand how status affects timing and then rank accordingly.
+
+### Expected result
+The final AI rank reflects both urgency and date logic.
+
+---
+
+## 5. MAKE THE AI RANK DATE-AWARE AND NOT ONLY CHANGEOVER-AWARE
+
+One of the current problems is that the AI sometimes over-prioritizes:
+- grouping
+- changeover minimization
+- material clustering
+
+while not fully respecting date ordering.
+
+### Required improvement
+The AI should balance:
+- date-aware ranking
+- urgency-aware ranking
+- changeover/material grouping
+
+instead of letting grouping dominate the order.
+
+### Goal
+The AI should sequence intelligently without visibly breaking the intended date order.
+
+### Expected result
+The final order should feel both:
+- operationally optimized
+- and chronologically sensible
+
+---
+
+## 6. USE THE AI’S RANK AS THE BASIS FOR FINAL SORTING
+
+Once the AI has assigned the final date-aware rank, please use that rank directly as the basis for:
+- preview order
+- final applied order
+- row sequence shown to users
+
+### Goal
+Avoid disconnect between:
+- AI reasoning
+- visible table order
+- applied sequence
+
+### Expected result
+The final row order should directly reflect the AI rank.
+
+---
+
+## 7. ENSURE ALL ORDERS ARE INCLUDED IN THE AI’S RANKED OUTPUT
+
+Please require the AI to return a ranked result for every input order/entity.
+
+### Goal
+Prevent missing rows from falling outside the AI’s actual sequencing logic.
+
+### Expected result
+The AI output is complete, and every order participates in the rank-based sort.
+
+---
+
+## IMPORTANT
+
+Please make the **AI itself sort the orders**, and ensure that **effective / suggested date** is treated as a **core ranking factor**.
+
+This means:
+- the AI should determine or use the effective/suggested production date
+- the AI should use that date in ranking the orders
+- the AI should balance date, urgency, grouping, and changeover
+- the AI’s returned rank should be the basis for the final sequence shown in the preview and apply flow
+
+The goal is for the AI to produce a rank that is already:
+- date-aware
+- urgency-aware
+- sequencing-aware
+- and suitable to use directly as the order of the rows
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log effective/suggested date usage in AI ranking and final rank sort.
+
+```javascript
+console.debug('[Auto-Sequence AI Date-Aware Ranking]', {
+  strategyId,
+  orders: aiInputOrders?.map(o => ({
+    orderId: o.orderId,
+    rawAvailDate: o.availDate,
+    futureDispatchStatus: o.status,
+    effectiveSuggestedDate: o.effectiveSuggestedDate,
+  })),
+});
+```
+
+```javascript
+console.debug('[Auto-Sequence AI Final Rank Output]', {
+  strategyId,
+  rankedOrders: aiOutput?.sequence?.map(o => ({
+    orderId: o.order_id,
+    aiRank: o.rank,
+    effectiveSuggestedDate: o.suggested_date,
+    futureDispatchStatus: o.status,
+  })),
+});
+```
+
+```javascript
+console.debug('[Auto-Sequence Final Sort Uses AIRank]', {
+  strategyId,
+  previewSortedByAiRank: true,
+  applySortedByAiRank: true,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ The AI is responsible for sorting the orders
+2. ✅ Effective / suggested date is treated as a core ranking factor
+3. ✅ The AI uses effective/suggested date rather than only raw avail date
+4. ✅ Future-dispatch status affects both date reasoning and rank
+5. ✅ The AI balances date logic with grouping/changeover logic
+6. ✅ Final preview is sorted by AI rank
+7. ✅ Applied schedule uses the same AI rank order
+8. ✅ All orders are included in the AI-ranked output
+9. ✅ No UI errors or console errors are introduced

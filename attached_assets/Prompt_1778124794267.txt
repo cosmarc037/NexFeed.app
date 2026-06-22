@@ -1,0 +1,191 @@
+```
+Expand the notification sound behavior so the app also plays a sound when auto-sequence results are successfully applied to schedule.
+
+---
+
+## OBJECTIVE
+
+We already want a notification sound when Plant-Level Auto-Sequence finishes successfully and the preview is ready.
+
+Now extend this so the app also plays a notification sound when the user clicks **Apply to Schedule** and the schedule update succeeds.
+
+This gives users two clear audio notifications:
+1. auto-sequence finished → preview ready
+2. apply to schedule succeeded → changes committed
+
+---
+
+## REQUIRED BEHAVIOR
+
+Play a notification sound when:
+- the user successfully applies the auto-sequence result to schedule
+
+### Trigger condition
+Only play the sound when:
+- Apply to Schedule completes successfully
+- the schedule update is committed
+
+### Do NOT play the sound when:
+- apply fails
+- apply is cancelled
+- apply is blocked by validation
+- no changes were actually committed
+
+---
+
+## 1. REUSE THE EXISTING SUCCESS SOUND OR CREATE A SHARED SUCCESS SOUND HELPER
+
+If a completion sound already exists for auto-sequence completion, reuse the same sound for apply success.
+
+### Recommended:
+Use the same subtle success sound for both:
+- auto-sequence complete
+- apply to schedule complete
+
+This keeps the experience simple and consistent.
+
+### Example helper:
+```javascript
+function playSuccessNotificationSound() {
+  if (!successAudio) return;
+
+  successAudio.currentTime = 0;
+  successAudio.play().catch(() => {
+    // fail silently
+  });
+}
+```
+
+Then this same helper can be called from both success paths.
+
+---
+
+## 2. PLAY THE SOUND ONLY AFTER APPLY TO SCHEDULE SUCCEEDS
+
+The sound must play after the apply operation has actually completed successfully.
+
+### Example flow:
+```javascript
+await applyToSchedule();
+showSuccessToast('Schedule applied successfully.');
+playSuccessNotificationSound();
+```
+
+Important:
+- do not play the sound before success is confirmed
+- do not play it when the request is still pending
+- do not play it on optimistic click only
+
+---
+
+## 3. DO NOT PLAY SOUND ON APPLY FAILURE
+
+If applying to schedule fails:
+- no sound should play
+
+### Example:
+```javascript
+try {
+  await applyToSchedule();
+  showSuccessToast('Schedule applied successfully.');
+  playSuccessNotificationSound();
+} catch (err) {
+  // show error if needed
+  // no sound
+}
+```
+
+---
+
+## 4. OPTIONALLY SHOW A SUCCESS TOAST TOGETHER WITH THE SOUND
+
+Recommended:
+When apply succeeds, also show a toast like:
+- `Schedule applied successfully.`
+- `Changes have been applied to the schedule.`
+
+This gives both:
+- audio confirmation
+- visible confirmation
+
+But the sound should remain the main notification feature.
+
+---
+
+## 5. KEEP PLAYBACK SAFE FOR BROWSER RESTRICTIONS
+
+As with the auto-sequence completion sound:
+- audio playback should be initialized after prior user interaction
+- playback errors should be caught silently
+- sound failure must not break apply flow
+
+The user is already interacting with the app by clicking Apply to Schedule, so playback should generally be allowed.
+
+---
+
+## 6. DO NOT PLAY MULTIPLE TIMES FOR THE SAME APPLY ACTION
+
+Ensure the sound plays only once per successful apply.
+
+If state refreshes or re-renders happen afterward, do not replay the sound accidentally.
+
+---
+
+## 7. KEEP THIS CONSISTENT WITH THE AUTO-SEQUENCE COMPLETION SOUND
+
+Desired audio behavior:
+
+### When auto-sequence finishes successfully
+- play notification sound
+- preview is ready
+
+### When apply to schedule succeeds
+- play notification sound
+- schedule is committed
+
+No sound for:
+- cancel
+- error
+- blocked actions
+
+---
+
+## 8. OPTIONAL: DIFFERENT SOUND LATER, BUT SAME SOUND FOR NOW
+
+For now, use the same sound for both success events unless a separate sound already exists.
+
+This keeps the implementation simple.
+
+If needed later, separate sounds can be introduced for:
+- preview-ready success
+- apply-success confirmation
+
+But that is not required now.
+
+---
+
+## 9. ADD DEBUG LOGGING IF NEEDED
+
+Temporarily log:
+
+```javascript
+console.debug('[Apply To Schedule Success Sound]', {
+  applied: true,
+  soundPlayed: true,
+});
+```
+
+This helps verify:
+- the sound only fires on successful apply
+- not on failure or cancel paths
+
+---
+
+## 10. VERIFICATION
+
+1. ✅ Sound plays when auto-sequence finishes successfully
+2. ✅ Sound also plays when Apply to Schedule succeeds
+3. ✅ No sound plays if apply fails
+4. ✅ No sound plays if action is cancelled or blocked
+5. ✅ Sound plays only once per successful apply action
+6. ✅ Sound failure does not break the apply flow

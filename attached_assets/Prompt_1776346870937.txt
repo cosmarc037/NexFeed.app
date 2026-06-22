@@ -1,0 +1,286 @@
+```
+Fix: Create NEW lead record, ALL original orders become children — matching Smart Combine pattern exactly:
+
+---
+
+## 1. FIX applySequencedResultsToDB — CREATE NEW LEAD FOR COMBINED ORDERS
+
+```javascript
+async function applySequencedResultsToDB(sequencedResults, options = {}) {
+  const { label = 'Auto-sequence' } = options;
+  
+  const combinedLeadMap = {};
+  
+  for (const [line, lineOrders] of Object.entries(sequencedResults)) {
+    if (!lineOrders || lineOrders.length === 0) continue;
+    
+    let prioCounter = 1;
+    
+    for (const order of lineOrders) {
+      
+      if (order._isCombined && order._combinedFrom && order._combinedFrom.length > 1) {
+        // === COMBINED ORDER ===
+        // Step 1: Sum ALL child volumes
+        const combinedVolume = order._combinedFrom.reduce((sum, sub) => {
+          return sum + (parseFloat(sub.volume) || parseFloat(sub.total_volume_mt) || 0);
+        }, 0);
+        
+        const allChildIds = order._combinedFrom.map(sub => sub.id);
+        const firstChild = order._combinedFrom[0];
+        
+        // Step 2: CREATE a brand new lead order
+        // Copy product details from the first child
+        const newLead = await createOrderMutation.mutateAsync({
+          data: {
+            fpr: firstChild.fpr,
+            feedmill_line: line,
+            priority_seq: prioCounter,
+            
+            // Product details — same as children
+            material_code_fg: firstChild.material_code_fg,
+            material_code_sfg: firstChild.material_code_sfg,
+            item_description: firstChild.item_description,
+            form: firstChild.form,
+            batch_size: firstChild.batch_size,
+            run_rate: firstChild.run_rate,
+            category: firstChild.category,
+            color: firstChild.color,
+            diameter: firstChild.diameter,
+            formula_version: firstChild.formula_version,
+            changeover: firstChild.changeover,
+            
+            // Use first child's planned order numbers
+            planned_order_fg: firstChild.planned_order_fg,
+            planned_order_sfg: firstChild.planned_order_sfg,
+            
+            // Avail date — earliest from children
+            target_avail_date: order.target_avail_date || firstChild.target_avail_date,
+            
+            // Combined-specific fields
+            volume_override: combinedVolume > 0 ? combinedVolume : null,
+            original_order_ids: allChildIds,
+            parent_id: null,
+            
+            // Volume fields
+            total_volume_mt: combinedVolume > 0 ? combinedVolume : null,
+          }
+        });
+        
+        const newLeadId = newLead.id;
+        combinedLeadMap[order.id] = newLeadId;
+        
+        console.log(`  [New Lead Created] ID: ${newLeadId}, ${firstChild.item_description}, ${combinedVolume} MT`);
+        console.log(`    Children: ${allChildIds.join(', ')}`);
+        
+        // Step 3: ALL original orders become children
+        for (const sub of order._combinedFrom) {
+          await updateOrderMutation.mutateAsync({
+            id: sub.id,
+            data: {
+              parent_id: newLeadId,
+              feedmill_line: line,
+              priority_seq: null,
+            }
+          });
+          console.log(`    [Child] ${sub.id} (${sub.volume} MT) → parent_id=${newLeadId}`);
+        }
+        
+        prioCounter++;
+        
+      } else {
+        // === REGULAR ORDER (not combined) ===
+        await updateOrderMutation.mutateAsync({
+          id: order.id,
+          data: {
+            feedmill_line: line,
+            priority_seq: prioCounter,
+            parent_id: null,
+            volume_override: null,
+            original_order_ids: null,
+          }
+        });
+        
+        prioCounter++;
+      }
+    }
+  }
+  
+  // Refetch
+  await queryClient.invalidateQueries({ queryKey: ["orders"] });
+  await new Promise(resolve => setTimeout(resolve, 500));
+  
+  // Cascade — use new lead IDs
+  for (const [line, lineOrders] of Object.entries(sequencedResults)) {
+    if (!lineOrders || lineOrders.length === 0) continue;
+    
+    const topLevel = lineOrders.map((o, i) => {
+      const realId = combinedLeadMap[o.id] || o.id;
+      return {
+        ...o,
+        id: realId,
+        priority_seq: i + 1,
+        feedmill_line: line,
+      };
+    });
+    
+    await cascadeSchedule(topLevel, 0);
+  }
+  
+  // Final refetch
+  await queryClient.invalidateQueries({ queryKey: ["orders"] });
+  
+  const totalOrders = Object.values(sequencedResults).reduce((s, lo) => s + lo.length, 0);
+  const combinedCount = Object.keys(combinedLeadMap).length;
+  const linesUsed = Object.keys(sequencedResults).filter(l =>
+    (sequencedResults[l] || []).length > 0
+  ).length;
+  
+  return { totalOrders, combinedCount, linesUsed };
+}
+```
+
+---
+
+## WHAT THIS DOES
+
+Example: Order A (80 MT) + Order B (80 MT) combined
+
+Step 1: Create NEW lead record
+  → New Order C: 160 MT, volume_override=160, original_order_ids=[A,B], parent_id=null
+
+Step 2: Update ALL original orders as children
+  → Order A: parent_id=C, priority_seq=null
+  → Order B: parent_id=C, priority_seq=null
+
+Result in order table:
+  [Lead] Order C: 160 MT
+  [Child] Order A: 80 MT
+  [Child] Order B: 80 MT
+
+Example: 5 orders (5+10+20+30+80 = 145 MT) combined
+
+Step 1: Create NEW lead
+  → New Order F: 145 MT, original_order_ids=[A,B,C,D,E]
+
+Step 2: ALL 5 become children
+  → Order A (5 MT): parent_id=F
+  → Order B (10 MT): parent_id=F
+  → Order C (20 MT): parent_id=F
+  → Order D (30 MT): parent_id=F
+  → Order E (80 MT): parent_id=F
+
+Result in order table:
+  [Lead] Order F: 145 MT — "5 orders combined"
+  [Child] Order A: 5 MT
+  [Child] Order B: 10 MT
+  [Child] Order C: 20 MT
+  [Child] Order D: 30 MT
+  [Child] Order E: 80 MT
+
+```
+You're right, here's the rest:
+
+```
+---
+
+## 2. ENSURE PREVIEW AFTER TABLE MATCHES — ALL SUB-ORDERS SHOWN
+
+```jsx
+// In PlantAfterRow — show ALL _combinedFrom as sub-orders
+// This matches exactly what the order table shows after apply
+
+const subOrders = order._isCombined && order._combinedFrom ? order._combinedFrom : [];
+
+// Label
+{order._isCombined && subOrders.length > 0 && (
+  <div className="as-combined-label">
+    {subOrders.length} orders combined
+  </div>
+)}
+
+// Expanded rows — ALL sub-orders
+{isExpanded && subOrders.map((subOrder, subIndex) => (
+  // ... render each sub-order row
+))}
+```
+
+---
+
+## 3. USE THIS SAME FUNCTION FOR ALL THREE FLOWS
+
+```javascript
+// Plant-level
+async function handlePlantApply(sequencedResults) {
+  setIsApplying(true);
+  try {
+    const stats = await applySequencedResultsToDB(sequencedResults, {
+      label: 'Plant-Level Auto-Sequence'
+    });
+    setShowPlantAutoSequencePreview(false);
+    setIsApplying(false);
+    toast.success(`Applied: ${stats.totalOrders} orders, ${stats.linesUsed} lines, ${stats.combinedCount} combined.`);
+  } catch (error) {
+    console.error(error);
+    setIsApplying(false);
+    toast.error(`Failed: ${error.message}`);
+  }
+}
+
+// Per-line
+async function handleLineApply({ targetLine, sequencedOrders }) {
+  setIsApplying(true);
+  try {
+    const stats = await applySequencedResultsToDB({ [targetLine]: sequencedOrders }, {
+      label: `Line Auto-Sequence (${targetLine})`
+    });
+    setShowLineAutoSequencePreview(false);
+    setIsApplying(false);
+    toast.success(`Applied to ${targetLine}: ${stats.totalOrders} orders.`);
+  } catch (error) {
+    console.error(error);
+    setIsApplying(false);
+    toast.error(`Failed: ${error.message}`);
+  }
+}
+```
+
+---
+
+## VERIFICATION
+
+### New lead created (not reusing existing order)
+1. ✅ createOrderMutation called — brand new DB record
+2. ✅ Lead has volume_override = sum of ALL children
+3. ✅ Lead has original_order_ids = [all child IDs]
+4. ✅ Lead has parent_id = null
+5. ✅ Lead copies product details from first child (material code, form, category, etc.)
+
+### ALL original orders become children
+6. ✅ Every order in _combinedFrom gets parent_id = newLeadId
+7. ✅ Every child gets priority_seq = null
+8. ✅ No original order is skipped or reused as the lead
+9. ✅ 2 orders combined = 1 NEW lead + 2 children = 3 rows
+10. ✅ 5 orders combined = 1 NEW lead + 5 children = 6 rows
+
+### Order table display matches preview
+11. ✅ Preview: Lead 160 MT + Child 80 MT + Child 80 MT
+12. ✅ Order table after apply: Lead 160 MT + Child 80 MT + Child 80 MT
+13. ✅ Preview: Lead 145 MT + 5 children (5+10+20+30+80)
+14. ✅ Order table after apply: Lead 145 MT + 5 children (5+10+20+30+80)
+
+### Same function for all flows
+15. ✅ Plant-level auto-sequence uses applySequencedResultsToDB
+16. ✅ Per-line auto-sequence uses applySequencedResultsToDB
+17. ✅ Both create NEW leads for combined orders
+18. ✅ Both set parent_id on ALL children
+
+### Cascade
+19. ✅ combinedLeadMap maps preview order ID → new lead DB ID
+20. ✅ Cascade uses real new lead IDs
+21. ✅ Completion dates calculated correctly
+
+### No blank lines
+22. ✅ Lead has parent_id = null → passes table filter !order.parent_id
+23. ✅ Lead shows in main table
+24. ✅ Children show when lead is expanded via expandedLeads
+```

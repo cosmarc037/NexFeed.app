@@ -1,0 +1,14 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "_DpjI9-R10rYKtF6N0kWS"
+uri = "file://AI_PROMPTS.md"
+type = "text"
+title = "NexFeed — Active AI System Prompts"
+
+[[outputs]]
+id = "FQZ24EgF0IRmOwFDjBzrp"
+uri = "file://NEXFEED_APP_CONTEXT.md"
+type = "text"
+title = "NexFeed — Complete Application Context"

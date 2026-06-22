@@ -1,0 +1,120 @@
+Please revisit the Powermix-generated order logic again, because two specific issues are still incorrect.
+
+---
+
+## 1. SHOW “ORIGINAL” MT WHEN THE GENERATED SPLIT VOLUME IS APP-ADJUSTED
+
+Example case:
+- Source Line 5 volume = `200 MT`
+- Powermix Split percentage = `85%`
+- Raw split result = `170 MT`
+
+If the app then adjusts the generated volume to satisfy batch divisibility and the final displayed quantity becomes:
+- `172 MT`
+
+then the row must clearly show:
+
+`172 MT`
+`Original: 170 MT`
+
+This is the expected behavior.
+
+### Required rule
+If a Powermix-generated order’s final displayed MT differs from the percentage-derived original split quantity because of app adjustment / batch normalization, then show the original split quantity under the displayed MT.
+
+### Example
+- final displayed MT = `172 MT`
+- original split quantity before normalization = `170 MT`
+
+Display:
+- `172 MT`
+- `Original: 170 MT`
+
+This should not be omitted.
+
+---
+
+## 2. POWERMIX BATCH SIZE LOOKUP IS STILL WRONG — FIX THE SOURCE OF TRUTH
+
+The app still appears to be using the wrong batch size source.
+
+It should use:
+- the relevant material code as the lookup key
+- and resolve the batch size from the **Powermix Split** tab
+
+The problem is not the use of material code.
+The problem is that the app still does not appear to be reading the matched Powermix Split batch correctly.
+
+### Required behavior
+For a Powermix-generated order:
+1. take the relevant material code
+2. match it to the correct row in the Powermix Split config
+3. read the configured batch size from that row
+4. use that batch size as the source of truth
+
+Do not:
+- default to batch size `1`
+- prefer Master Data batch size over Powermix Split
+- skip the Powermix Split lookup when a valid matching rule exists
+
+### Important
+This should work through material code lookup into Powermix Split.
+That is the expected join path.
+
+If the matched Powermix Split row says batch = 4 or 2, then use that exact value.
+
+---
+
+## 3. APPLY THE BATCH LOOKUP BEFORE NORMALIZING THE GENERATED MT
+
+The app must:
+1. calculate the raw split quantity from the configured percentage
+2. resolve the correct batch size from Powermix Split
+3. normalize/adjust the generated quantity using that batch size
+4. display the final MT and, if adjusted, show the original MT as helper text
+
+If the batch lookup is wrong, then the normalization result will also be wrong.
+
+So please fix the lookup first, then re-check the adjusted MT behavior.
+
+---
+
+## 4. DEBUG LOGGING
+
+Temporarily log:
+
+```javascript
+console.debug('[Powermix Batch Lookup Critical Check]', {
+  sourceOrderId,
+  materialCodeUsedForLookup,
+  matchedPowermixRuleId,
+  matchedPowermixBatch,
+  masterDataBatch,
+  appliedBatch,
+  isUsingPowermixBatch: appliedBatch === matchedPowermixBatch,
+});
+```
+
+```javascript
+console.debug('[Powermix Generated MT Adjustment]', {
+  sourceOrderId,
+  sourceVolume,
+  percentage,
+  rawSplitQty,
+  appliedBatch,
+  adjustedFinalQty,
+  shouldRenderOriginal: adjustedFinalQty !== rawSplitQty,
+});
+```
+
+---
+
+## 5. VERIFICATION
+
+1. ✅ For a 200 MT source order with 85% split, the raw split is 170 MT
+2. ✅ If app-adjusted to 172 MT, the row displays:
+   - `172 MT`
+   - `Original: 170 MT`
+3. ✅ Batch size is resolved from Powermix Split using material code lookup
+4. ✅ The app no longer defaults incorrectly to batch size 1 when a Powermix Split rule exists
+5. ✅ Normalization uses the Powermix Split batch size, not the wrong fallback source

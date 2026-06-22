@@ -1,0 +1,114 @@
+```
+Implement the following change to the NexFeed application:
+
+---
+
+## FIX: DRAG-AND-DROP DATE VIOLATION TOAST — FRIENDLIER MESSAGE
+
+Update the toast notification that appears when a user tries to drag a dated order out of chronological sequence. Instead of saying "Cannot place order here" (which sounds like a dead end), suggest what the user can do to resolve it.
+
+---
+
+### CURRENT MESSAGE (UNFRIENDLY)
+
+```
+⚠ Cannot place order here
+
+260309 (Mar 22, 2026) cannot be placed before 260309 
+(Mar 24, 2026). Orders with availability dates must stay 
+in chronological order.
+
+Mar 22, 2026 → Mar 24, 2026
+```
+
+### UPDATED MESSAGE (HELPFUL)
+
+```
+⚠ Order requires date adjustment
+
+To move 260309 (Mar 22, 2026) to this position, you'll 
+need to update its availability date first. Orders with 
+availability dates must remain in chronological order.
+
+Current sequence: Mar 22, 2026 → Mar 24, 2026
+
+💡 Tip: Edit the availability date of this order to a 
+date that fits the desired position, then drag it again.
+```
+
+---
+
+### MESSAGE DETAILS
+
+**Title:**
+- Changed from: "Cannot place order here"
+- Changed to: "Order requires date adjustment"
+- Tone: informational, not blocking
+
+**Body — first paragraph:**
+- Explains what the user needs to do: "update its availability date first"
+- References the specific FPR and dates
+- Still explains the chronological rule
+
+**Body — current sequence line:**
+- Shows the date sequence that would be violated
+- Grey text (#6b7280), italic
+- Format: "Current sequence: [Date A] → [Date B]"
+
+**Body — tip:**
+- 💡 icon prefix
+- Actionable advice: "Edit the availability date... then drag it again"
+- Slightly smaller text (12px vs 13px body)
+- Grey text (#6b7280)
+
+---
+
+### TOAST STYLING
+
+| Property | Value |
+|---|---|
+| Background | #fffbeb (light amber) |
+| Border-left | 4px solid #f59e0b |
+| Title | "⚠ Order requires date adjustment" — 14px, #111827, font-weight 700 |
+| Body text | 13px, #374151, line-height 1.6 |
+| Tip text | 12px, #6b7280, line-height 1.5 |
+| FPR references | Bold (#111827) |
+| Date references | Semi-bold (#374151) |
+| Sequence line | 12px, italic, #6b7280 |
+| Max width | 420px |
+| Padding | 16px |
+| Auto-dismiss | 6 seconds (slightly longer since there's more to read) |
+| Close (×) button | Top-right, grey, click to dismiss |
+
+---
+
+### ALSO UPDATE FOR TARGET DATE VIOLATIONS
+
+When a user drags an order with an inferred target date (from Next 10 Days) out of sequence:
+
+```
+⚠ Order requires date adjustment
+
+To move 260309 (Target: Mar 19) to this position, you'll 
+need to update its stock target date or availability date 
+first. Orders with deadlines must remain in chronological 
+order.
+
+Current sequence: Target Mar 19 → Avail Mar 22
+
+💡 Tip: Edit the availability date in the Avail Date 
+column, or update the Next 10 Days stock data to change 
+the target date.
+```
+
+---
+
+### APPLY TO ALL DATE VIOLATION SCENARIOS
+
+| Scenario | Title | Tip |
+|---|---|---|
+| Dated order dragged before an earlier date | "Order requires date adjustment" | "Edit the availability date to fit the desired position" |
+| Dated order dragged after a later date | "Order requires date adjustment" | "Edit the availability date to fit the desired position" |
+| Target-dated order dragged out of sequence | "Order requires date adjustment" | "Edit the availability date or update the Next 10 Days data" |
+| Same message for both directions | Same friendly tone | Same actionable advice |
+```

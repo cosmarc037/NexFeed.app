@@ -1,0 +1,461 @@
+```
+Perform a full terminology cleanup across the application and replace user-facing uses of “KB” / “Knowledge Base” with “Master Data”.
+
+---
+
+## OBJECTIVE
+
+We previously renamed “Knowledge Base” to “Master Data”, but some parts of the application still use:
+- `KB`
+- `Knowledge Base`
+- `knowledge base`
+- `kb`
+
+We now want to remove those user-facing terms and consistently use:
+
+## Preferred replacement:
+**Master Data**
+
+This replacement should apply anywhere the old terminology is still shown to users, including:
+- UI labels
+- headers
+- tabs
+- tooltips
+- insights
+- AI-generated text
+- template-based/system-generated messages
+- fallback explanations
+- action summaries
+- reasoning modals
+- validation messages
+- help text
+- reports / exported text if applicable
+
+The goal is:
+- no user-facing text should still say “KB” or “Knowledge Base”
+- the app should consistently use “Master Data” or natural contextual phrasing
+
+---
+
+## 1. GLOBAL RULE
+
+Replace user-facing occurrences of:
+- `KB`
+- `kb`
+- `Knowledge Base`
+- `knowledge base`
+
+With:
+- **Master Data**
+
+Or, when needed in sentence form:
+- `master data`
+- `master data mapping`
+- `master data run-rate mapping`
+- `master data record`
+- `master data configuration`
+
+Important:
+- internal variable names can remain unchanged if renaming them is risky
+- but all user-facing text must stop showing “KB” / “Knowledge Base”
+
+---
+
+## 2. MAIN DEFAULT TERM TO USE
+
+Use this as the standard user-facing label in most places:
+
+### **Master Data**
+
+Examples:
+- tab → `Master Data`
+- section → `Master Data`
+- label → `Master Data`
+- button/help text → `Master Data`
+
+---
+
+## 3. SENTENCE-LEVEL REPLACEMENT RULES
+
+When “KB” appears inside explanatory text, replace it with natural wording rather than a blind abbreviation swap.
+
+### Examples
+
+#### Old:
+- `Based on KB run-rate mapping`
+#### New:
+- `Based on master data run-rate mapping`
+
+#### Old:
+- `Derived from master data and KB run-rate mapping`
+#### New:
+- `Derived from master data run-rate mapping`
+
+#### Old:
+- `The line was selected using KB configuration`
+#### New:
+- `The line was selected using master data configuration`
+
+#### Old:
+- `No KB record found`
+#### New:
+- `No master data record found`
+
+#### Old:
+- `Matched against KB`
+#### New:
+- `Matched against master data`
+
+#### Old:
+- `KB margin was unavailable`
+#### New:
+- `Master data margin was unavailable`
+
+Use sentence case naturally:
+- `master data mapping`
+- `master data run-rate mapping`
+- `master data settings`
+- `master data values`
+
+---
+
+## 4. SEARCH ALL USER-FACING TEXT SOURCES
+
+Do a full pass across the codebase for user-facing occurrences of:
+- `"KB"`
+- `"kb"`
+- `"Knowledge Base"`
+- `"knowledge base"`
+
+Check and update all of the following:
+
+### A. Static UI labels
+- tabs
+- headers
+- cards
+- section titles
+- tooltips
+- helper text
+- dialogs
+- filters
+- dropdown labels
+
+### B. Insights and explanations
+- row-level sequence insights
+- AI-generated insights
+- system/template-generated insights
+- actions taken summaries
+- line move explanations
+- combine explanations
+- scheduling explanations
+
+### C. Strategy reasoning
+- AI reasoning modal
+- template-based fallback reasoning
+- recommendation reasoning
+- line eligibility explanations
+- profitability / run-rate explanations
+
+### D. Validation / warning / empty states
+- missing data warnings
+- no match found messages
+- unsupported mapping messages
+- imported data errors
+- info banners
+
+### E. AI prompt templates
+Any prompt that still tells the AI to talk about:
+- KB
+- knowledge base
+- KB run-rate mapping
+- KB margin/cost data
+
+must be updated so AI-generated text also uses “Master Data”.
+
+### F. Exported / generated content
+- CSV headers
+- reports
+- printable text
+- summaries if applicable
+
+---
+
+## 5. UPDATE AI PROMPTS SO AI OUTPUT ALSO USES MASTER DATA
+
+This is critical.
+
+Even if the UI labels are updated, the AI may still generate “KB” if prompts still include that wording.
+
+Replace prompt wording like:
+
+### Old:
+```text
+Consider KB run-rate mapping, KB margin, and KB cost where available.
+```
+
+### New:
+```text
+Consider master data run-rate mapping, master data margin, and master data cost where available.
+```
+
+### Old:
+```text
+If KB data is missing, explain that KB was unavailable.
+```
+
+### New:
+```text
+If master data is missing, explain that master data was unavailable.
+```
+
+### Old:
+```text
+Use KB mapping to determine eligible lines.
+```
+
+### New:
+```text
+Use master data mapping to determine eligible lines.
+```
+
+This will stop AI-generated explanations from using legacy terminology.
+
+---
+
+## 6. UPDATE TEMPLATE-BASED / FALLBACK STRINGS
+
+Replace hardcoded fallback text too.
+
+### Example replacements
+
+#### Old:
+```javascript
+reason: 'Selected using KB run-rate mapping'
+```
+
+#### New:
+```javascript
+reason: 'Selected using master data run-rate mapping'
+```
+
+---
+
+#### Old:
+```javascript
+description: 'No KB match found for this material code.'
+```
+
+#### New:
+```javascript
+description: 'No master data match found for this material code.'
+```
+
+---
+
+#### Old:
+```javascript
+long: 'This order was placed on the eligible line based on KB mapping.'
+```
+
+#### New:
+```javascript
+long: 'This order was placed on the eligible line based on master data mapping.'
+```
+
+---
+
+## 7. REMOVE COMBINED/REDUNDANT WORDING LIKE “MASTER DATA AND KB”
+
+Because Knowledge Base was renamed to Master Data, avoid wording like:
+- `master data and KB run-rate mapping`
+
+That is redundant and confusing.
+
+### Replace examples like:
+- `based on master data and KB run-rate mapping`
+with:
+- `based on master data run-rate mapping`
+
+Or:
+- `based on master data configuration`
+
+Use the cleanest sentence possible.
+
+---
+
+## 8. KEEP INTERNAL DATA MODEL NAMES IF NEEDED
+
+To reduce implementation risk, it is acceptable to keep internal code names such as:
+- `kbData`
+- `knowledgeBase`
+- `getKBMapping()`
+- `_kbMargin`
+
+if full internal renaming is too risky.
+
+However:
+- wrap them before rendering
+- convert terminology in prompts and user-facing text
+- do not expose those internal names to the user
+
+Example:
+```javascript
+const userLabel = 'Master Data';
+```
+
+Or:
+```javascript
+function getMasterDataDisplayText(...) { ... }
+```
+
+---
+
+## 9. OPTIONAL: ADD A USER-FACING TERM HELPER
+
+To avoid future inconsistency, define shared user-facing terms.
+
+### Example:
+```javascript
+const USER_TERMS = {
+  masterData: 'Master Data',
+  masterDataMapping: 'master data mapping',
+  masterDataRunRateMapping: 'master data run-rate mapping',
+  masterDataRecord: 'master data record',
+  masterDataConfiguration: 'master data configuration',
+};
+```
+
+Use these in:
+- UI labels
+- prompt builders
+- fallback messages
+- reasoning text
+- templates
+
+This reduces the chance that “KB” comes back later.
+
+---
+
+## 10. USE NATURAL VARIANTS WHERE NEEDED
+
+Do not force “Master Data” awkwardly in every sentence if lowercase sentence form reads better.
+
+### Preferred variants by context:
+
+#### UI labels
+- `Master Data`
+
+#### Sentence-level
+- `master data`
+- `master data mapping`
+- `master data run-rate mapping`
+- `master data record`
+- `master data configuration`
+
+### Example:
+- `The line was selected based on master data run-rate mapping.`
+is better than
+- `The line was selected based on Master Data run-rate mapping.`
+
+Use title case only where appropriate:
+- tabs
+- headers
+- labels
+
+---
+
+## 11. UPDATE ACTIONS TAKEN / MOVE INSIGHTS
+
+Any Actions Taken or line-move explanation still showing `KB` must be updated.
+
+### Example
+
+#### Old:
+- `Based on master data and KB run-rate mapping, the order was moved...`
+
+#### New:
+- `Based on master data run-rate mapping, the order was moved...`
+
+#### Old:
+- `KB indicated that this line is eligible`
+#### New:
+- `Master data indicated that this line is eligible`
+
+Or better:
+- `Master data shows that this line is eligible`
+
+---
+
+## 12. UPDATE PROFIT / COST / ELIGIBILITY EXPLANATIONS
+
+Any explanation that refers to KB as the source of:
+- cost
+- margin
+- run rate
+- line eligibility
+- compatibility
+
+must now say Master Data instead.
+
+### Example:
+#### Old:
+- `KB margin was used for profitability scoring.`
+#### New:
+- `Master data margin was used for profitability scoring.`
+
+#### Old:
+- `No KB cost found.`
+#### New:
+- `No master data cost found.`
+
+---
+
+## 13. OPTIONAL: ADD A LEGACY TERM DETECTOR FOR DEVELOPMENT
+
+If feasible, add a development-only safeguard that logs if `KB` or `Knowledge Base` still appears in user-facing text.
+
+### Example:
+```javascript
+function assertNoLegacyKBText(text, context) {
+  if (typeof text === 'string' && /\bkb\b|knowledge base/i.test(text)) {
+    console.warn('[Legacy KB Text Found]', { context, text });
+  }
+}
+```
+
+Use this during development on:
+- cards
+- insights
+- modal text
+- action summaries
+- strategy descriptions
+- tooltips
+
+This will help catch leftovers.
+
+---
+
+## 14. VERIFICATION
+
+### UI cleanup
+1. ✅ Tabs and headers no longer show “KB” or “Knowledge Base”
+2. ✅ Tooltips and labels no longer show “KB” or “Knowledge Base”
+3. ✅ Empty states and helper text no longer show legacy terminology
+
+### Insight cleanup
+4. ✅ Sequence insights no longer use “KB”
+5. ✅ AI-generated reasoning no longer uses “KB”
+6. ✅ Template/fallback text no longer uses “Knowledge Base”
+
+### Prompt cleanup
+7. ✅ AI prompts no longer instruct the model to use “KB” or “Knowledge Base”
+8. ✅ AI-generated move explanations now use “Master Data”
+
+### Actions / explanations
+9. ✅ Actions Taken no longer shows phrases like “master data and KB run-rate mapping”
+10. ✅ Move and line eligibility explanations now use clean “master data” terminology
+11. ✅ Cost / margin / run-rate reasoning now references Master Data consistently
+
+### Consistency
+12. ✅ User-facing wording is now consistently “Master Data” or natural sentence-level variants
+13. ✅ Internal variable names may remain unchanged safely, but are no longer exposed to users

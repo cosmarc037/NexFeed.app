@@ -1,0 +1,902 @@
+```
+Add auto-sequence on upload feature:
+
+---
+
+## 1. DETECT BLANK LINES AND TRIGGER AUTO-SEQUENCE AFTER UPLOAD
+
+```javascript
+async function handleOrderUpload(file) {
+  // Parse and upload orders
+  const uploadedOrders = await parseOrderFile(file);
+  
+  // Save to DB first
+  await saveOrdersToDB(uploadedOrders);
+  
+  // Invalidate and refetch
+  await queryClient.invalidateQueries({ queryKey: ["orders"] });
+  
+  // Wait for refetch
+  await new Promise(resolve => setTimeout(resolve, 500));
+  
+  // Get all current orders after upload
+  const allCurrentOrders = queryClient.getQueryData(["orders"]) || [];
+  const activeOrders = allCurrentOrders.filter(
+    o => o.status !== 'Done' && o.status !== 'Cancel PO'
+  );
+  
+  // Check if Future Dispatches is uploaded
+  const n10dData = queryClient.getQueryData(["n10d"]) || [];
+  const hasN10D = n10dData.length > 0;
+  
+  // Check if ALL lines were blank BEFORE this upload
+  // (meaning the uploaded orders are the ONLY orders)
+  const uploadedIds = new Set(uploadedOrders.map(o => o.id));
+  const existingOrdersBeforeUpload = activeOrders.filter(o => !uploadedIds.has(o.id));
+  const allLinesWereBlank = existingOrdersBeforeUpload.length === 0;
+  
+  // Check if ANY lines have existing orders
+  const hasExistingOrders = existingOrdersBeforeUpload.length > 0;
+  
+  // Store upload context
+  setUploadContext({
+    allLinesWereBlank,
+    hasExistingOrders,
+    hasN10D,
+    uploadedOrderCount: uploadedOrders.length
+  });
+  
+  // Always show the auto-sequence preview after upload
+  setShowUploadAutoSequence(true);
+}
+```
+
+---
+
+## 2. UPLOAD AUTO-SEQUENCE PREVIEW
+
+```jsx
+function UploadAutoSequencePreview({
+  uploadContext,
+  allOrders,
+  masterData,
+  n10dData,
+  changeoverRules,
+  onApplySequence,
+  onUploadOnly,
+  onCancel
+}) {
+  const [isProcessing, setIsProcessing] = useState(true);
+  const [sequencedResults, setSequencedResults] = useState(null);
+  const [originalSnapshot, setOriginalSnapshot] = useState(null);
+  const [summaryStats, setSummaryStats] = useState(null);
+  const [placementLog, setPlacementLog] = useState([]);
+  const [isCombined, setIsCombined] = useState(false);
+  const [isApplying, setIsApplying] = useState(false);
+  const [isCombining, setIsCombining] = useState(false);
+  const [activeTab, setActiveTab] = useState('summary');
+  
+  // AI state
+  const [aiExplanations, setAiExplanations] = useState(null);
+  const [isLoadingAI, setIsLoadingAI] = useState(false);
+  const [useFallback, setUseFallback] = useState(false);
+  
+  const allLines = ALL_LINES_ORDERED.map(l => normalizeLine(`${l.feedmill} - ${l.line}`));
+  
+  useEffect(() => {
+    runSequenceOnly();
+  }, []);
+  
+  async function runSequenceOnly() {
+    setIsProcessing(true);
+    
+    const activeOrders = allOrders.filter(
+      o => o.status !== 'Done' && o.status !== 'Cancel PO'
+    );
+    
+    // Save original snapshot
+    const snapshot = {};
+    allLines.forEach(line => {
+      snapshot[line] = activeOrders
+        .filter(o => normalizeLine(o.feedmill_line) === line)
+        .sort((a, b) => (a.priority_seq || 0) - (b.priority_seq || 0))
+        .map(o => ({ ...JSON.parse(JSON.stringify(o)) }));
+    });
+    setOriginalSnapshot(snapshot);
+    
+    // Run SEQUENCE ONLY — no combine
+    const { lineOrdersMap, placementLog: log } = sequenceOnlyAcrossLines(
+      activeOrders, masterData, n10dData, allLines
+    );
+    
+    // Run per-line auto-sequence on each line
+    const results = {};
+    allLines.forEach(line => {
+      const lineOrders = lineOrdersMap[line] || [];
+      if (lineOrders.length === 0) {
+        results[line] = [];
+        return;
+      }
+      
+      const sequenced = runAutoSequence(lineOrders, changeoverRules, masterData, n10dData);
+      const withChangeovers = calculatePreviewChangeovers(sequenced, changeoverRules);
+      
+      const originalLineOrders = snapshot[line] || [];
+      const withMovement = withChangeovers.map((order, newIndex) => {
+        const newPrio = newIndex + 1;
+        const originalIndex = originalLineOrders.findIndex(o => o.id === order.id);
+        let movement = 'same';
+        let movementDelta = 0;
+        
+        if (originalIndex >= 0) {
+          const originalPrio = originalIndex + 1;
+          movementDelta = originalPrio - newPrio;
+          if (movementDelta > 0) movement = 'up';
+          else if (movementDelta < 0) movement = 'down';
+        } else {
+          movement = 'new_to_line';
+        }
+        
+        return {
+          ...order,
+          prio: newPrio,
+          _originalPrio: originalIndex >= 0 ? originalIndex + 1 : -1,
+          _movement: movement,
+          _movementDelta: Math.abs(movementDelta)
+        };
+      });
+      
+      results[line] = withMovement;
+    });
+    
+    setSequencedResults(results);
+    setPlacementLog(log);
+    
+    const stats = calculatePlantSummary(snapshot, results, [], log, allLines);
+    setSummaryStats(stats);
+    
+    setIsProcessing(false);
+    
+    // Generate AI explanations if there are actions
+    if (log.length > 0) {
+      generateAIExplanations(log);
+    }
+  }
+  
+  async function handleCombineOrders() {
+    if (isCombining || isCombined) return;
+    setIsCombining(true);
+    
+    // Get current sequenced orders (flat list)
+    const allSequencedOrders = [];
+    Object.entries(sequencedResults).forEach(([line, orders]) => {
+      orders.forEach(o => {
+        allSequencedOrders.push({ ...o, line });
+      });
+    });
+    
+    // Run combine algorithm on the sequenced orders
+    const { lineOrdersMap, combinedOrders, placementLog: combinePlacementLog } = plantLevelCombineOnly(
+      allSequencedOrders, masterData, n10dData, allLines
+    );
+    
+    // Re-sequence each line after combine
+    const results = {};
+    allLines.forEach(line => {
+      const lineOrders = lineOrdersMap[line] || [];
+      if (lineOrders.length === 0) {
+        results[line] = [];
+        return;
+      }
+      
+      const sequenced = runAutoSequence(lineOrders, changeoverRules, masterData, n10dData);
+      const withChangeovers = calculatePreviewChangeovers(sequenced, changeoverRules);
+      
+      const originalLineOrders = originalSnapshot[line] || [];
+      const withMovement = withChangeovers.map((order, newIndex) => {
+        const newPrio = newIndex + 1;
+        const originalIndex = originalLineOrders.findIndex(o => o.id === order.id);
+        let movement = 'same';
+        let movementDelta = 0;
+        
+        if (originalIndex >= 0) {
+          const originalPrio = originalIndex + 1;
+          movementDelta = originalPrio - newPrio;
+          if (movementDelta > 0) movement = 'up';
+          else if (movementDelta < 0) movement = 'down';
+        } else {
+          movement = 'new_to_line';
+        }
+        
+        return {
+          ...order,
+          prio: newPrio,
+          _originalPrio: originalIndex >= 0 ? originalIndex + 1 : -1,
+          _movement: movement,
+          _movementDelta: Math.abs(movementDelta)
+        };
+      });
+      
+      results[line] = withMovement;
+    });
+    
+    // Update state
+    setSequencedResults(results);
+    
+    // Merge placement logs
+    const mergedLog = [...placementLog, ...combinePlacementLog];
+    setPlacementLog(mergedLog);
+    
+    const stats = calculatePlantSummary(originalSnapshot, results, combinedOrders, mergedLog, allLines);
+    setSummaryStats(stats);
+    
+    setIsCombined(true);
+    setIsCombining(false);
+    
+    // Regenerate AI for new actions
+    if (combinePlacementLog.length > 0) {
+      generateAIExplanations(mergedLog);
+    }
+  }
+  
+  async function generateAIExplanations(log) {
+    setIsLoadingAI(true);
+    try {
+      const prompt = buildActionsPrompt(log);
+      const response = await callAI(prompt);
+      const parsed = parseActionsResponse(response, log);
+      if (Object.keys(parsed).length >= log.length * 0.5) {
+        setAiExplanations(parsed);
+      } else {
+        setUseFallback(true);
+      }
+    } catch {
+      setUseFallback(true);
+    }
+    setIsLoadingAI(false);
+  }
+  
+  const activeLines = allLines.filter(line =>
+    (originalSnapshot?.[line]?.length || 0) > 0 ||
+    (sequencedResults?.[line]?.length || 0) > 0
+  );
+  
+  return (
+    <div className="auto-sequence-overlay" onClick={e => e.stopPropagation()}>
+      <div className="auto-sequence-modal" onClick={e => e.stopPropagation()}>
+        {/* Header */}
+        <div className="auto-sequence-header">
+          <div>
+            <h2>✨ Auto-Sequence — Post Upload</h2>
+            <span className="auto-sequence-subtitle">
+              {uploadContext.allLinesWereBlank 
+                ? 'All lines were blank — orders auto-assigned to optimal lines'
+                : 'Orders uploaded — review proposed sequence'
+              }
+            </span>
+          </div>
+          <button 
+            className="auto-sequence-close" 
+            onClick={onCancel}
+            disabled={isApplying}
+          >
+            ✕
+          </button>
+        </div>
+        
+        {/* N10D Warning Banner */}
+        {!uploadContext.hasN10D && (
+          <div className="upload-as-warning-banner">
+            <span className="upload-as-warning-icon">⚠️</span>
+            <div className="upload-as-warning-content">
+              <span className="upload-as-warning-title">Future Dispatches not uploaded</span>
+              <span className="upload-as-warning-text">
+                It's recommended to upload Future Dispatches first before uploading orders, 
+                so the app can properly assess demand and stock status for optimal sequencing.
+              </span>
+            </div>
+            <button 
+              className="upload-as-warning-dismiss"
+              onClick={(e) => e.target.closest('.upload-as-warning-banner').remove()}
+            >
+              ✕
+            </button>
+          </div>
+        )}
+        
+        {/* Processing state */}
+        {isProcessing && (
+          <div className="upload-as-processing">
+            <div className="auto-sequence-applying-spinner"></div>
+            <span>Analyzing and sequencing orders...</span>
+          </div>
+        )}
+        
+        {!isProcessing && sequencedResults && summaryStats && (
+          <>
+            {/* Stats */}
+            <div className="auto-sequence-stats">
+              <StatBadge label="Orders" value={summaryStats.totalOrdersBefore} />
+              <StatBadge label="Lines Used" value={activeLines.length} />
+              {summaryStats.ordersMovedBetweenLines > 0 && (
+                <StatBadge label="Cross-Line Moves" value={summaryStats.ordersMovedBetweenLines} color="orange" />
+              )}
+              {isCombined && summaryStats.ordersCombined > 0 && (
+                <StatBadge label="Combined Groups" value={summaryStats.ordersCombined} color="green" />
+              )}
+            </div>
+            
+            {/* Tabs */}
+            <div className="plant-preview-tabs">
+              <button
+                className={`plant-preview-tab ${activeTab === 'summary' ? 'active' : ''}`}
+                onClick={() => setActiveTab('summary')}
+              >
+                📊 All Lines Summary
+              </button>
+              {activeLines.map(line => (
+                <button
+                  key={line}
+                  className={`plant-preview-tab ${activeTab === line ? 'active' : ''}`}
+                  onClick={() => setActiveTab(line)}
+                >
+                  {line}
+                </button>
+              ))}
+            </div>
+            
+            {/* Content */}
+            <div className="plant-preview-content">
+              {activeTab === 'summary' && (
+                <PlantSummaryTab
+                  summaryStats={summaryStats}
+                  placementLog={placementLog}
+                  aiExplanations={aiExplanations}
+                  isLoadingAI={isLoadingAI}
+                  useFallback={useFallback}
+                  onRefreshInsights={() => generateAIExplanations(placementLog)}
+                />
+              )}
+              {activeTab !== 'summary' && (
+                <PlantLineTab
+                  line={activeTab}
+                  originalOrders={originalSnapshot[activeTab] || []}
+                  sequencedOrders={sequencedResults[activeTab] || []}
+                  placementLog={placementLog}
+                  aiExplanations={aiExplanations}
+                  isLoadingAI={isLoadingAI}
+                  useFallback={useFallback}
+                />
+              )}
+            </div>
+            
+            {/* Applying overlay */}
+            {isApplying && (
+              <div className="auto-sequence-applying-overlay">
+                <div className="auto-sequence-applying-content">
+                  <div className="auto-sequence-applying-spinner"></div>
+                  <span className="auto-sequence-applying-text">Applying to schedule...</span>
+                  <span className="auto-sequence-applying-sub">Please wait. Do not close this window.</span>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+        
+        {/* Footer */}
+        <div className="auto-sequence-footer">
+          <div className="auto-sequence-footer-left">
+            {/* Combine button — only if not yet combined */}
+            {!isCombined && !isProcessing && (
+              <button
+                className={`btn-combine-orders ${isCombining ? 'btn-combine-loading' : ''}`}
+                onClick={handleCombineOrders}
+                disabled={isCombining || isApplying}
+              >
+                {isCombining ? (
+                  <>
+                    <span className="btn-apply-spinner"></span>
+                    Combining...
+                  </>
+                ) : (
+                  '🔗 Combine Orders'
+                )}
+              </button>
+            )}
+            {isCombined && (
+              <span className="btn-combine-done">✅ Orders Combined</span>
+            )}
+          </div>
+          <div className="auto-sequence-footer-right">
+            <button
+              className="btn-upload-only"
+              onClick={onUploadOnly}
+              disabled={isApplying || isCombining}
+            >
+              Upload Only
+            </button>
+            <button
+              className={`btn-apply ${isApplying ? 'btn-apply-loading' : ''}`}
+              onClick={() => {
+                if (isApplying) return;
+                setIsApplying(true);
+                onApplySequence(sequencedResults);
+              }}
+              disabled={isApplying || isProcessing || isCombining}
+            >
+              {isApplying ? (
+                <>
+                  <span className="btn-apply-spinner"></span>
+                  Applying...
+                </>
+              ) : (
+                'Apply to Schedule'
+              )}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+## 3. SEQUENCE-ONLY ALGORITHM (NO COMBINE)
+
+```javascript
+function sequenceOnlyAcrossLines(allOrders, masterData, n10dData, allLines) {
+  let workingOrders = allOrders
+    .filter(o => o.status !== 'Done' && o.status !== 'Cancel PO')
+    .map(o => ({
+      ...JSON.parse(JSON.stringify(o)),
+      _originalLine: normalizeLine(o.feedmill_line || o.line),
+      _movedFromLine: null
+    }));
+  
+  // Track MT per line
+  const lineTotalMT = {};
+  allLines.forEach(line => {
+    const lineOrders = workingOrders.filter(o => normalizeLine(o.feedmill_line || o.line) === line);
+    lineTotalMT[line] = lineOrders.reduce((sum, o) => sum + (parseFloat(o.volume) || 0), 0);
+  });
+  
+  const lineOrdersMap = {};
+  allLines.forEach(line => {
+    lineOrdersMap[line] = workingOrders
+      .filter(o => normalizeLine(o.feedmill_line || o.line) === line)
+      .sort((a, b) => (a.priority_seq || 0) - (b.priority_seq || 0));
+  });
+  
+  const placementLog = [];
+  
+  // Sort: dated first, then by avail date
+  const datedOrders = workingOrders.filter(o => {
+    const avail = o.target_avail_date;
+    return avail && /^\d{4}-\d{2}-\d{2}/.test(avail) && !isNaN(Date.parse(avail));
+  }).sort((a, b) => new Date(a.target_avail_date) - new Date(b.target_avail_date));
+  
+  const nonDatedOrders = workingOrders.filter(o => {
+    const avail = o.target_avail_date;
+    return !avail || !/^\d{4}-\d{2}-\d{2}/.test(avail) || isNaN(Date.parse(avail));
+  });
+  
+  const sortedOrders = [...datedOrders, ...nonDatedOrders];
+  
+  // For each order, evaluate if it should be on a different line
+  sortedOrders.forEach(order => {
+    const eligibleLines = allLines.filter(line =>
+      canProduceOnLine(order, line, masterData)
+    );
+    
+    if (eligibleLines.length === 0) return;
+    
+    const orderVolume = parseFloat(order.volume) || 0;
+    const origLine = normalizeLine(order.feedmill_line || order.line);
+    
+    // Remove from current line
+    lineTotalMT[origLine] = (lineTotalMT[origLine] || 0) - orderVolume;
+    lineOrdersMap[origLine] = (lineOrdersMap[origLine] || []).filter(o => o.id !== order.id);
+    
+    // Calculate queue times
+    const lineScores = eligibleLines.map(line => {
+      const currentTotalMT = lineTotalMT[line] || 0;
+      const runRate = getLineRunRate(line);
+      const queueTime = runRate > 0 ? currentTotalMT / runRate : Infinity;
+      const lineNumber = parseInt(line.match(/\d+/)?.[0] || '99');
+      
+      return { line, runRate, totalMTBefore: currentTotalMT, queueTimeBefore: queueTime, lineNumber };
+    });
+    
+    lineScores.sort((a, b) => {
+      const diff = a.queueTimeBefore - b.queueTimeBefore;
+      if (Math.abs(diff) > 0.001) return diff;
+      return a.lineNumber - b.lineNumber;
+    });
+    
+    const bestLine = lineScores[0].line;
+    
+    // Place on best line
+    if (origLine !== bestLine) {
+      order._movedFromLine = origLine;
+      order.line = bestLine;
+      order.feedmill_line = bestLine;
+      
+      const toScore = lineScores.find(ls => ls.line === bestLine);
+      
+      placementLog.push({
+        type: 'moved',
+        product: order.item_description,
+        materialCode: order.material_code_fg,
+        fromLine: origLine,
+        toLine: bestLine,
+        volume: orderVolume,
+        fpr: order.fpr,
+        lineScores: lineScores.map(ls => ({
+          line: ls.line,
+          runRate: ls.runRate,
+          totalMTBefore: ls.totalMTBefore,
+          queueTimeBefore: ls.queueTimeBefore,
+          totalMTAfter: ls.line === bestLine ? (ls.totalMTBefore + orderVolume) : ls.totalMTBefore,
+          queueTimeAfter: ls.line === bestLine ? ((ls.totalMTBefore + orderVolume) / ls.runRate) : ls.queueTimeBefore
+        })),
+        bestLineReason: {
+          line: bestLine,
+          runRate: toScore.runRate,
+          queueTime: toScore.queueTimeBefore,
+          totalMTBefore: toScore.totalMTBefore,
+          totalMTAfter: toScore.totalMTBefore + orderVolume,
+          queueTimeAfter: (toScore.totalMTBefore + orderVolume) / toScore.runRate
+        },
+        fromLineReason: {
+          line: origLine,
+          queueTime: lineScores.find(ls => ls.line === origLine)?.queueTimeBefore || 0,
+          runRate: getLineRunRate(origLine)
+        }
+      });
+    }
+    
+    lineTotalMT[bestLine] = (lineTotalMT[bestLine] || 0) + orderVolume;
+    if (!lineOrdersMap[bestLine]) lineOrdersMap[bestLine] = [];
+    lineOrdersMap[bestLine].push(order);
+  });
+  
+  return { lineOrdersMap, placementLog };
+}
+```
+
+---
+
+## 4. COMBINE-ONLY ALGORITHM (RUN ON TOP OF SEQUENCED ORDERS)
+
+```javascript
+function plantLevelCombineOnly(allOrders, masterData, n10dData, allLines) {
+  // This is the same as plantLevelCombineAndPlace but ONLY does the combine step
+  // It does NOT move orders between lines — just combines matching orders on the same line
+  // or across lines if queue time is better
+  
+  let workingOrders = allOrders.map(o => ({
+    ...JSON.parse(JSON.stringify(o)),
+    _originalLine: normalizeLine(o.line || o.feedmill_line),
+    _movedFromLine: null
+  }));
+  
+  const lineTotalMT = {};
+  allLines.forEach(line => {
+    const lineOrders = workingOrders.filter(o => normalizeLine(o.line || o.feedmill_line) === line);
+    lineTotalMT[line] = lineOrders.reduce((sum, o) => sum + (parseFloat(o.volume) || 0), 0);
+  });
+  
+  const lineOrdersMap = {};
+  allLines.forEach(line => {
+    lineOrdersMap[line] = workingOrders.filter(o => normalizeLine(o.line || o.feedmill_line) === line);
+  });
+  
+  // Group by Material Code + Formula Version
+  const matchGroups = {};
+  workingOrders.forEach(order => {
+    const key = `${String(order.material_code_fg || '').trim()}||${order.formula_version || '—'}`;
+    if (!matchGroups[key]) matchGroups[key] = [];
+    matchGroups[key].push(order);
+  });
+  
+  const combinedOrders = [];
+  const placementLog = [];
+  const processedIds = new Set();
+  
+  Object.entries(matchGroups).forEach(([key, orders]) => {
+    if (orders.length < 2) return;
+    
+    const eligibleLines = allLines.filter(line =>
+      canProduceOnLine(orders[0], line, masterData)
+    );
+    
+    if (eligibleLines.length === 0) return;
+    
+    // Greedy combine up to 180 MT
+    const sorted = [...orders].sort((a, b) => (parseFloat(b.volume) || 0) - (parseFloat(a.volume) || 0));
+    const combineGroups = [];
+    const remaining = [...sorted];
+    
+    while (remaining.length > 0) {
+      const group = [remaining.shift()];
+      let vol = parseFloat(group[0].volume) || 0;
+      
+      for (let i = remaining.length - 1; i >= 0; i--) {
+        const cv = parseFloat(remaining[i].volume) || 0;
+        if (vol + cv <= MAX_COMBINE_MT) {
+          vol += cv;
+          group.push(remaining.splice(i, 1)[0]);
+        }
+      }
+      
+      if (group.length > 1) {
+        combineGroups.push({ orders: group, totalVolume: vol });
+      }
+    }
+    
+    // Place each combine group
+    combineGroups.forEach(combineGroup => {
+      // Remove from lines
+      combineGroup.orders.forEach(o => {
+        const orig = normalizeLine(o.line || o.feedmill_line);
+        lineTotalMT[orig] = (lineTotalMT[orig] || 0) - (parseFloat(o.volume) || 0);
+        lineOrdersMap[orig] = (lineOrdersMap[orig] || []).filter(lo => lo.id !== o.id);
+        processedIds.add(o.id);
+      });
+      
+      // Evaluate lines
+      const lineScores = eligibleLines.map(line => {
+        const mt = lineTotalMT[line] || 0;
+        const rate = getLineRunRate(line);
+        return { line, runRate: rate, totalMTBefore: mt, queueTimeBefore: rate > 0 ? mt / rate : Infinity, lineNumber: parseInt(line.match(/\d+/)?.[0] || '99') };
+      });
+      lineScores.sort((a, b) => {
+        const d = a.queueTimeBefore - b.queueTimeBefore;
+        if (Math.abs(d) > 0.001) return d;
+        return a.lineNumber - b.lineNumber;
+      });
+      
+      const bestLine = lineScores[0].line;
+      
+      // Create combined order
+      const baseOrder = { ...combineGroup.orders[0] };
+      baseOrder.volume = combineGroup.totalVolume;
+      baseOrder.line = bestLine;
+      baseOrder.feedmill_line = bestLine;
+      baseOrder._isCombined = true;
+      baseOrder._combinedFrom = combineGroup.orders.map(o => ({
+        id: o.id, line: o._originalLine, fpr: o.fpr, volume: o.volume,
+        item_description: o.item_description, form: o.form,
+        material_code_fg: o.material_code_fg, planned_order_fg: o.planned_order_fg,
+        planned_order_sfg: o.planned_order_sfg, batch_size: o.batch_size,
+        batches: o.batches, production_time: o.production_time,
+        target_avail_date: o.target_avail_date, category: o.category
+      }));
+      baseOrder._combinedFromLines = [...new Set(combineGroup.orders.map(o => o._originalLine))];
+      
+      const batchSize = parseFloat(baseOrder.batch_size) || 1;
+      baseOrder.batches = Math.ceil(combineGroup.totalVolume / batchSize);
+      
+      lineTotalMT[bestLine] = (lineTotalMT[bestLine] || 0) + combineGroup.totalVolume;
+      lineOrdersMap[bestLine].push(baseOrder);
+      combinedOrders.push(baseOrder);
+      
+      const afterMT = lineTotalMT[bestLine];
+      const changeoversSaved = combineGroup.orders.length - 1;
+      const baseCO = getBaseChangeover(baseOrder.form, getDefaultChangeoverRules()?.baseChangeover);
+      
+      placementLog.push({
+        type: 'combined',
+        product: baseOrder.item_description,
+        materialCode: baseOrder.material_code_fg,
+        ordersCount: combineGroup.orders.length,
+        fromLines: [...new Set(combineGroup.orders.map(o => o._originalLine))],
+        toLine: bestLine,
+        totalVolume: combineGroup.totalVolume,
+        individualVolumes: combineGroup.orders.map(o => ({ name: o.item_description, volume: parseFloat(o.volume) || 0, fromLine: o._originalLine, fpr: o.fpr })),
+        lineScores: lineScores.map(ls => ({ ...ls, totalMTAfter: lineTotalMT[ls.line] || 0, queueTimeAfter: (lineTotalMT[ls.line] || 0) / ls.runRate })),
+        bestLineReason: { line: bestLine, runRate: getLineRunRate(bestLine), queueTime: lineScores[0].queueTimeBefore, totalMTBefore: lineScores[0].totalMTBefore, totalMTAfter: afterMT, queueTimeAfter: afterMT / getLineRunRate(bestLine) },
+        changeoversSaved, baseChangeover: baseCO, timeSaved: changeoversSaved * baseCO
+      });
+    });
+  });
+  
+  return { lineOrdersMap, combinedOrders, placementLog };
+}
+```
+
+---
+
+## 5. INTEGRATE INTO UPLOAD FLOW
+
+```jsx
+// In the parent component / upload page
+
+const [showUploadAutoSequence, setShowUploadAutoSequence] = useState(false);
+const [uploadContext, setUploadContext] = useState(null);
+
+// After upload completes, show the preview
+{showUploadAutoSequence && uploadContext && (
+  <UploadAutoSequencePreview
+    uploadContext={uploadContext}
+    allOrders={enrichedOrders}
+    masterData={masterData}
+    n10dData={n10dData}
+    changeoverRules={changeoverRules}
+    onApplySequence={async (sequencedResults) => {
+      await handlePlantApply(sequencedResults);
+      setShowUploadAutoSequence(false);
+    }}
+    onUploadOnly={() => {
+      setShowUploadAutoSequence(false);
+      toast.success('Orders uploaded without sequencing.');
+    }}
+    onCancel={() => {
+      setShowUploadAutoSequence(false);
+    }}
+  />
+)}
+```
+
+---
+
+## 6. STYLING
+
+```css
+/* Warning banner */
+.upload-as-warning-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 24px;
+  background: #fffbeb;
+  border-bottom: 1px solid #fde68a;
+}
+
+.upload-as-warning-icon {
+  font-size: 16px;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.upload-as-warning-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.upload-as-warning-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #92400e;
+}
+
+.upload-as-warning-text {
+  font-size: 12px;
+  color: #a16207;
+  line-height: 1.5;
+}
+
+.upload-as-warning-dismiss {
+  background: none;
+  border: none;
+  color: #a16207;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.upload-as-warning-dismiss:hover {
+  color: #92400e;
+}
+
+/* Processing state */
+.upload-as-processing {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 60px 24px;
+  color: #6b7280;
+  font-size: 14px;
+}
+
+/* Combine button */
+.btn-combine-orders {
+  padding: 8px 16px;
+  background: #ffffff;
+  color: #16a34a;
+  border: 1px solid #16a34a;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn-combine-orders:hover:not(:disabled) {
+  background: #f0fdf4;
+}
+
+.btn-combine-orders:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-combine-loading {
+  color: #6b7280;
+  border-color: #d1d5db;
+}
+
+.btn-combine-done {
+  font-size: 12px;
+  color: #16a34a;
+  font-weight: 600;
+}
+
+/* Upload Only button */
+.btn-upload-only {
+  padding: 8px 16px;
+  background: #ffffff;
+  color: #374151;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn-upload-only:hover:not(:disabled) {
+  background: #f9fafb;
+}
+
+.btn-upload-only:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+```
+
+---
+
+## VERIFICATION
+
+### Upload triggers auto-sequence
+1. ✅ After order upload, auto-sequence preview appears
+2. ✅ If all lines were blank → subtitle says "All lines were blank"
+3. ✅ If lines had orders → subtitle says "Review proposed sequence"
+
+### N10D warning banner
+4. ✅ Yellow warning if Future Dispatches not uploaded
+5. ✅ Dismissible with ✕ button
+6. ✅ Recommends uploading Future Dispatches first
+
+### Sequence only (no combine by default)
+7. ✅ Orders distributed to optimal lines by queue time
+8. ✅ No orders combined initially
+9. ✅ Each order stays as separate row
+
+### Combine button
+10. ✅ "🔗 Combine Orders" button in footer
+11. ✅ Clicking runs combine algorithm on sequenced orders
+12. ✅ Preview updates in-place with combined results
+13. ✅ Button shows loading state while combining
+14. ✅ After combine, button changes to "✅ Orders Combined"
+15. ✅ Cannot combine twice
+
+### Upload Only
+16. ✅ "Upload Only" button skips sequencing
+17. ✅ Orders land on SAP-assigned lines as-is
+18. ✅ Toast confirms upload without sequencing
+
+### Apply to Schedule
+19. ✅ Same DB mutation pattern as plant-level auto-sequence
+20. ✅ Loading state, double-click prevention
+21. ✅ Modal locked during apply
+```

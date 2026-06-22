@@ -1,0 +1,510 @@
+```
+Fix the algorithm to remove orders from their original lines FIRST, then calculate queue times on the reduced totals, then pick the best line:
+
+---
+
+## FIX: REMOVE FIRST, THEN EVALUATE, THEN PLACE
+
+```javascript
+function plantLevelCombineAndPlace(allOrders, masterData, n10dData, allLines) {
+  let workingOrders = allOrders
+    .filter(o => o.status !== 'Done' && o.status !== 'Cancel PO')
+    .map(o => {
+      const normalized = {
+        ...JSON.parse(JSON.stringify(o)),
+        _originalLine: normalizeLine(o.line),
+        _movedFromLine: null
+      };
+      normalized.line = normalizeLine(o.line);
+      return normalized;
+    });
+  
+  const normalizedAllLines = allLines.map(l => normalizeLine(l));
+  
+  // Track current MT per line — running total
+  const lineTotalMT = {};
+  normalizedAllLines.forEach(line => {
+    const lineOrders = workingOrders.filter(o => o.line === line);
+    lineTotalMT[line] = lineOrders.reduce((sum, o) => sum + (parseFloat(o.volume) || 0), 0);
+  });
+  
+  const lineOrdersMap = {};
+  normalizedAllLines.forEach(line => {
+    lineOrdersMap[line] = workingOrders
+      .filter(o => o.line === line)
+      .sort((a, b) => a.prio - b.prio);
+  });
+  
+  console.log('=== INITIAL LINE TOTALS ===');
+  normalizedAllLines.forEach(line => {
+    console.log(`  ${line}: ${lineTotalMT[line].toFixed(1)} MT, Rate: ${getLineRunRate(line)} MT/hr, Queue: ${(lineTotalMT[line] / getLineRunRate(line)).toFixed(2)} hrs`);
+  });
+  
+  // Step 1: Sort dated orders first
+  const datedOrders = workingOrders.filter(o => {
+    const avail = o.target_avail_date;
+    return avail && /^\d{4}-\d{2}-\d{2}/.test(avail) && !isNaN(Date.parse(avail));
+  }).sort((a, b) => new Date(a.target_avail_date) - new Date(b.target_avail_date));
+  
+  const nonDatedOrders = workingOrders.filter(o => {
+    const avail = o.target_avail_date;
+    return !avail || !/^\d{4}-\d{2}-\d{2}/.test(avail) || isNaN(Date.parse(avail));
+  });
+  
+  const sortedOrders = [...datedOrders, ...nonDatedOrders];
+  
+  // Step 2: Group by Material Code + Formula Version
+  const matchGroups = {};
+  sortedOrders.forEach(order => {
+    const key = `${String(order.material_code_fg || '').trim()}||${order.formula_version || '—'}`;
+    if (!matchGroups[key]) matchGroups[key] = [];
+    matchGroups[key].push(order);
+  });
+  
+  const matchedGroups = {};
+  const nonMatchedOrders = [];
+  
+  Object.entries(matchGroups).forEach(([key, orders]) => {
+    if (orders.length >= 2) {
+      matchedGroups[key] = orders;
+    } else {
+      nonMatchedOrders.push(orders[0]);
+    }
+  });
+  
+  const combinedOrders = [];
+  const placementLog = [];
+  const processedOrderIds = new Set();
+  
+  // Step 3: Process matched groups
+  Object.entries(matchedGroups).forEach(([key, orders]) => {
+    const [materialCode] = key.split('||');
+    
+    const eligibleLines = normalizedAllLines.filter(line =>
+      canProduceOnLine(orders[0], line, masterData)
+    );
+    
+    console.log(`\n=== Processing matched: ${orders[0].item_description} ===`);
+    console.log(`  Material: ${materialCode}, Orders: ${orders.length}`);
+    console.log(`  Eligible lines: ${eligibleLines.map(l => getLineShortName(l)).join(', ')}`);
+    
+    if (eligibleLines.length === 0) {
+      orders.forEach(o => processedOrderIds.add(o.id));
+      return;
+    }
+    
+    // Greedy combine up to 180 MT
+    const sortedByVolume = [...orders].sort((a, b) =>
+      (parseFloat(b.volume) || 0) - (parseFloat(a.volume) || 0)
+    );
+    
+    const combineGroups = [];
+    const remaining = [...sortedByVolume];
+    
+    while (remaining.length > 0) {
+      const group = [remaining.shift()];
+      let groupVolume = parseFloat(group[0].volume) || 0;
+      
+      for (let i = remaining.length - 1; i >= 0; i--) {
+        const candidateVolume = parseFloat(remaining[i].volume) || 0;
+        if (groupVolume + candidateVolume <= MAX_COMBINE_MT) {
+          groupVolume += candidateVolume;
+          group.push(remaining.splice(i, 1)[0]);
+        }
+      }
+      
+      combineGroups.push({ orders: group, totalVolume: groupVolume });
+    }
+    
+    // Place each combine group
+    combineGroups.forEach((combineGroup, groupIdx) => {
+      console.log(`\n  Group ${groupIdx + 1}: ${combineGroup.totalVolume} MT (${combineGroup.orders.length} orders)`);
+      
+      // === STEP A: REMOVE all orders in this group from their current lines FIRST ===
+      const removedFrom = {};
+      combineGroup.orders.forEach(o => {
+        const origLine = o._originalLine || o.line;
+        const vol = parseFloat(o.volume) || 0;
+        
+        // Track what we removed for logging
+        if (!removedFrom[origLine]) removedFrom[origLine] = { mt: 0, count: 0 };
+        removedFrom[origLine].mt += vol;
+        removedFrom[origLine].count++;
+        
+        // Subtract from line total
+        lineTotalMT[origLine] = (lineTotalMT[origLine] || 0) - vol;
+        
+        // Remove from line orders map
+        if (lineOrdersMap[origLine]) {
+          lineOrdersMap[origLine] = lineOrdersMap[origLine].filter(lo => lo.id !== o.id);
+        }
+        
+        processedOrderIds.add(o.id);
+      });
+      
+      console.log(`  Removed from:`);
+      Object.entries(removedFrom).forEach(([line, info]) => {
+        console.log(`    ${getLineShortName(line)}: -${info.mt.toFixed(1)} MT (${info.count} orders). Line now: ${(lineTotalMT[line] || 0).toFixed(1)} MT`);
+      });
+      
+      // === STEP B: NOW calculate queue times with UPDATED totals ===
+      const lineScores = eligibleLines.map(line => {
+        const currentTotalMT = lineTotalMT[line] || 0;
+        const runRate = getLineRunRate(line);
+        const queueTime = runRate > 0 ? currentTotalMT / runRate : Infinity;
+        const lineNumber = parseInt(line.match(/\d+/)?.[0] || '99');
+        
+        return {
+          line,
+          runRate,
+          totalMTBefore: currentTotalMT, // This is AFTER removal but BEFORE placement
+          queueTimeBefore: queueTime,
+          lineNumber
+        };
+      });
+      
+      // Sort: lowest queue time, then lowest line number
+      lineScores.sort((a, b) => {
+        const queueDiff = a.queueTimeBefore - b.queueTimeBefore;
+        if (Math.abs(queueDiff) > 0.001) return queueDiff;
+        return a.lineNumber - b.lineNumber;
+      });
+      
+      console.log(`  Queue times (after removal, before placement):`);
+      lineScores.forEach(ls => {
+        console.log(`    ${getLineShortName(ls.line)}: ${ls.totalMTBefore.toFixed(1)} MT ÷ ${ls.runRate} MT/hr = ${ls.queueTimeBefore.toFixed(2)} hrs`);
+      });
+      
+      const bestLine = lineScores[0].line;
+      console.log(`  Best: ${getLineShortName(bestLine)} (${lineScores[0].queueTimeBefore.toFixed(2)} hrs)`);
+      
+      // === STEP C: PLACE the combined order on the best line ===
+      if (combineGroup.orders.length === 1) {
+        // Single order
+        const order = combineGroup.orders[0];
+        const orderVolume = parseFloat(order.volume) || 0;
+        
+        if (order._originalLine !== bestLine) {
+          order._movedFromLine = order._originalLine;
+        }
+        order.line = bestLine;
+        
+        // Add volume to best line
+        lineTotalMT[bestLine] = (lineTotalMT[bestLine] || 0) + orderVolume;
+        lineOrdersMap[bestLine].push(order);
+        
+        const afterTotalMT = lineTotalMT[bestLine] || 0;
+        const afterQueueTime = afterTotalMT / getLineRunRate(bestLine);
+        
+        placementLog.push({
+          type: order._movedFromLine ? 'moved' : 'placed',
+          product: order.item_description,
+          materialCode: order.material_code_fg,
+          fromLine: order._movedFromLine || null,
+          toLine: bestLine,
+          volume: orderVolume,
+          fpr: order.fpr,
+          lineScores: lineScores.map(ls => ({
+            line: ls.line,
+            runRate: ls.runRate,
+            totalMTBefore: ls.totalMTBefore,
+            queueTimeBefore: ls.queueTimeBefore,
+            totalMTAfter: lineTotalMT[ls.line] || 0,
+            queueTimeAfter: (lineTotalMT[ls.line] || 0) / ls.runRate
+          })),
+          bestLineReason: {
+            line: bestLine,
+            runRate: getLineRunRate(bestLine),
+            queueTime: lineScores[0].queueTimeBefore,
+            totalMTBefore: lineScores[0].totalMTBefore,
+            totalMTAfter: afterTotalMT,
+            queueTimeAfter: afterQueueTime
+          },
+          fromLineReason: order._movedFromLine ? {
+            line: order._movedFromLine,
+            queueTime: lineScores.find(ls => ls.line === order._movedFromLine)?.queueTimeBefore || 0,
+            runRate: getLineRunRate(order._movedFromLine)
+          } : null
+        });
+        
+      } else {
+        // Multiple orders — combine
+        const baseOrder = { ...combineGroup.orders[0] };
+        const combinedVolume = combineGroup.totalVolume;
+        
+        // Determine avail date
+        const datedInGroup = combineGroup.orders.filter(o => {
+          const avail = o.target_avail_date;
+          return avail && /^\d{4}-\d{2}-\d{2}/.test(avail) && !isNaN(Date.parse(avail));
+        }).sort((a, b) => new Date(a.target_avail_date) - new Date(b.target_avail_date));
+        
+        if (datedInGroup.length > 0) {
+          baseOrder.target_avail_date = datedInGroup[0].target_avail_date;
+        }
+        
+        // Set combined order properties
+        baseOrder.volume = combinedVolume;
+        baseOrder.line = bestLine;
+        baseOrder._isCombined = true;
+        baseOrder._combinedFrom = combineGroup.orders.map(o => ({
+          id: o.id,
+          line: o._originalLine,
+          fpr: o.fpr,
+          volume: o.volume,
+          item_description: o.item_description,
+          form: o.form,
+          material_code_fg: o.material_code_fg,
+          planned_order_fg: o.planned_order_fg,
+          planned_order_sfg: o.planned_order_sfg,
+          batch_size: o.batch_size,
+          batches: o.batches,
+          production_time: o.production_time,
+          target_avail_date: o.target_avail_date,
+          category: o.category
+        }));
+        baseOrder._movedFromLine = baseOrder._originalLine !== bestLine ? baseOrder._originalLine : null;
+        baseOrder._combinedFromLines = [...new Set(combineGroup.orders.map(o => o._originalLine))];
+        
+        const batchSize = parseFloat(baseOrder.batch_size) || 1;
+        baseOrder.batches = Math.ceil(combinedVolume / batchSize);
+        const runRate = parseFloat(baseOrder.run_rate) || 0;
+        baseOrder.production_time = runRate > 0 ? (combinedVolume / runRate).toFixed(2) : '0.00';
+        
+        // Add combined volume to best line
+        lineTotalMT[bestLine] = (lineTotalMT[bestLine] || 0) + combinedVolume;
+        lineOrdersMap[bestLine].push(baseOrder);
+        combinedOrders.push(baseOrder);
+        
+        const afterTotalMT = lineTotalMT[bestLine] || 0;
+        const afterQueueTime = afterTotalMT / getLineRunRate(bestLine);
+        
+        const changeoversSaved = combineGroup.orders.length - 1;
+        const baseChangeover = getBaseChangeover(baseOrder.form, getDefaultChangeoverRules()?.baseChangeover);
+        
+        placementLog.push({
+          type: 'combined',
+          product: baseOrder.item_description,
+          materialCode: baseOrder.material_code_fg,
+          ordersCount: combineGroup.orders.length,
+          fromLines: [...new Set(combineGroup.orders.map(o => o._originalLine))],
+          toLine: bestLine,
+          totalVolume: combinedVolume,
+          individualVolumes: combineGroup.orders.map(o => ({
+            name: o.item_description,
+            volume: parseFloat(o.volume) || 0,
+            fromLine: o._originalLine,
+            fpr: o.fpr
+          })),
+          lineScores: lineScores.map(ls => ({
+            line: ls.line,
+            runRate: ls.runRate,
+            totalMTBefore: ls.totalMTBefore,
+            queueTimeBefore: ls.queueTimeBefore,
+            totalMTAfter: lineTotalMT[ls.line] || 0,
+            queueTimeAfter: (lineTotalMT[ls.line] || 0) / ls.runRate
+          })),
+          bestLineReason: {
+            line: bestLine,
+            runRate: getLineRunRate(bestLine),
+            queueTime: lineScores[0].queueTimeBefore,
+            totalMTBefore: lineScores[0].totalMTBefore,
+            totalMTAfter: afterTotalMT,
+            queueTimeAfter: afterQueueTime
+          },
+          changeoversSaved,
+          baseChangeover,
+          timeSaved: changeoversSaved * baseChangeover
+        });
+      }
+      
+      console.log(`  → Placed on ${getLineShortName(bestLine)}. Line now: ${(lineTotalMT[bestLine] || 0).toFixed(1)} MT`);
+    });
+  });
+  
+  // Step 4: Process non-matched orders — SAME FIX
+  nonMatchedOrders.forEach(order => {
+    if (processedOrderIds.has(order.id)) return;
+    
+    const eligibleLines = normalizedAllLines.filter(line =>
+      canProduceOnLine(order, line, masterData)
+    );
+    
+    if (eligibleLines.length === 0) {
+      processedOrderIds.add(order.id);
+      return;
+    }
+    
+    const orderVolume = parseFloat(order.volume) || 0;
+    
+    // === STEP A: REMOVE order from current line FIRST ===
+    const origLine = order.line;
+    lineTotalMT[origLine] = (lineTotalMT[origLine] || 0) - orderVolume;
+    lineOrdersMap[origLine] = (lineOrdersMap[origLine] || []).filter(o => o.id !== order.id);
+    
+    console.log(`\n  Non-matched: ${order.item_description} (${orderVolume} MT)`);
+    console.log(`    Removed from ${getLineShortName(origLine)}. Line now: ${(lineTotalMT[origLine] || 0).toFixed(1)} MT`);
+    
+    // === STEP B: Calculate queue times with UPDATED totals ===
+    const lineScores = eligibleLines.map(line => {
+      const currentTotalMT = lineTotalMT[line] || 0;
+      const runRate = getLineRunRate(line);
+      const queueTime = runRate > 0 ? currentTotalMT / runRate : Infinity;
+      const lineNumber = parseInt(line.match(/\d+/)?.[0] || '99');
+      
+      return {
+        line,
+        runRate,
+        totalMTBefore: currentTotalMT,
+        queueTimeBefore: queueTime,
+        lineNumber
+      };
+    });
+    
+    lineScores.sort((a, b) => {
+      const queueDiff = a.queueTimeBefore - b.queueTimeBefore;
+      if (Math.abs(queueDiff) > 0.001) return queueDiff;
+      return a.lineNumber - b.lineNumber;
+    });
+    
+    console.log(`    Queue times:`);
+    lineScores.forEach(ls => {
+      console.log(`      ${getLineShortName(ls.line)}: ${ls.totalMTBefore.toFixed(1)} MT ÷ ${ls.runRate} MT/hr = ${ls.queueTimeBefore.toFixed(2)} hrs`);
+    });
+    
+    const bestLine = lineScores[0].line;
+    console.log(`    Best: ${getLineShortName(bestLine)}`);
+    
+    // === STEP C: PLACE on best line ===
+    if (origLine !== bestLine) {
+      order._movedFromLine = origLine;
+    }
+    order.line = bestLine;
+    
+    lineTotalMT[bestLine] = (lineTotalMT[bestLine] || 0) + orderVolume;
+    lineOrdersMap[bestLine].push(order);
+    
+    if (order._movedFromLine) {
+      const afterTotalMT = lineTotalMT[bestLine] || 0;
+      const afterQueueTime = afterTotalMT / getLineRunRate(bestLine);
+      
+      placementLog.push({
+        type: 'moved',
+        product: order.item_description,
+        materialCode: order.material_code_fg,
+        fromLine: order._movedFromLine,
+        toLine: bestLine,
+        volume: orderVolume,
+        fpr: order.fpr,
+        lineScores: lineScores.map(ls => ({
+          line: ls.line,
+          runRate: ls.runRate,
+          totalMTBefore: ls.totalMTBefore,
+          queueTimeBefore: ls.queueTimeBefore,
+          totalMTAfter: lineTotalMT[ls.line] || 0,
+          queueTimeAfter: (lineTotalMT[ls.line] || 0) / ls.runRate
+        })),
+        bestLineReason: {
+          line: bestLine,
+          runRate: getLineRunRate(bestLine),
+          queueTime: lineScores[0].queueTimeBefore,
+          totalMTBefore: lineScores[0].totalMTBefore,
+          totalMTAfter: afterTotalMT,
+          queueTimeAfter: afterQueueTime
+        },
+        fromLineReason: {
+          line: order._movedFromLine,
+          queueTime: lineScores.find(ls => ls.line === order._movedFromLine)?.queueTimeBefore || 0,
+          runRate: getLineRunRate(order._movedFromLine)
+        }
+      });
+    }
+    
+    processedOrderIds.add(order.id);
+    console.log(`    → Placed on ${getLineShortName(bestLine)}. Line now: ${(lineTotalMT[bestLine] || 0).toFixed(1)} MT`);
+  });
+  
+  // Final totals
+  console.log('\n=== FINAL LINE TOTALS ===');
+  normalizedAllLines.forEach(line => {
+    console.log(`  ${line}: ${(lineTotalMT[line] || 0).toFixed(1)} MT, Queue: ${((lineTotalMT[line] || 0) / getLineRunRate(line)).toFixed(2)} hrs`);
+  });
+  
+  return { lineOrdersMap, combinedOrders, placementLog };
+}
+```
+
+---
+
+## TRACE THROUGH YOUR EXAMPLE TO VERIFY
+
+```
+Initial:
+  Line 1: 100 MT (A=30, B=20, C=50) → 100÷20 = 5.00 hrs
+  Line 2: 200 MT → 200÷20 = 10.00 hrs
+  Line 3: 300 MT → 300÷10 = 30.00 hrs
+
+Processing Order A (30 MT), eligible: L1, L2, L3
+  Step A: Remove from L1 → L1: 70 MT, L2: 200 MT, L3: 300 MT
+  Step B: Queue times:
+    L1: 70÷20 = 3.50 hrs ← LOWEST
+    L2: 200÷20 = 10.00 hrs
+    L3: 300÷10 = 30.00 hrs
+  Step C: Place on L1 (stays!) → L1: 100 MT
+
+Processing Order B (20 MT), eligible: L1, L2, L3
+  Step A: Remove from L1 → L1: 80 MT, L2: 200 MT, L3: 300 MT
+  Step B: Queue times:
+    L1: 80÷20 = 4.00 hrs ← LOWEST
+    L2: 200÷20 = 10.00 hrs
+    L3: 300÷10 = 30.00 hrs
+  Step C: Place on L1 (stays!) → L1: 100 MT
+
+Processing Order C (50 MT), eligible: L1, L2, L3
+  Step A: Remove from L1 → L1: 50 MT, L2: 200 MT, L3: 300 MT
+  Step B: Queue times:
+    L1: 50÷20 = 2.50 hrs ← LOWEST
+    L2: 200÷20 = 10.00 hrs
+    L3: 300÷10 = 30.00 hrs
+  Step C: Place on L1 (stays!) → L1: 100 MT
+
+Result: All orders stay on Line 1 because even after removal,
+Line 1 always has the lowest queue time!
+```
+
+This is the correct behavior — orders won't unnecessarily move to overloaded lines.
+
+---
+
+## VERIFICATION
+
+### Remove-first, then evaluate
+1. ✅ Orders removed from original line BEFORE queue time calculation
+2. ✅ lineTotalMT subtracted BEFORE lineScores calculated
+3. ✅ Queue times reflect actual state WITHOUT the order being evaluated
+
+### Combined orders — remove all, then evaluate
+4. ✅ ALL orders in combine group removed from their lines first
+5. ✅ Queue times calculated on reduced totals
+6. ✅ Best line chosen based on reduced totals
+7. ✅ Combined volume added to best line after selection
+
+### Non-matched orders — same flow
+8. ✅ Order removed from current line first
+9. ✅ Queue times calculated without the order
+10. ✅ Best line chosen, order placed
+
+### Running total integrity
+11. ✅ lineTotalMT always reflects current state
+12. ✅ Each placement updates totals immediately
+13. ✅ Next evaluation sees accumulated changes
+
+### No unnecessary moves
+14. ✅ Order on lightly loaded line stays there (removing it makes it even lighter)
+15. ✅ Order only moves if destination line truly has lower queue time
+16. ✅ Lines naturally balance as orders accumulate on chosen lines
+
+### Placement log accurate
+17. ✅ totalMTBefore = line total AFTER removal, BEFORE placement
+18. ✅ totalMTAfter = line total AFTER placement
+19. ✅ Queue times match the actual decision point
+```

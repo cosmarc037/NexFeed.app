@@ -1,0 +1,302 @@
+```
+Fix the "Actions Taken" insight for combine-in-place actions so it uses the true pre-combine line load and does not incorrectly say the line had no load when the original orders were already on that line.
+
+---
+
+## OBJECTIVE
+
+The current combine insight is incorrectly describing the pre-combine state of the line.
+
+Example:
+- Before table shows 2 orders already on Line 1:
+  - 3 MT
+  - 6 MT
+- After table shows those same 2 orders combined in place into:
+  - 9 MT on Line 1
+
+But the insight says:
+- `Before the move, L1 had no load with a queue time of 0.00 hours`
+
+This is wrong.
+
+Line 1 clearly already had load before the combine.
+
+We need to fix the combine insight logic so that it reflects the true pre-combine line state.
+
+---
+
+## PROBLEM TO FIX
+
+The app appears to be calculating the “before” load after:
+- removing the original component orders
+- but before inserting the combined order
+
+That temporary internal state may be empty, but it is not the true user-facing pre-combine state.
+
+For a combine-in-place action, the line did not have “no load.”
+It had the original orders on that line.
+
+So the insight must use:
+- the actual line load before combination
+not
+- a temporary empty intermediate state created by the combine operation
+
+---
+
+## REQUIRED BEHAVIOR
+
+For combine-in-place:
+- use the true line state before combination
+- if the orders were already on Line 1, the “before” load must include them
+- do not describe it like a fresh move onto an empty line
+
+### Example expected behavior for the current case:
+Before combine on L1:
+- 3 MT
+- 6 MT
+- total = 9 MT
+- queue time = 9 ÷ 20 = 0.45 hrs
+
+After combine on L1:
+- 9 MT combined order
+- total = 9 MT
+- queue time = 9 ÷ 20 = 0.45 hrs
+
+So the insight should describe:
+- same total line load before and after
+- reduced number of orders
+- reduced changeover/setup impact
+- consolidation benefit
+
+---
+
+## 1. TREAT COMBINE-IN-PLACE DIFFERENTLY FROM MOVE-TO-LINE
+
+When generating action insights, distinguish between:
+- move actions
+- combine-in-place actions
+- combine + move actions
+
+For **combine-in-place**:
+- the line already contained the source orders
+- this is not equivalent to adding new load to an empty line
+
+### Add a helper like:
+```javascript
+function isCombineInPlaceAction(action) {
+  return (
+    action?.type === 'combine' &&
+    action?.sourceLine &&
+    action?.targetLine &&
+    action.sourceLine === action.targetLine
+  );
+}
+```
+
+Or use the equivalent existing action metadata.
+
+---
+
+## 2. CAPTURE THE TRUE PRE-COMBINE LINE STATE BEFORE REMOVING CHILD ORDERS
+
+Before performing the combine mutation:
+- snapshot the line orders
+- calculate the line total MT from the original row set
+- calculate queue time from that snapshot
+
+Do not compute “before” state after removing the source orders.
+
+### Correct order:
+1. capture pre-combine line orders
+2. calculate pre-combine total MT
+3. calculate pre-combine queue time
+4. perform combination mutation
+5. calculate post-combine total MT and queue time
+
+---
+
+## 3. FOR COMBINE-IN-PLACE, PRE-COMBINE LOAD MUST INCLUDE THE COMBINED CHILD ORDERS
+
+In the current example:
+- 3 MT order on L1
+- 6 MT order on L1
+
+These are the exact orders being combined into 9 MT on L1.
+
+So:
+- pre-combine load on L1 = 9 MT
+- not 0 MT
+
+### Example helper:
+```javascript
+function calculateLineLoadBeforeCombine(preCombineOrdersForLine) {
+  return Number(
+    (preCombineOrdersForLine || []).reduce((sum, order) => {
+      return sum + getEffectiveOrderVolume(order);
+    }, 0).toFixed(2)
+  );
+}
+```
+
+Use the actual pre-combine row state.
+
+---
+
+## 4. FOR COMBINE-IN-PLACE, POST-COMBINE LOAD MAY STAY THE SAME
+
+In many combine-in-place cases:
+- line load before = line load after
+- only order count changes
+- sequence becomes cleaner
+- changeover/setup may improve
+
+So the insight should not pretend the line load was newly added.
+
+### Example:
+- before = 9.0 MT
+- after = 9.0 MT
+- queue before = 0.45 hrs
+- queue after = 0.45 hrs
+
+The benefit is:
+- 2 orders became 1
+- changeover reduced
+- setup simplified
+
+---
+
+## 5. UPDATE THE TEXT TEMPLATE FOR COMBINE-IN-PLACE ACTIONS
+
+Do not use wording like:
+- `Before the move...`
+- `After adding...`
+when the action is not actually a move to a new line
+
+Instead use wording specific to in-place combine.
+
+### Example preferred wording:
+```text
+Line 1 is the eligible production line for Salto Conditioner P 1kg based on master data run-rate mapping. The two orders already on L1 (3.0 MT and 6.0 MT) were combined in place into a single 9.0 MT order. Before combining, L1 already had 9.0 MT queued, equivalent to 0.45 hours at 20 MT/hr. After combining, L1 still had 9.0 MT queued, but with fewer separate orders, helping reduce one changeover and simplify the sequence.
+```
+
+This is much more accurate.
+
+---
+
+## 6. IF TOTAL LOAD DOES NOT CHANGE, SAY SO CLEARLY
+
+If combine-in-place does not change line load:
+- do not imply queue increase from adding volume
+- say that total queued MT stayed the same
+
+### Example:
+```text
+The total queued load on L1 remained 9.0 MT before and after the combine.
+```
+
+This avoids misleading users into thinking volume was added.
+
+---
+
+## 7. IF THERE IS ALSO A LINE MOVE, HANDLE THAT AS A DIFFERENT ACTION TYPE
+
+If a combine action also involves moving between lines:
+- then use move-style before/after load logic
+
+But if both orders were already on the same line and remained on that same line:
+- use combine-in-place logic only
+
+Do not route combine-in-place through the move narrative template.
+
+---
+
+## 8. USE TRUE LINE LOAD SNAPSHOTS FOR THE INSIGHT
+
+### Suggested data flow:
+```javascript
+const preActionOrdersByLine = snapshotLineLoads(currentOrdersByLine);
+
+// calculate pre-combine line load from snapshot
+const beforeLineOrders = preActionOrdersByLine[targetLine] || [];
+const beforeLineMT = calculateLineTotalEffectiveMT(beforeLineOrders);
+
+// then perform combine mutation
+const afterLineOrders = nextOrdersByLine[targetLine] || [];
+const afterLineMT = calculateLineTotalEffectiveMT(afterLineOrders);
+```
+
+Do not use a temporary state where child orders have already been removed but the combined row has not yet been inserted.
+
+---
+
+## 9. ADD DEBUG LOGGING FOR COMBINE INSIGHT STATE
+
+Temporarily log:
+
+```javascript
+console.debug('[Combine Insight Debug]', {
+  actionType: action.type,
+  sourceLine: action.sourceLine,
+  targetLine: action.targetLine,
+  isCombineInPlace: isCombineInPlaceAction(action),
+  preLineOrders: beforeLineOrders.map(o => ({
+    orderId: o.id,
+    volume: getEffectiveOrderVolume(o),
+  })),
+  beforeLineMT,
+  afterLineOrders: afterLineOrders.map(o => ({
+    orderId: o.id,
+    volume: getEffectiveOrderVolume(o),
+  })),
+  afterLineMT,
+});
+```
+
+This will help verify:
+- beforeLineMT is 9, not 0
+- afterLineMT is 9
+- the insight is using the correct state
+
+---
+
+## 10. VERIFY AGAINST THE PROVIDED EXAMPLE
+
+For the current case:
+- Before:
+  - 3 MT
+  - 6 MT
+  - total = 9 MT
+- After:
+  - combined 9 MT
+- line run rate = 20 MT/hr
+
+Expected:
+- before queue = 9 ÷ 20 = 0.45 hrs
+- after queue = 9 ÷ 20 = 0.45 hrs
+
+The insight must no longer say:
+- `Before the move, L1 had no load`
+
+Instead it should explain:
+- the orders were already on L1
+- they were combined in place
+- total load stayed the same
+- one changeover was reduced
+
+---
+
+## 11. VERIFICATION
+
+### Logic
+1. ✅ Combine-in-place uses true pre-combine line load
+2. ✅ Pre-combine line load includes the original component orders already on the line
+3. ✅ The app no longer calculates “before” load from an empty temporary intermediate state
+
+### Messaging
+4. ✅ Combine-in-place actions no longer use move-style misleading wording
+5. ✅ The insight no longer says the line had no load when it already had orders
+6. ✅ The insight explains consolidation / changeover reduction rather than fake added load
+
+### Example correctness
+7. ✅ The provided L1 example now reflects 9 MT before and 9 MT after
+8. ✅ Queue time before and after both show 0.45 hrs in this case

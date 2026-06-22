@@ -1,0 +1,1021 @@
+```
+Implement the following changes to the Smart Assistant (floating chatbox):
+
+---
+
+## REWORK: SMART ASSISTANT — PRODUCTION PLANNING AI CHATBOX
+
+Transform the existing basic chatbox into a fully data-aware production planning assistant that can query all app data, provide analysis, and execute actions with confirmation.
+
+---
+
+### 1. DATA ACCESS — FULL APP CONTEXT
+
+The assistant must have access to ALL app data to answer questions accurately:
+
+```javascript
+function buildAssistantContext() {
+  return {
+    // Order data
+    orders: {
+      allOrders: getAllOrders(),         // All orders across all lines
+      byLine: getOrdersByLine(),         // Orders grouped by line
+      byFeedmill: getOrdersByFeedmill(), // Orders grouped by feedmill
+      byStatus: getOrdersByStatus(),     // Orders grouped by status
+    },
+    
+    // N10D data
+    n10d: {
+      products: getN10DProducts(),       // All N10D products with status
+      criticalProducts: getN10DByStatus('Critical'),
+      urgentProducts: getN10DByStatus('Urgent'),
+      monitorProducts: getN10DByStatus('Monitor'),
+      sufficientProducts: getN10DByStatus('Sufficient'),
+    },
+    
+    // Knowledge Base
+    knowledgeBase: {
+      products: getKBProducts(),         // All KB product data
+      runRates: getRunRates(),           // Run rates per line
+      batchSizes: getBatchSizes(),       // Batch sizes per feedmill
+    },
+    
+    // Line status
+    lines: {
+      lineStatus: getLineStatus(),       // Current status per line
+      lineCapacity: getLineCapacity(),   // Capacity per line
+      feedmillMapping: FEEDMILL_LINE_MAP, // FM1: L1,L2 etc.
+    },
+    
+    // Order History
+    history: {
+      completedOrders: getCompletedOrders(),
+      recentChanges: getRecentChanges(),
+    },
+    
+    // Current state
+    currentState: {
+      today: new Date(),
+      activeTab: getCurrentTab(),
+      activeLine: getCurrentLine(),
+    }
+  };
+}
+```
+
+---
+
+### 2. SYSTEM PROMPT — PRODUCTION PLANNING ADVISOR
+
+```javascript
+function getSystemPrompt(context) {
+  return `
+You are a smart production planning assistant for NexFeed, a feed manufacturing production scheduling application. You help planners manage orders, analyze production schedules, and make informed decisions.
+
+TONE:
+- Concise for simple questions (1-3 sentences)
+- Detailed for complex analysis (structured with bullet points or tables)
+- Professional but approachable
+- Always be specific — use exact order numbers, dates, volumes, and line names
+
+APP STRUCTURE:
+- Feedmill 1: Line 1, Line 2
+- Feedmill 2: Line 3, Line 4
+- Feedmill 3: Line 6, Line 7
+- Powermix: Line 5
+
+ORDER STATUSES:
+- Locked: Done, Cancel PO, In Production, On-going (batching/pelleting/bagging), Planned
+- Movable: Plotted, Hold, Cut, Uncombine, Merge Back, Custom
+
+N10D STATUS LEVELS:
+- Critical: DFL >= Inventory (needs production NOW)
+- Urgent: Stock breaches within 3 days
+- Monitor: Stock breaches within 4-10 days
+- Sufficient: No breach within 10 days
+
+COMBINE CRITERIA:
+Orders can be combined if they share the same: Material Code (FG), Material Code (SFG), Category, Form, Batch Size, Line, and SCADA.
+Volume ceiling warning at 200 MT.
+
+CURRENT DATA:
+${JSON.stringify(context, null, 2)}
+
+RULES:
+- When answering about orders, always reference the specific order by FPR, material code, and item description
+- When calculating delays, use the run rates from the Knowledge Base for that specific line
+- When suggesting combines, check ALL combine criteria match
+- Use full month names for dates (e.g., "April 11, 2026")
+- If asked to execute an action, provide a confirmation button — NEVER execute without confirmation
+- If data is not available, say so clearly — do NOT make up numbers
+- When listing orders, format as a clean structured list
+  `;
+}
+```
+
+---
+
+### 3. QUERY CAPABILITIES
+
+### PRODUCTION PLANNING QUERIES
+
+```javascript
+const QUERY_CAPABILITIES = {
+  
+  // === LINE STATUS ===
+  lineLoad: {
+    examples: [
+      "What's the production load for Line 1 today?",
+      "How busy is Line 3?",
+      "Which line has the least workload?",
+      "Show me the line status for Feedmill 2"
+    ],
+    handler: (context, params) => {
+      // Calculate total volume, order count, estimated hours per line
+    }
+  },
+  
+  lineCapacity: {
+    examples: [
+      "Can Line 2 handle 80 MT of Elite XP Startex?",
+      "How much capacity is left on Line 1?",
+      "What's the estimated completion time for all orders on Line 3?"
+    ],
+    handler: (context, params) => {
+      // Calculate remaining capacity using run rates from KB
+    }
+  },
+  
+  // === SHUTDOWN ANALYSIS ===
+  shutdownImpact: {
+    examples: [
+      "What orders will delay if Line 1 shuts down for 4 hours?",
+      "Impact of shutting down Line 3 for 2 hours?",
+      "If Line 5 goes down for maintenance, what happens?"
+    ],
+    handler: (context, params) => {
+      // Calculate cascading delays using production times and run rates
+    }
+  },
+  
+  // === DELAY ANALYSIS ===
+  delayAnalysis: {
+    examples: [
+      "How much will orders be delayed if I add a new 80 MT order to Line 1?",
+      "What happens if I delay order 5873008 by 2 hours?",
+      "If I prioritize Gall 21 Chicken Layer, what orders get pushed?",
+      "What if Line 1 runs overtime for 3 hours?"
+    ],
+    handler: (context, params) => {
+      // Simulate schedule changes and calculate impacts
+    }
+  },
+  
+  // === STOCK / N10D QUERIES ===
+  stockStatus: {
+    examples: [
+      "Which products are critical right now?",
+      "When will Elite XP Startex run out of stock?",
+      "Show me the N10D summary",
+      "What's the buffer for Gallimax Pigeon Pellet?",
+      "List all urgent products"
+    ],
+    handler: (context, params) => {
+      // Query N10D data for product status, buffer, avail dates
+    }
+  },
+  
+  // === COMBINE SUGGESTIONS ===
+  combineSuggestions: {
+    examples: [
+      "Which orders can be combined?",
+      "Can I combine orders 5873008 and 5873010?",
+      "Show combinable orders on Line 1",
+      "What's the best combine strategy for Elite XP Startex orders?"
+    ],
+    handler: (context, params) => {
+      // Check combine criteria for all orders, group combinable sets
+    }
+  },
+  
+  // === ORDER MANAGEMENT ===
+  orderQuery: {
+    examples: [
+      "Show me all orders for FPR 260330",
+      "What orders are on hold?",
+      "How many orders are in production across all lines?",
+      "Show me orders for Gall 21 Chicken Layer",
+      "What's the status of order 5873008?"
+    ],
+    handler: (context, params) => {
+      // Filter and display order data
+    }
+  },
+  
+  // === REPORTING ===
+  reporting: {
+    examples: [
+      "Give me a summary of today's production",
+      "How many MT have been completed today?",
+      "What's the utilization rate for each line?",
+      "How many orders are pending per feedmill?"
+    ],
+    handler: (context, params) => {
+      // Aggregate and summarize production data
+    }
+  }
+};
+```
+
+---
+
+### 4. EXECUTABLE ACTIONS — WITH CONFIRMATION
+
+The assistant can execute actions but EVERY action requires a confirmation button in the chat.
+
+### ACTION TYPES
+
+```javascript
+const EXECUTABLE_ACTIONS = {
+  combineOrders: {
+    description: 'Combine specific orders',
+    confirmMessage: (params) => `Combine ${params.orderIds.length} orders into one? Total volume: ${params.totalVolume} MT.`,
+    execute: async (params) => {
+      return await combineOrders(params.orderIds, params.leadOrderId);
+    }
+  },
+  
+  divertOrder: {
+    description: 'Divert an order to another line',
+    confirmMessage: (params) => `Divert "${params.orderName}" from ${params.fromLine} to ${params.toLine}?`,
+    execute: async (params) => {
+      return await divertOrder(params.orderId, params.toLine);
+    }
+  },
+  
+  changeStatus: {
+    description: 'Change order status',
+    confirmMessage: (params) => `Change "${params.orderName}" status from "${params.fromStatus}" to "${params.toStatus}"?`,
+    execute: async (params) => {
+      return await changeOrderStatus(params.orderId, params.newStatus);
+    }
+  },
+  
+  runAutoSequence: {
+    description: 'Run auto-sequence for a line',
+    confirmMessage: (params) => `Run auto-sequence for ${params.line}? This will reorder ${params.orderCount} movable orders.`,
+    execute: async (params) => {
+      return await runAutoSequence(params.line);
+    }
+  },
+  
+  addOrder: {
+    description: 'Add a new order',
+    confirmMessage: (params) => `Add new order: ${params.itemDescription}, ${params.volume} MT on ${params.line}?`,
+    execute: async (params) => {
+      return await addNewOrder(params);
+    }
+  },
+  
+  shutdownLine: {
+    description: 'Simulate line shutdown',
+    confirmMessage: (params) => `Simulate shutdown of ${params.line} for ${params.hours} hours?`,
+    execute: async (params) => {
+      return await simulateShutdown(params.line, params.hours);
+    }
+  }
+};
+```
+
+### ACTION CONFIRMATION IN CHAT
+
+When the assistant determines an action should be executed, it renders a confirmation card:
+
+```jsx
+function ActionConfirmationCard({ action, params, onConfirm, onCancel }) {
+  const [isExecuting, setIsExecuting] = useState(false);
+  
+  async function handleConfirm() {
+    setIsExecuting(true);
+    try {
+      const result = await action.execute(params);
+      onConfirm(result);
+    } catch (error) {
+      onConfirm({ success: false, error: error.message });
+    } finally {
+      setIsExecuting(false);
+    }
+  }
+  
+  return (
+    <div className="chat-action-card">
+      <div className="chat-action-header">
+        <span className="chat-action-icon">⚡</span>
+        <span className="chat-action-title">{action.description}</span>
+      </div>
+      <div className="chat-action-body">
+        <p>{action.confirmMessage(params)}</p>
+      </div>
+      <div className="chat-action-footer">
+        <button 
+          className="chat-action-cancel"
+          onClick={onCancel}
+          disabled={isExecuting}
+        >
+          Cancel
+        </button>
+        <button 
+          className="chat-action-confirm"
+          onClick={handleConfirm}
+          disabled={isExecuting}
+        >
+          {isExecuting ? 'Executing...' : 'Confirm'}
+        </button>
+      </div>
+    </div>
+  );
+}
+```
+
+### ACTION CARD STYLING
+
+```css
+.chat-action-card {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 0;
+  margin: 8px 0;
+  overflow: hidden;
+}
+
+.chat-action-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  background: #f9fafb;
+  border-bottom: 1px solid #e5e7eb;
+  font-size: 11px;
+  font-weight: 600;
+  color: #374151;
+}
+
+.chat-action-icon {
+  font-size: 14px;
+}
+
+.chat-action-body {
+  padding: 10px 12px;
+  font-size: 12px;
+  color: #4b5563;
+  line-height: 1.5;
+}
+
+.chat-action-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 8px 12px;
+  border-top: 1px solid #f3f4f6;
+}
+
+.chat-action-cancel {
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #6b7280;
+  background: #ffffff;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.chat-action-cancel:hover {
+  background: #f9fafb;
+}
+
+.chat-action-confirm {
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #ffffff;
+  background: #fd5108;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.chat-action-confirm:hover {
+  background: #e8490b;
+}
+
+.chat-action-confirm:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+```
+
+---
+
+### 5. QUICK ACTION BUTTONS
+
+Show suggested quick action buttons above the text input for common queries:
+
+```jsx
+function QuickActions({ onAction }) {
+  const actions = [
+    { label: '🔴 Critical Orders', query: 'Which products are critical right now?' },
+    { label: '📊 Line Status', query: 'Show me the current line status for all feedmills' },
+    { label: '🔗 Combine Suggestions', query: 'Which orders can be combined?' },
+    { label: '📋 Today\'s Summary', query: 'Give me a summary of today\'s production' },
+    { label: '⏰ Delays', query: 'Are there any orders at risk of delay?' },
+    { label: '📦 Stock Alerts', query: 'Show me all urgent and critical stock alerts' },
+  ];
+  
+  return (
+    <div className="chat-quick-actions">
+      {actions.map((action, index) => (
+        <button
+          key={index}
+          className="chat-quick-btn"
+          onClick={() => onAction(action.query)}
+        >
+          {action.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+```
+
+### QUICK ACTION STYLING
+
+```css
+.chat-quick-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 12px;
+  border-top: 1px solid #f3f4f6;
+}
+
+.chat-quick-btn {
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 500;
+  color: #4b5563;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 16px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.chat-quick-btn:hover {
+  background: #f3f4f6;
+  border-color: #d1d5db;
+  color: #1a1a1a;
+}
+```
+
+---
+
+### 6. CHAT UI — COMPLETE COMPONENT
+
+```jsx
+function SmartAssistant() {
+  const [isOpen, setIsOpen] = useState(false);
+  const [messages, setMessages] = useState([]);
+  const [inputValue, setInputValue] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const messagesEndRef = useRef(null);
+  
+  // Auto-scroll to bottom on new message
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+  
+  // Reset messages when chat closes and reopens
+  function handleToggle() {
+    if (!isOpen) {
+      setMessages([{
+        id: Date.now(),
+        role: 'assistant',
+        content: 'Hi! I\'m your production planning assistant. I can help you with order management, line analysis, stock alerts, and more. What would you like to know?',
+        type: 'text'
+      }]);
+    }
+    setIsOpen(!isOpen);
+  }
+  
+  async function handleSendMessage(text) {
+    if (!text.trim()) return;
+    
+    const userMessage = {
+      id: Date.now(),
+      role: 'user',
+      content: text,
+      type: 'text'
+    };
+    
+    setMessages(prev => [...prev, userMessage]);
+    setInputValue('');
+    setIsLoading(true);
+    
+    try {
+      const context = buildAssistantContext();
+      const systemPrompt = getSystemPrompt(context);
+      
+      const response = await callAI({
+        systemPrompt: systemPrompt,
+        messages: messages.filter(m => m.type === 'text').map(m => ({
+          role: m.role,
+          content: m.content
+        })),
+        userMessage: text
+      });
+      
+      // Parse response for actions
+      const parsedResponse = parseAssistantResponse(response);
+      
+      // Add assistant message(s)
+      parsedResponse.forEach(msg => {
+        setMessages(prev => [...prev, {
+          id: Date.now() + Math.random(),
+          role: 'assistant',
+          ...msg
+        }]);
+      });
+      
+    } catch (error) {
+      setMessages(prev => [...prev, {
+        id: Date.now(),
+        role: 'assistant',
+        content: 'Sorry, I encountered an error. Please try again.',
+        type: 'text'
+      }]);
+    } finally {
+      setIsLoading(false);
+    }
+  }
+  
+  function handleQuickAction(query) {
+    handleSendMessage(query);
+  }
+  
+  function handleActionConfirm(result) {
+    if (result.success) {
+      setMessages(prev => [...prev, {
+        id: Date.now(),
+        role: 'assistant',
+        content: `✅ ${result.message}`,
+        type: 'text'
+      }]);
+    } else {
+      setMessages(prev => [...prev, {
+        id: Date.now(),
+        role: 'assistant',
+        content: `❌ ${result.error || 'Action failed. Please try again.'}`,
+        type: 'text'
+      }]);
+    }
+  }
+  
+  function handleActionCancel() {
+    setMessages(prev => [...prev, {
+      id: Date.now(),
+      role: 'assistant',
+      content: 'Action cancelled.',
+      type: 'text'
+    }]);
+  }
+  
+  return (
+    <>
+      {/* Floating bubble */}
+      <button className="chat-bubble" onClick={handleToggle}>
+        {isOpen ? '✕' : '💬'}
+      </button>
+      
+      {/* Chat window */}
+      {isOpen && (
+        <div className="chat-window">
+          {/* Header */}
+          <div className="chat-header">
+            <div className="chat-header-info">
+              <span className="chat-header-title">Smart Assistant</span>
+              <span className="chat-header-subtitle">Production Planning AI</span>
+            </div>
+            <button className="chat-header-close" onClick={handleToggle}>✕</button>
+          </div>
+          
+          {/* Messages */}
+          <div className="chat-messages">
+            {messages.map(msg => (
+              <div key={msg.id} className={`chat-msg chat-msg-${msg.role}`}>
+                {msg.type === 'text' && (
+                  <div className="chat-msg-bubble">
+                    <p>{msg.content}</p>
+                  </div>
+                )}
+                {msg.type === 'action' && (
+                  <ActionConfirmationCard
+                    action={EXECUTABLE_ACTIONS[msg.actionType]}
+                    params={msg.actionParams}
+                    onConfirm={handleActionConfirm}
+                    onCancel={handleActionCancel}
+                  />
+                )}
+              </div>
+            ))}
+            {isLoading && (
+              <div className="chat-msg chat-msg-assistant">
+                <div className="chat-msg-bubble chat-msg-loading">
+                  <span className="typing-dots">Thinking</span>
+                </div>
+              </div>
+            )}
+            <div ref={messagesEndRef} />
+          </div>
+          
+          {/* Quick actions */}
+          <QuickActions onAction={handleQuickAction} />
+          
+          {/* Input */}
+          <div className="chat-input-container">
+            <input
+              type="text"
+              className="chat-input"
+              placeholder="Ask me anything about production..."
+              value={inputValue}
+              onChange={(e) => setInputValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSendMessage(inputValue);
+                }
+              }}
+              disabled={isLoading}
+            />
+            <button
+              className="chat-send-btn"
+              onClick={() => handleSendMessage(inputValue)}
+              disabled={isLoading || !inputValue.trim()}
+            >
+              ➤
+            </button>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+```
+
+---
+
+### 7. CHAT UI STYLING
+
+```css
+/* Floating bubble */
+.chat-bubble {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: #fd5108;
+  color: #ffffff;
+  font-size: 22px;
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(253, 81, 8, 0.3);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.15s;
+}
+
+.chat-bubble:hover {
+  transform: scale(1.05);
+}
+
+/* Chat window */
+.chat-window {
+  position: fixed;
+  bottom: 88px;
+  right: 24px;
+  width: 380px;
+  height: 520px;
+  background: #ffffff;
+  border-radius: 12px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.15);
+  z-index: 9998;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Header */
+.chat-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  background: #fd5108;
+  color: #ffffff;
+}
+
+.chat-header-title {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.chat-header-subtitle {
+  font-size: 10px;
+  opacity: 0.8;
+  display: block;
+}
+
+.chat-header-close {
+  background: none;
+  border: none;
+  color: #ffffff;
+  font-size: 18px;
+  cursor: pointer;
+  opacity: 0.8;
+}
+
+.chat-header-close:hover {
+  opacity: 1;
+}
+
+/* Messages area */
+.chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Message bubbles */
+.chat-msg {
+  display: flex;
+  max-width: 85%;
+}
+
+.chat-msg-user {
+  align-self: flex-end;
+}
+
+.chat-msg-assistant {
+  align-self: flex-start;
+}
+
+.chat-msg-bubble {
+  padding: 8px 12px;
+  border-radius: 12px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.chat-msg-user .chat-msg-bubble {
+  background: #fd5108;
+  color: #ffffff;
+  border-bottom-right-radius: 4px;
+}
+
+.chat-msg-assistant .chat-msg-bubble {
+  background: #f3f4f6;
+  color: #374151;
+  border-bottom-left-radius: 4px;
+}
+
+/* Loading dots */
+.chat-msg-loading {
+  color: #9ca3af;
+}
+
+.typing-dots::after {
+  content: '';
+  animation: typingDots 1.5s steps(4, end) infinite;
+}
+
+@keyframes typingDots {
+  0% { content: ''; }
+  25% { content: '.'; }
+  50% { content: '..'; }
+  75% { content: '...'; }
+}
+
+/* Input area */
+.chat-input-container {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.chat-input {
+  flex: 1;
+  padding: 8px 12px;
+  font-size: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 20px;
+  outline: none;
+}
+
+.chat-input:focus {
+  border-color: #fd5108;
+}
+
+.chat-input::placeholder {
+  color: #9ca3af;
+}
+
+.chat-send-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: #fd5108;
+  color: #ffffff;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.chat-send-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.chat-send-btn:hover:not(:disabled) {
+  background: #e8490b;
+}
+```
+
+---
+
+### 8. RESPONSE PARSER — DETECT ACTIONS IN AI RESPONSE
+
+```javascript
+function parseAssistantResponse(response) {
+  const results = [];
+  
+  // Check if AI response contains an action trigger
+  const actionPatterns = [
+    { pattern: /\[ACTION:COMBINE\](.*?)\[\/ACTION\]/s, type: 'combineOrders' },
+    { pattern: /\[ACTION:DIVERT\](.*?)\[\/ACTION\]/s, type: 'divertOrder' },
+    { pattern: /\[ACTION:STATUS\](.*?)\[\/ACTION\]/s, type: 'changeStatus' },
+    { pattern: /\[ACTION:SEQUENCE\](.*?)\[\/ACTION\]/s, type: 'runAutoSequence' },
+    { pattern: /\[ACTION:ADD_ORDER\](.*?)\[\/ACTION\]/s, type: 'addOrder' },
+    { pattern: /\[ACTION:SHUTDOWN\](.*?)\[\/ACTION\]/s, type: 'shutdownLine' },
+  ];
+  
+  let textContent = response;
+  
+  actionPatterns.forEach(({ pattern, type }) => {
+    const match = response.match(pattern);
+    if (match) {
+      try {
+        const params = JSON.parse(match[1]);
+        results.push({
+          type: 'action',
+          actionType: type,
+          actionParams: params
+        });
+        textContent = textContent.replace(match[0], '').trim();
+      } catch (e) {
+        console.error('Failed to parse action params:', e);
+      }
+    }
+  });
+  
+  if (textContent.trim()) {
+    results.unshift({
+      type: 'text',
+      content: textContent.trim()
+    });
+  }
+  
+  if (results.length === 0) {
+    results.push({
+      type: 'text',
+      content: response
+    });
+  }
+  
+  return results;
+}
+```
+
+---
+
+### 9. AI PROMPT ADDITION — ACTION INSTRUCTIONS
+
+Add to the system prompt:
+
+```
+WHEN THE USER ASKS TO EXECUTE AN ACTION:
+If the user asks you to do something (combine, divert, change status, etc.), include an action tag in your response alongside your explanation.
+
+Action format:
+[ACTION:TYPE]{"param1": "value1", "param2": "value2"}[/ACTION]
+
+Examples:
+- User: "Combine orders 5873008 and 5873010"
+  Response: "I'll combine those two Elite XP Startex orders. Both are on Line 1 with matching material codes, form, and batch size. Total combined volume will be 112 MT.
+  [ACTION:COMBINE]{"orderIds": ["5873008", "5873010"], "leadOrderId": "5873008", "totalVolume": 112}[/ACTION]"
+
+- User: "Move order 5873008 to Line 2"
+  Response: "I'll divert order 5873008 (Elite XP Startex, 80 MT) from Line 1 to Line 2. This may affect the production schedule on both lines.
+  [ACTION:DIVERT]{"orderId": "5873008", "orderName": "Elite XP Startex", "fromLine": "Line 1", "toLine": "Line 2"}[/ACTION]"
+
+- User: "Change order 5873008 to Hold"
+  Response: "I'll put order 5873008 (Elite XP Startex, 80 MT) on Hold. This order will remain in its current position but won't be included in auto-sequencing until the hold is removed.
+  [ACTION:STATUS]{"orderId": "5873008", "orderName": "Elite XP Startex", "fromStatus": "Plotted", "toStatus": "Hold"}[/ACTION]"
+
+- User: "Run auto-sequence for Line 1"
+  Response: "I'll run auto-sequence for Line 1. This will reorder all movable orders (Plotted, Hold, Cut) chronologically while keeping locked orders (Done, In Production, Planned) in place.
+  [ACTION:SEQUENCE]{"line": "Line 1", "orderCount": 8}[/ACTION]"
+
+- User: "Simulate shutting down Line 1 for 4 hours"
+  Response: "Here's the impact analysis for a 4-hour shutdown on Line 1...
+  [ACTION:SHUTDOWN]{"line": "Line 1", "hours": 4}[/ACTION]"
+
+Only include action tags when the user explicitly asks to DO something. For queries (show me, what is, how many), just provide the information — no action tags.
+```
+
+---
+
+### 10. CHAT RESETS ON CLOSE
+
+```javascript
+function handleToggle() {
+  if (!isOpen) {
+    // Opening — show welcome message
+    setMessages([{
+      id: Date.now(),
+      role: 'assistant',
+      content: 'Hi! I\'m your production planning assistant. I can help you with order management, line analysis, stock alerts, and more. What would you like to know?',
+      type: 'text'
+    }]);
+  }
+  setIsOpen(!isOpen);
+}
+```
+
+Messages reset every time the chat is closed and reopened.
+
+---
+
+### 11. VERIFICATION
+
+### Query capabilities
+1. ✅ "Which products are critical?" → lists all Critical products from N10D
+2. ✅ "What's the load on Line 1?" → shows volume, order count, estimated hours
+3. ✅ "Which orders can be combined?" → lists all combinable groups with criteria
+4. ✅ "What orders delay if Line 1 shuts down for 4 hours?" → full impact analysis
+5. ✅ "Show me orders for FPR 260330" → lists all orders with that FPR
+6. ✅ "How much will be delayed?" → calculates specific delay times
+7. ✅ "Today's production summary" → aggregate stats
+
+### Executable actions
+8. ✅ "Combine orders 5873008 and 5873010" → shows confirmation card → executes on confirm
+9. ✅ "Move order to Line 2" → shows confirmation card → executes on confirm
+10. ✅ "Change order to Hold" → shows confirmation card → executes on confirm
+11. ✅ "Run auto-sequence for Line 1" → shows confirmation card → executes on confirm
+12. ✅ Cancel button on confirmation card → action cancelled, message shown
+13. ✅ All actions require confirmation — nothing executes automatically
+
+### Quick actions
+14. ✅ Quick action buttons visible above input
+15. ✅ Clicking a quick action sends the query
+16. ✅ Buttons are scrollable if they overflow
+
+### UI behavior
+17. ✅ Floating orange bubble at bottom right
+18. ✅ Chat window opens above the bubble
+19. ✅ Messages auto-scroll to bottom
+20. ✅ Loading state shows "Thinking..." with dots animation
+21. ✅ Chat resets when closed and reopened
+22. ✅ Enter key sends message
+23. ✅ Send button disabled when input is empty or loading
+
+### Data access
+24. ✅ Assistant can reference specific orders by FPR, material code, description
+25. ✅ Assistant uses N10D data for stock status queries
+26. ✅ Assistant uses Knowledge Base for run rates and batch sizes
+27. ✅ Assistant uses line mapping (FM1=L1,L2; FM2=L3,L4; FM3=L6,L7; PMX=L5)
+28. ✅ If data not available, assistant says so clearly
+```

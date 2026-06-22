@@ -1,0 +1,285 @@
+```
+Fix the Product Insight content in the order table so it always uses the correct final displayed scheduling data and does not reference incorrect dates such as March when the row is showing May.
+
+---
+
+## OBJECTIVE
+
+There are cases where the Product Insight shows the wrong date.
+
+Example:
+- the row shows an avail date in **May**
+- the estimated completion is also in **May**
+- but the Product Insight says:
+  - `This order has a deadline of March 26, 2026...`
+
+This is incorrect and confusing.
+
+We need to make sure Product Insight always reflects the correct row-level data that is currently displayed to the user.
+
+---
+
+## PROBLEM TO FIX
+
+The Product Insight appears to be using the wrong date source, such as:
+- an old/original deadline field
+- a raw imported source date
+- a stale cached insight from before scheduling updates
+- a bad fallback date
+- legacy date logic that no longer matches what the row displays
+
+As a result, users see:
+- visible row dates in May
+but
+- insight text talking about March
+
+This must not happen.
+
+---
+
+## 1. USE FINAL DISPLAYED ROW DATA AS THE SOURCE OF TRUTH
+
+Product Insight must be generated from the same final row values shown in the order table.
+
+At minimum, the insight generator should resolve and use:
+- final avail date
+- final estimated completion date
+- final end date / target date if applicable
+- final future dispatch date if applicable
+- final production time
+
+Do not generate user-facing insight text from stale internal/raw/original values if those are not what the row currently displays.
+
+---
+
+## 2. CREATE A SHARED HELPER TO RESOLVE FINAL DATE CONTEXT
+
+Create a helper that returns the final scheduling context for the row.
+
+### Suggested helper:
+```javascript
+function getFinalOrderDateContext(order) {
+  return {
+    availDate:
+      order.display_avail_date ??
+      order.avail_date ??
+      order.AvailDate ??
+      null,
+
+    estimatedCompletion:
+      order.display_estimated_completion ??
+      order.estimated_completion ??
+      order.estimated_completion_date ??
+      null,
+
+    endDate:
+      order.display_end_date ??
+      order.end_date ??
+      order.target_date ??
+      order.deadline ??
+      null,
+
+    futureDispatchDate:
+      order.display_future_dispatch_date ??
+      order.future_dispatch_date ??
+      order.n10d_date ??
+      null,
+  };
+}
+```
+
+Important:
+- prioritize the same display fields used by the row renderer
+- only fall back if the display fields are missing
+- do not prioritize legacy/original fields over displayed fields
+
+---
+
+## 3. REMOVE WRONG/LEGACY DATE SOURCES FROM PRODUCT INSIGHT GENERATION
+
+Review the Product Insight generator and remove or deprioritize fields such as:
+- original deadline
+- imported due date
+- created date
+- old pre-sequence target date
+- stale legacy N10D/raw future-dispatch values
+- hidden historical dates
+
+The insight must not use those fields unless they are explicitly the same fields shown in the row.
+
+---
+
+## 4. MAKE THE INSIGHT DATE TYPE CLEAR
+
+If the insight text says:
+- `This order has a deadline of ...`
+
+then the date it uses must truly be the actual deadline field shown in the scheduling logic.
+
+If the app is actually using:
+- end date
+- future dispatch target
+- target date
+- avail date
+
+then the wording should match the actual date type.
+
+### For example:
+If it is really using future dispatch date:
+- say `future dispatch target`
+
+If it is using end date:
+- say `end date`
+
+If it is using avail date:
+- do not call it `deadline`
+
+This avoids false or misleading wording.
+
+---
+
+## 5. PREFER A CONSISTENT DATE PRIORITY FOR INSIGHTS
+
+If Product Insight needs to reference a date, use a clear priority order.
+
+### Suggested priority:
+1. final displayed end date / target date if present
+2. final displayed future dispatch date if relevant
+3. final displayed avail date
+4. otherwise no date-specific sentence
+
+Do not fall back to unrelated historical dates just to fill a sentence.
+
+---
+
+## 6. IF THE DATE SOURCE IS MISSING, DO NOT INVENT OR PULL UNRELATED DATES
+
+If a true deadline/target date is unavailable:
+- do not substitute some old raw March date from another field
+- either:
+  - use the correct visible avail/end/future-dispatch date
+  - or omit the deadline sentence entirely
+
+It is better to show a simpler correct insight than a specific wrong one.
+
+---
+
+## 7. REGENERATE PRODUCT INSIGHT WHEN ROW DATES CHANGE
+
+If row dates are updated because of:
+- scheduling logic
+- auto-sequence
+- Future Dispatches logic
+- manual edits
+- line changes
+- strategy selection
+
+then Product Insight must be recalculated using the updated row values.
+
+Do not keep stale insight text generated from earlier state.
+
+---
+
+## 8. IF PRODUCT INSIGHT IS CACHED, INCLUDE FINAL DATE VALUES IN THE CACHE KEY
+
+If insight generation uses caching, include the final displayed date context in the key.
+
+### Example:
+```javascript
+const insightCacheKey = JSON.stringify({
+  orderId: order.id,
+  availDate: finalDateContext.availDate,
+  estimatedCompletion: finalDateContext.estimatedCompletion,
+  endDate: finalDateContext.endDate,
+  futureDispatchDate: finalDateContext.futureDispatchDate,
+  productionHours: finalProductionHours,
+});
+```
+
+This prevents stale March-based text from surviving when the row’s dates have already changed to May.
+
+---
+
+## 9. USE THE SAME DATE FORMATTING AS THE ROW WHERE POSSIBLE
+
+If the row displays:
+- May 05, 2026
+
+then the insight should use the same resolved date formatting source and not reformat a different legacy field.
+
+This helps maintain consistency and makes date mismatches easier to avoid.
+
+---
+
+## 10. ADD DEBUG LOGGING TO TRACE THE DATE USED BY PRODUCT INSIGHT
+
+Temporarily log the exact date source used by the Product Insight.
+
+```javascript
+console.debug('[Product Insight Date Debug]', {
+  orderId: order.id,
+  item: order.item_description,
+  finalDateContext: getFinalOrderDateContext(order),
+  chosenInsightDate: chosenInsightDate,
+  chosenInsightDateType: chosenInsightDateType,
+  insightText,
+});
+```
+
+This should help identify:
+- where the March date is coming from
+- whether the insight is stale
+- whether the wrong fallback field is being used
+
+---
+
+## 11. UPDATE INSIGHT TEMPLATE WORDING IF NEEDED
+
+If the current template hardcodes wording like:
+- `This order has a deadline of...`
+
+update it so it can use the correct date label.
+
+### Example:
+Instead of always:
+```text
+This order has a deadline of {date}...
+```
+
+Use something like:
+```javascript
+function buildDateAwareInsight(dateType, dateValue, daysRemaining, productionHours) {
+  if (dateType === 'futureDispatch') {
+    return `This order has a future dispatch target of ${dateValue} — ${daysRemaining} days remaining. Estimated production time is ${productionHours} hours.`;
+  }
+
+  if (dateType === 'endDate') {
+    return `This order has an end date of ${dateValue} — ${daysRemaining} days remaining. Estimated production time is ${productionHours} hours.`;
+  }
+
+  if (dateType === 'availDate') {
+    return `This order is available on ${dateValue}. Estimated production time is ${productionHours} hours.`;
+  }
+
+  return `Estimated production time is ${productionHours} hours.`;
+}
+```
+
+This prevents wrong terminology and improves clarity.
+
+---
+
+## 12. VERIFICATION
+
+### Correctness
+1. ✅ Product Insight now uses the final displayed row dates
+2. ✅ If the row shows May dates, the insight no longer incorrectly references March
+3. ✅ Legacy/raw/original/stale date fields are no longer used incorrectly
+
+### Sync behavior
+4. ✅ Product Insight refreshes when row dates change
+5. ✅ Cached insights are invalidated when final date context changes
+
+### UX
+6. ✅ The date wording in Product Insight matches the actual date type being referenced
+7. ✅ Users can trust that Product Insight matches the visible row data

@@ -1,0 +1,200 @@
+```
+Implement the following change to the NexFeed application:
+
+---
+
+## AUTO-SEQUENCE — INTEGRATE NEXT 10 DAYS TARGET DATES
+
+Update the Auto-Sequence feature to incorporate the Next 10 Days stock level data when building the optimal sequence.
+
+---
+
+### UPDATED AI ANALYSIS FACTORS
+
+The Auto-Sequence AI now considers the following when sequencing (in priority order):
+
+**Priority 1 — Orders with actual Avail Dates:**
+- Sorted chronologically (earliest first).
+- Must complete on or before their Avail Date.
+- This is unchanged from before.
+
+**Priority 2 — Orders with inferred Target Dates (from Next 10 Days):**
+- Non-dated orders (prio replenish, safety stocks) that have a calculated target date from the Next 10 Days stock level data.
+- Sorted chronologically by target date (earliest first).
+- INTERLEAVED with actual dated orders based on date.
+- Must complete on or before their target date to avoid stockout.
+
+**Priority 3 — Non-dated orders WITHOUT target dates:**
+- Orders with non-date avail (prio replenish, safety stocks) that have NO match in the Next 10 Days data.
+- No date constraint — placed in gaps or after all dated/targeted orders.
+- Fill available production time.
+
+**Priority 4 — Stock Sufficient orders:**
+- Orders matched in Next 10 Days but flagged as "Stock Sufficient" (due for loading already >= inventory).
+- Lowest priority — placed at the very bottom.
+- Produced only if there is remaining capacity after all other orders.
+
+---
+
+### AUTO-SEQUENCE ALGORITHM UPDATE
+
+```
+Step 1: Collect all orders in the line.
+
+Step 2: Categorize each order:
+  - Category A: Has actual avail date → use avail date
+  - Category B: Has inferred target date from Next 10 Days → use target date
+  - Category C: Non-dated, no target date, no match → no date constraint
+  - Category D: Stock Sufficient → lowest priority
+
+Step 3: Sort Categories A and B together chronologically by date.
+  - Treat actual avail dates and inferred target dates equally.
+  - If an actual avail date and a target date fall on the same day,
+    actual avail date takes priority (it's a hard deadline).
+
+Step 4: Build the sequence:
+  a. Place Category A + B orders in chronological order.
+  b. Work backwards from each order's date to determine 
+     when production must start.
+  c. Fill gaps between dated/targeted orders with Category C 
+     orders to maximize plant uptime.
+  d. Place Category D orders at the very end.
+
+Step 5: Verify and flag conflicts:
+  - If any Category A order would miss its avail date → red conflict.
+  - If any Category B order would miss its target date → amber warning.
+  - If a Category C order placed in a gap causes a downstream 
+    dated/targeted order to miss its deadline → yellow warning.
+```
+
+---
+
+### AI INSIGHTS IN AUTO-SEQUENCE MODAL — STOCK LEVEL REFERENCES
+
+The AI insights in the Auto-Sequence simulation modal should reference stock level data when available.
+
+**New insight types:**
+
+**Stock-driven priority:**
+```
+📊 FPR: 260309 (Gallimax 3 Maintenance, 80 MT) is 
+"safety stocks" but stock data shows inventory target 
+must be met by March 19. Moved from Prio 12 to Prio 3 
+to ensure production completes before stockout risk.
+```
+
+**Stock sufficient deprioritized:**
+```
+📊 FPR: 260309 (Salto Baby Stag w/Grits, 24 MT) is 
+"prio replenish" but stock levels show warehouse 
+already has sufficient inventory (25.2 MT vs target 
+23.4 MT). Moved to Prio 18 — lowest priority. Produce 
+only if line capacity allows.
+```
+
+**Target date unlikely within 10 days:**
+```
+⚠ FPR: 260309 (Elite XP Startex, 80 MT) needs 
+production but stock data shows the inventory target 
+(310.6 MT) is unlikely to be met within the next 10 
+days. Current loading covers only 231.6 MT by Mar 28. 
+Scheduled as early as possible to start closing the gap.
+```
+
+**Multiple orders same product — stock-aware:**
+```
+📊 5 orders exist for Elite XP Startex (total: 225 MT). 
+Stock target date is Mar 28 (unlikely to meet full 
+inventory target within 10 days). Recommend running 
+these orders consecutively to minimize changeover and 
+maximize output toward the 310.6 MT target.
+```
+
+---
+
+### SIMULATION TABLE — STOCK LEVEL INDICATORS
+
+In the Auto-Sequence simulation table, add visual indicators for stock-level data:
+
+**Left border colors (updated):**
+
+| Indicator | Meaning | Border Color |
+|---|---|---|
+| ✅ Green | Actual avail date — on track | #43a047 |
+| 🔵 Blue | Target date from stock data — on track | #3b82f6 |
+| ⚠️ Yellow | Tight fit or gap overflow | #f9a825 |
+| 🟠 Amber | Target date — may miss deadline | #f59e0b |
+| 🔴 Red | Actual avail date — will miss deadline | #e53935 |
+| ⬜ Grey | No date, no target — gap filler | #a1a8b3 |
+| ⚪ Light grey | Stock sufficient — lowest priority | #d1d5db |
+
+**Stock data column in simulation table:**
+- Add a small "📊" icon next to the Avail Date column for orders that have an inferred target date.
+- Hovering the icon shows a tooltip:
+  ```
+  Stock Level Data:
+  Due for loading: 455.3 MT
+  Inventory target: 759.3 MT
+  Target date: Mar 23
+  Status: Needs Production
+  ```
+
+---
+
+### SUMMARY BAR UPDATE
+
+The summary bar at the top of the Auto-Sequence modal now includes stock-level stats:
+
+```
+Orders: 15 | Dated: 5 | Stock-targeted: 7 | Gap fillers: 2 | Stock sufficient: 1 | Conflicts: 0
+```
+
+- **Stock-targeted:** Orders with inferred target dates from Next 10 Days.
+- **Stock sufficient:** Orders deprioritized due to sufficient stock levels.
+
+---
+
+### WHEN NEXT 10 DAYS DATA IS NOT AVAILABLE
+
+If no Next 10 Days file has been uploaded:
+- Auto-Sequence works as before (no stock-level prioritization).
+- Non-dated orders are treated as gap fillers with no date constraint.
+- The AI adds a note:
+  ```
+  📊 No stock level data available. Upload the "Next 10 Days" 
+  file in Configurations for smarter prioritization of prio 
+  replenish and safety stock orders.
+  ```
+
+---
+
+### PRODUCTION INSIGHTS — STOCK-BASED RECOMMENDATIONS
+
+The Production Insights panel also uses the updated logic:
+
+**New insight — Auto-Sequence suggestion with stock data:**
+```
+📊 Stock-Level Sequencing Available
+
+Next 10 Days data shows 7 orders have inferred target 
+dates. Run Auto-Sequence to optimize the production 
+schedule based on stock demand forecasts.
+
+[Run Auto-Sequence]  ← small orange button
+```
+
+**New insight — Stock sufficient deprioritization:**
+```
+✅ Deprioritize Stock-Sufficient Orders
+
+3 orders are flagged as "Stock Sufficient" based on 
+current warehouse loading levels. These can be moved 
+to lower priority:
+
+• FPR: 260309 — Salto Baby Stag (24 MT, Line 3)
+• FPR: 260309 — Gall 21 Chicken Layer (39 MT, Line 1)
+• FPR: 260309 — Ave Max Duck Layex 2 (60 MT, Line 2)
+
+Run Auto-Sequence to automatically deprioritize these.
+```
+```

@@ -1,0 +1,125 @@
+```
+Implement the following changes to the NexFeed application:
+
+---
+
+## SAFETY STOCK INSIGHTS — REDESIGN CONTAINER
+
+Redesign the Safety Stock Insights to match the Smart Insight style from the Analytics tab. The title and refresh button stay OUTSIDE the container. The AI content goes inside a simple, clean scrollable container with white background.
+
+---
+
+### LAYOUT
+
+```
+✨ Safety Stock Insights                        ↻ Refresh
+
+┌──────────────────────────────────────────────────────┐
+│                                                      │
+│  A) Overview                                         │
+│                                                      │
+│  There are 20 products in the analysis...            │
+│                                                      │
+│  B) Urgent — Production Needed Soon                  │
+│                                                      │
+│  • Poultry Sol Broiler Starter — Target: Mar 22...   │
+│  • Poultry Sol Broiler Finisher — Target: Mar 23...  │
+│                                                      │
+│  C) Production Needed                                │
+│  ...                                                 │▐ ← scrollbar
+│                                                      │
+│  D) Stock Sufficient                                 │
+│  ...                                                 │
+│                                                      │
+│  E) SAP Order Match                                  │
+│  ...                                                 │
+│                                                      │
+└──────────────────────────────────────────────────────┘
+```
+
+- Title "✨ Safety Stock Insights" and "↻ Refresh" are OUTSIDE the container
+- The container only holds the AI content
+- No header inside the container
+
+---
+
+### TITLE ROW (outside container)
+
+```css
+.safety-stock-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+```
+
+| Element | Styling |
+|---|---|
+| "✨ Safety Stock Insights" | 13px, font-weight 700, dark text (#1a1a1a) |
+| "↻ Refresh" | 12px, orange (#fd5108), cursor pointer, hover: darker orange |
+
+---
+
+### CONTENT CONTAINER
+
+```css
+.safety-stock-insights-container {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 20px 24px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.safety-stock-insights-container::-webkit-scrollbar {
+  width: 6px;
+}
+
+.safety-stock-insights-container::-webkit-scrollbar-track {
+  background: #f3f4f6;
+  border-radius: 3px;
+}
+
+.safety-stock-insights-container::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 3px;
+}
+
+.safety-stock-insights-container::-webkit-scrollbar-thumb:hover {
+  background: #9ca3af;
+}
+```
+
+| Property | Value |
+|---|---|
+| Background | White (#ffffff) |
+| Border | 1px solid #e5e7eb |
+| Border-radius | 8px |
+| Padding | 20px 24px (generous — text never touches edges) |
+| Max height | 400px |
+| Overflow-y | Auto (scroll when content exceeds) |
+| Scrollbar | Thin (6px), subtle grey |
+
+---
+
+### CONTENT TEXT STYLING
+
+| Element | Styling |
+|---|---|
+| Section headers (A, B, C, D, E) | 13px, font-weight 700, dark text (#1a1a1a) |
+| Body text | 12px, font-weight 400, grey (#4b5563), line-height 1.7 |
+| Product names in bullets | 12px, font-weight 700, dark text (#1a1a1a) |
+| Data labels (Target:, Demand:, etc.) | 12px, font-weight 400, grey (#4b5563) |
+| Everything else | 12px, font-weight 400, grey (#4b5563) |
+
+---
+
+### DO NOT CHANGE
+
+- ❌ Impact Analysis — keep current light orange background (#fff7ed), it's already okay
+- ❌ Smart Insight (Analytics) — already okay
+- ❌ Production Insights — already okay
+- ❌ Auto-Sequence Analysis — already okay
+```

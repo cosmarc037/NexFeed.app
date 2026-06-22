@@ -1,0 +1,424 @@
+```
+Implement the following fixes to the Knowledge Base History:
+
+---
+
+## FIX 1: TOOLTIP POSITION — CLOSER TO THE CELL
+
+The tooltip appears too far from the cell. Adjust so it appears directly below or beside the cell, not far away.
+
+```jsx
+function HistoryNotesCell({ summary, details }) {
+  const [showTooltip, setShowTooltip] = useState(false);
+  const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
+  const cellRef = useRef(null);
+  const timeoutRef = useRef(null);
+  
+  function handleMouseEnter(e) {
+    timeoutRef.current = setTimeout(() => {
+      // Position relative to the cell, not cursor
+      if (cellRef.current) {
+        const rect = cellRef.current.getBoundingClientRect();
+        const pos = clampToViewport(
+          rect.left,           // Align left edge with cell
+          rect.bottom + 4,     // Just below the cell with 4px gap
+          400, 
+          200
+        );
+        setTooltipPos(pos);
+      }
+      setShowTooltip(true);
+    }, 300);
+  }
+  
+  function handleMouseLeave() {
+    clearTimeout(timeoutRef.current);
+    setShowTooltip(false);
+  }
+  
+  const fullText = details ? `${summary}\n\nDetails:\n${details}` : summary;
+  const hasDetails = details && details.trim().length > 0;
+  
+  return (
+    <td
+      ref={cellRef}
+      className="history-notes-cell"
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
+    >
+      <span className="history-notes-text">{summary}</span>
+      
+      {showTooltip && (
+        <TooltipPortal>
+          <div
+            className="history-notes-tooltip"
+            style={{
+              position: 'fixed',
+              left: tooltipPos.x,
+              top: tooltipPos.y,
+              zIndex: 99999,
+              pointerEvents: 'none'
+            }}
+          >
+            <div className="tooltip-summary">{summary}</div>
+            {hasDetails && (
+              <>
+                <div className="tooltip-divider" />
+                <div className="tooltip-label">Details:</div>
+                <div className="tooltip-details">
+                  {details.split('\n').map((line, i) => (
+                    <div key={i} className="tooltip-detail-line">
+                      {line}
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        </TooltipPortal>
+      )}
+    </td>
+  );
+}
+```
+
+---
+
+## FIX 2: DETAILS NOT SHOWING — ENSURE CHANGE DETAILS ARE STORED
+
+The change details (which rows modified, what changed) are not being stored in the history entry. Fix the save handler to include full details.
+
+```javascript
+function handleSaveChanges() {
+  const errors = validateKnowledgeBase(kbData);
+  
+  if (errors.length > 0) {
+    setValidationErrors(errors);
+    showNotification('error', `Cannot save. ${errors.length} validation error(s) found.`);
+    return;
+  }
+  
+  // Generate change summary WITH details
+  const { summary, details } = changeTracker.generateChangeSummary();
+  
+  const editEntry = {
+    id: Date.now(),
+    type: 'manual_edit',
+    timestamp: new Date().toISOString(),
+    summary: summary,
+    details: details,   // MUST include this — was possibly missing
+    snapshot: JSON.parse(JSON.stringify(kbData)),
+    user: getCurrentUser(),
+  };
+  
+  addToHistory(editEntry);
+  
+  setIsEditMode(false);
+  setChanges([]);
+  setValidationErrors([]);
+  
+  showNotification('success', 'Knowledge Base saved successfully.');
+}
+```
+
+### VERIFY generateChangeSummary RETURNS DETAILS
+
+```javascript
+function generateChangeSummary() {
+  const added = changes.filter(c => c.type === 'add');
+  const deleted = changes.filter(c => c.type === 'delete');
+  
+  // Deduplicate modifications per row+field
+  const modMap = {};
+  changes.filter(c => c.type === 'modify').forEach(c => {
+    const key = `${c.rowId}_${c.field}`;
+    modMap[key] = c;
+  });
+  const modified = Object.values(modMap);
+  
+  // Group by row
+  const modifiedByRow = {};
+  modified.forEach(c => {
+    if (!modifiedByRow[c.rowId]) {
+      modifiedByRow[c.rowId] = {
+        materialCode: c.materialCode,
+        itemDescription: c.itemDescription,
+        changes: []
+      };
+    }
+    modifiedByRow[c.rowId].changes.push(c);
+  });
+  
+  const modifiedRowCount = Object.keys(modifiedByRow).length;
+  
+  // Summary line
+  const parts = [];
+  if (modifiedRowCount > 0) parts.push(`${modifiedRowCount} row(s) modified`);
+  if (added.length > 0) parts.push(`${added.length} row(s) added`);
+  if (deleted.length > 0) parts.push(`${deleted.length} row(s) deleted`);
+  const summary = `Manual edit — ${parts.join(', ')}`;
+  
+  // DETAILS — must build this
+  const detailLines = [];
+  
+  added.forEach(c => {
+    detailLines.push(
+      `- Added new row: ${c.materialCode || 'New'} - ${c.itemDescription || 'Untitled'}`
+    );
+  });
+  
+  deleted.forEach(c => {
+    detailLines.push(
+      `- Deleted row: ${c.materialCode} - ${c.itemDescription}`
+    );
+  });
+  
+  Object.values(modifiedByRow).forEach(row => {
+    const fieldChanges = row.changes.map(c => {
+      const label = getFieldLabel(c.field);
+      return `${label}: ${c.oldValue || '-'} → ${c.newValue || '-'}`;
+    }).join(', ');
+    detailLines.push(
+      `- Modified ${row.materialCode} - ${row.itemDescription}: ${fieldChanges}`
+    );
+  });
+  
+  const details = detailLines.join('\n');
+  
+  return { summary, details };
+}
+```
+
+---
+
+## FIX 3: ACTIVE ENTRY — SHOW ALL BUTTONS, DISABLE REVERT
+
+Show ALL action buttons for every entry including the active one. Revert is disabled on the active entry with a tooltip explaining why. Delete on the active entry transfers active status to the next entry.
+
+```jsx
+{history.map((entry, index) => {
+  const isActive = index === 0;
+  
+  return (
+    <tr key={entry.id} className={isActive ? 'kb-history-active-row' : ''}>
+      <td>{index + 1}</td>
+      <td>{formatDateTimeFull(entry.timestamp)}</td>
+      <td>
+        <span className={`kb-history-type-badge ${entry.type}`}>
+          {getTypeLabel(entry.type)}
+        </span>
+      </td>
+      <td>
+        <HistoryNotesCell summary={entry.summary} details={entry.details} />
+      </td>
+      <td>
+        {isActive && (
+          <span className="kb-history-active-badge">Active</span>
+        )}
+      </td>
+      <td className="kb-history-actions">
+        {/* Download — always available */}
+        <button 
+          className="kb-history-action-btn"
+          onClick={() => onDownload(entry)}
+          title="Download snapshot"
+        >
+          📥
+        </button>
+        
+        {/* Revert — disabled on active entry */}
+        <button 
+          className={`kb-history-action-btn ${isActive ? 'disabled' : ''}`}
+          onClick={() => {
+            if (!isActive) onRevert(entry);
+          }}
+          disabled={isActive}
+          title={isActive 
+            ? "This is the current active version. You cannot revert to the version that is already in use." 
+            : "Revert to this version"
+          }
+        >
+          ↩
+        </button>
+        
+        {/* Delete — available on all entries */}
+        <button 
+          className="kb-history-action-btn delete"
+          onClick={() => handleDeleteWithActiveTransfer(entry, index)}
+          title="Delete this entry"
+        >
+          🗑
+        </button>
+      </td>
+    </tr>
+  );
+})}
+```
+
+### DISABLED BUTTON STYLING
+
+```css
+.kb-history-action-btn.disabled {
+  color: #d1d5db;
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.kb-history-action-btn.disabled:hover {
+  color: #d1d5db;
+  background: transparent;
+}
+```
+
+### DELETE ACTIVE ENTRY — TRANSFER ACTIVE TO NEXT
+
+When deleting the active entry, the next entry in line becomes active and its snapshot becomes the current KB data:
+
+```javascript
+function handleDeleteWithActiveTransfer(entry, index) {
+  const isActive = index === 0;
+  
+  if (isActive && history.length <= 1) {
+    // Cannot delete the only entry
+    showNotification('warning', 'Cannot delete the only history entry. Upload a new file or make changes first.');
+    return;
+  }
+  
+  // Show confirmation dialog
+  showDeleteConfirmDialog(entry, () => {
+    if (isActive) {
+      // Transfer active to next entry
+      const nextEntry = history[1]; // Next in line
+      
+      if (nextEntry && nextEntry.snapshot) {
+        // Load the next entry's snapshot as current KB data
+        setKbData(JSON.parse(JSON.stringify(nextEntry.snapshot)));
+        showNotification('info', 
+          `Active version deleted. Reverted to version from ${formatDateTimeFull(nextEntry.timestamp)}.`
+        );
+      }
+    }
+    
+    // Remove the entry
+    removeFromHistory(entry.id);
+  });
+}
+```
+
+### DELETE CONFIRMATION — ACTIVE ENTRY HAS EXTRA WARNING
+
+```jsx
+function showDeleteConfirmDialog(entry, onConfirm) {
+  const isActive = history[0]?.id === entry.id;
+  
+  return (
+    <div className="dialog-overlay">
+      <div className="dialog-container" style={{ maxWidth: '440px' }}>
+        <div className="dialog-header">
+          <span>⚠ Delete History Entry</span>
+          <button className="dialog-close" onClick={onClose}>✕</button>
+        </div>
+        
+        <div className="dialog-body">
+          <p style={{ fontSize: '12px', color: '#374151', lineHeight: 1.6 }}>
+            You are about to delete this history entry:
+          </p>
+          <p style={{ fontSize: '13px', fontWeight: 600, color: '#1a1a1a', margin: '8px 0' }}>
+            {formatDateTimeFull(entry.timestamp)} — {getTypeLabel(entry.type)}
+          </p>
+          <p style={{ fontSize: '11px', color: '#6b7280', marginBottom: '12px' }}>
+            {entry.summary}
+          </p>
+          
+          {isActive && (
+            <div style={{ 
+              background: '#fff7ed', 
+              border: '1px solid #fed7aa', 
+              borderRadius: '6px', 
+              padding: '10px 12px',
+              marginBottom: '12px'
+            }}>
+              <p style={{ fontSize: '12px', color: '#ea580c', lineHeight: 1.6, fontWeight: 500 }}>
+                ⚠ This is the currently active version. Deleting it will 
+                revert the Knowledge Base to the next version in the history.
+              </p>
+            </div>
+          )}
+          
+          <p style={{ fontSize: '12px', color: '#dc2626', lineHeight: 1.6 }}>
+            This action cannot be undone.
+          </p>
+          <p style={{ fontSize: '12px', color: '#374151', lineHeight: 1.6, marginTop: '12px' }}>
+            Type <strong>Confirm</strong> to proceed:
+          </p>
+          <input
+            type="text"
+            value={confirmText}
+            onChange={(e) => setConfirmText(e.target.value)}
+            placeholder="Type Confirm"
+            style={{
+              width: '100%',
+              padding: '8px 12px',
+              fontSize: '13px',
+              border: '1px solid #e5e7eb',
+              borderRadius: '6px',
+              marginTop: '8px',
+              outline: 'none'
+            }}
+          />
+        </div>
+        
+        <div className="dialog-footer" style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+          <button onClick={onClose} style={{
+            background: '#ffffff', color: '#374151', border: '1px solid #d1d5db',
+            borderRadius: '6px', padding: '8px 20px', fontSize: '13px', cursor: 'pointer'
+          }}>
+            Cancel
+          </button>
+          <button 
+            onClick={() => { if (confirmText === 'Confirm') onConfirm(); }}
+            disabled={confirmText !== 'Confirm'}
+            style={{
+              background: confirmText === 'Confirm' ? '#dc2626' : '#d1d5db',
+              color: '#ffffff', border: 'none', borderRadius: '6px',
+              padding: '8px 20px', fontSize: '13px', fontWeight: 600,
+              cursor: confirmText === 'Confirm' ? 'pointer' : 'not-allowed'
+            }}
+          >
+            Delete
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+## VERIFICATION
+
+### Tooltip position
+1. ✅ Tooltip appears directly below the cell with 4px gap
+2. ✅ Not far away from the cell
+3. ✅ Aligned with left edge of the cell
+
+### Details in tooltip
+4. ✅ Manual edit shows summary line: "Manual edit — 1 row(s) modified"
+5. ✅ Details section shows: "Modified 1000000000933: Batch FM1: 4.000 → 3.500"
+6. ✅ Added rows show: "Added new row: 1000000000XXX - Product Name"
+7. ✅ Deleted rows show: "Deleted row: 1000000000XXX - Product Name"
+
+### Active entry buttons
+8. ✅ Download button visible on active entry
+9. ✅ Revert button visible but DISABLED on active entry
+10. ✅ Hover on disabled revert shows tooltip: "This is the current active version..."
+11. ✅ Delete button visible on active entry
+12. ✅ Deleting active entry → next entry becomes active → KB data loads from next snapshot
+13. ✅ Warning in delete dialog when deleting active entry
+
+### Non-active entries
+14. ✅ All three buttons enabled
+15. ✅ Revert works with "Confirm" dialog
+16. ✅ Delete works with "Confirm" dialog
+```

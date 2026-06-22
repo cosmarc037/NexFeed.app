@@ -1,0 +1,174 @@
+Please improve the **Auto-Sequence AI date suggestion logic** so that the AI suggests dates that are not only strategically reasonable, but also **capacity-aware based on production time**.
+
+---
+
+## 1. MAKE THE AI CONSIDER PRODUCTION TIME WHEN SUGGESTING DATES
+
+Right now, the AI may assign multiple orders to the same suggested date even when the total production load for that date becomes unrealistic.
+
+### Required behavior
+When the AI suggests a date for an order, it should consider:
+- the order’s production time
+- the cumulative production time already assigned to that date
+- whether the day still has realistic available capacity
+
+### Goal
+Prevent the AI from overloading one date with too many hours of work.
+
+### Expected result
+Suggested dates should reflect not just sequencing preference, but also realistic daily production capacity.
+
+---
+
+## 2. DO NOT KEEP ASSIGNING ORDERS TO THE SAME DAY IF THAT DAY IS ALREADY OVERLOADED
+
+There are cases where multiple orders are all assigned to the same day (for example, June 6), but their combined production times make it clear that they cannot all realistically complete on that date.
+
+### Required behavior
+If the total load for a day is already too high, the AI should recognize that and assign some later orders to:
+- the next feasible day
+- or another later date that better fits the line’s capacity
+
+### Goal
+Make the AI’s suggested dates operationally realistic.
+
+### Expected result
+The AI should no longer keep placing too many long-duration orders on the same day when that day is already overloaded.
+
+---
+
+## 3. MAKE THE AI USE CUMULATIVE DAILY LOAD WHEN DECIDING SUGGESTED DATES
+
+Please make the AI more aware of the accumulated production hours on a given day.
+
+### The AI should consider:
+- each order’s production time
+- changeover time if relevant
+- cumulative total for the day
+- whether adding another order to that same date still makes sense
+
+### Goal
+Suggested dates should reflect a realistic sequence that can actually fit into the day.
+
+### Expected result
+The AI date suggestion becomes more aligned with actual line capacity.
+
+---
+
+## 4. IF A DAY IS FULL, LET THE AI PUSH LATER ORDERS TO THE NEXT FEASIBLE DATE
+
+Please allow the AI to move later orders to the next logical date if the current suggested day has already reached or exceeded practical capacity.
+
+### Example
+If several orders are all being suggested for `June 6`, but their combined production time already consumes the day, then the AI should begin suggesting:
+- `June 7`
+- or later dates where appropriate
+
+### Goal
+Avoid unrealistic clustering of too much production on one date.
+
+### Expected result
+The AI should spread work across days when needed, instead of forcing everything into one overloaded day.
+
+---
+
+## 5. KEEP THE AI DATE SUGGESTION BALANCED WITH OTHER SEQUENCING GOALS
+
+The AI should still consider:
+- urgency / future dispatch status
+- changeovers
+- material grouping
+- production flow
+- avail / suggested date logic
+
+but it should also now balance those with:
+- realistic daily capacity based on production time
+
+### Goal
+Avoid a situation where grouping and flow are optimized, but the suggested dates become operationally unrealistic.
+
+### Expected result
+The AI can still optimize sequencing, but not at the expense of impossible daily loading.
+
+---
+
+## 6. MAKE THE AI’S SUGGESTED DATE MORE MEANINGFUL
+
+A suggested date should mean:
+- this order can realistically be produced around that day given the sequence and load
+
+not:
+- this is just a preferred grouping date even if production spills into other days
+
+### Goal
+Increase trust in the AI’s suggested dates.
+
+### Expected result
+Users should be able to look at the suggested dates and feel they are realistic, not overloaded placeholders.
+
+---
+
+## IMPORTANT
+
+Please improve the Auto-Sequence AI so that when it suggests dates, it also considers:
+
+- the production time of each order
+- cumulative load already assigned to that date
+- realistic daily capacity
+- whether additional orders should instead move to the next feasible date
+
+This is needed because the AI currently sometimes gives too many orders the same suggested date even when the combined production time clearly overloads that day.
+
+The AI should suggest dates that make operational sense, not just sequencing/grouping sense.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log AI date suggestion vs cumulative load.
+
+```javascript
+console.debug('[Auto-Sequence AI Date Load Check]', {
+  strategyId,
+  line,
+  orderId,
+  suggestedDate,
+  productionTime,
+  cumulativeLoadForSuggestedDate,
+  estimatedCapacityExceeded,
+});
+```
+
+```javascript
+console.debug('[Auto-Sequence AI Daily Capacity Awareness]', {
+  strategyId,
+  line,
+  dayLoads,
+  aiUsedDailyLoadAwareness: true,
+});
+```
+
+```javascript
+console.debug('[Auto-Sequence AI Date Spillover Detection]', {
+  strategyId,
+  line,
+  orderId,
+  suggestedDate,
+  estimatedCompletion,
+  spillsBeyondSuggestedDate:
+    suggestedDate && estimatedCompletion
+      ? new Date(estimatedCompletion).toDateString() !== new Date(suggestedDate).toDateString()
+      : false,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ AI considers production time when suggesting dates
+2. ✅ AI stops overloading one day with too many orders
+3. ✅ AI uses cumulative daily load in date decisions
+4. ✅ Later orders can be pushed to the next feasible date
+5. ✅ Suggested dates become more realistic and meaningful
+6. ✅ No UI errors or console errors are introduced

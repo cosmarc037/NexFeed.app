@@ -1,0 +1,253 @@
+Implement the following fixes to the Knowledge Base:
+
+---
+
+## FIX: HIGHLIGHT DUPLICATE MATERIAL CODE ROWS IN RED
+
+When the Knowledge Base contains rows with duplicate FG Material Code values, highlight those cells in light red so users can easily identify duplicates. This works similarly to the yellow highlight for edited cells — just a light red background, no border lines.
+
+### THE PROBLEM
+
+The Knowledge Base table can contain rows with duplicate FG Material Code values (either from the uploaded file itself or from manual edits). Currently, there is no visual indicator to help users spot these duplicates.
+
+### THE FIX
+
+#### DETECT DUPLICATE FG MATERIAL CODES
+
+Compute a set of duplicate material codes by counting occurrences. A material code is considered duplicate if it appears more than once AND is not empty/blank:
+
+```javascript
+const duplicateMaterialCodes = useMemo(() => {
+  if (!kbData || kbData.length === 0) return new Set();
+
+  // Count occurrences of each FG Material Code
+  const codeCount = {};
+  kbData.forEach((row) => {
+    const code = normalizeValue(row.fgMaterialCode);
+    if (code === '' || code === '-') return; // Skip empty/placeholder values
+    codeCount[code] = (codeCount[code] || 0) + 1;
+  });
+
+  // Collect codes that appear more than once
+  const duplicates = new Set();
+  Object.entries(codeCount).forEach(([code, count]) => {
+    if (count > 1) {
+      duplicates.add(code);
+    }
+  });
+
+  return duplicates;
+}, [kbData]);
+```
+
+#### HELPER TO CHECK IF A ROW HAS DUPLICATE MATERIAL CODE
+
+```javascript
+function isDuplicateMaterialCode(row) {
+  const code = normalizeValue(row.fgMaterialCode);
+  if (code === '' || code === '-') return false;
+  return duplicateMaterialCodes.has(code);
+}
+```
+
+#### RENDER TABLE CELLS WITH RED HIGHLIGHT FOR DUPLICATES
+
+Apply light red background to the FG Material Code cell when its value is duplicated. The red highlight takes priority over the yellow edited highlight on the same cell. For other cells in the same row, they keep their normal or yellow highlight as applicable — only the FG Material Code cell itself gets the red highlight:
+
+```jsx
+{columns.map((col) => {
+  const isEdited = isCellEdited(row._rowId, col.key);
+  const isDuplicate = col.key === 'fgMaterialCode' && isDuplicateMaterialCode(row);
+
+  // Determine which highlight class to apply
+  // Red (duplicate) takes priority over yellow (edited) on the same cell
+  let cellClass = 'kb-cell';
+  if (isDuplicate) {
+    cellClass += ' kb-cell-duplicate';
+  } else if (isEdited) {
+    cellClass += ' kb-cell-edited';
+  }
+
+  return (
+    <td key={col.key} className={cellClass}>
+      {isEditMode ? (
+        <input
+          type="text"
+          value={row[col.key] ?? ''}
+          onChange={(e) => handleCellChange(row._rowId, col.key, e.target.value)}
+          className={`kb-cell-input ${
+            isDuplicate
+              ? 'kb-cell-input-duplicate'
+              : isEdited
+              ? 'kb-cell-input-edited'
+              : ''
+          }`}
+        />
+      ) : (
+        <span>{row[col.key] ?? ''}</span>
+      )}
+    </td>
+  );
+})}
+```
+
+#### CSS STYLES FOR DUPLICATE CELL HIGHLIGHT
+
+```css
+/* Duplicate material code highlight — light red background ONLY */
+.kb-cell-duplicate {
+  background-color: #fef2f2 !important; /* Very light red */
+}
+
+/* Edit mode — input inside duplicate cell */
+.kb-cell-input-duplicate {
+  background-color: #fef2f2 !important;
+}
+
+/* Hover state for duplicate cells — slightly deeper red */
+.kb-cell-duplicate:hover {
+  background-color: #fee2e2 !important;
+}
+
+/* Ensure the highlight works with table striping */
+tr:nth-child(even) .kb-cell-duplicate {
+  background-color: #fef2f2 !important;
+}
+
+tr:nth-child(odd) .kb-cell-duplicate {
+  background-color: #fef2f2 !important;
+}
+```
+
+#### DUPLICATE DETECTION MUST UPDATE IN REAL-TIME DURING EDITS
+
+When a user changes an FG Material Code value in edit mode, the duplicate detection should recalculate immediately since `duplicateMaterialCodes` is derived from `kbData` via `useMemo`, it will automatically recompute when `kbData` changes:
+
+```javascript
+function handleCellChange(rowId, field, newValue) {
+  setKbData((prev) => {
+    return prev.map((row) => {
+      if (row._rowId === rowId) {
+        const oldValue = row[field];
+        if (oldValue !== newValue) {
+          trackChange('modify', row, field, oldValue, newValue);
+        }
+        return { ...row, [field]: newValue };
+      }
+      return row;
+    });
+  });
+  // duplicateMaterialCodes will auto-recalculate via useMemo dependency on kbData
+}
+```
+
+This means:
+- If a user edits a material code to match another existing row, both cells immediately turn red
+- If a user fixes a duplicate by changing the code to a unique value, the red highlight disappears from both cells (assuming no other duplicates remain for that code)
+- If a user edits a material code so that 3 rows now share the same code, all 3 cells turn red
+
+#### DUPLICATE DETECTION AFTER FILE UPLOAD
+
+Duplicates from the uploaded file itself should also be highlighted immediately after upload. Since `duplicateMaterialCodes` is computed from `kbData`, it will automatically detect duplicates in the uploaded data:
+
+```javascript
+// No special handling needed — the useMemo on kbData handles it:
+// 1. User uploads file
+// 2. setKbData(parsedData) is called
+// 3. duplicateMaterialCodes recalculates
+// 4. Any duplicate FG Material Codes in the uploaded file are highlighted in red
+// 5. No yellow highlights appear (baseline matches current data)
+// 6. Only red highlights for duplicates
+```
+
+#### DUPLICATE DETECTION AFTER REVERT OR DELETE
+
+Same principle — since `duplicateMaterialCodes` derives from `kbData`, reverting or deleting a history entry that changes `kbData` will automatically recalculate duplicates:
+
+```javascript
+// When reverting:
+setKbData(deepClone(entry.snapshot));
+// → duplicateMaterialCodes recalculates for the restored data
+
+// When deleting active and falling back:
+setKbData(deepClone(nextEntry.snapshot));
+// → duplicateMaterialCodes recalculates for the fallback data
+```
+
+#### TOOLTIP ON DUPLICATE CELLS
+
+Show a tooltip on duplicate cells indicating how many times the code appears:
+
+```jsx
+<td
+  key={col.key}
+  className={cellClass}
+  title={
+    isDuplicate
+      ? `Duplicate: This FG Material Code appears ${getDuplicateCount(row.fgMaterialCode)} times`
+      : isCellEdited(row._rowId, col.key)
+      ? `Original: ${getOriginalValue(row._rowId, col.key)}`
+      : undefined
+  }
+>
+  {/* ... cell content ... */}
+</td>
+```
+
+```javascript
+function getDuplicateCount(materialCode) {
+  const code = normalizeValue(materialCode);
+  if (code === '' || code === '-') return 0;
+  return kbData.filter(
+    (row) => normalizeValue(row.fgMaterialCode) === code
+  ).length;
+}
+```
+
+---
+
+## VERIFICATION
+
+### Duplicate Highlights on File Upload
+1. ✅ Upload file that contains duplicate FG Material Codes → those FG Material Code cells immediately show light red background
+2. ✅ Non-duplicate FG Material Code cells have normal background
+3. ✅ Only the FG Material Code column cells get red highlight — other columns in the same row are NOT red
+4. ✅ Empty or "-" material codes are NOT treated as duplicates
+
+### Duplicate Highlights During Manual Edit
+5. ✅ Change a material code to match an existing one → both cells turn red immediately
+6. ✅ Change a material code to a unique value → red highlight disappears from that cell
+7. ✅ If 3 rows share the same code, all 3 FG Material Code cells are red
+8. ✅ Fix one of the 3 duplicates → only the remaining 2 stay red
+9. ✅ Fix all duplicates → no red highlights remain
+
+### Red vs Yellow Priority
+10. ✅ If a cell is both edited AND duplicate, it shows red (red takes priority)
+11. ✅ If a cell is edited but NOT duplicate, it shows yellow
+12. ✅ If a cell is duplicate but NOT edited (from uploaded file), it shows red
+13. ✅ Other columns in a duplicate row that are edited still show yellow
+14. ✅ Other columns in a duplicate row that are NOT edited show no highlight
+
+### No Border Lines
+15. ✅ Duplicate cells show ONLY a light red background
+16. ✅ No thick red/orange vertical line on the left side of any cell
+17. ✅ No `::after` pseudo-element on duplicate cells
+18. ✅ No inline `borderLeft` or `boxShadow` styles on duplicate cells
+19. ✅ Clean, subtle highlight — background color only
+
+### Duplicate Highlights After History Operations
+20. ✅ Revert to a version that had duplicates → red highlights appear
+21. ✅ Revert to a version that had no duplicates → red highlights disappear
+22. ✅ Delete active history → fallback data's duplicates are highlighted correctly
+
+### Tooltip
+23. ✅ Hover over red duplicate cell → tooltip shows "Duplicate: This FG Material Code appears X times"
+24. ✅ Hover over yellow edited cell → tooltip shows "Original: [value]"
+25. ✅ Hover over normal cell → no tooltip
+
+### Edge Cases
+26. ✅ All rows have unique material codes → no red highlights anywhere
+27. ✅ Two rows with same code, one gets deleted → remaining row loses red highlight (no longer duplicate)
+28. ✅ Insert new row with empty material code → no red highlight
+29. ✅ Insert new row, type a code that already exists → both cells turn red
+30. ✅ Search/filter results still show red highlights for duplicates

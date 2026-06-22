@@ -1,0 +1,289 @@
+```
+Fix both bugs:
+
+---
+
+## FIX 1: LINE BADGE — ONLY SHOW IF SUB-ORDER CAME FROM A DIFFERENT LINE
+
+```jsx
+// In PlantAfterRow — sub-order rows
+{isExpanded && order._isCombined && order._combinedFrom && (
+  order._combinedFrom.map((subOrder, subIndex) => {
+    // Only show line badge if sub-order came from a DIFFERENT line
+    const cameFromDifferentLine = subOrder.line !== order.line;
+    
+    return (
+      <tr key={`sub-${order.id}-${subIndex}`} className="as-row-combined-sub">
+        {/* ... other cells ... */}
+        <td className="as-col-desc">
+          <div className="as-sub-desc">
+            {/* Line badge ONLY if from different line */}
+            {cameFromDifferentLine && (
+              <span
+                className="as-line-badge as-line-badge-small"
+                title={`Originally from ${subOrder.line}`}
+              >
+                {getLineShortName(subOrder.line)}
+              </span>
+            )}
+            <div>
+              <div className="as-sub-text-dark">{subOrder.item_description || order.item_description}</div>
+            </div>
+          </div>
+        </td>
+        {/* ... other cells ... */}
+      </tr>
+    );
+  })
+)}
+```
+
+### ALSO FIX THE MAIN ROW — ONLY SHOW _movedFromLine BADGE IF ACTUALLY MOVED
+
+```jsx
+// In the main order row — description cell
+<td className="as-col-desc">
+  <div className="as-desc-with-movement">
+    {/* Line badge ONLY if order actually moved from a different line */}
+    {order._movedFromLine && order._movedFromLine !== order.line && (
+      <span
+        className="as-line-badge"
+        title={`This order came from ${order._movedFromLine}`}
+      >
+        {getLineShortName(order._movedFromLine)}
+      </span>
+    )}
+    
+    {/* Combined icon */}
+    {order._isCombined && (
+      <button
+        className="as-combined-toggle"
+        onClick={() => setIsExpanded(!isExpanded)}
+        title={`${order._combinedFrom?.length || 0} orders combined`}
+      >
+        🔗
+      </button>
+    )}
+    
+    {/* Movement indicator — only for non-combined, non-new orders */}
+    {order._movement !== 'new_to_line' && (order._movement === 'up' || order._movement === 'down') && (
+      <MovementIndicator movement={order._movement} delta={order._movementDelta} />
+    )}
+    
+    <div>
+      <div className="as-desc-main">{order.item_description}</div>
+      <div className="as-sub-text">{order.category}</div>
+      {order._isCombined && order._combinedFrom && (
+        <div className="as-combined-label">
+          {order._combinedFrom.length} orders combined
+          {/* Only mention "from lines" if orders came from DIFFERENT lines */}
+          {order._combinedFromLines && 
+           order._combinedFromLines.some(l => l !== order.line) && (
+            <span> · from {order._combinedFromLines
+              .filter(l => l !== order.line)
+              .map(l => getLineShortName(l))
+              .join(', ')
+            }</span>
+          )}
+        </div>
+      )}
+    </div>
+  </div>
+</td>
+```
+
+---
+
+## FIX 2: ELIGIBLE LINES — NORMALIZE LINE NAMES FOR MATCHING
+
+```javascript
+function canProduceOnLine(order, line, masterData) {
+  if (!masterData || !Array.isArray(masterData)) return false;
+  
+  const materialCode = String(order.material_code_fg || '').trim();
+  if (!materialCode) return false;
+  
+  // Normalize line name for comparison
+  const normalizedLine = normalizeLine(line);
+  
+  const entries = masterData.filter(m => {
+    const masterMaterial = String(m.material_code_fg || '').trim();
+    const masterLine = normalizeLine(String(m.line || ''));
+    return masterMaterial === materialCode && masterLine === normalizedLine;
+  });
+  
+  const hasRunRate = entries.some(m => (parseFloat(m.run_rate) || 0) > 0);
+  
+  // Debug log for troubleshooting
+  if (!hasRunRate && entries.length === 0) {
+    // Check if product exists in master data at all
+    const allEntriesForProduct = masterData.filter(m => 
+      String(m.material_code_fg || '').trim() === materialCode
+    );
+    
+    if (allEntriesForProduct.length > 0) {
+      console.log(`canProduceOnLine: ${materialCode} NOT found for "${line}" (normalized: "${normalizedLine}")`);
+      console.log(`  Available lines in master data:`, allEntriesForProduct.map(m => `"${m.line}"`).join(', '));
+    }
+  }
+  
+  return hasRunRate;
+}
+
+// Normalize line names to handle different formats
+function normalizeLine(line) {
+  if (!line) return '';
+  
+  let normalized = String(line).trim();
+  
+  // Handle various formats:
+  // "Line 1", "line 1", "L1", "l1", "Line1", "LINE 1"
+  
+  // If it's already "Line X" format, standardize spacing and case
+  const lineMatch = normalized.match(/^line\s*(\d+)$/i);
+  if (lineMatch) {
+    return `Line ${lineMatch[1]}`;
+  }
+  
+  // If it's "LX" format, convert to "Line X"
+  const shortMatch = normalized.match(/^l(\d+)$/i);
+  if (shortMatch) {
+    return `Line ${shortMatch[1]}`;
+  }
+  
+  return normalized;
+}
+```
+
+### ALSO NORMALIZE WHEN BUILDING lineOrdersMap AND lineTotalMT
+
+```javascript
+function plantLevelCombineAndPlace(allOrders, masterData, n10dData, allLines) {
+  // Normalize all line references in orders
+  let workingOrders = allOrders
+    .filter(o => o.status !== 'Done' && o.status !== 'Cancel PO')
+    .map(o => {
+      const normalized = { 
+        ...JSON.parse(JSON.stringify(o)), 
+        _originalLine: normalizeLine(o.line),
+        _movedFromLine: null 
+      };
+      normalized.line = normalizeLine(o.line);
+      return normalized;
+    });
+  
+  // Normalize allLines
+  const normalizedAllLines = allLines.map(l => normalizeLine(l));
+  
+  // Track current MT per line
+  const lineTotalMT = {};
+  normalizedAllLines.forEach(line => {
+    const lineOrders = workingOrders.filter(o => o.line === line);
+    lineTotalMT[line] = lineOrders.reduce((sum, o) => sum + (parseFloat(o.volume) || 0), 0);
+  });
+  
+  // Track orders per line
+  const lineOrdersMap = {};
+  normalizedAllLines.forEach(line => {
+    lineOrdersMap[line] = workingOrders
+      .filter(o => o.line === line)
+      .sort((a, b) => a.prio - b.prio);
+  });
+  
+  // ... rest of algorithm uses normalizedAllLines ...
+}
+```
+
+---
+
+## FIX 3: AI PROMPT — CLARIFY WHEN ORDER STAYS ON SAME LINE
+
+Update the prompt to distinguish "combined on same line" vs "combined and moved":
+
+```javascript
+// In the AI prompt building
+if (entry.type === 'combined') {
+  const allSameLine = entry.fromLines.every(l => l === entry.toLine);
+  const someFromOtherLines = entry.fromLines.some(l => l !== entry.toLine);
+  
+  let movementDesc;
+  if (allSameLine) {
+    movementDesc = `All ${entry.ordersCount} orders were already on ${getLineShortName(entry.toLine)} — combined in place.`;
+  } else if (someFromOtherLines) {
+    const otherLines = entry.fromLines.filter(l => l !== entry.toLine);
+    movementDesc = `Orders from ${otherLines.map(l => getLineShortName(l)).join(', ')} were moved to ${getLineShortName(entry.toLine)} for combination.`;
+  }
+  
+  return `
+ACTION ${index + 1}: COMBINED
+Product: ${entry.product}
+Orders Combined: ${entry.ordersCount}
+Total Volume: ${entry.totalVolume} MT
+Movement: ${movementDesc}
+Individual Orders:
+${entry.individualVolumes.map(iv => `  - ${iv.volume} MT from ${getLineShortName(iv.fromLine)}`).join('\n')}
+Eligible Lines and Queue Times (BEFORE placement):
+    ${lineDetails}
+Chosen: ${getLineShortName(entry.toLine)} (lowest queue time: ${entry.bestLineReason.queueTime.toFixed(2)} hrs)
+After Placement: ${getLineShortName(entry.toLine)} becomes ${entry.bestLineReason.totalMTAfter.toFixed(1)} MT (${entry.bestLineReason.queueTimeAfter.toFixed(2)} hrs)
+Changeovers Saved: ${entry.changeoversSaved} (${entry.timeSaved.toFixed(2)} hrs saved)
+`;
+}
+```
+
+---
+
+## FIX 4: FALLBACK — DISTINGUISH SAME-LINE COMBINE
+
+```javascript
+function generateFallbackExplanation(entry) {
+  const allLineDetails = entry.lineScores
+    .map(ls => `${getLineShortName(ls.line)}: ${ls.totalMTBefore.toFixed(1)} MT ÷ ${ls.runRate} MT/hr = ${ls.queueTimeBefore.toFixed(2)} hrs`)
+    .join('; ');
+  
+  if (entry.type === 'combined') {
+    const allSameLine = entry.fromLines.every(l => l === entry.toLine);
+    
+    if (allSameLine) {
+      return `${entry.ordersCount} orders of ${entry.product} that were already on ${getLineShortName(entry.toLine)} were combined into a single ${entry.totalVolume} MT run. Queue times evaluated — ${allLineDetails}. ${getLineShortName(entry.toLine)} was confirmed as the optimal line with a queue time of ${entry.bestLineReason.queueTime.toFixed(2)} hrs. This eliminates ${entry.changeoversSaved} changeover${entry.changeoversSaved > 1 ? 's' : ''}, saving ${formatTimeShift(entry.timeSaved)}.`;
+    } else {
+      const otherLines = [...new Set(entry.fromLines.filter(l => l !== entry.toLine))];
+      return `${entry.ordersCount} orders of ${entry.product} were combined into a single ${entry.totalVolume} MT run on ${getLineShortName(entry.toLine)}, with orders pulled from ${otherLines.map(l => getLineShortName(l)).join(', ')}. Queue times evaluated — ${allLineDetails}. ${getLineShortName(entry.toLine)} was selected with the lowest queue time of ${entry.bestLineReason.queueTime.toFixed(2)} hrs. After placement, ${getLineShortName(entry.toLine)} has ${entry.bestLineReason.totalMTAfter.toFixed(1)} MT (${entry.bestLineReason.queueTimeAfter.toFixed(2)} hrs). This eliminates ${entry.changeoversSaved} changeover${entry.changeoversSaved > 1 ? 's' : ''}, saving ${formatTimeShift(entry.timeSaved)}.`;
+    }
+  }
+  
+  if (entry.type === 'moved') {
+    return `${entry.product} (${entry.volume} MT) was moved from ${getLineShortName(entry.fromLine)} to ${getLineShortName(entry.toLine)}. Queue times evaluated — ${allLineDetails}. ${getLineShortName(entry.toLine)} had the lowest queue time of ${entry.bestLineReason.queueTime.toFixed(2)} hrs, compared to ${getLineShortName(entry.fromLine)} at ${entry.fromLineReason.queueTime.toFixed(2)} hrs. This optimizes load distribution across production lines.`;
+  }
+  
+  return 'Action details unavailable.';
+}
+```
+
+---
+
+## VERIFICATION
+
+### Line badge — only for different lines
+1. ✅ Sub-orders from SAME line as combined order → NO badge
+2. ✅ Sub-orders from DIFFERENT line → badge shown (e.g., "L7")
+3. ✅ Main order row → badge only if _movedFromLine !== current line
+4. ✅ Combined label "from L3, L7" only shows lines that differ from destination
+
+### Eligible lines — all found
+5. ✅ Line names normalized (Line 1, L1, line 1 all match)
+6. ✅ Debug logging shows which lines were found/not found
+7. ✅ All lines with master data entries for the product are included
+8. ✅ If product has run rate on L1, L2, L6, L7 → all four shown as eligible
+
+### Same-line combine
+9. ✅ If all orders already on L2 and combined on L2 → "combined in place"
+10. ✅ AI prompt says "All orders were already on L2"
+11. ✅ Fallback says "orders that were already on L2 were combined"
+12. ✅ No "moved to" language when nothing moved
+
+### Cross-line combine
+13. ✅ If orders from L2 and L7 combined on L1 → "orders from L2, L7 moved to L1"
+14. ✅ Sub-orders from L2 get "L2" badge, from L7 get "L7" badge
+15. ✅ Sub-orders already on L1 get no badge
+```

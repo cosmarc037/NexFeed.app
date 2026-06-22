@@ -1,0 +1,254 @@
+```
+Fix the order overview / line total calculations so they always use the final displayed order volume shown in bold in the order table, not the raw/original volume.
+
+---
+
+## OBJECTIVE
+
+There is still a mismatch between the order table and the line overview total.
+
+Example from the UI:
+Displayed row volumes are:
+- 3 MT
+- 24 MT
+- 32 MT (Original: 30 MT)
+
+The correct total should be:
+- 59 MT
+
+But the overview is showing:
+- 57 MT
+
+This means the overview is still summing from the wrong source, likely using raw/original volume for at least one row.
+
+We need to enforce a consistent rule:
+
+## All overview totals must use the exact volume currently displayed in bold in the order table.
+
+---
+
+## REQUIRED RULE
+
+When calculating totals for overview cards, line summaries, line header totals, or any aggregated MT display:
+
+Use the final displayed order volume, which is the same value shown in bold in the table.
+
+This applies regardless of whether the order volume is:
+- raw and already divisible
+- app-adjusted / rounded up
+- user-overridden
+- combined
+- any other resolved final display state
+
+Do NOT use:
+- original/raw volume
+- hidden pre-adjustment volume
+- stale combined basis
+- old source totals
+
+---
+
+## 1. DEFINE A SHARED "FINAL DISPLAYED VOLUME" HELPER
+
+Create or reuse a helper whose sole purpose is to return the exact volume displayed in bold in the order table.
+
+### Suggested helper:
+```javascript
+function getFinalDisplayedOrderVolume(order) {
+  const candidates = [
+    order.display_volume_mt,
+    order._displayVolumeMT,
+    order.final_volume_mt,
+    order._finalVolumeMT,
+    order.volume_override,
+    order._combined_effective_volume,
+    order._effectiveVolumeMT,
+    order.total_volume_mt,
+    order.volume_mt,
+    order.volume,
+  ];
+
+  for (const val of candidates) {
+    const parsed = parseFloat(val);
+    if (!Number.isNaN(parsed)) {
+      return Number(parsed.toFixed(2));
+    }
+  }
+
+  return 0;
+}
+```
+
+Important:
+- the first priority should be the actual resolved display volume used by the row renderer
+- if necessary, explicitly store `_displayVolumeMT` when building table rows
+- the goal is for overview totals and row display to use the same source of truth
+
+---
+
+## 2. USE THIS HELPER FOR ALL OVERVIEW / LINE TOTALS
+
+Anywhere the app calculates totals like:
+- line total MT
+- line overview card MT
+- line header totals
+- production load totals
+- overview total assigned MT
+
+replace raw summation with:
+
+```javascript
+function calculateDisplayedVolumeTotal(orders) {
+  return Number(
+    (orders || []).reduce((sum, order) => {
+      return sum + getFinalDisplayedOrderVolume(order);
+    }, 0).toFixed(2)
+  );
+}
+```
+
+Then:
+```javascript
+const totalMT = calculateDisplayedVolumeTotal(lineOrders);
+```
+
+Do not use:
+```javascript
+order.total_volume_mt
+```
+directly for overview totals.
+
+---
+
+## 3. MAKE THE ORDER TABLE AND OVERVIEW USE THE SAME SOURCE OF TRUTH
+
+If the table row shows:
+- `32 MT`
+with
+- `Original: 30 MT`
+
+then the overview must count:
+- `32`
+
+not:
+- `30`
+
+If the row shows:
+- `75 MT`
+because of app-adjustment from `73 MT`
+
+then the overview must count:
+- `75`
+
+If the row shows:
+- a user override of `8 MT`
+
+then the overview must count:
+- `8`
+
+If the row shows:
+- a combined order of `9 MT`
+
+then the overview must count:
+- `9`
+
+The UI must always be internally consistent.
+
+---
+
+## 4. APPLY THIS TO ALL RELEVANT AGGREGATE DISPLAYS
+
+This fix should not be limited to only one card.
+
+Review and update any aggregate display that totals order MT, including:
+- line overview totals
+- line header totals
+- production load widgets
+- order overview cards
+- any dashboard totals tied to visible order rows
+
+All of these should use the final displayed volume.
+
+---
+
+## 5. IF NECESSARY, STORE THE DISPLAYED VOLUME ON THE ORDER OBJECT
+
+If the final displayed volume is currently computed only inside the cell renderer, make it explicit.
+
+### Example:
+```javascript
+const enrichedOrder = {
+  ...order,
+  _displayVolumeMT: resolvedDisplayedVolume,
+};
+```
+
+Then:
+- the table uses `_displayVolumeMT`
+- the overview totals use `_displayVolumeMT`
+
+This avoids divergence between display and totals.
+
+---
+
+## 6. DO NOT USE ORIGINAL VOLUME FOR TOTALING IF ORIGINAL IS ONLY FOR REFERENCE
+
+The `Original: X MT` label is informational only.
+
+It should never drive totals if the bold displayed volume has already changed.
+
+The bold displayed volume is the operational/current value.
+That is the one that must be summed.
+
+---
+
+## 7. ADD DEBUG LOGGING TO VERIFY TOTAL SOURCES
+
+Temporarily log the breakdown used in overview totals.
+
+```javascript
+console.debug('[Overview Total Check]', {
+  line,
+  rows: (orders || []).map(order => ({
+    orderId: order.id,
+    rawVolume: order.total_volume_mt,
+    originalVolume: order.original_volume_mt,
+    overrideVolume: order.volume_override,
+    displayVolume: getFinalDisplayedOrderVolume(order),
+  })),
+  totalDisplayedVolume: calculateDisplayedVolumeTotal(orders),
+});
+```
+
+This should help confirm:
+- the 32 MT row contributes 32, not 30
+- the overview total matches the visible table
+
+---
+
+## 8. VERIFY AGAINST THE PROVIDED EXAMPLE
+
+Current displayed row volumes:
+- 3 MT
+- 24 MT
+- 32 MT
+
+Expected total:
+- 59 MT
+
+The overview must no longer show:
+- 57 MT
+
+It must show:
+- 59 MT
+
+---
+
+## 9. VERIFICATION
+
+1. ✅ Overview totals now use the final displayed row volume
+2. ✅ App-adjusted rows contribute their adjusted displayed volume
+3. ✅ Override rows contribute their override displayed volume
+4. ✅ Combined rows contribute their final displayed combined volume
+5. ✅ Original/raw volumes are no longer incorrectly used in overview totals
+6. ✅ The overview now matches the visible bold MT values in the order table exactly

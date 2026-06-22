@@ -1,0 +1,271 @@
+Please update the **auto-sequence / AI-powered sequencing logic** so that alternating **normal orders** and **generated orders** is treated as an additional sequencing consideration, and also reflect this reasoning in the **AI sequence cards** and **Sequence Insight** explanations.
+
+---
+
+## 1. ADD NORMAL-ORDER / GENERATED-ORDER ALTERNATION AS A SEQUENCING CONSIDERATION
+
+The application already has an **auto-sequence** feature that sequences orders based on factors such as:
+- avail date
+- operational constraints
+- AI-assisted analysis
+- sequencing strategies
+
+Since generated orders are now part of the sequence, please update the sequencing logic so that it also considers alternating:
+
+- **normal orders**
+- **generated orders**
+
+where feasible.
+
+### Goal
+When possible, the sequence should avoid clustering all normal orders together and all generated orders together.
+
+Instead, the sequencing engine should try to alternate them in a more balanced pattern.
+
+### Example pattern
+Preferred where feasible:
+- Normal
+- Generated
+- Normal
+- Generated
+
+instead of:
+- Normal
+- Normal
+- Normal
+- Generated
+- Generated
+
+---
+
+## 2. TREAT THIS AS A CONSIDERATION, NOT A STRICT OVERRIDE RULE
+
+This should be an additional **sequencing consideration**, not a hard rule that overrides all other logic.
+
+### Important
+Please make sure the AI understands that alternation between normal and generated orders is:
+- a sequencing preference / consideration
+- not an absolute rule that must always be followed
+
+### It should not override higher-priority constraints such as:
+- avail date feasibility
+- critical/urgent timing
+- major changeover reduction
+- valid line or production constraints
+- shutdown/diversion constraints
+- other stronger optimization priorities already defined in the app
+
+### Expected result
+The AI should consider alternating normal and generated orders when building the sequence, but only when doing so is operationally reasonable.
+
+---
+
+## 3. APPLY THIS ESPECIALLY TO PELLET / NON-PELLET ALTERNATION CONTEXT
+
+Per the client’s operational guidance, this is related to how pellet sequencing should behave.
+
+When sequencing orders that involve pellet-related production behavior, the app should consider alternating the order flow so that:
+- normal/source orders
+- generated orders
+
+do not all cluster together unnecessarily.
+
+### Expected result
+Generated orders should be treated as a meaningful sequencing dimension in pellet-related sequence planning.
+
+---
+
+## 4. RESPECT AVAIL DATE AND EXISTING AUTO-SEQUENCE FEASIBILITY
+
+The app already sequences orders based on **Avail Date**, and the AI can analyze orders to find the best sequence strategy.
+
+Please preserve that foundation.
+
+### Important
+Alternation between normal and generated orders should happen **within feasible scheduling windows** and should not violate:
+- avail dates
+- date readiness
+- existing sequencing feasibility
+- locked/valid schedule boundaries
+
+### Expected result
+If a generated order is not yet available, the app should not force it earlier just to maintain alternation.
+
+Alternation should be applied only when it is compatible with the actual scheduling constraints.
+
+---
+
+## 5. USE ALTERNATION AS A TIE-BREAKER OR SECONDARY OPTIMIZATION SIGNAL WHERE APPROPRIATE
+
+Please consider using normal/generated alternation as:
+- a secondary optimization signal
+- a preference within compatible clusters
+- or a tie-breaker where multiple sequence options are otherwise similarly valid
+
+### Goal
+This should help the AI choose a more operationally balanced sequence when other stronger factors are already satisfied.
+
+### Expected result
+Where two sequencing options are both valid, the AI can favor the one that better alternates normal and generated orders.
+
+---
+
+## 6. UPDATE THE AI REASONING ON THE SEQUENCE CARDS
+
+Please also update the **AI reasoning / explanation content** shown in the sequence cards so that when alternation influences placement, the explanation reflects that.
+
+### Goal
+Users should understand that a specific order may have been placed in its position not only because of avail date or changeover logic, but also because the AI considered balancing normal and generated orders.
+
+### Example reasoning language
+- `Positioned here to maintain a balanced alternation between normal and generated orders while preserving avail-date feasibility.`
+- `Placed after a normal order to support generated-order alternation without disrupting the sequence.`
+- `Sequenced here to preserve a feasible normal/generated pattern alongside changeover and urgency constraints.`
+
+### Expected result
+If alternation is one of the reasons for the order’s position, the sequence card should communicate that clearly.
+
+---
+
+## 7. UPDATE THE “SEQUENCE INSIGHT” EXPLANATION
+
+Please also update the **Sequence Insight** field to mention alternation when it meaningfully contributed to the placement decision.
+
+### Goal
+The explanation should help users understand **why this order is in this specific position**.
+
+### Example insight wording
+- `Placed in this position to alternate generated and normal orders while maintaining the current avail-date sequence.`
+- `Sequenced after a normal order to support pellet-related alternation and preserve operational flow.`
+- `Position selected to balance generated-order placement without increasing higher-priority changeover impact.`
+
+### Expected result
+The Sequence Insight should become more transparent when alternation is part of the sequencing rationale.
+
+---
+
+## 8. ONLY MENTION ALTERNATION IN THE EXPLANATION WHEN IT ACTUALLY CONTRIBUTED
+
+Please do not add generic alternation wording to every order.
+
+Only mention this in:
+- sequence cards
+- AI reasoning
+- Sequence Insight
+
+when alternation actually contributed to why the order was placed where it was.
+
+### Expected result
+The explanation remains truthful and useful, rather than repetitive or generic.
+
+---
+
+## 9. HANDLE IMPERFECT ALTERNATION GRACEFULLY
+
+There will be cases where perfect alternation is not possible because of:
+- uneven counts of normal vs generated orders
+- avail date restrictions
+- critical orders
+- stronger optimization rules
+
+Please handle this gracefully.
+
+### Expected result
+The AI should:
+- alternate where possible
+- not force unnatural sequencing when it would worsen the schedule
+- still explain when alternation was considered but outweighed by stronger constraints if relevant
+
+### Example
+If there are 3 normal orders and 1 generated order, a reasonable result may be:
+- Normal
+- Generated
+- Normal
+- Normal
+
+rather than forcing an invalid pattern.
+
+---
+
+## 10. PRESERVE EXISTING SEQUENCING PRIORITIES AND AI ANALYSIS STRUCTURE
+
+Please preserve the current AI-powered sequencing framework, including:
+- avail date logic
+- AI strategy evaluation
+- sequence cards
+- sequence insight
+- 3-dimension analysis
+- urgency / criticality handling
+- changeover considerations
+- profitability considerations where applicable
+
+This request is to add another sequencing consideration and improve the reasoning output, not to replace the current sequencing engine.
+
+---
+
+## IMPORTANT
+
+Please implement this as:
+
+- a **sequencing consideration**
+- not a strict rule
+
+The AI should consider alternating:
+- **normal orders**
+- **generated orders**
+
+when sequencing orders, especially in pellet-related contexts, but only when doing so remains operationally sound.
+
+Also update the AI explanation layers so users can understand when this consideration influenced the final placement.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log when alternation between normal and generated orders is evaluated and when it affects sequence placement.
+
+```javascript
+console.debug('[Auto Sequence Alternation Check]', {
+  orderId,
+  orderType, // 'normal' | 'generated'
+  previousOrderType,
+  nextCandidateOrderType,
+  alternationPreferred,
+  alternationApplied,
+});
+```
+
+```javascript
+console.debug('[Auto Sequence Alternation Reasoning]', {
+  orderId,
+  orderType,
+  availDate,
+  alternationConsidered: true,
+  alternationUsedInPlacement,
+  overriddenByHigherPriorityConstraint,
+});
+```
+
+```javascript
+console.debug('[Sequence Insight Reason Update]', {
+  orderId,
+  includeAlternationReason,
+  insightReasonTags,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ The auto-sequence logic considers alternation between normal and generated orders
+2. ✅ Alternation is treated as a consideration, not a strict override rule
+3. ✅ Avail date and stronger sequencing constraints still take priority where necessary
+4. ✅ The AI may use alternation as a secondary optimization signal or tie-breaker
+5. ✅ The sequence does not unnecessarily cluster all generated orders together when a better alternated pattern is feasible
+6. ✅ The sequence does not force invalid or worse scheduling just to maintain alternation
+7. ✅ AI reasoning on the sequence cards can mention alternation when it contributed to placement
+8. ✅ Sequence Insight can explain that an order was positioned partly to maintain normal/generated alternation
+9. ✅ Alternation wording only appears when it actually influenced the order’s placement
+10. ✅ Existing sequencing logic and UI behavior remain intact
+11. ✅ No UI errors or console errors are introduced

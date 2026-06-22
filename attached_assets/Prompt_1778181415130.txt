@@ -1,0 +1,235 @@
+```
+Fix the auto-selection sync issue in the auto-sequence preview so that when a recommended AI strategy is automatically selected, the After table immediately shows that strategy’s actual table data without requiring the user to click the card again.
+
+---
+
+## OBJECTIVE
+
+Right now, when auto-sequence finishes:
+- the app correctly selects the recommended AI strategy card
+- but the After table initially still displays the Standard Sequence result
+- only after the user clicks the already-selected recommended card again does the After table update to the correct sequence
+
+This is incorrect and confusing.
+
+We need to ensure that when a strategy is auto-selected, the table and all dependent UI update immediately to match that selected strategy.
+
+---
+
+## CURRENT ISSUE
+
+Observed behavior:
+1. auto-sequence finishes
+2. recommended AI strategy card is marked as `Selected`
+3. After table still shows Standard Sequence rows
+4. user clicks the already-selected AI strategy card
+5. only then does the After table switch to the correct AI sequence
+
+This means the selected-card state and the rendered table state are out of sync.
+
+---
+
+## REQUIRED BEHAVIOR
+
+When auto-sequence finishes and a recommended AI strategy is auto-selected:
+- the selected card should update
+- the After table should immediately use that strategy’s rows
+- row insights should match that strategy
+- any strategy-specific columns/metrics should also match
+- the user should not need to click the selected card again
+
+If no AI strategy is recommended and Standard Sequence is the fallback selection:
+- the table should show Standard immediately as well
+
+In all cases:
+- selected strategy and displayed table must be synchronized from the start
+
+---
+
+## 1. USE A SINGLE SOURCE OF TRUTH FOR ACTIVE STRATEGY
+
+The After table should be derived directly from the actual active/selected strategy state.
+
+Avoid a situation where:
+- `selectedStrategyId` says AI option 2
+but
+- `displayedAfterOrders` still points to Standard rows
+
+### Preferred approach:
+```javascript
+const activeStrategyResult = strategyResults[activeStrategyId];
+const afterOrders = activeStrategyResult?.orders ?? [];
+```
+
+This ensures the table is always rendered from the currently active strategy.
+
+---
+
+## 2. MAKE AUTO-SELECTION USE THE SAME LOGIC AS MANUAL CARD CLICK
+
+Most likely, the manual click handler properly updates everything, while the auto-selection path only updates the selected-card state.
+
+Fix this by routing auto-selection through the same strategy activation flow used when the user clicks a card.
+
+### Example:
+```javascript
+function activateStrategy(strategyId) {
+  setSelectedStrategyId(strategyId);
+  setDisplayedAfterOrders(strategyResults[strategyId]?.orders ?? []);
+  setDisplayedInsights(strategyResults[strategyId]?.insights ?? {});
+  setDisplayedMetrics(strategyResults[strategyId]?.metrics ?? {});
+}
+```
+
+Then:
+- manual click calls `activateStrategy(strategyId)`
+- auto-select after finish also calls `activateStrategy(recommendedStrategyId)`
+
+Do not let the auto-select path update only part of the state.
+
+---
+
+## 3. ENSURE INITIAL PREVIEW RENDER USES THE FINAL AUTO-SELECTED STRATEGY
+
+After the preview results are created:
+- determine recommended strategy
+- determine fallback if needed
+- activate that strategy before first render of the After table
+
+### Example flow:
+```javascript
+const initialStrategyId = recommendedStrategyId ?? 'standard';
+activateStrategy(initialStrategyId);
+```
+
+This should happen as part of preview initialization.
+
+The first visible table must already match the selected card.
+
+---
+
+## 4. REMOVE STALE STANDARD TABLE STATE ON INITIAL LOAD
+
+If the After table is being initialized with Standard rows by default before the recommended strategy is applied, remove that stale initialization.
+
+Do not:
+- initialize table with Standard
+- then separately mark AI card as selected
+without updating the table payload
+
+Instead:
+- initialize the preview directly with the correct active strategy result
+
+---
+
+## 5. SYNCHRONIZE ALL STRATEGY-DEPENDENT UI, NOT JUST THE TABLE
+
+When the recommended strategy is auto-selected, also ensure these update immediately:
+- After table rows
+- row-level sequence insights
+- expanded “more” reasoning
+- strategy-specific dynamic columns like Margin or Profit Score
+- totals/metrics if shown elsewhere
+- any highlighting tied to row ordering
+
+Everything should reflect the selected strategy from the first render.
+
+---
+
+## 6. IF USING DERIVED STATE, RECOMPUTE IT WHEN SELECTED STRATEGY CHANGES
+
+If the app keeps separate state like:
+- `selectedStrategyId`
+- `afterOrders`
+- `afterInsights`
+- `afterColumns`
+
+then make sure these update whenever `selectedStrategyId` changes.
+
+### Example:
+```javascript
+useEffect(() => {
+  const result = strategyResults[selectedStrategyId];
+  if (!result) return;
+
+  setDisplayedAfterOrders(result.orders ?? []);
+  setDisplayedInsights(result.insights ?? {});
+  setDisplayedMetrics(result.metrics ?? {});
+}, [selectedStrategyId, strategyResults]);
+```
+
+This prevents the selected card and table from drifting apart.
+
+---
+
+## 7. REVIEW THE ORDER OF STATE UPDATES AFTER AUTO-SEQUENCE COMPLETES
+
+Check the post-run flow carefully.
+
+Current likely issue:
+- recommendation is computed
+- selected card state is set
+- preview/table state is still holding Standard data
+
+Make sure the order becomes:
+1. build all strategy results
+2. compute recommended strategy
+3. choose initial active strategy
+4. activate it fully
+5. render preview
+
+Not:
+1. render preview with Standard
+2. set selected recommended card
+3. wait for user click to fix the table
+
+---
+
+## 8. ADD DEBUG LOGGING TO VERIFY SYNC
+
+Temporarily log:
+
+```javascript
+console.debug('[Initial Strategy Sync]', {
+  recommendedStrategyId,
+  selectedStrategyId,
+  displayedAfterOrderIds: displayedAfterOrders?.map(o => o.id),
+  selectedStrategyOrderIds: strategyResults[selectedStrategyId]?.orders?.map(o => o.id),
+});
+```
+
+Also log on auto-select:
+```javascript
+console.debug('[Auto Select Strategy]', {
+  strategyId: recommendedStrategyId,
+  cardSelected: true,
+  tableUpdated: true,
+});
+```
+
+This helps confirm:
+- the selected card and rendered table are using the same strategy from the start
+
+---
+
+## 9. VERIFY AGAINST THE CURRENT ISSUE
+
+Expected behavior after fix:
+- if `Red-Late Diameter Shift` is recommended and auto-selected
+- the After table immediately shows the `Red-Late Diameter Shift` order sequence on first display
+- the user should not need to click that card again
+
+This should be true on the very first render after auto-sequence completes.
+
+---
+
+## 10. VERIFICATION
+
+1. ✅ When auto-sequence finishes, the recommended AI strategy card is selected
+2. ✅ The After table immediately shows the rows for that same selected strategy
+3. ✅ The user no longer needs to click the selected card again to refresh the table
+4. ✅ Standard rows are not shown initially when an AI strategy is already selected
+5. ✅ Row insights and other strategy-dependent UI also match the selected strategy on first render
+6. ✅ If no AI strategy is recommended, Standard is selected and its table is shown immediately
+7. ✅ Selected card state and displayed table state remain fully synchronized
+```

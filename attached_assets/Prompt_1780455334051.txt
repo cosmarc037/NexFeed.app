@@ -1,0 +1,229 @@
+Please enhance the app so that **Add Order**, **Divert Order**, and **Cut Order** also use **AI-generated insertion position logic**, similar to the current **Re-order** workflow.
+
+---
+
+## 1. EXPAND AI-GENERATED INSERTION POSITION BEYOND RE-ORDER
+
+Right now, only **Re-order** uses AI-generated insertion position.
+
+Current behavior:
+- **Add Order** → rule-based insertion by chronological avail date
+- **Divert Order** → rule-based insertion by chronological avail date on target line
+- **Re-order** → AI-generated insertion position
+- **Cut Order** → no real insertion analysis; Portion 2 is automatically placed after Portion 1
+
+### New requirement
+Please extend AI-generated insertion-position analysis to:
+- **Add Order**
+- **Divert Order**
+- **Cut Order**
+
+### Goal
+Make insertion recommendations more intelligent and consistent across all major order actions.
+
+### Expected result
+These flows should no longer rely only on simple date-based or fixed insertion rules.
+
+---
+
+## 2. USE A SHARED AI INSERTION RECOMMENDATION ENGINE ACROSS THESE MODALS
+
+Please implement this using a shared AI insertion recommendation layer/engine rather than building separate disconnected logic for each modal.
+
+### This shared engine should evaluate:
+- current lineup on the target line
+- order volume and production time
+- avail dates / deadlines / urgency
+- changeovers
+- line context
+- downstream effects
+- risk of delay to other orders
+- action-specific context (add, divert, cut, re-order)
+
+### Goal
+Create one consistent insertion recommendation system used across the app.
+
+### Expected result
+Add, Divert, Cut, and Re-order all use the same core AI-driven insertion evaluation approach.
+
+---
+
+## 3. ADD AI INSERTION RECOMMENDATION TO `ADD ORDER`
+
+For **Add Order**, instead of relying only on chronological avail-date placement, please let the AI recommend where the new order should be inserted.
+
+### The AI should consider:
+- current sequence on the selected line
+- order deadline / avail date
+- production time
+- changeover impact
+- downstream delay impact
+- whether earlier/later slots are more appropriate
+
+### Expected result
+The Add Order modal should show:
+- recommended insertion position
+- reasoning
+- impact analysis
+before the user confirms
+
+---
+
+## 4. ADD AI INSERTION RECOMMENDATION TO `DIVERT ORDER`
+
+For **Divert Order**, instead of relying only on chronological avail-date placement on the target line, please let the AI recommend where on the target line the diverted order should be inserted.
+
+### The AI should consider:
+- target line lineup
+- target line feasibility
+- deadlines / avail dates
+- changeover impact
+- downstream impact on the destination line
+- whether the diverted order fits better earlier/later in that line’s current sequence
+
+### Expected result
+The Divert Order modal should show:
+- recommended insertion position
+- reasoning
+- impact analysis
+based on the selected destination line
+
+---
+
+## 5. ADD AI INSERTION RECOMMENDATION TO `CUT ORDER`
+
+For **Cut Order**, please improve the current logic so that the cut portions are not handled only by the fixed rule where Portion 2 automatically goes immediately after Portion 1.
+
+### New requirement
+Please let the AI evaluate where the cut order portions should best fit in the sequence.
+
+### Important
+The AI should still respect practical cut-order constraints, such as:
+- Portion 1 and Portion 2 should remain reasonably related
+- but they do not need to be forced into a simplistic fixed placement if a better schedule fit exists
+
+### Expected result
+The Cut Order modal should show:
+- recommended insertion position for the cut portions
+- reasoning
+- impact analysis
+instead of relying only on the current fixed Portion 2 behavior
+
+---
+
+## 6. KEEP THE MODAL REVIEW FLOW CONSISTENT
+
+For each of these actions (**Add**, **Divert**, **Cut**, and **Re-order**), please present the AI insertion recommendation in a reviewable modal before final confirmation.
+
+### The modal should show:
+- proposed insertion position
+- relevant line
+- production time / date context where applicable
+- downstream delay risk
+- explanation / impact analysis
+
+### Goal
+Users should be able to review the AI’s placement recommendation before committing the change.
+
+### Expected result
+All four order actions follow a more consistent review-and-confirm flow.
+
+---
+
+## 7. MAKE THE FINAL INSERTION MATCH THE REVIEWED AI POSITION
+
+Please ensure that for all these modals:
+- the insertion position shown in the modal
+- is the same insertion position actually applied after confirmation
+
+### Expected result
+No drift should occur between:
+- AI-reviewed insertion position
+- final inserted priority in the schedule
+
+---
+
+## 8. PRESERVE ACTION-SPECIFIC RULES, BUT LET AI HANDLE THE PLACEMENT DECISION
+
+Please keep the necessary business rules for each workflow, but let the AI handle the placement recommendation within those allowed boundaries.
+
+### Examples
+- Add Order: still respect line validity and order data
+- Divert Order: still respect eligible destination lines
+- Cut Order: still respect cut-order relationship constraints
+- Re-order: still respect source/generated order dependencies
+
+### Expected result
+The AI recommends the best insertion slot, but still within valid operational/business constraints.
+
+---
+
+## IMPORTANT
+
+Please extend **AI-generated insertion position logic** so it is not limited to **Re-order** only.
+
+Apply it to:
+- **Add Order**
+- **Divert Order**
+- **Cut Order**
+- while preserving **Re-order**
+
+This should be implemented through a shared AI insertion recommendation engine that evaluates:
+- lineup
+- avail dates / deadlines
+- production time
+- changeovers
+- downstream effects
+- action-specific constraints
+
+The modal should show the AI recommendation, and the final insertion should match what the user reviewed.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log AI insertion recommendation across all modal types.
+
+```javascript
+console.debug('[AI Insertion Recommendation]', {
+  modalType, // 'add' | 'divert' | 'cut' | 'reorder'
+  orderId,
+  targetLine,
+  recommendedPriority,
+  recommendedAvailDate,
+  downstreamDelayRisk,
+  usedAiInsertionEngine: true,
+});
+```
+
+```javascript
+console.debug('[AI Insertion Final Apply Consistency]', {
+  modalType,
+  orderId,
+  reviewedPriority,
+  finalAppliedPriority,
+  exactMatch: reviewedPriority === finalAppliedPriority,
+});
+```
+
+```javascript
+console.debug('[AI Insertion Action Constraints]', {
+  modalType,
+  orderId,
+  respectedConstraints,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Add Order uses AI-generated insertion recommendation
+2. ✅ Divert Order uses AI-generated insertion recommendation
+3. ✅ Cut Order uses AI-generated insertion recommendation
+4. ✅ Re-order continues to use AI-generated insertion recommendation
+5. ✅ All four flows use a shared insertion recommendation approach
+6. ✅ Each modal shows insertion position, reasoning, and impact analysis
+7. ✅ Final insertion matches the reviewed modal recommendation
+8. ✅ Action-specific business rules remain respected
+9. ✅ No UI errors or console errors are introduced

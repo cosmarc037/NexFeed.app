@@ -1,0 +1,160 @@
+Please correct the default period logic in the Demand Profile page.
+
+The current behavior is incorrectly defaulting the Demand page to the current calendar year (for example 2026), even when the uploaded historical demand data only exists for 2025.
+
+This is not the intended behavior.
+
+---
+
+## BUSINESS INTENT
+
+The purpose of the Demand Profile comparison is:
+
+- compare **current operational orders today**
+against
+- **historical demand data from the same month/day period**
+
+This means the page should default based on the **current month or current day**, not blindly based on the current system year.
+
+---
+
+## REQUIRED DEFAULTING LOGIC
+
+### Monthly view
+If today is in **May**, the page should default to:
+- the **month = May**
+- and a **valid historical demand year that exists in the uploaded dataset**
+
+Example:
+- today is May 2026
+- uploaded historical demand only contains 2025
+- then default to:
+  - **Month = May**
+  - **Year = 2025**
+
+Do **not** default to 2026 if 2026 historical demand data does not exist.
+
+---
+
+### Daily view
+If today is **May 19**, the page should default to:
+- the same **month/day period**
+- using a valid historical demand year from the uploaded dataset
+
+Example:
+- today is May 19, 2026
+- uploaded historical demand only contains 2025
+- then compare against:
+  - **May 19, 2025**
+
+Do not auto-select a historical year that does not exist in the dataset.
+
+---
+
+### Quarterly view
+If today falls in Q2:
+- default to the current quarter label (Q2)
+- using the latest valid historical demand year available in the uploaded data
+
+---
+
+### Yearly view
+For yearly view, use the latest valid historical year in the uploaded dataset by default.
+
+---
+
+## IMPORTANT RULE
+
+The Demand page should default by the **current period label**:
+- current month
+- current day
+- current quarter
+
+But the **year must come from the available uploaded historical demand dataset**, not automatically from the current system year.
+
+---
+
+## YEAR SELECTION BEHAVIOR
+
+When the Demand page loads:
+- inspect the uploaded historical demand data
+- determine which years actually exist
+- choose a valid default year from those available years
+
+### Preferred default year
+Use:
+- the **latest available historical year in the uploaded dataset**
+
+unless the user has already manually selected another year during the session.
+
+---
+
+## EXAMPLE
+
+If uploaded data contains only:
+- 2025
+
+and today is:
+- May 2026
+
+then default to:
+- Time grain = Monthly
+- Year = 2025
+- Month = May
+
+This is correct because the purpose is to compare current orders today vs the same historical month period.
+
+---
+
+## DO NOT
+
+- Do not auto-default to a year that does not exist in the historical demand data
+- Do not assume the current system year must always be selected
+- Do not break the user’s ability to manually change year/month/time grain
+
+---
+
+## KEEP USER CONTROL
+
+The user should still be able to manually change:
+- year
+- month
+- day
+- quarter
+- time grain
+
+But on first load, the app should use:
+- the current month/day/quarter
+- paired with the latest valid historical year available
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log:
+
+```javascript
+console.debug('[Demand Profile Default Historical Period]', {
+  today: new Date().toISOString(),
+  selectedTimeGrain,
+  currentMonth,
+  currentDay,
+  currentQuarter,
+  availableHistoricalYears,
+  appliedDefaultYear,
+  appliedDefaultPeriod,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Demand Profile no longer defaults to a year that does not exist in the uploaded historical demand data
+2. ✅ Monthly view defaults to the current month using a valid historical year from the dataset
+3. ✅ Daily view defaults to the current day/month using a valid historical year from the dataset
+4. ✅ Quarterly view defaults to the current quarter using a valid historical year from the dataset
+5. ✅ Yearly view defaults to the latest available historical year
+6. ✅ If only 2025 historical data exists, the page defaults to 2025 instead of 2026
+7. ✅ Users can still manually change year and period after load
+8. ✅ No route or console errors are introduced

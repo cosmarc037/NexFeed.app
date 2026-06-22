@@ -1,0 +1,223 @@
+Please update the **order combination logic** so that compatible orders with different avail dates are still allowed to combine, using the **earliest date among the combined orders as the controlling date**.
+
+This should apply to both **MTO** and **MTS** orders.
+
+---
+
+## 1. DO NOT BLOCK COMBINATION ONLY BECAUSE THE ORDERS HAVE DIFFERENT AVAIL DATES
+
+Right now, it appears that otherwise compatible orders may be blocked from combining if their avail dates are different.
+
+Please revisit this rule.
+
+### Required behavior
+If two orders are otherwise valid for combination:
+- same material code
+- same formula version
+- within the 200 MT combine cap
+
+then a difference in avail dates should **not automatically block** the combination.
+
+### Goal
+Allow compatible orders to combine even when their dates differ.
+
+### Expected result
+Different avail dates alone no longer prevent valid combinations.
+
+---
+
+## 2. USE THE EARLIEST DATE AS THE CONTROLLING DATE FOR THE COMBINED ORDER
+
+When two or more compatible orders are combined and their dates differ, the combined order should inherit the **earliest date** among them.
+
+### Example
+If:
+- Order A = Jun 10
+- Order B = Jun 12
+
+then the combined order should use:
+- **Jun 10** as the controlling date
+
+### Why
+Using the earliest date is the safer logic:
+- producing by Jun 10 also satisfies Jun 12
+- producing by Jun 12 would delay the Jun 10 requirement
+
+### Goal
+Make combined-order date handling operationally correct and deadline-safe.
+
+### Expected result
+The combined order always uses the earliest date among the merged orders.
+
+---
+
+## 3. APPLY THIS SAME EARLIEST-DATE RULE TO MTS ORDERS
+
+Please apply the same earliest-date logic to **MTS** combinations as well.
+
+### Required behavior
+If multiple MTS orders are combined:
+- the earliest target/avail date among them becomes the controlling date
+
+### Important
+If the resulting combined order is still treated as an MTS-type combined order, then the AI may still suggest a date — but:
+- it must not go beyond the controlling target date
+
+### Goal
+Keep MTS combinations flexible where allowed, but always anchored by the earliest target date.
+
+### Expected result
+Combined MTS orders are governed by the earliest target date among the component orders.
+
+---
+
+## 4. APPLY THIS TO MTO + MTS COMBINATIONS AS WELL
+
+Please also support combinations involving:
+- **MTO + MTS**
+
+when they are otherwise combinable.
+
+### Required behavior
+If an MTO order and an MTS order are combined:
+- determine which of the two has the **earliest controlling date**
+- use that earliest date as the governing date for the combined order
+
+### Goal
+Let mixed MTO/MTS combinations use one consistent earliest-date rule.
+
+### Expected result
+MTO + MTS combinations are handled consistently instead of being blocked by date mismatch alone.
+
+---
+
+## 5. IF THE EARLIEST CONTROLLING DATE BELONGS TO AN MTO ORDER, TREAT THE COMBINED ORDER AS FIXED-DATE
+
+If the earliest controlling date comes from an **MTO** order:
+
+### Required behavior
+- the combined order should behave as fixed to that MTO actual avail date
+- it should not be subject to AI suggested-date movement
+- it should respect the MTO-style date immutability behavior
+
+### Goal
+Preserve the hard-date nature of MTO when it is the controlling earliest order in the combination.
+
+### Expected result
+If the earliest date is an MTO date, the combined order is treated as fixed-date.
+
+---
+
+## 6. IF THE EARLIEST CONTROLLING DATE BELONGS TO AN MTS ORDER, THE COMBINED ORDER MAY STILL USE AI SUGGESTED-DATE LOGIC
+
+If the earliest controlling date comes from an **MTS** order:
+
+### Required behavior
+- the combined order may still use AI suggested-date logic
+- but it must never be suggested later than the controlling target date
+- earlier advancement is still allowed where valid
+
+### Goal
+Preserve MTS flexibility while keeping the earliest target date as the hard ceiling.
+
+### Expected result
+If the earliest date is MTS-based, the combined order can still be AI-scheduled within valid MTS rules.
+
+---
+
+## 7. KEEP THE NORMAL COMBINATION RULES INTACT
+
+Please keep the existing combination requirements, such as:
+- same material code
+- same formula version
+- total combined quantity within the 200 MT cap
+
+### Goal
+This change should only relax the date mismatch blocker, not the core combine rules.
+
+### Expected result
+Date handling improves, while the existing combination eligibility rules remain intact.
+
+---
+
+## 8. DIFFERENTIATE BETWEEN DATE MISMATCH AND ADJACENCY / SEQUENCING LIMITATIONS
+
+This request is specifically about **date mismatch not automatically blocking combination**.
+
+### Important
+If the app currently requires adjacency or resequencing before combination, that is a separate issue.
+
+### Goal
+Make sure that:
+- date difference is no longer the blocker
+- but any separate adjacency logic remains clearly handled on its own terms
+
+### Expected result
+Combination is no longer rejected just because the dates differ.
+
+---
+
+## IMPORTANT
+
+Please update the order combination logic so that:
+
+- compatible orders with different avail dates can still combine
+- the combined order uses the **earliest date** among the component orders as the controlling date
+- this applies to:
+  - MTO + MTO
+  - MTS + MTS
+  - MTO + MTS
+- if the earliest controlling date belongs to an **MTO**, the combined order behaves as fixed-date
+- if the earliest controlling date belongs to an **MTS**, the combined order may still use AI suggested-date logic, but must never go later than that target date
+- existing combination rules like same material code, same formula version, and 200 MT cap should remain intact
+
+This is needed because using the earliest date is operationally safer and more correct than blocking valid combinations just because one order has a later date than the other.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log date handling for combined orders.
+
+```javascript
+console.debug('[Combination Earliest Date Resolution]', {
+  combineCandidateIds,
+  componentDates,
+  earliestControllingDate,
+  controllingOrderType,
+});
+```
+
+```javascript
+console.debug('[Combination Mixed MTO MTS Handling]', {
+  combineCandidateIds,
+  hasMTO: componentOrders?.some(o => o.isMTO),
+  hasMTS: componentOrders?.some(o => !o.isMTO),
+  earliestControllingDate,
+  combinedOrderDateBehavior:
+    controllingOrderType === 'MTO'
+      ? 'fixed_date'
+      : 'mts_ai_suggested_date_allowed_with_ceiling',
+});
+```
+
+```javascript
+console.debug('[Combination Date Mismatch No Longer Blocking]', {
+  combineCandidateIds,
+  differentDatesDetected: true,
+  blockedBecauseOfDateMismatch: false,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Different avail dates no longer automatically block valid combinations
+2. ✅ Combined orders inherit the earliest controlling date
+3. ✅ The earliest-date rule applies to MTS combinations
+4. ✅ The earliest-date rule applies to MTO + MTS combinations
+5. ✅ MTO-earliest combinations remain fixed-date
+6. ✅ MTS-earliest combinations may still use AI suggested-date logic within ceiling
+7. ✅ Existing combine rules remain intact
+8. ✅ No UI errors or console errors are introduced

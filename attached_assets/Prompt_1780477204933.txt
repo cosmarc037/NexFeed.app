@@ -1,0 +1,224 @@
+Please revisit and improve the **Mash Diversion to Shutdown Line** workflow so it correctly supports **multiple shutdown lines**, no longer gets stuck on **Line 1**, and cleans up the modal layout and no-rate formatting.
+
+---
+
+## 1. FIX THE SHUTDOWN DESTINATION LOGIC SO IT DOES NOT GET STUCK ON `LINE 1`
+
+There is currently a problem where the Mash diversion prompt/modal keeps using **Line 1** as the shutdown destination, even when other lines are also in shutdown.
+
+### Current issue
+The row-level note and the Mash diversion modal continue to say:
+- `Line 1 is shutdown`
+- `Destination: Line 1`
+
+even after another shutdown line is introduced.
+
+### Likely issue
+The flow appears to be using:
+- a stale shutdown-line reference
+- or only the first detected shutdown line
+instead of reading the full current active shutdown-line set.
+
+### Required behavior
+The Mash diversion workflow must always reflect the **actual currently active shutdown lines**.
+
+### Expected result
+The feature should no longer default or get stuck on **Line 1** unless Line 1 is truly the only applicable shutdown destination.
+
+---
+
+## 2. SUPPORT MULTIPLE SHUTDOWN LINES AS DESTINATION OPTIONS FOR MASH DIVERSION
+
+If more than one line is in shutdown, the Mash diversion modal should not behave as if there is only one fixed destination.
+
+### Required behavior
+If:
+- only one shutdown line exists → it may remain auto-selected
+- multiple shutdown lines exist → show all eligible shutdown lines as destination options
+
+### Expected result
+The user can choose among all currently valid shutdown-line destinations for the Mash order.
+
+---
+
+## 3. MAKE THE DESTINATION DYNAMIC IN THE MODAL
+
+Right now the modal behaves like the destination is fixed:
+- `Destination: Line 1`
+
+That only works if there is exactly one shutdown line.
+
+### New requirement
+When multiple shutdown lines exist:
+- the destination should become selectable in the modal
+- insertion position and impact analysis should update based on the chosen shutdown line
+
+### Expected result
+The Mash diversion modal behaves correctly for both:
+- single shutdown-line case
+- multi-shutdown-line case
+
+---
+
+## 4. UPDATE THE ROW-LEVEL MASH PROMPT / NOTE TO REFLECT THE REAL SHUTDOWN CONTEXT
+
+The current row note can incorrectly hardcode:
+- `Line 1 is shutdown — right-click to divert this Mash order`
+
+### Required behavior
+If only one shutdown line exists:
+- show that exact line
+
+If multiple shutdown lines exist:
+- show a more general but accurate message, such as:
+  - `Shutdown lines available — right-click to divert this Mash order`
+  - or another equivalent message that reflects multiple options
+
+### Expected result
+The row prompt should match the actual shutdown-line state of the plant.
+
+---
+
+## 5. RESTRUCTURE THE `ORDER SUMMARY` LAYOUT
+
+Please restructure the **Order Summary** section in the Mash diversion modal using this layout:
+
+```text
+Material Code:                 Volume:
+Item:                                 Batches:
+Form:                                Avail Date:
+Current Line
+```
+
+### Important
+Please align the labels and values cleanly.
+
+### Expected result
+The Order Summary should be easier to scan and match the requested structure.
+
+---
+
+## 6. REMOVE FIXED DESTINATION FROM THE ORDER SUMMARY IF DESTINATION BECOMES SELECTABLE
+
+Because the destination may now be dynamic when multiple shutdown lines exist, please do not keep it as a fixed field inside the Order Summary block.
+
+### Goal
+Avoid showing a fixed destination in the summary when the user may still choose among multiple shutdown lines.
+
+### Expected result
+Destination should be handled in the dedicated Mash diversion section / destination-selection area, not as a hardcoded summary field.
+
+---
+
+## 7. FIX THE PRODUCTION-TIME DISPLAY FOR NO-RATE CASES
+
+There is currently broken formatting in the modal such as:
+- `Production Time: h (was h)`
+
+### Required behavior
+If no valid production time can be derived because the target line has no rate on record:
+- show a clean value such as:
+  - `Production Time: N/A`
+  - or `Production Time: —`
+
+### Important
+Do not display broken placeholders like:
+- `h`
+- `was h`
+
+### Expected result
+No-rate mash diversion cases should display production-time information cleanly and honestly.
+
+---
+
+## 8. KEEP MASH-SPECIFIC SHUTDOWN DIVERSION LOGIC, BUT MAKE IT MULTI-SHUTDOWN-LINE AWARE
+
+Please preserve the special business rule:
+
+- Mash orders can be diverted to shutdown lines because they skip the pellet mill
+
+but make sure the implementation correctly handles:
+- one shutdown line
+- multiple shutdown lines
+
+### Expected result
+Mash diversion opportunities remain valid, but now correctly reflect the real set of shutdown destinations.
+
+---
+
+## IMPORTANT
+
+Please improve the **Mash Diversion to Shutdown Line** workflow so that:
+
+- it no longer gets stuck on `Line 1`
+- it correctly detects all active shutdown lines
+- if multiple shutdown lines exist, all valid destinations are shown in the modal
+- the row-level prompt reflects the real shutdown context
+- the Order Summary is restructured as:
+
+```text
+Material Code:                 Volume:
+Item:                                 Batches:
+Form:                                Avail Date:
+Current Line
+```
+
+- destination should no longer be treated as a fixed summary field when multiple shutdown lines exist
+- no-rate cases should display clean production-time text like `N/A` or `—`, not broken values like `h (was h)`
+
+This is needed so the Mash diversion workflow is accurate, scalable, and clean when shutdown conditions change.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log shutdown-line detection, destination options, and no-rate formatting.
+
+```javascript
+console.debug('[Mash Diversion Active Shutdown Lines]', {
+  mashOrderId,
+  activeShutdownLines,
+  singleShutdownMode: activeShutdownLines?.length === 1,
+  multiShutdownMode: activeShutdownLines?.length > 1,
+});
+```
+
+```javascript
+console.debug('[Mash Diversion Destination Options]', {
+  mashOrderId,
+  availableShutdownDestinations,
+  selectedDestination,
+});
+```
+
+```javascript
+console.debug('[Mash Diversion Prompt Text]', {
+  mashOrderId,
+  promptText,
+  reflectsActualShutdownState: true,
+});
+```
+
+```javascript
+console.debug('[Mash Diversion No-Rate Production Time Formatting]', {
+  mashOrderId,
+  targetLine,
+  targetRunRate,
+  displayedProductionTime,
+  usedCleanNoRateFallback:
+    displayedProductionTime === 'N/A' || displayedProductionTime === '—',
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Mash diversion no longer gets stuck on `Line 1`
+2. ✅ All active shutdown lines are correctly detected
+3. ✅ Multiple shutdown lines are shown as destination options when applicable
+4. ✅ Row prompt reflects actual shutdown context
+5. ✅ Order Summary follows the requested structure
+6. ✅ Destination is not incorrectly hardcoded in the summary when multiple options exist
+7. ✅ No-rate cases display clean production-time values
+8. ✅ No UI errors or console errors are introduced

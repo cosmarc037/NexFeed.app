@@ -1,0 +1,70 @@
+**Requirements:**
+- Create a single reusable Azure OpenAI client/service module that all features import and use.
+- Add error handling — if the AI service is unavailable, the app still functions normally. AI features gracefully degrade (show "Smart insights unavailable" or similar) instead of crashing.
+- Wire the AI service to these features:
+  - Smart Recommendations banner (per feedmill tab)
+  - Smart Alerts and Reminders section
+  - Smart Assistant chatbot (floating bubble, lower-right corner)
+  - Overview tab summary
+  - Analytics insights
+  - Start Date/Time suggestions upon order upload
+
+---
+
+### 2. Drag and Drop — Dedicated Grip Handle
+
+Update drag-and-drop so users grab a dedicated handle instead of the first column.
+
+**Requirements:**
+- Add a grip/drag handle icon (6 dots in 2×3 grid, or horizontal grip lines) as the leftmost element of every row, BEFORE the Prio column.
+- The handle column should be narrow (24–32px wide).
+- Handle styling: subtle grey (#a1a8b3), slightly darker on hover.
+- Cursor: `grab` on hover, `grabbing` while dragging.
+- Drag is initiated ONLY from the grip handle — not from clicking anywhere else on the row. This prevents accidental drags when clicking editable fields.
+- While dragging: show a visual preview of the row (slightly elevated, drop shadow) and a horizontal insertion line at the drop target.
+- On drop:
+  - Reorder the row to its new position
+  - Re-sequence all Prio numbers automatically
+  - Trigger the scheduling cascade (recalculate Start Date/Time and Completion Date for all affected orders in the same feedmill line)
+- Do NOT show the drag handle on:
+  - Recently Completed rows (fixed position)
+  - Individual non-lead combined orders (move with their group)
+  - Column header rows
+
+---
+
+### 3. Fix Avail Date Parsing — Intelligent Year Inference
+
+The current date parsing from the Remarks column produces unreasonable dates. For example, FPR "251229" (order created December 29, 2025) with Remarks "TLD | Jan 02" results in January 02, 2027 — two years out. Fix with this logic:
+
+**New parsing rules:**
+
+Step 1: Parse the FPR column (YYMMDD format) to get the order creation date.
+  - Example: "251229" → December 29, 2025
+
+Step 2: Extract month and day from Remarks.
+  - Pattern: "TLD | Jan 02" → month = January, day = 2
+  - If Remarks contains non-date text (e.g., "prio replenish"), display as-is. No date conversion.
+
+Step 3: Build a candidate Avail Date using the extracted month/day and the FPR year.
+  - Example: January 02, 2025
+
+Step 4: Compare the candidate date to the FPR creation date:
+  - If the candidate is MORE than 30 days BEFORE the FPR date → set Avail Date to NEXT year (FPR year + 1)
+    - Example: FPR = Dec 29, 2025. Candidate = Jan 02, 2025. Jan 02 is ~362 days before Dec 29 → Avail Date = January 02, 2026
+  - If the candidate is WITHIN 30 days before OR any time AFTER the FPR date → keep same year
+    - Example: FPR = Jan 15, 2026. Candidate = Feb 10, 2026. Feb 10 is after Jan 15 → Avail Date = February 10, 2026
+
+Step 5: Sanity check — if the resulting Avail Date is more than 90 days after the FPR date, display the date but flag it with a console warning for review.
+
+**Validation examples:**
+
+| FPR    | Remarks        | FPR Date     | Avail Date       | Why                                         |
+|--------|----------------|--------------|------------------|---------------------------------------------|
+| 251229 | TLD | Jan 02   | Dec 29, 2025 | Jan 02, 2026     | Jan 02 in 2025 is >30 days before → +1 year |
+| 251229 | TLD | Jan 06   | Dec 29, 2025 | Jan 06, 2026     | Jan 06 in 2025 is >30 days before → +1 year |
+| 260115 | TLD | Feb 10   | Jan 15, 2026 | Feb 10, 2026     | Feb 10 is after Jan 15 → same year          |
+| 260115 | TLD | Jan 10   | Jan 15, 2026 | Jan 10, 2026     | Jan 10 is only 5 days before → within 30 days → same year |
+| 251229 | prio replenish | Dec 29, 2025 | "prio replenish" | Non-date text → display as-is               |
+
+**Logging:** For the first upload, log parsed dates to the console:

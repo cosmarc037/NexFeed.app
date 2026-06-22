@@ -1,0 +1,100 @@
+```
+Fix: Make upload apply use the EXACT same function as Auto-Sequence (All):
+
+---
+
+## 1. THE UPLOAD APPLY HANDLER — JUST CALL THE SAME FUNCTION
+
+```javascript
+// The handleUploadApplySequence should be IDENTICAL to handlePlantApply
+// Both just call applySequencedResultsToDB
+
+async function handleUploadApplySequence(sequencedResults) {
+  // This is the EXACT same as handlePlantApply
+  // No special handling for upload — same DB, same orders, same mutations
+  await handlePlantApply(sequencedResults);
+  
+  // Close the upload preview instead of plant preview
+  setShowUploadAutoSequence(false);
+}
+```
+
+Or even simpler — just pass `handlePlantApply` directly:
+
+```jsx
+{showUploadAutoSequence && uploadContext && (
+  <UploadAutoSequencePreview
+    uploadContext={uploadContext}
+    allOrders={enrichedOrders}
+    masterData={masterData}
+    n10dData={n10dData}
+    changeoverRules={changeoverRules}
+    onApplySequence={async (sequencedResults) => {
+      await handlePlantApply(sequencedResults);
+      setShowUploadAutoSequence(false);
+    }}
+    onUploadOnly={() => {
+      setShowUploadAutoSequence(false);
+      toast.success('Orders uploaded without sequencing.');
+    }}
+    onCancel={() => {
+      setShowUploadAutoSequence(false);
+    }}
+  />
+)}
+```
+
+---
+
+## 2. REMOVE ANY SEPARATE UPLOAD APPLY FUNCTION
+
+Delete or comment out any `handleUploadApplySequence` that has its own logic. There should be ONE apply function used everywhere:
+
+```javascript
+// DELETE this if it exists as a separate function:
+// async function handleUploadApplySequence(sequencedResults) { ... }
+
+// KEEP only handlePlantApply which uses applySequencedResultsToDB
+// And reuse it for all three flows
+```
+
+---
+
+## 3. ENSURE THE PREVIEW PASSES THE SAME DATA FORMAT
+
+The upload preview must pass `sequencedResults` in the same format as the plant-level preview:
+
+```javascript
+// sequencedResults should be:
+// {
+//   "Line 1": [order1, order2, ...],
+//   "Line 2": [order3, order4, ...],
+//   ...
+// }
+// 
+// Where each order has the same shape as plant-level:
+// - order.id = real DB ID
+// - order._isCombined = true/false
+// - order._combinedFrom = [{id, line, volume, ...}, ...]
+// - order.line = line name
+// - order.feedmill_line = line name
+```
+
+Verify in the UploadAutoSequencePreview that when it calls `onApplySequence(sequencedResults)`, the `sequencedResults` object matches this format exactly.
+
+---
+
+## VERIFICATION
+
+### Same function
+1. ✅ Upload apply calls handlePlantApply — no separate function
+2. ✅ Plant-level apply calls handlePlantApply
+3. ✅ Per-line apply calls handlePlantApply with { [targetLine]: orders }
+4. ✅ ONE function, THREE callers
+
+### Data format
+5. ✅ sequencedResults is { lineName: [orders] } in all three flows
+6. ✅ order.id is always a real DB ID
+7. ✅ order._isCombined and order._combinedFrom same shape
+8. ✅ Combined orders have volume_override, original_order_ids, parent_id written to DB
+```

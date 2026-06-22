@@ -1,0 +1,244 @@
+```
+Please revisit the AI strategy sequencing again because the selected strategy is still not aligned with the final table, and more importantly, the resulting date flow is now visibly wrong.
+
+---
+
+## OBJECTIVE
+
+The current AI strategy output has two major issues:
+
+1. the strategy description still does not fully match the resulting order table
+2. the sequence now appears to break the expected availability-date flow, which is a more serious problem
+
+This needs to be corrected so AI-powered sequences:
+- remain faithful to their own stated strategy
+- preserve correct date ordering / date safety
+- only reorder orders within valid feasible windows
+
+---
+
+## SELECTED STRATEGY
+
+### `Late Red End Placement`
+Description:
+> moves the red order later in the sequence where feasible to avoid expensive Red→Non-Red changeover; rearranges flexibles to minimize costly transitions.
+
+Card metrics:
+- MTS adjusted: 5 / 5
+- Changeover time: 5.49 hr
+- Time-saved: -0.17 hr
+- Faithfulness: 76.0%
+
+---
+
+## WHAT IS WRONG
+
+### 1. The strategy is still not fully reflected in the table
+The strategy says:
+- move the red order later
+- minimize costly transitions
+
+But the actual final table still does not clearly reflect a strongly optimized low-changeover sequence.
+The red order is still not clearly at the end, and the final order positions do not strongly match the description.
+
+So the strategy card and the table are still only partially aligned.
+
+---
+
+### 2. The availability-date flow is visibly wrong
+The After-table shows Avail Dates in this order:
+
+- 10 May 2026
+- 11 May 2026
+- 12 May 2026
+- 19 May 2026
+- 19 May 2026
+- 09 May 2026
+
+This means an order with an earlier availability date (`09 May 2026`) is being placed after orders with later availability dates (`19 May 2026`), which looks incorrect.
+
+Unless there is a valid hard reason, this should not happen.
+
+This is especially problematic because the strategy says:
+- `where feasible`
+
+which implies that date feasibility should still be respected.
+
+If the AI is allowed to reorder flexibles, it should do so **within the valid date-safe window**, not in a way that breaks the expected availability-date progression.
+
+---
+
+## REQUIRED FIX
+
+Please improve the AI sequencing logic so that:
+1. date flow remains valid and explainable
+2. AI strategies only reorder within safe windows
+3. strategy descriptions match the actual final result
+4. concrete claims are only made when they are visible in the table
+
+---
+
+## 1. RESTORE DATE-SAFE SEQUENCING AS A HARD CONSTRAINT
+
+Availability-date flow must remain protected.
+
+AI-powered strategies should not push an earlier-date order behind later-date orders unless:
+- there is a truly valid hard business rule allowing it
+- and that reason is explicitly tracked and explainable
+
+If no such rule exists, then the AI must preserve the expected date progression.
+
+At minimum:
+- earlier avail-date orders should not be placed after later avail-date orders in a way that violates date logic
+- especially not a `09 May` order after `19 May` orders
+
+This should be treated as a hard sequencing safety failure, not just a cosmetic issue.
+
+---
+
+## 2. LIMIT AI REORDERING TO FEASIBLE DATE WINDOWS
+
+If the AI wants to cluster orders for changeover reduction, it should only do so within a safe reorder window.
+
+That means:
+- preserve hard date precedence
+- preserve Future Dispatches urgency ordering where required
+- preserve MTO/date protection
+- only reorder among orders that are genuinely movable relative to each other
+
+Do not allow the AI to globally improve changeover at the cost of breaking date flow.
+
+---
+
+## 3. MAKE THE AI AWARE OF DATE PRIORITY IN THE SAME WAY IT IS AWARE OF CHANGEOVER RULES
+
+The AI already needs:
+- current lineup
+- order details
+- changeover rules
+
+It must also receive explicit instruction that:
+- date safety is a hard constraint
+- availability dates are not optional soft hints
+- reordering is only allowed when the orders are within the same safe/movable window
+
+The AI should understand:
+- “optimize changeover subject to date safety”
+not
+- “optimize changeover first, then hope the dates still look okay”
+
+---
+
+## 4. DO NOT LET THE EXECUTION LAYER BREAK DATE ORDER EVEN IF THE AI SUGGESTS IT
+
+Even if the AI proposes a changeover-friendly order, the execution layer must reject or constrain any arrangement that violates protected date flow.
+
+So the application layer should validate:
+- does this reorder break hard availability ordering?
+- does this push an earlier avail-date behind later avail-date orders improperly?
+- does this create a deadline/feasibility risk?
+
+If yes:
+- reject that arrangement
+- or force a date-safe version of it
+- and update the strategy wording accordingly
+
+---
+
+## 5. STRATEGY DESCRIPTION MUST MATCH THE FINAL DATE-SAFE RESULT
+
+If the final sequence is only allowed to move the red order “later” but not all the way to the end because of date constraints, then the card should say that more carefully.
+
+For example:
+- `moves the red order later where feasible while preserving date-safe sequencing`
+
+But if the final result does not visibly achieve even that in a meaningful way, then the strategy wording should be softened further.
+
+The description should describe what actually happened in the final table, not an idealized version.
+
+---
+
+## 6. REASSESS FAITHFULNESS WHEN DATE ORDER IS BROKEN OR THE CLAIM IS ONLY PARTIAL
+
+A strategy should not receive a healthy faithfulness score if:
+- its concrete claim is not strongly reflected
+or
+- the final sequence breaks expected date flow
+
+Please review whether `76.0%` is still appropriate if:
+- the red order is not clearly at the end
+- the Avail Date progression is visibly out of order
+
+Faithfulness must reflect both:
+- strategy-to-table alignment
+- adherence to protected sequencing rules
+
+---
+
+## 7. ADD A VALIDATION STEP BEFORE SHOWING THE STRATEGY AS SELECTABLE / RECOMMENDED
+
+Before the AI strategy is surfaced as selected or recommended:
+- validate that the final sequence is date-safe
+- validate that concrete claims are actually reflected
+- validate that the resulting table does not visibly violate expected avail-date flow
+
+If it fails these checks:
+- fix the sequence
+- revise the wording
+- or disqualify the strategy from recommendation
+
+---
+
+## 8. DEBUG THIS SPECIFIC CASE
+
+Please inspect this exact case and determine:
+- why the `09 May 2026` order was pushed below `19 May 2026` orders
+- whether the execution layer allowed an invalid reorder
+- whether the AI was given enough date-protection context
+- whether a hidden rule caused this
+- if yes, whether that hidden rule should be surfaced in the explanation
+
+Because from the screenshot, this looks like an invalid or at least highly misleading date flow.
+
+---
+
+## 9. ADD DEBUG LOGGING FOR DATE ORDER VALIDATION
+
+Temporarily log:
+
+```javascript
+console.debug('[AI Date Safety Check]', {
+  lineId,
+  strategyId,
+  finalOrders: finalOrders.map((o, index) => ({
+    position: index + 1,
+    orderId: o.id,
+    item: o.item_description,
+    availDate: o.avail_date,
+    color: o.color,
+    diameter: o.diameter,
+    category: o.category,
+  })),
+  dateOrderViolations: detectedDateFlowViolations,
+  strategyDescription,
+  faithfulness,
+});
+```
+
+Also explicitly log:
+- whether the reorder crossed protected avail-date boundaries
+- whether the red-late objective overrode date safety incorrectly
+- whether the final sequence was accepted without proper validation
+
+---
+
+## 10. VERIFICATION
+
+1. ✅ AI strategies now preserve date-safe sequencing as a hard constraint
+2. ✅ Earlier avail-date orders are no longer pushed behind clearly later avail-date orders unless an explicitly valid rule allows it
+3. ✅ AI reorder logic operates only within feasible date windows
+4. ✅ The execution layer rejects or corrects date-breaking reorderings
+5. ✅ The strategy description matches the actual final date-safe table
+6. ✅ Concrete claims like “moves red later” are only used if visibly reflected
+7. ✅ Faithfulness scoring is adjusted if the strategy only partially aligns or breaks protected sequencing logic
+8. ✅ Recommended/selected AI strategies no longer show visibly wrong Avail Date flow

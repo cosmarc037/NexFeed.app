@@ -1,0 +1,157 @@
+Please update the **Add Order / line selection / run-rate behavior** so that the displayed run rate is strictly **line-specific**, and lines without a historical run rate for that product are **disabled / greyed out**.
+
+---
+
+## 1. USE THE RUN RATE OF THE SELECTED LINE ONLY
+
+When the user selects a line for a new order, please make sure the displayed run rate reflects only the historical run rate for that **specific selected line**.
+
+### Required rule
+If the user selects:
+- `Line 2`
+
+then the run rate shown must come from:
+- the product’s historical run rate on `Line 2`
+
+and not from:
+- `Line 3`
+- `Line 6`
+- or any other line
+
+### Current issue
+There are cases where the selected line is one line, but the displayed run rate is estimated from another line.
+
+### Expected result
+The run rate shown in the form must always match the currently selected line.
+
+---
+
+## 2. DO NOT DISPLAY A RUN RATE ESTIMATED FROM ANOTHER LINE WHEN A DIFFERENT LINE IS SELECTED
+
+Please remove the behavior where the form shows something like:
+- `Est. from Line 3`
+
+while the selected line is:
+- `Line 2`
+
+### Goal
+Avoid misleading the user into thinking the selected line has a valid historical run rate when the rate actually came from a different line.
+
+### Expected result
+If `Line 2` is selected, the displayed run rate must be from `Line 2` only.
+If no rate exists for `Line 2`, then do not substitute another line’s rate.
+
+---
+
+## 3. DISABLE / GREY OUT LINES THAT DO NOT HAVE A HISTORICAL RUN RATE FOR THAT PRODUCT
+
+When the user opens the line dropdown, please disable or grey out any line where the product has no historical run rate.
+
+### Required behavior
+- lines with valid historical run rate for that product → selectable
+- lines with no historical run rate for that product → disabled / greyed out
+
+### Goal
+Prevent users from selecting a line where the product has no known valid run-rate basis.
+
+### Expected result
+The user can only actively select lines that have historical run-rate support for that product.
+
+---
+
+## 4. DO NOT ALLOW USERS TO SELECT AN INVALID LINE WITH NO HISTORICAL RUN RATE
+
+If a line has no historical run rate for that product, it should not just be visually dimmed — it should also be non-selectable.
+
+### Expected result
+The user cannot proceed with selecting a line that has no historical run rate for that product.
+
+### Goal
+Reduce invalid scheduling choices and avoid downstream run-rate/production-time issues.
+
+---
+
+## 5. KEEP RECOMMENDED / AVAILABLE LINE MESSAGING CONSISTENT WITH VALID HISTORICAL RUN RATES
+
+If the UI shows recommended or available lines based on historical run rate, please make sure that messaging is consistent with the line selection behavior.
+
+### Expected result
+- recommended lines should be valid lines with actual historical run rate
+- available lines shown to the user should also have valid historical run rate
+- invalid lines should not appear as normal selectable options
+
+---
+
+## 6. IF THE SELECTED LINE HAS NO HISTORICAL RUN RATE, SHOW NO RUN RATE RATHER THAN BORROWING FROM ANOTHER LINE
+
+If for any reason the UI must display a line that has no historical run rate, do not borrow a rate from another line.
+
+### Expected behavior
+If no valid historical run rate exists on the selected line:
+- show no run rate / unavailable run rate
+- do not use another line’s rate as a substitute
+
+### Goal
+Keep the scheduling form honest and line-specific.
+
+### Expected result
+The app does not misrepresent run-rate availability.
+
+---
+
+## IMPORTANT
+
+Please enforce the following rules:
+
+1. If the user selects **Line X**, the displayed run rate must come from **Line X only**
+2. Do **not** show a run rate estimated from another line when a different line is selected
+3. In the line dropdown, disable / grey out lines that do not have a historical run rate for that product
+4. Users should not be able to select a line with no historical run rate for that product
+
+This is needed to keep line selection valid and prevent misleading run-rate behavior.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log selected-line run-rate source and disabled-line handling.
+
+```javascript
+console.debug('[Add Order Line-Specific Run Rate]', {
+  productId,
+  selectedLine,
+  displayedRunRate,
+  displayedRunRateSourceLine,
+  usesSelectedLineRate: selectedLine === displayedRunRateSourceLine,
+});
+```
+
+```javascript
+console.debug('[Add Order Disabled Invalid Lines]', {
+  productId,
+  selectableLines,
+  disabledLines,
+  disabledBecauseNoHistoricalRunRate: true,
+});
+```
+
+```javascript
+console.debug('[Add Order Invalid Cross-Line Rate Check]', {
+  productId,
+  selectedLine,
+  displayedRunRateSourceLine,
+  invalidCrossLineRateUsed:
+    selectedLine !== displayedRunRateSourceLine && !!displayedRunRateSourceLine,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Selected line always determines the displayed run rate
+2. ✅ No rate from another line is shown when a different line is selected
+3. ✅ Lines with no historical run rate are greyed out
+4. ✅ Lines with no historical run rate are not selectable
+5. ✅ Recommended/available line messaging stays consistent with valid run-rate support
+6. ✅ No UI errors or console errors are introduced

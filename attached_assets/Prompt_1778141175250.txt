@@ -1,0 +1,252 @@
+```
+Revisit and fix how profitability is applied inside AI strategy execution, especially within clustered groups where the AI says profitability is used as a secondary dimension or tie-breaker.
+
+---
+
+## OBJECTIVE
+
+We need to verify that the actual order sequence produced by an AI-powered strategy is aligned with the strategy’s own three-dimension analysis.
+
+In the current case, the selected AI strategy says it is:
+
+- clustering late MTO poultry orders
+- primarily optimizing for changeover reduction
+- secondarily considering profitability
+- using profit score as a tie-breaker
+- deprioritizing advancement
+
+The changeover clustering seems to be working, but the profitability part appears inconsistent with the final sequence.
+
+---
+
+## PROBLEM TO FIX
+
+From the selected AI strategy:
+- **Changeover reduction** = Primary
+- **Profitability** = Secondary
+- reasoning says profit score is used as a tie-breaker
+
+However, in the After table:
+- two clustered poultry orders are on the same date: **May 26**
+- one has **profit score = 1.5**
+- another has **profit score = 5.9**
+- but the **1.5** order is placed earlier than the **5.9** order
+
+This creates a mismatch.
+
+If profitability is truly part of the 3-dimension sequencing logic, then within a clustered group where the primary grouping objective has already been satisfied, the higher profit score should generally be prioritized ahead of the lower one — unless a stronger sequencing rule overrides it.
+
+Right now, one of these may be true:
+1. profitability is not actually being applied strongly enough in the execution layer
+2. another hidden local ordering rule is overriding profitability
+3. the AI reasoning is overstating the role of profitability
+4. the row-level insights are not explaining why the lower-score order stayed ahead
+
+---
+
+## REQUIRED BEHAVIOR
+
+For AI strategies that explicitly state:
+- changeover reduction is primary
+- profitability is secondary / tie-breaker
+
+the final sequence should behave like this:
+
+1. first, satisfy the primary grouping objective
+   - e.g. cluster late poultry orders together
+2. then, within the eligible clustered group, apply profitability as the next ordering factor
+3. higher profit score should come earlier than lower profit score
+4. unless a stronger hard constraint or sequencing factor justifiably overrides it
+
+If profitability is not actually used in that local ranking, the reasoning should not imply that it was.
+
+---
+
+## 1. VERIFY THE INTRA-CLUSTER ORDERING LOGIC
+
+Check how the app orders rows inside a cluster once the cluster itself has already been formed.
+
+For example, once multiple poultry orders are grouped onto the same date block:
+- what determines the order inside that poultry cluster?
+- is profit score actually used there?
+- if yes, at what priority?
+- if not, why does the AI reasoning say profitability is secondary?
+
+We need to ensure the execution logic matches the stated strategy.
+
+---
+
+## 2. APPLY PROFIT SCORE AS A TIE-BREAKER WITHIN CLUSTERED CANDIDATES
+
+When:
+- the primary cluster objective is already satisfied
+- the compared orders are in the same clustered group
+- the compared orders are on the same date or within the same sequence window
+- no hard constraint blocks reordering
+
+then the order with the higher profit score should generally be placed first.
+
+### Example expectation
+If:
+- Order A = profit score 1.5
+- Order B = profit score 5.9
+- both are in the same poultry cluster
+- both are on May 26
+- both are otherwise valid
+
+Expected:
+- Order B (5.9) should come before Order A (1.5)
+
+unless another real sequencing rule overrides it.
+
+---
+
+## 3. IDENTIFY WHETHER A STRONGER LOCAL ORDERING RULE IS OVERRIDING PROFITABILITY
+
+If a lower profit score remains ahead of a higher one, verify whether that is because of a stronger rule, such as:
+- exact changeover path optimization
+- MTO protection nuance
+- diameter continuity with neighboring rows
+- form compatibility
+- manual/locked constraints
+- estimated completion alignment
+- hidden time-slot feasibility
+- start-time insertion logic
+
+If one of these is intentionally stronger than profitability, then:
+- that is acceptable
+- but it must be explicitly understood and preferably reflected in the reasoning
+
+---
+
+## 4. DO NOT OVERSTATE PROFITABILITY IN THE AI REASONING
+
+If profitability only weakly influenced the strategy, or did not actually affect the local order in that cluster, then the AI reasoning should not imply that it did.
+
+For example, avoid reasoning that suggests:
+- profit score was meaningfully used as a tie-breaker
+
+if the actual sequence did not follow it.
+
+The strategy explanation should match the real execution.
+
+---
+
+## 5. UPDATE ROW-LEVEL SEQUENCE INSIGHTS TO EXPLAIN OVERRIDES
+
+If a lower-profit-score order stays ahead of a higher-profit-score order for a valid reason, then the row-level sequence insight should explain why.
+
+Example acceptable explanations:
+- retained ahead due to tighter diameter continuity with the previous order
+- preserved because moving it would increase changeover more than the profitability gain
+- protected by a stricter MTO/date constraint
+- maintained due to local sequence fit despite lower profit score
+
+This helps users understand why profitability did not win in that case.
+
+---
+
+## 6. IMPROVE THE STRATEGY FAITHFULNESS TO THE 3-DIMENSION ANALYSIS
+
+If the card says:
+- changeover reduction = primary
+- profitability = secondary
+- MTS/date advancement = deprioritized
+
+then the actual sequence should visibly reflect those priorities.
+
+That means:
+- changeover grouping should be real
+- profitability should influence the local ranking when applicable
+- advancement should not dominate unless needed
+
+The current sequence appears only partially aligned.
+
+---
+
+## 7. ADD A POST-EXECUTION VALIDATION FOR SECONDARY-DIMENSION CONSISTENCY
+
+After the AI strategy builds the final sequence, validate whether the resulting order list is consistent with the secondary profitability dimension.
+
+For clustered groups:
+- detect orders within the same cluster/date band
+- compare adjacent orders
+- if a lower-profit-score order is ahead of a higher-score order, check whether a valid override reason exists
+
+If no valid override reason exists:
+- reorder them
+- or reduce the stated faithfulness / update reasoning accordingly
+
+---
+
+## 8. ADD DEBUG LOGGING TO VERIFY PROFITABILITY APPLICATION
+
+Temporarily log the local cluster ordering:
+
+```javascript
+console.debug('[AI Cluster Profitability Check]', {
+  lineId,
+  strategyId,
+  clusterType: 'late_poultry_cluster',
+  orders: clusteredOrders.map((o, index) => ({
+    index,
+    orderId: o.id,
+    item: o.item_description,
+    date: o.avail_date,
+    profitScore: o._profitScore,
+    category: o.category,
+    diameter: o.diameter,
+  })),
+});
+```
+
+And for any overridden case:
+```javascript
+console.debug('[Profitability Override Reason]', {
+  lowerScoreOrderId,
+  higherScoreOrderId,
+  lowerScore: lowerScoreOrder._profitScore,
+  higherScore: higherScoreOrder._profitScore,
+  overrideReason,
+});
+```
+
+This should help verify:
+- whether profitability is actually being used
+- where it is being overridden
+- whether the current reasoning is justified
+
+---
+
+## 9. VERIFY AGAINST THE CURRENT CASE
+
+For the specific example:
+- two clustered poultry orders are on **May 26**
+- one has **profit score = 1.5**
+- one has **profit score = 5.9**
+- the lower score is earlier in sequence
+
+Expected review:
+- check whether there is a valid stronger sequencing reason for this
+- if no such reason exists, reorder so **5.9** comes before **1.5**
+- if such a reason does exist, make the reasoning explain it clearly
+
+---
+
+## 10. VERIFICATION
+
+### Strategy alignment
+1. ✅ The final sequence better reflects the three-dimension analysis described by the AI strategy
+2. ✅ Changeover remains the primary cluster driver where intended
+3. ✅ Profitability is actually used as a secondary ordering factor inside clustered groups where applicable
+
+### Local ordering
+4. ✅ Higher profit score is prioritized within a valid cluster/date group unless a stronger rule overrides it
+5. ✅ Lower-profit-score rows no longer stay ahead without a valid reason
+
+### Transparency
+6. ✅ If profitability is overridden, the override reason is explainable
+7. ✅ AI reasoning and row-level insights no longer overstate profitability when it was not actually used
+
+### Faithfulness
+8. ✅ The selected AI strategy’s actual output more closely matches its stated logic

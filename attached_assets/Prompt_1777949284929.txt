@@ -1,0 +1,286 @@
+```
+Fix the flow and visibility rules for cancelled orders so they behave like done orders, but at the bottom of the table and ordered by cancellation recency.
+
+---
+
+## OBJECTIVE
+
+Cancelled orders should follow a consistent flow similar to done orders.
+
+### Done orders behavior today
+Done orders already behave like this:
+- shown at the top of the table
+- only the 3 most recent done orders remain visible in the main table
+- inside the visible done section:
+  - oldest visible done order at the top
+  - most recent visible done order at the bottom
+- any older done orders beyond the visible 3 are moved to Order History
+
+### Cancelled orders should behave similarly, but at the bottom
+Cancelled orders must:
+- be shown at the bottom of the table
+- only the 3 most recent cancelled orders remain visible in the main table
+- inside the visible cancelled section:
+  - most recent cancelled order at the top of the cancelled block
+  - oldest visible cancelled order at the bottom of the cancelled block
+- any older cancelled orders beyond the visible 3 must be moved to Order History → Cancelled
+
+---
+
+## 1. DEFINE THE EXPECTED CANCELLED ORDER FLOW
+
+### Visible cancelled order block in main table
+- maximum of 3 visible cancelled orders
+- positioned at the bottom of the table
+- sorted by cancellation timestamp descending inside the cancelled block
+
+This means:
+- newest cancelled first
+- oldest visible cancelled last
+
+### Example
+If cancelled orders over time are:
+- A = oldest cancelled
+- B
+- C = most recent cancelled
+
+Visible bottom block should be:
+- C
+- B
+- A
+
+If D is cancelled next:
+- D
+- C
+- B
+
+And A should move to Order History → Cancelled
+
+---
+
+## 2. USE A REAL CANCELLATION TIMESTAMP / SEQUENCE
+
+Cancelled ordering must be based on actual cancellation recency.
+
+If there is already a field like:
+- `cancelled_at`
+- `canceled_at`
+- `status_updated_at`
+- `updated_at`
+- `cancel_sequence`
+
+use that.
+
+If no dedicated cancellation timestamp exists yet, create/store one when an order is marked cancelled.
+
+### Example:
+```javascript
+function markOrderCancelled(order) {
+  return {
+    ...order,
+    status: 'cancelled',
+    cancelled_at: new Date().toISOString(),
+  };
+}
+```
+
+Do not rely on current table position alone to infer recency.
+
+---
+
+## 3. SPLIT MAIN TABLE DATA INTO ACTIVE / DONE / CANCELLED BLOCKS
+
+Build the visible table using three sections:
+
+1. visible done orders
+2. active/non-done/non-cancelled orders
+3. visible cancelled orders
+
+### Suggested flow:
+```javascript
+function buildVisibleOrdersTable(allOrders) {
+  const doneOrders = allOrders.filter(isDoneOrder);
+  const cancelledOrders = allOrders.filter(isCancelledOrder);
+  const activeOrders = allOrders.filter(order => !isDoneOrder(order) && !isCancelledOrder(order));
+
+  const visibleDone = getVisibleDoneOrders(doneOrders);
+  const visibleCancelled = getVisibleCancelledOrders(cancelledOrders);
+
+  return [
+    ...visibleDone,
+    ...activeOrders,
+    ...visibleCancelled,
+  ];
+}
+```
+
+---
+
+## 4. KEEP DONE LOGIC AS-IS, BUT MIRROR THE SAME LIMIT FOR CANCELLED
+
+If done logic already caps visible done rows to 3, keep that unchanged.
+
+Now implement similar logic for cancelled:
+
+### Suggested helper:
+```javascript
+function getVisibleCancelledOrders(cancelledOrders) {
+  return [...cancelledOrders]
+    .sort((a, b) => {
+      const dateA = new Date(a.cancelled_at || 0).getTime();
+      const dateB = new Date(b.cancelled_at || 0).getTime();
+      return dateB - dateA; // newest first
+    })
+    .slice(0, 3);
+}
+```
+
+This ensures:
+- only 3 most recent cancelled orders remain visible
+- newest cancelled is first within the cancelled block
+
+---
+
+## 5. SEND OLDER CANCELLED ORDERS TO ORDER HISTORY → CANCELLED
+
+Any cancelled orders beyond the visible 3 must not remain in the main table.
+
+They should still exist in the dataset, but only under the history view / cancelled orders tab.
+
+### Suggested helper:
+```javascript
+function getCancelledOrderHistory(cancelledOrders) {
+  return [...cancelledOrders]
+    .sort((a, b) => {
+      const dateA = new Date(a.cancelled_at || 0).getTime();
+      const dateB = new Date(b.cancelled_at || 0).getTime();
+      return dateB - dateA; // newest first
+    })
+    .slice(3);
+}
+```
+
+If history expects oldest-first ordering instead, you can reorder in the history tab itself, but the main table must only show the latest 3 cancelled orders.
+
+---
+
+## 6. ENSURE NEWLY CANCELLED ORDER APPEARS FIRST IN THE CANCELLED BLOCK
+
+When a new order is marked cancelled:
+- assign/update `cancelled_at`
+- recompute visible sections
+- move the newly cancelled order to the top of the cancelled block
+- keep only the latest 3 cancelled in the main table
+
+### Expected example
+If visible cancelled block currently is:
+- C
+- B
+- A
+
+Then cancelling D should result in:
+- D
+- C
+- B
+
+And A disappears from the main table and goes to Order History → Cancelled
+
+---
+
+## 7. DO NOT LET CANCELLED ORDERS ACCUMULATE UNBOUNDED IN THE MAIN TABLE
+
+Fix the current bug where:
+- 4, 5, or more cancelled orders continue to remain visible in the table
+
+After the fix:
+- max visible cancelled = 3
+- max visible done = 3
+- all overflow must move to history
+
+---
+
+## 8. KEEP CANCELLED ORDERS AT THE BOTTOM OF THE TABLE
+
+Regardless of original active position:
+- cancelled orders should always render at the bottom visible block
+- after active rows
+- below all active orders
+
+They should not remain mixed into active rows after cancellation.
+
+---
+
+## 9. PRESERVE VISUAL STYLING / STATUS BADGE
+
+Keep the existing cancelled styling:
+- faded/greyed rows if already implemented
+- "Cancel PO" badge or cancelled indicator
+
+This fix is about ordering and visibility logic, not the visual status design.
+
+---
+
+## 10. HANDLE EDGE CASES
+
+### A. Missing cancellation timestamp
+If old cancelled rows do not yet have `cancelled_at`:
+- fallback to a stable alternative if available
+- otherwise assign a safe fallback ordering
+- but going forward, all newly cancelled orders should store a proper timestamp
+
+### B. Restored / uncancelled orders
+If an order is restored from cancelled back to active:
+- remove it from cancelled block
+- remove or ignore `cancelled_at` as needed
+- rebuild visible blocks cleanly
+
+### C. Done vs Cancelled
+Ensure done and cancelled logic stay independent:
+- done block at top, oldest visible done first
+- cancelled block at bottom, newest visible cancelled first
+
+---
+
+## 11. ADD DEBUG / VERIFICATION LOGGING
+
+Temporarily log block composition:
+
+```javascript
+console.debug('[Order Table Blocks]', {
+  visibleDone: visibleDone.map(o => ({ id: o.id, done_at: o.done_at })),
+  active: activeOrders.map(o => ({ id: o.id })),
+  visibleCancelled: visibleCancelled.map(o => ({ id: o.id, cancelled_at: o.cancelled_at })),
+  cancelledHistory: cancelledHistory.map(o => ({ id: o.id, cancelled_at: o.cancelled_at })),
+});
+```
+
+This will help confirm:
+- only 3 cancelled are visible
+- newest cancelled is first in the cancelled block
+- overflow goes to history
+
+---
+
+## 12. VERIFICATION
+
+### Cancelled order flow
+1. ✅ Cancelled orders appear at the bottom of the table
+2. ✅ Only the 3 most recent cancelled orders remain visible in the main table
+3. ✅ Within the visible cancelled block, newest cancelled appears first
+4. ✅ Older cancelled orders move to Order History → Cancelled
+
+### Done order flow
+5. ✅ Existing done order behavior remains unchanged
+6. ✅ Done block stays at top
+7. ✅ Only the latest 3 visible done orders remain in main table
+8. ✅ Overflow done orders still move to history
+
+### User flow
+9. ✅ When a new order is cancelled, it immediately appears at the top of the cancelled block
+10. ✅ The oldest visible cancelled order drops out of the main table if there are now more than 3 cancelled rows
+11. ✅ Cancelled rows no longer accumulate indefinitely in the main table
+
+### Data integrity
+12. ✅ Cancellation ordering is based on actual cancellation timestamp / recency
+13. ✅ History view still retains older cancelled orders
+14. ✅ Restored orders are removed cleanly from the cancelled block if applicable

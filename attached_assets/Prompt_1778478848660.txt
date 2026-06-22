@@ -1,0 +1,216 @@
+Please fix the Daily utilization section in the auto-sequence cards by improving the layout/spacing of the expanded content, and correct the Standard Sequence calculation so it uses the Standard sequence’s After-table result instead of the Before-table data.
+
+---
+
+## OBJECTIVE
+
+There are two issues to fix in the Daily utilization KPI on the sequence cards:
+
+1. the expanded Daily utilization content is still poorly placed / spaced and needs cleaner layout inside the card
+2. the Standard Sequence card appears to be using the wrong data source for its Daily utilization breakdown, likely the Before table instead of the Standard sequence’s After result
+
+We want to keep the expanded content inside the card, but improve readability and ensure all cards use the correct underlying sequence result.
+
+---
+
+## ISSUE 1 — FIX THE PLACEMENT / SPACING OF THE DAILY UTILIZATION CONTENT
+
+### Current problem
+The expanded Daily utilization section is already inside the card, but the content placement still feels cramped and messy.
+
+The spacing/alignment needs improvement so the section is easier to scan.
+
+### Required fix
+Keep the expanded Daily utilization section **inside the card**, directly under the KPI row, but improve the layout by adjusting:
+
+- top spacing between KPI row and expanded box
+- left/right padding of the expanded content
+- spacing between rows
+- column alignment
+- visual separation between header row and data rows
+- spacing above the footer line (`Capacity utilization: ...`)
+- overall readability within the card width
+
+### Important
+Do **not** move the expanded content outside the card.
+Do **not** redesign the interaction.
+Just improve spacing and placement.
+
+---
+
+## EXPECTED EXPANDED LAYOUT
+
+The expanded block should stay visually tied to the KPI row and appear neat, aligned, and readable.
+
+Example target structure:
+
+```text
+Daily utilization ▾                         +18.9%
+
+DATE           ORDERS      HOURS      UTIL %
+May 09, 2026   1           4.3 hrs    18.1%
+May 11, 2026   1           2.2 hrs     9.0%
+May 13, 2026   2          11.1 hrs    46.4%
+May 17, 2026   1           5.3 hrs    22.1%
+May 22, 2026   1           0.2 hrs     0.7%
+
+Capacity utilization: Improved
+```
+
+Please make sure:
+- columns visually align
+- text does not feel cramped
+- the footer is separated cleanly from the rows above
+- the section looks polished inside the card
+
+---
+
+## ISSUE 2 — STANDARD SEQUENCE IS LIKELY USING THE WRONG SOURCE
+
+### Current problem
+The Standard Sequence Daily utilization breakdown appears incorrect.
+
+From the screenshot, the Standard card shows:
+- only `May 22, 2026`
+- plus `(no date)`
+
+But the Standard sequence’s visible result clearly contains multiple avail dates in the After table.
+
+This strongly suggests that the Standard Sequence Daily utilization breakdown is using the wrong source, likely:
+- the Before table
+or
+- raw original rows
+
+instead of:
+- the Standard strategy’s own resulting After-table sequence rows
+
+### Required fix
+The Standard Sequence Daily utilization KPI must be computed from the **Standard sequence’s actual After-table result**, just like AI strategies are computed from their own resulting After-table result.
+
+Do not use:
+- Before table rows
+- raw pre-sequence data
+- stale source rows
+
+Use:
+- the Standard strategy’s resulting ordered rows shown in the preview result
+
+---
+
+## 3. ALL STRATEGIES MUST USE THEIR OWN AFTER-TABLE RESULT
+
+For Daily utilization calculation, each strategy card must use that specific strategy’s resulting sequence output.
+
+### That means:
+- Standard Sequence → Standard After-table result
+- AI Strategy A → AI Strategy A After-table result
+- AI Strategy B → AI Strategy B After-table result
+
+This ensures the Daily utilization KPI reflects what the user is actually seeing in the preview.
+
+---
+
+## 4. GROUPING MUST STILL USE AVAIL DATE
+
+Keep the grouping logic based on:
+
+- **Avail Date**
+
+This rule still applies.
+
+The issue is not the grouping basis — the issue is the wrong data source for Standard and the spacing/layout of the expanded section.
+
+If the resulting sequence contains avail dates such as:
+- May 9
+- May 13
+- May 14
+- May 15
+- May 22
+
+then all of those should appear in the breakdown for that strategy.
+
+No missing dates, no `(no date)` unless the sequence truly contains orders without avail dates.
+
+---
+
+## 5. HOURS MUST STILL REPRESENT FULL USED HOURS
+
+Do not change the hours meaning.
+
+The `Hours` column should still represent:
+- production hours
+- plus changeovers for that date
+
+This remains the basis for:
+- daily utilization %
+- average utilization
+- improvement vs Standard
+
+---
+
+## 6. KEEP THE KPI HEADER FORMAT AS ALREADY AGREED
+
+The Daily utilization KPI row should remain in this format:
+
+Collapsed:
+- `Daily utilization ▸     +X.X%`
+
+Expanded:
+- `Daily utilization ▾     +X.X%`
+
+Chevron stays after the label.
+
+Do not move it back to the left.
+
+---
+
+## 7. STANDARD SEQUENCE SHOULD NO LONGER SHOW INVALID PARTIAL DATES
+
+After the fix, Standard Sequence should no longer show incorrect breakdowns like:
+- only one date
+- `(no date)` unexpectedly
+- or a subset that does not match the Standard After table
+
+The breakdown must align with the visible Standard sequence result.
+
+---
+
+## 8. ADD DEBUG LOGGING FOR SOURCE VALIDATION
+
+Temporarily log:
+
+```javascript
+console.debug('[Daily Utilization Source Check]', {
+  strategyId,
+  title: strategy.title,
+  sourceUsed: 'afterTableResult',
+  rowCount: strategyRows.length,
+  availDatesFound: groupedRows.map(r => r.availDate),
+  groupedRows: groupedRows.map(r => ({
+    availDate: r.availDate,
+    orderCount: r.orderCount,
+    usedHours: r.usedHours,
+    utilizationPercent: r.utilizationPercent,
+  })),
+});
+```
+
+This helps verify:
+- Standard is using its own After-table rows
+- no card is mistakenly using Before-table rows
+- all dates are included correctly
+
+---
+
+## 9. VERIFICATION
+
+1. ✅ The expanded Daily utilization block remains inside the card
+2. ✅ Spacing, padding, alignment, and readability of the expanded content are improved
+3. ✅ Columns in the expanded breakdown are cleanly aligned
+4. ✅ The footer (`Capacity utilization: ...`) is properly spaced and visually separated
+5. ✅ Standard Sequence now computes Daily utilization from the Standard After-table result, not the Before table
+6. ✅ All strategies use their own resulting After-table rows as the source for Daily utilization
+7. ✅ Grouping still uses Avail Date
+8. ✅ Missing or incorrect Standard dates are fixed
+9. ✅ Unexpected `(no date)` entries no longer appear unless the actual resulting sequence truly has no Avail Date
+10. ✅ The Daily utilization KPI remains in the agreed format with the chevron after the label

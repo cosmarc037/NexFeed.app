@@ -1,0 +1,182 @@
+Please review and fix this row-level sequence insight because it is especially misleading for the last order in the sequence.
+
+---
+
+## ISSUE OBSERVED
+
+In the screenshot:
+
+- the row is the **last order**
+- the row displays: `CO: 0.00`
+- but the sequence insight says:
+  - `The 0.83-hour incoming changeover is accepted as necessary...`
+
+This does not make sense in the current UI context.
+
+---
+
+## IMPORTANT CONTEXT
+
+The row shows `CO: 0.00` because it is the **last order** in the sequence.
+
+That is correct:
+- there is no next order after it
+- therefore the last order’s row-level changeover is `0.00`
+
+So it is misleading for the insight to introduce:
+- `0.83-hour incoming changeover`
+
+for this last row.
+
+Even if that 0.83 technically refers to the transition from the previous order into this one, it is still inappropriate in this row-level insight because:
+- the visible row-level CO for the last order is already correctly `0.00`
+- users will interpret the insight as explaining this row’s visible changeover context
+- the wording makes it sound like the row somehow still carries a 0.83 changeover, which contradicts the display
+
+---
+
+## REQUIRED FIX
+
+For the last order in the table:
+- do not describe the row using a conflicting “incoming changeover” value
+- align the insight to the fact that the row is last and has `CO: 0.00`
+- explain why the order is placed last instead of introducing a contradictory transition value
+
+---
+
+## 1. LAST ORDER INSIGHTS SHOULD BE SPECIAL-CASED
+
+If an order is the final order in the sequence:
+- its row-level displayed CO is `0.00`
+- its insight should be written with that in mind
+
+The last order insight should focus on:
+- why it ends the run
+- why it is placed last
+- how that placement helps avoid downstream changeover
+- date / urgency / strategy reasons for keeping it at the end
+
+It should not casually mention a non-zero “incoming” changeover in a way that conflicts with the row display.
+
+---
+
+## 2. DO NOT USE "INCOMING CHANGEOVER" LANGUAGE FOR THE LAST ROW IN A MISLEADING WAY
+
+Even if the system internally tracks:
+- previous → current transition
+- current → next transition
+
+the row insight for the last row should not surface that distinction in a confusing way.
+
+For the last row, avoid wording like:
+- `0.83-hour incoming changeover`
+- `from the previous product`
+if it causes the user to think this row’s operative changeover is non-zero
+
+The visible table already communicates the last row’s changeover:
+- `CO: 0.00`
+
+The insight must stay aligned to that visible logic.
+
+---
+
+## 3. USE LAST-ROW APPROPRIATE INSIGHT WORDING
+
+For the final row, prefer wording like:
+
+### Example 1
+```text
+This order is placed last to avoid adding further downstream changeover after the sequence ends.
+```
+
+### Example 2
+```text
+This order remains at the end of the run because its later placement avoids creating additional follow-on changeover.
+```
+
+### Example 3
+```text
+This order closes the sequence, so no further changeover is required after it.
+```
+
+If needed, also mention:
+- date protection
+- strategy rationale
+- changeover-reduction benefit of end placement
+
+But do not introduce a contradictory non-zero transition value as the row explanation.
+
+---
+
+## 4. ALIGN ROW INSIGHT WITH THE DISPLAYED ROW CO VALUE
+
+For all rows, but especially the last row:
+- the row-level insight should align with the displayed row CO
+
+So if the last row shows:
+- `CO: 0.00`
+
+the insight should not create the impression that this row still has:
+- `0.83 hr`
+
+The insight and row display must tell the same story.
+
+---
+
+## 5. REVIEW WHETHER THE INSIGHT GENERATOR IS STILL MIXING PREVIOUS→CURRENT AND CURRENT→NEXT LOGIC
+
+This case suggests the insight generator may still be mixing:
+- incoming transition logic
+- outgoing transition logic
+- displayed row CO
+
+Please confirm whether:
+- row display uses `current -> next`
+- insight uses `previous -> current`
+
+If so, either unify them or suppress that distinction in row-level insight text.
+
+The current behavior is too confusing.
+
+---
+
+## 6. CHECK THIS EXACT LAST-ROW CASE
+
+Please inspect this specific row and verify:
+- it is the final order in the sequence
+- displayed row CO is `0.00` because there is no next order
+- the insight is incorrectly introducing `0.83 incoming`
+- the text should be rewritten to explain last-row placement instead
+
+---
+
+## 7. ADD DEBUG LOGGING FOR LAST-ROW INSIGHT GENERATION
+
+Temporarily log:
+
+```javascript
+console.debug('[Last Row Insight Check]', {
+  orderId: order.id,
+  isLastRow: true,
+  displayedRowCO: order._displayChangeoverHrs,
+  previousOrderId: previousOrder?.id ?? null,
+  previousToCurrentCO: computedIncomingCO,
+  currentToNextCO: computedOutgoingCO,
+  insightText: order.sequenceInsight,
+});
+```
+
+This helps verify:
+- the last row is correctly identified
+- the displayed row CO is 0.00
+- the insight is not incorrectly using incoming transition text
+
+---
+
+## VERIFICATION
+
+1. ✅ The last order’s row insight no longer mentions a conflicting non-zero “incoming changeover”
+2. ✅ The last order’s insight is aligned with its displayed `CO: 0.00`
+3. ✅ Last-row insight wording now explains why the order is placed last, rather than introducing misleading transition language
+4. ✅ The row-level insight no longer creates contradiction between table display and explanation
+5. ✅ Previous→current vs current→next transition logic is no longer surfaced in a confusing way for users

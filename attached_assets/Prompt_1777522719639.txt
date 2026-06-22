@@ -1,0 +1,343 @@
+```
+Ensure that the AI-generated strategy is reflected as faithfully as possible in the "After" preview table.
+
+---
+
+## PROBLEM TO FIX
+
+Currently, the AI strategy card and the actual After table are not fully aligned.
+
+Examples from current behavior:
+
+### Strategy: Flexible Date Advancement
+The card says the strategy advances flexible orders earlier to fill slack and tighten the schedule.
+But in the After table:
+- flexible orders are not clearly advanced enough
+- lightly loaded dates are not fully utilized
+- material compatibility is not handled well alongside date advancement
+- the result does not strongly reflect the strategy
+
+### Strategy: Swine Diameter Grouping
+The card says the strategy groups swine orders by diameter to reduce diameter-related changeovers.
+But in the After table:
+- swine orders are not clearly grouped
+- diameter-compatible runs are not visibly clustered
+- the preview result does not strongly reflect the strategy description
+
+So the strategy text is stronger than the actual applied sequence.
+
+---
+
+## OBJECTIVE
+
+Make the After table reflect the selected AI strategy as faithfully as possible.
+
+If the AI suggests a strategy:
+- the sequencing order
+- the grouping behavior
+- the date suggestions
+- the changeover logic
+- the slack usage
+
+must visibly and measurably show up in the preview table.
+
+The strategy card must not just be descriptive.
+It must drive the resulting sequence.
+
+---
+
+## 1. TREAT AI STRATEGY OUTPUT AS AN EXECUTION PLAN, NOT JUST A LABEL
+
+Currently the app appears to use the AI strategy mostly as:
+- a title
+- a description
+- a reasoning summary
+
+while still relying on generic heuristic sequencing underneath.
+
+This must change.
+
+Each AI strategy should be treated as a real strategy plan with:
+- explicit sequencing objective
+- explicit grouping objective
+- explicit date movement intent
+- explicit order priority preferences
+
+The app should execute the AI strategy as closely as valid scheduling rules allow.
+
+---
+
+## 2. REQUIRE THE AI TO RETURN STRUCTURED STRATEGY INSTRUCTIONS
+
+For each AI-generated strategy, require the AI to return not only:
+- strategy_name
+- short_description
+- reasoning_summary
+
+but also a structured execution intent.
+
+### Add fields like:
+```json
+{
+  "strategy_name": "Flexible Date Advancement",
+  "short_description": "Advances flexible orders to fill earlier slack while keeping protected dates safe.",
+  "distinct_focus": "Advance eligible flexible orders into earlier safe dates and compress the queue",
+  "execution_intent": {
+    "primary_goal": "advance_flexible_orders",
+    "secondary_goal": "preserve_material_compatibility",
+    "date_behavior": "pull_flexible_orders_forward_into_earlier_safe_slots",
+    "grouping_behavior": "prefer_nearby_compatible_materials_when_advancing",
+    "slack_behavior": "fill_underutilized_early_days_when_safe"
+  },
+  "orders": [
+    { "order_id": "A1", "suggested_date": "2026-04-30", "priority_reason": "protected" },
+    { "order_id": "A2", "suggested_date": "2026-05-02", "priority_reason": "advanced into early slack" }
+  ]
+}
+```
+
+For grouping strategy:
+```json
+{
+  "strategy_name": "Swine Diameter Grouping",
+  "short_description": "Clusters swine orders by diameter to reduce costly diameter changeovers.",
+  "distinct_focus": "Diameter-compatible swine runs",
+  "execution_intent": {
+    "primary_goal": "group_swine_by_diameter",
+    "secondary_goal": "keep_dates_safe",
+    "date_behavior": "adjust_flexible_swine_orders_within_safe_windows_to_improve_grouping",
+    "grouping_behavior": "cluster_swine_orders_with_same_or_compatible_diameter",
+    "slack_behavior": "do_not_scatter_grouped_swine_runs_unnecessarily"
+  },
+  "orders": [
+    { "order_id": "A3", "suggested_date": "2026-05-05", "priority_reason": "grouped with 4.00mm swine run" }
+  ]
+}
+```
+
+This allows the app to actually interpret and enforce the strategy.
+
+---
+
+## 3. APPLY STRATEGY-SPECIFIC EXECUTION LOGIC AFTER AI RETURNS THE PLAN
+
+The app should not treat all AI strategies with the same generic sequencing pipeline.
+
+Instead, after the AI strategy is returned, inspect its `execution_intent.primary_goal` and apply a matching execution behavior.
+
+### Example:
+- `advance_flexible_orders`
+- `group_swine_by_diameter`
+- `compress_compatible_runs`
+- `create_downstream_slack`
+- `protect_late_window_capacity`
+- `stabilize_mid_queue`
+
+This gives the app a way to faithfully apply what the AI actually suggested.
+
+---
+
+## 4. ADD STRATEGY-INTENT EXECUTION HELPERS
+
+Create a new execution layer after AI returns a strategy.
+
+### Suggested function:
+```javascript
+function executeAIStrategyForLine({
+  strategy,
+  line,
+  lineOrders,
+  n10dData,
+  masterData,
+  changeoverRules,
+}) {
+  // executes the AI strategy as faithfully as possible
+}
+```
+
+This function should:
+1. start from the AI-returned order sequence
+2. apply suggested dates if valid
+3. interpret the strategy's execution intent
+4. refine the sequence to better match the declared strategy
+5. preserve all hard constraints
+6. return the final line orders for preview
+
+---
+
+## 5. FOR "ADVANCE FLEXIBLE ORDERS", ACTUALLY FILL EARLIER SAFE DAYS
+
+If the AI strategy’s primary goal is to advance flexible orders:
+- identify earlier safe dates with available capacity
+- do not leave lightly loaded early days underused if eligible flexible orders can be moved there safely
+- compress the flexible queue where possible
+- still preserve compatibility where reasonable
+
+### Required behavior:
+- if a day has only one order and enough remaining usable hours, allow the strategy to move another eligible flexible order into that day
+- prefer earlier safe dates over later safe dates when the strategy says to advance
+- do not keep orders unnecessarily spread across 02 May, 04 May, 05 May if earlier safe grouping is possible
+
+### Suggested helper:
+```javascript
+function applyFlexibleDateAdvancementIntent({
+  orders,
+  line,
+  strategy,
+  n10dData,
+  changeoverRules,
+}) {
+  // move eligible flexible orders into earlier safe dates
+  // fill light-load days
+  // preserve hard constraints
+  // prefer compatible adjacencies when possible
+}
+```
+
+---
+
+## 6. FOR "GROUP SWINE BY DIAMETER", ACTUALLY CLUSTER THOSE ORDERS
+
+If the AI strategy says to group swine orders by diameter:
+- identify swine orders
+- identify diameter
+- cluster same or compatible diameter runs together where safe
+- allow date adjustments for flexible swine orders if needed
+- reduce diameter-related fragmentation in the final sequence
+
+### Required behavior:
+- swine orders should visibly appear closer together in the After table
+- diameter-compatible swine runs should be adjacent or near-adjacent if safe
+- the final table should visibly support the strategy card claim
+
+### Suggested helper:
+```javascript
+function applySwineDiameterGroupingIntent({
+  orders,
+  line,
+  strategy,
+  n10dData,
+  changeoverRules,
+}) {
+  // identify swine orders
+  // group by diameter
+  // move eligible flexible swine orders within safe windows
+  // preserve chronology for protected orders
+}
+```
+
+---
+
+## 7. STRATEGY EXECUTION SHOULD OVERRIDE GENERIC HEURISTIC DEFAULTS WHEN SAFE
+
+Right now the generic sequencing logic appears to be diluting the AI strategy.
+
+Change this:
+- generic heuristics should support the AI strategy
+- not override it unless needed for hard-rule safety
+
+Priority should become:
+1. hard constraints
+2. selected AI strategy intent
+3. generic optimization heuristics
+4. final cleanup/sorting
+
+Not:
+1. hard constraints
+2. generic heuristics
+3. strategy card text
+
+---
+
+## 8. ADD STRATEGY-FAITHFULNESS VALIDATION
+
+After building the final After table for an AI strategy, validate whether the result actually reflects the strategy’s stated intent.
+
+### Example checks:
+#### Flexible Date Advancement
+- Did at least some eligible flexible orders move earlier?
+- Were lightly loaded earlier dates used better?
+- Is total queue compression improved?
+
+#### Swine Diameter Grouping
+- Are swine orders more clustered than in Standard?
+- Are diameter-compatible runs closer together?
+- Is diameter changeover reduced or at least visibly improved?
+
+If the answer is no:
+- mark the strategy as weakly applied
+- regenerate / refine execution
+- do not present it as if it were fully implemented
+
+### Suggested helper:
+```javascript
+function evaluateStrategyFaithfulness({
+  strategy,
+  standardOrders,
+  finalOrders,
+  line,
+}) {
+  // returns faithfulness score and reasons
+}
+```
+
+---
+
+## 9. USE STRATEGY-FAITHFULNESS IN RECOMMENDATION / LOW-DISTINCTION LOGIC
+
+If a strategy’s output does not meaningfully reflect its own intent:
+- reduce its distinction score
+- do not recommend it unless it truly performs better and is faithfully applied
+
+This prevents the UI from recommending a strategy whose card description is not matched by the preview.
+
+---
+
+## 10. MAKE SEQUENCE INSIGHT MATCH THE ACTUAL APPLIED STRATEGY RESULT
+
+The row-level Sequence Insight should explain:
+- what actually happened in the applied table
+- not just what the strategy intended in theory
+
+Example:
+- if a flexible order was advanced into 30 Apr because the day was lightly loaded, say that
+- if a swine 4.00mm order was moved nearer another swine 4.00mm order, say that
+
+Do not let insights describe a grouping/advancement that the table does not visibly show.
+
+---
+
+## 11. PRESERVE HARD CONSTRAINTS
+
+All of the above must still respect:
+- MTO / actual dated order protection
+- critical / urgent / monitor rules
+- N10D safe windows
+- chronology for protected items
+- valid date logic
+
+The goal is not to force the AI strategy blindly.
+The goal is to apply it as faithfully as possible within the allowed rules.
+
+---
+
+## 12. VERIFICATION
+
+### Strategy execution fidelity
+1. ✅ The selected AI strategy materially changes the After table
+2. ✅ Strategy card descriptions are visibly reflected in the row sequence
+3. ✅ Flexible Date Advancement actually advances eligible flexible orders into earlier safe slots
+4. ✅ Lightly loaded days are used more effectively when the strategy calls for advancement
+5. ✅ Swine Diameter Grouping visibly clusters swine orders by diameter in the After table
+6. ✅ The preview no longer shows strategy text that is stronger than the actual result
+
+### System behavior
+7. ✅ AI strategy execution is now strategy-specific, not one generic pipeline for all AI options
+8. ✅ Generic heuristics support the selected AI strategy instead of overriding it
+9. ✅ Hard constraints remain protected
+10. ✅ Final row values are recalculated after strategy execution
+
+### UX / explainability
+11. ✅ Sequence Insight reflects the actual applied row behavior
+12. ✅ Recommendation and distinction logic can consider strategy faithfulness
+13. ✅ Users can trust that what the strategy card says is what the preview is actually doing

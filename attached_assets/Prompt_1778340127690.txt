@@ -1,0 +1,304 @@
+Please update the Order History feature so it remains simple and focused, while adding support for the most meaningful movement/edit events introduced in the app.
+
+---
+
+## OBJECTIVE
+
+Enhance the History column / OrderHistoryModal so it records only a small set of clear, high-signal operational events.
+
+We want to keep history simple and easy to scan.
+
+Do not flood the history modal with planning noise or verbose strategy explanations.
+
+---
+
+## KEEP EXISTING HISTORY BEHAVIOR
+
+Keep the current history system and data structure as-is:
+
+```json
+{
+  "timestamp": "05/09/2026, 02:15 PM",
+  "action": "Status changed: plotted → completed",
+  "details": "End Date auto-set: 05/09/2026, 02:15 PM"
+}
+```
+
+The modal should continue to:
+- display newest first
+- show timestamp
+- show action
+- optionally show details if still needed for legacy events
+
+Do not remove or break the existing history events such as:
+- Uploaded
+- Status changed
+- Cancel / restore
+- Completed
+- Cut order / merge back
+- Un-combine
+- etc.
+
+This is an additive enhancement only.
+
+---
+
+## NEW HISTORY EVENTS TO SUPPORT
+
+We want to add only these new history event types:
+
+1. **Auto-sequence**
+2. **Line shutdown**
+3. **Feedmill shutdown**
+4. **Override volume**
+5. **Manually reordered**
+6. **Optimize order**
+
+These new entries should be simple and primarily use the **action line** to show what changed.
+
+---
+
+## ACTION LINE FORMAT
+
+Use **Option B**:
+- put the important information directly in the `action` line
+- keep entries compact and readable
+
+Examples:
+- `Auto-sequence: Line 1 -> Line 3, Prio 7 -> 3`
+- `Auto-sequence: Prio 7 -> 3`
+- `Line shutdown: Line 2 -> Line 3, Prio 3 -> 5`
+- `Feedmill shutdown: Line 4 -> Line 7, Prio 2 -> 6`
+- `Override volume: 140 MT -> 160 MT`
+- `Manually reordered: Prio 7 -> 3`
+- `Optimize order: Line 3 -> Line 4, Prio 4 -> 3`
+
+Please keep this formatting consistent.
+
+---
+
+## 1. AUTO-SEQUENCE HISTORY
+
+When auto-sequence changes an order, add a history entry.
+
+### If the order moved across lines:
+Format:
+- `Auto-sequence: Line X -> Line Y, Prio A -> B`
+
+Example:
+- `Auto-sequence: Line 1 -> Line 3, Prio 7 -> 3`
+
+### If the order stayed on the same line but changed priority:
+Format:
+- `Auto-sequence: Prio A -> B`
+
+Example:
+- `Auto-sequence: Prio 7 -> 3`
+
+This should reflect the actual committed movement after auto-sequence is applied, not just preview behavior.
+
+---
+
+## 2. LINE SHUTDOWN HISTORY
+
+When a line shutdown diverts orders to another line, add a history entry.
+
+This should always be a cross-line move.
+
+Format:
+- `Line shutdown: Line X -> Line Y, Prio A -> B`
+
+Example:
+- `Line shutdown: Line 2 -> Line 3, Prio 3 -> 5`
+
+Do not use line shutdown for same-line priority-only movement.
+
+---
+
+## 3. FEEDMILL SHUTDOWN HISTORY
+
+When a feedmill shutdown diverts orders to another line, add a history entry.
+
+Format:
+- `Feedmill shutdown: Line X -> Line Y, Prio A -> B`
+
+Example:
+- `Feedmill shutdown: Line 4 -> Line 7, Prio 2 -> 6`
+
+Include priority in feedmill shutdown entries as well.
+
+---
+
+## 4. OVERRIDE VOLUME HISTORY
+
+When a user manually overrides the volume, add a history entry.
+
+Format:
+- `Override volume: OLD MT -> NEW MT`
+
+Example:
+- `Override volume: 140 MT -> 160 MT`
+
+### Important:
+This is only for **manual override volume**.
+
+Do **not** add app-adjusted divisible volume into history.
+
+App-adjusted divisible volume is intentionally excluded from history.
+
+---
+
+## 5. MANUALLY REORDERED HISTORY
+
+When a user manually drags/drops an order within the same line, add a history entry.
+
+This is always same-line only.
+
+Format:
+- `Manually reordered: Prio A -> B`
+
+Example:
+- `Manually reordered: Prio 7 -> 3`
+
+Do not include line movement in this event, because manual reordering only applies within the current line.
+
+---
+
+## 6. OPTIMIZE ORDER HISTORY
+
+When the user uses the **Optimize** feature and the app moves an order from another line into the selected line, add a history entry.
+
+Format:
+- `Optimize order: Line X -> Line Y, Prio A -> B`
+
+Example:
+- `Optimize order: Line 3 -> Line 4, Prio 4 -> 3`
+
+This should be a distinct event from Auto-sequence, because Optimize is a separate user-triggered feature.
+
+---
+
+## 7. DO NOT ADD THESE TO HISTORY
+
+Do **not** add the following to the history modal:
+
+- apply to schedule / strategy application
+- profitability applied
+- auto-sequence reasoning summary
+- app-adjusted divisible volume
+- generic planning rationale
+- sequence insight explanation
+
+These are intentionally excluded to keep history simple and useful.
+
+---
+
+## 8. APP-ADJUSTED DIVISIBLE VOLUME SHOULD USE A TOOLTIP, NOT HISTORY
+
+If a volume is app-adjusted because the original value is not divisible by batch size:
+- do not write it to order history
+- instead, show it via a tooltip in the order table if needed
+
+Example tooltip:
+- `Adjusted from 145 MT to 148 MT so the volume is divisible by batch size 4.`
+
+This should remain outside the history modal.
+
+---
+
+## 9. STORE THE ENTRY WHEN THE CHANGE IS ACTUALLY COMMITTED
+
+For all new history types:
+- write the history entry when the action is actually committed
+- not when it is merely previewed
+
+Examples:
+- Auto-sequence entry should be written when the result is applied
+- Optimize entry should be written when the optimize move is committed
+- Shutdown entries should be written when the divert/reassignment is executed
+- Manual reorder should be written when the drag/drop reorder is saved/applied
+- Override volume should be written when the manual override is confirmed
+
+This keeps history as a true audit trail.
+
+---
+
+## 10. KEEP THE MODAL UI SIMPLE
+
+No major redesign needed.
+
+Continue using the current OrderHistoryModal style:
+- title: `Order History — FPR: XXXXXX`
+- timeline layout
+- newest first
+- timestamp shown
+- action text clearly visible
+
+For these new event types, the main content should primarily be in the `action` line.
+
+You may leave `details` empty for these new simple entries unless additional context is genuinely needed.
+
+---
+
+## 11. USE CONSISTENT ACTION LABELS
+
+Use these exact styles consistently:
+
+- `Auto-sequence: ...`
+- `Line shutdown: ...`
+- `Feedmill shutdown: ...`
+- `Override volume: ...`
+- `Manually reordered: ...`
+- `Optimize order: ...`
+
+Also, for consistency, always use:
+- `Line X -> Line Y`
+not shortened variations
+
+And use:
+- `Prio A -> B`
+
+---
+
+## 12. ADD DEBUG LOGGING FOR NEW HISTORY EVENTS
+
+Temporarily log:
+
+```javascript
+console.debug('[Order History Write]', {
+  orderId,
+  timestamp,
+  action,
+  details,
+});
+```
+
+Especially for:
+- Auto-sequence
+- Line shutdown
+- Feedmill shutdown
+- Override volume
+- Manually reordered
+- Optimize order
+
+This will help verify that history entries are being written correctly.
+
+---
+
+## VERIFICATION
+
+1. ✅ Existing history behavior remains intact
+2. ✅ Auto-sequence writes history for both:
+   - cross-line moves (`Line X -> Line Y, Prio A -> B`)
+   - same-line reprioritization (`Prio A -> B`)
+3. ✅ Line shutdown always writes cross-line movement with priority change
+4. ✅ Feedmill shutdown writes cross-line movement with priority change
+5. ✅ Manual override volume writes `Override volume: OLD MT -> NEW MT`
+6. ✅ Manual drag/drop writes `Manually reordered: Prio A -> B`
+7. ✅ Optimize feature writes `Optimize order: Line X -> Line Y, Prio A -> B`
+8. ✅ App-adjusted divisible volume is NOT written into history
+9. ✅ Apply-to-schedule, profitability, and planning rationale are NOT added to history
+10. ✅ New history entries are compact and shown primarily in the action line
+11. ✅ History entries are written only when the action is actually committed
+12. ✅ The history modal stays simple, readable, and consistent with the current UI
+```

@@ -1,0 +1,213 @@
+Please fix the **diversion destination priority inconsistency** so that the **Diversion modal**, **history log**, and **actual destination table display** all use the same final inserted priority.
+
+---
+
+## 1. FIX THE MISMATCH BETWEEN DIVERSION PREVIEW / HISTORY AND THE DESTINATION TABLE
+
+There is currently an inconsistency in the diversion flow.
+
+In the reported case:
+- the order originally starts at `Prio 4`
+- the Diversion modal / Impact Analysis says it will be inserted at `Prio 2`
+- the History entry also records:
+  - `Moved from Prio 4 → 2`
+- but the actual destination table displays the order at:
+  - `Prio 1`
+
+This creates a contradiction between:
+- the diversion preview
+- the history log
+- and the actual table display
+
+### Expected result
+All three must match:
+- Diversion preview
+- History
+- Actual final table position
+
+---
+
+## 2. USE A SINGLE SOURCE OF TRUTH FOR FINAL INSERTION POSITION
+
+Please update the diversion implementation so that the app uses one shared final insertion result for:
+
+- the preview shown in the Diversion modal
+- the priority value written into history
+- the final priority displayed in the destination line table
+
+### Goal
+There should not be one insertion position for the modal/history and another one for the rendered table.
+
+### Expected result
+If the insertion is truly:
+- `Priority 2`
+
+then:
+- the modal should say `Priority 2`
+- the history should log `Prio 4 → 2`
+- the destination table should display the order at `Prio 2`
+
+If the true insertion is actually:
+- `Priority 1`
+
+then all three must reflect:
+- `Priority 1`
+
+---
+
+## 3. ENSURE THE DESTINATION TABLE PRIORITY MATCHES THE FINAL APPLIED INSERTION
+
+Please check the final destination line rendering and priority numbering after diversion.
+
+### Current issue
+It appears that the destination table may be:
+- displaying a different priority than the one used by the diversion logic
+- or reindexing/reordering the row after diversion in a way that changes its visible priority
+
+### Expected result
+The visible destination table should show the exact same final inserted position that the diversion logic has already determined.
+
+---
+
+## 4. DO NOT LET POST-DIVERSION REINDEXING OR UI REFRESH CHANGE THE REPORTED INSERTION POSITION SILENTLY
+
+If the order is calculated and confirmed to be inserted at:
+- `Priority 2`
+
+then the app should not silently end up rendering it at:
+- `Priority 1`
+
+because of:
+- UI refresh timing
+- automatic re-sorting
+- downstream row normalization
+- priority recalculation after insertion
+- delayed line refresh
+
+### Expected result
+Once the final insertion position is committed, the displayed priority should remain consistent with that committed result.
+
+---
+
+## 5. KEEP HISTORY AND PREVIEW CORRECT, BUT MAKE SURE THE TABLE MATCHES THEM
+
+In the reported example, the Diversion modal and the history are already aligned:
+- `Prio 4 → 2`
+
+So please preserve that correctness if it is based on the true final insertion logic.
+
+The main fix is to ensure the destination table no longer displays a different priority than what was committed and logged.
+
+### Expected result
+The table should not contradict the modal/history.
+
+---
+
+## 6. IF THE TABLE POSITION IS THE TRUE FINAL RESULT, THEN UPDATE PREVIEW + HISTORY INSTEAD
+
+If, after investigation, the actual final insertion logic truly results in:
+- `Priority 1`
+
+then:
+- the modal preview should say `Priority 1`
+- the history should log `Prio 4 → 1`
+
+### Goal
+Whichever priority is truly correct, the app must show the same answer everywhere.
+
+### Expected result
+The bug should be fixed by making all layers consistent, not by hardcoding one side only.
+
+---
+
+## 7. APPLY THIS TO DIVERSION AND REVIEW REVERT IF THE SAME PATTERN EXISTS
+
+Please fix this for **diversion** first, and also review whether **revert** may have the same issue where:
+- preview / logic / history
+- and table rendering
+can drift apart
+
+### Expected result
+Line-move actions should have one consistent before/after priority result across all UI surfaces.
+
+---
+
+## 8. PRESERVE EXISTING DIVERSION UX AND HISTORY FORMAT
+
+Please preserve:
+- the current diversion modal structure
+- impact analysis wording
+- history wording style
+- destination line rendering style
+
+This request is specifically to fix the **priority consistency** between those layers.
+
+---
+
+## IMPORTANT
+
+Please ensure the app uses one consistent final insertion priority across:
+
+- **Diversion modal / Impact Analysis**
+- **History log**
+- **Destination line table display**
+
+There should never be a case where:
+- preview says `Prio 2`
+- history says `Prio 4 → 2`
+- but the destination table shows `Prio 1`
+
+All three must use the same final result.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log the priority values used at each stage of diversion.
+
+```javascript
+console.debug('[Diversion Priority Consistency Check]', {
+  orderId,
+  sourceLine,
+  targetLine,
+  sourcePriority,
+  previewInsertionPriority,
+  committedInsertionPriority,
+  historyLoggedDestinationPriority,
+  tableDisplayedPriority,
+});
+```
+
+```javascript
+console.debug('[Diversion Final Insert Source of Truth]', {
+  orderId,
+  finalInsertionPriority,
+  usedForPreview: previewInsertionPriority === finalInsertionPriority,
+  usedForHistory: historyLoggedDestinationPriority === finalInsertionPriority,
+  usedForTableDisplay: tableDisplayedPriority === finalInsertionPriority,
+});
+```
+
+```javascript
+console.debug('[Destination Table Reindex After Diversion]', {
+  orderId,
+  targetLine,
+  priorityBeforeRender,
+  priorityAfterRender,
+  priorityChangedDuringRender:
+    priorityBeforeRender !== priorityAfterRender,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ If the diversion modal predicts `Priority 2`, the destination table also shows the diverted order at `Prio 2`
+2. ✅ If history logs `Moved from Prio 4 → 2`, the destination table also shows the order at `Prio 2`
+3. ✅ The destination table no longer displays a different priority than the diversion modal and history
+4. ✅ A single final insertion priority is used across preview, history, and table rendering
+5. ✅ Post-diversion UI refresh or reindexing does not silently change the displayed priority
+6. ✅ If the true final result should instead be `Priority 1`, then preview and history are also updated to `Priority 1`
+7. ✅ Existing diversion UI and history format remain intact
+8. ✅ No UI errors or console errors are introduced

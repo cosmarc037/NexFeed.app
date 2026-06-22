@@ -1,0 +1,819 @@
+```
+Implement the following changes to the NexFeed application:
+
+---
+
+## 1. SMART COMBINE — UPDATE COMBINATION CRITERIA
+
+Update the Smart Combine matching criteria to use Material Code (FG), Material Code (SFG), Line, and SCADA (Formula Version).
+
+### BEFORE (OLD CRITERIA)
+
+```javascript
+// Old: FG, SFG, Category, Form, Batch Size, Line, SCADA
+function canCombine(orderA, orderB) {
+  return (
+    orderA.material_code_fg === orderB.material_code_fg &&
+    orderA.material_code_sfg === orderB.material_code_sfg &&
+    orderA.category === orderB.category &&
+    orderA.form === orderB.form &&
+    orderA.batch_size === orderB.batch_size &&
+    orderA.line === orderB.line &&
+    orderA.scada === orderB.scada
+  );
+}
+```
+
+### AFTER (NEW CRITERIA)
+
+```javascript
+// New: FG, SFG, Line, SCADA (Formula Version)
+function canCombine(orderA, orderB) {
+  return (
+    String(orderA.material_code_fg) === String(orderB.material_code_fg) &&
+    String(orderA.material_code_sfg) === String(orderB.material_code_sfg) &&
+    orderA.line === orderB.line &&
+    String(orderA.scada || '') === String(orderB.scada || '')
+  );
+}
+```
+
+### UPDATE ALL REFERENCES TO COMBINE CRITERIA
+
+Wherever the app mentions combine criteria in user-facing text:
+
+```
+BEFORE: "Orders can be combined if they share the same: Material Code (FG), Material Code (SFG), Category, Form, Batch Size, Line, and SCADA."
+
+AFTER: "Orders can be combined if they share the same: Material Code (FG), Material Code (SFG), Line, and Formula Version (SCADA)."
+```
+
+Update in:
+- Smart Combine panel description
+- Tour step description
+- Chatbot system prompt
+- Any tooltips referencing combine criteria
+
+---
+
+## 2. DOWNLOAD TEMPLATE — MASTER DATA
+
+Add a "Download Template" clickable text next to "Edit Table" in the Master Data page.
+
+### LAYOUT
+
+```
+[Download Template] | [Edit Table]    [Re-apply to Existing Orders]    [Upload Master Data]
+```
+
+### COMPONENT
+
+```jsx
+<div className="master-data-actions">
+  <div className="master-data-left-actions">
+    <button 
+      className="master-data-link-btn"
+      onClick={handleDownloadTemplate}
+    >
+      Download Template
+    </button>
+    <span className="master-data-divider">|</span>
+    <button 
+      className="master-data-link-btn"
+      onClick={() => setIsEditMode(!isEditMode)}
+    >
+      {isEditMode ? 'Cancel Edit' : 'Edit Table'}
+    </button>
+  </div>
+  
+  <div className="master-data-right-actions">
+    <button className="btn-reapply">Re-apply to Existing Orders</button>
+    <button className="btn-upload">Upload Master Data</button>
+  </div>
+</div>
+```
+
+### DOWNLOAD TEMPLATE HANDLER
+
+```javascript
+function handleDownloadTemplate() {
+  try {
+    const templateHeaders = [
+      'FG Material Code',
+      'FG Item Description',
+      'SFG1 Material Code',
+      'SFG Item Description',
+      'Batch FM1',
+      'Batch FM2',
+      'Batch FM3',
+      'Batch PMX',
+      'Form',
+      'FG Weight',
+      'Label 1',
+      'Label 2',
+      'Thread',
+      'Sacks Code',
+      'Sacks Desc',
+      'Tags Code',
+      'Tags Desc',
+      'L1 Rate',
+      'L2 Rate',
+      'L3 Rate',
+      'L4 Rate',
+      'L5 Rate',
+      'L6 Rate',
+      'L7 Rate'
+    ];
+    
+    // Sample row with example data
+    const sampleRow = {
+      'FG Material Code': '1000000000001 (example)',
+      'FG Item Description': 'Sample Product Name, 50kg (example)',
+      'SFG1 Material Code': '3000000000001 (example)',
+      'SFG Item Description': 'Sample SFG Description (example)',
+      'Batch FM1': '4 (example)',
+      'Batch FM2': '4 (example)',
+      'Batch FM3': '4 (example)',
+      'Batch PMX': '4 (example)',
+      'Form': 'MP (example)',
+      'FG Weight': '50 (example)',
+      'Label 1': '(example)',
+      'Label 2': '(example)',
+      'Thread': '(example)',
+      'Sacks Code': '(example)',
+      'Sacks Desc': '(example)',
+      'Tags Code': '(example)',
+      'Tags Desc': '(example)',
+      'L1 Rate': '20 (example)',
+      'L2 Rate': '20 (example)',
+      'L3 Rate': '10 (example)',
+      'L4 Rate': '10 (example)',
+      'L5 Rate': '10 (example)',
+      'L6 Rate': '10 (example)',
+      'L7 Rate': '10 (example)'
+    };
+    
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet([sampleRow], { header: templateHeaders });
+    
+    // Add a note row at the top or as a comment
+    // Insert a helper row above the data
+    XLSX.utils.sheet_add_aoa(ws, [
+      ['NOTE: The row below contains example values only. Feel free to delete them and enter your own data.']
+    ], { origin: { r: 0, c: 0 } });
+    
+    // Shift the header and data down
+    // Alternative: just add the note as a separate sheet
+    // For simplicity, add note as a second sheet
+    const noteWs = XLSX.utils.aoa_to_sheet([
+      ['INSTRUCTIONS'],
+      [''],
+      ['This template contains the required columns for the Master Data upload.'],
+      ['The first data row contains example values — feel free to delete them and enter your own data.'],
+      ['All columns are optional except FG Material Code and FG Item Description.'],
+      [''],
+      ['Column Guide:'],
+      ['PRODUCT DETAILS: FG Material Code, FG Item Description, SFG1 Material Code, SFG Item Description'],
+      ['BATCH SIZES: Batch FM1 (Feedmill 1), Batch FM2 (Feedmill 2), Batch FM3 (Feedmill 3), Batch PMX (Powermix)'],
+      ['LABELING: Form, FG Weight, Label 1, Label 2'],
+      ['PACKAGING: Thread, Sacks Code, Sacks Desc, Tags Code, Tags Desc'],
+      ['RUN RATES: L1-L7 Rate (MT/hr per production line)']
+    ]);
+    
+    // Main data sheet
+    const dataWs = XLSX.utils.json_to_sheet([sampleRow], { header: templateHeaders });
+    
+    dataWs['!cols'] = templateHeaders.map(h => ({
+      wch: Math.max(h.length + 4, 18)
+    }));
+    
+    XLSX.utils.book_append_sheet(wb, dataWs, 'Master Data');
+    XLSX.utils.book_append_sheet(wb, noteWs, 'Instructions');
+    
+    XLSX.writeFile(wb, 'Master_Data_Template.xlsx');
+    
+    showNotification('success', 'Template downloaded: Master_Data_Template.xlsx');
+  } catch (error) {
+    console.error('Template download failed:', error);
+    showNotification('error', 'Failed to download template.');
+  }
+}
+```
+
+### STYLING
+
+```css
+.master-data-left-actions {
+  display: flex;
+  align-items: center;
+  gap: 0;
+}
+
+.master-data-link-btn {
+  background: none;
+  border: none;
+  color: #4b5563;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 6px 10px;
+  transition: color 0.15s;
+}
+
+.master-data-link-btn:hover {
+  color: #fd5108;
+}
+
+.master-data-divider {
+  color: #d1d5db;
+  font-size: 13px;
+  user-select: none;
+}
+```
+
+---
+
+## 3. HEADER GROUPS IN MASTER DATA TABLE
+
+Group the columns under logical headers in this specific order:
+
+### COLUMN GROUP ORDER
+
+| Group | Columns | Colspan |
+|---|---|---|
+| PRODUCT DETAILS | FG Material Code, FG Item Description, SFG1 Material Code, SFG Item Description | 4 |
+| BATCH SIZES | Batch FM1, Batch FM2, Batch FM3, Batch PMX | 4 |
+| LABELING | Form, FG Weight, Label 1, Label 2 | 4 |
+| PACKAGING | Thread, Sacks Code, Sacks Desc, Tags Code, Tags Desc | 5 |
+| RUN RATES (MT/HR) | L1 Rate, L2 Rate, L3 Rate, L4 Rate, L5 Rate, L6 Rate, L7 Rate | 7 |
+
+### TABLE JSX
+
+```jsx
+<table className="master-data-table">
+  <thead>
+    {/* Row 1: Group headers */}
+    <tr className="master-data-group-headers">
+      {isEditMode && <th rowSpan={2} className="md-select-header"><input type="checkbox" /></th>}
+      <th rowSpan={2} className="md-row-number-header">#</th>
+      <th colSpan={4} className="md-group-header md-group-product">PRODUCT DETAILS</th>
+      <th colSpan={4} className="md-group-header md-group-batch">BATCH SIZES</th>
+      <th colSpan={4} className="md-group-header md-group-labeling">LABELING</th>
+      <th colSpan={5} className="md-group-header md-group-packaging">PACKAGING</th>
+      <th colSpan={7} className="md-group-header md-group-rates">RUN RATES (MT/HR)</th>
+      {isEditMode && <th rowSpan={2} className="md-delete-header"></th>}
+    </tr>
+    
+    {/* Row 2: Individual column headers */}
+    <tr className="master-data-column-headers">
+      {/* Product Details */}
+      <th>FG Material Code</th>
+      <th>FG Item Description</th>
+      <th>SFG1 Material Code</th>
+      <th>SFG Item Description</th>
+      
+      {/* Batch Sizes */}
+      <th>Batch FM1</th>
+      <th>Batch FM2</th>
+      <th>Batch FM3</th>
+      <th>Batch PMX</th>
+      
+      {/* Labeling */}
+      <th>Form</th>
+      <th>FG Weight</th>
+      <th>Label 1</th>
+      <th>Label 2</th>
+      
+      {/* Packaging */}
+      <th>Thread</th>
+      <th>Sacks Code</th>
+      <th>Sacks Desc</th>
+      <th>Tags Code</th>
+      <th>Tags Desc</th>
+      
+      {/* Run Rates */}
+      <th>L1 Rate</th>
+      <th>L2 Rate</th>
+      <th>L3 Rate</th>
+      <th>L4 Rate</th>
+      <th>L5 Rate</th>
+      <th>L6 Rate</th>
+      <th>L7 Rate</th>
+    </tr>
+  </thead>
+  <tbody>
+    {/* ... rows follow same column order ... */}
+  </tbody>
+</table>
+```
+
+### GROUP HEADER STYLING
+
+```css
+.md-group-header {
+  text-align: center;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 8px 6px;
+  border-bottom: 2px solid;
+}
+
+.md-group-product {
+  background: #fef3c7;
+  color: #92400e;
+  border-bottom-color: #f59e0b;
+}
+
+.md-group-batch {
+  background: #fff7ed;
+  color: #9a3412;
+  border-bottom-color: #f97316;
+}
+
+.md-group-labeling {
+  background: #fdf4ff;
+  color: #7e22ce;
+  border-bottom-color: #a855f7;
+}
+
+.md-group-packaging {
+  background: #f0fdf4;
+  color: #166534;
+  border-bottom-color: #16a34a;
+}
+
+.md-group-rates {
+  background: #fef2f2;
+  color: #991b1b;
+  border-bottom-color: #ef4444;
+}
+
+.master-data-column-headers th {
+  font-size: 10px;
+  font-weight: 600;
+  color: #374151;
+  padding: 6px 8px;
+  text-align: left;
+  white-space: nowrap;
+  background: #f9fafb;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.md-row-number-header {
+  width: 40px;
+  min-width: 40px;
+  text-align: center;
+  background: #f9fafb;
+}
+```
+
+### DATA ROWS — MATCH COLUMN ORDER
+
+Ensure the table body cells follow the same column order:
+
+```jsx
+<tbody>
+  {filteredData.map(row => (
+    <tr key={row._rowId}>
+      {isEditMode && <td className="md-select-cell"><input type="checkbox" /></td>}
+      <td className="md-row-number-cell">{(row._originalIndex ?? 0) + 1}</td>
+      
+      {/* Product Details */}
+      <td>{row.fgMaterialCode}</td>
+      <td>{row.fgItemDescription}</td>
+      <td>{row.sfg1MaterialCode}</td>
+      <td>{row.sfgItemDescription}</td>
+      
+      {/* Batch Sizes */}
+      <td>{row.batchFm1}</td>
+      <td>{row.batchFm2}</td>
+      <td>{row.batchFm3}</td>
+      <td>{row.batchPmx}</td>
+      
+      {/* Labeling */}
+      <td>{row.form}</td>
+      <td>{row.fgWeight}</td>
+      <td>{row.label1}</td>
+      <td>{row.label2}</td>
+      
+      {/* Packaging */}
+      <td>{row.thread}</td>
+      <td>{row.sacksCode}</td>
+      <td>{row.sacksDesc}</td>
+      <td>{row.tagsCode}</td>
+      <td>{row.tagsDesc}</td>
+      
+      {/* Run Rates */}
+      <td>{row.l1Rate}</td>
+      <td>{row.l2Rate}</td>
+      <td>{row.l3Rate}</td>
+      <td>{row.l4Rate}</td>
+      <td>{row.l5Rate}</td>
+      <td>{row.l6Rate}</td>
+      <td>{row.l7Rate}</td>
+      
+      {isEditMode && <td className="md-delete-cell"><button>🗑</button></td>}
+    </tr>
+  ))}
+</tbody>
+```
+
+---
+
+## 4. RENAME "NEXT 10 DAYS" → "FUTURE DISPATCHES"
+
+Replace ALL occurrences — both user-facing text AND internal references — to keep everything aligned and not confusing.
+
+### USER-FACING TEXT
+
+| Location | Before | After |
+|---|---|---|
+| Sidebar navigation | Next 10 Days | Future Dispatches |
+| Page header title | Next 10 Days | Future Dispatches |
+| Page subtitle | Upload daily stock level data for production prioritization | Upload dispatch forecast data for production prioritization |
+| Upload button | Upload Next 10 Days | Upload Future Dispatches |
+| Download button | Download N10D | Download Dispatches |
+| Re-apply button tooltip | Re-apply to Existing Orders (N10D) | Re-apply to Existing Orders |
+| All notifications | "Next 10 Days" / "N10D" references | "Future Dispatches" |
+| All tour steps | "Next 10 Days" / "N10D" references | "Future Dispatches" |
+| Chatbot system prompt | "Next 10 Days" / "N10D" references | "Future Dispatches" |
+| Product Insights text | "Next 10 Days data" / "N10D data" | "Future Dispatches data" |
+| Order table tooltips | "from N10D" / "from Next 10 Days" | "from Future Dispatches" |
+| Safety Stock Insights | "N10D" / "Next 10 Days" | "Future Dispatches" |
+| Auto-Sequence prompts | "N10D" references | "Future Dispatches" |
+| Summary column prompts | "N10D" references | "Future Dispatches" |
+| Upload History | "N10D" references | "Future Dispatches" |
+
+### DOWNLOAD FILENAMES
+
+| Before | After |
+|---|---|
+| N10D_Production_Orders_2026-04-06.xlsx | Future_Dispatches_2026-04-06.xlsx |
+
+### EXCEL SHEET NAMES
+
+| Before | After |
+|---|---|
+| N10D Orders | Future Dispatches |
+
+### INTERNAL REFERENCES — ALSO RENAME
+
+| Before | After |
+|---|---|
+| `sidebar-n10d` (data-tour) | `sidebar-future-dispatches` |
+| `n10d-upload` (data-tour) | `future-dispatches-upload` |
+| `n10d-reapply` (data-tour) | `future-dispatches-reapply` |
+| `n10d-download` (data-tour) | `future-dispatches-download` |
+| `n10d-search` (data-tour) | `future-dispatches-search` |
+| `n10d-table` (data-tour) | `future-dispatches-table` |
+| `n10d-header-product` (data-tour) | `future-dispatches-header-product` |
+| `n10d-header-days` (data-tour) | `future-dispatches-header-days` |
+| `n10d-header-tracking` (data-tour) | `future-dispatches-header-tracking` |
+| `n10d-safety-insights` (data-tour) | `future-dispatches-safety-insights` |
+| `n10d-history` (data-tour) | `future-dispatches-history` |
+
+### URL/ROUTE PATHS
+
+| Before | After |
+|---|---|
+| `/next-10-days` | `/future-dispatches` |
+| `#n10d` | `#future-dispatches` |
+
+### localStorage KEYS
+
+| Before | After |
+|---|---|
+| `kb_n10d_data` or similar | `future_dispatches_data` or similar |
+| `n10d_history` | `future_dispatches_history` |
+
+**Note:** When renaming localStorage keys, include migration logic to carry over existing data:
+
+```javascript
+function migrateLocalStorageKeys() {
+  const oldKeys = [
+    { old: 'n10d_data', new: 'future_dispatches_data' },
+    { old: 'n10d_history', new: 'future_dispatches_history' },
+    { old: 'kb_n10d_data', new: 'future_dispatches_data' }
+  ];
+  
+  oldKeys.forEach(({ old: oldKey, new: newKey }) => {
+    const oldData = localStorage.getItem(oldKey);
+    if (oldData && !localStorage.getItem(newKey)) {
+      localStorage.setItem(newKey, oldData);
+      localStorage.removeItem(oldKey);
+    }
+  });
+}
+
+// Call on app initialization
+migrateLocalStorageKeys();
+```
+
+### SEARCH AND REPLACE — COMPLETE LIST
+
+| Search | Replace |
+|---|---|
+| `Next 10 Days` | `Future Dispatches` |
+| `next 10 days` | `future dispatches` |
+| `Next 10 days` | `Future dispatches` |
+| `next-10-days` | `future-dispatches` |
+| `N10D` (everywhere) | `Future Dispatches` (user-facing) or `futureDispatches` (code) |
+| `n10d` (everywhere) | `future-dispatches` (routes/selectors) or `futureDispatches` (code) |
+| `Upload Next 10 Days` | `Upload Future Dispatches` |
+| `Download N10D` | `Download Dispatches` |
+| `sidebar-n10d` | `sidebar-future-dispatches` |
+| `n10d-upload` | `future-dispatches-upload` |
+| `n10d-reapply` | `future-dispatches-reapply` |
+| `n10d-download` | `future-dispatches-download` |
+| `n10d-search` | `future-dispatches-search` |
+| `n10d-table` | `future-dispatches-table` |
+| `n10d-header-product` | `future-dispatches-header-product` |
+| `n10d-header-days` | `future-dispatches-header-days` |
+| `n10d-header-tracking` | `future-dispatches-header-tracking` |
+| `n10d-safety-insights` | `future-dispatches-safety-insights` |
+| `n10d-history` | `future-dispatches-history` |
+
+### TOUR STEPS — UPDATED
+
+```javascript
+// Sidebar
+{
+  target: '[data-tour="sidebar-future-dispatches"]',
+  title: 'Future Dispatches',
+  description: 'Upload dispatch forecast data for production prioritization. The system analyzes inventory levels against demand and flags Critical, Urgent, Monitor, and Sufficient products.',
+  position: 'right'
+}
+
+// Page tour steps
+{
+  target: '[data-tour="future-dispatches-upload"]',
+  title: 'Upload Future Dispatches',
+  description: 'Upload your dispatch forecast data (Excel file). This data drives production prioritization by analyzing inventory levels against demand forecasts.',
+  position: 'bottom'
+},
+{
+  target: '[data-tour="future-dispatches-reapply"]',
+  title: 'Re-apply to Existing Orders',
+  description: 'After uploading new data, click this to refresh all order availability dates, stock status icons, and product insights across the app.',
+  position: 'bottom'
+},
+{
+  target: '[data-tour="future-dispatches-download"]',
+  title: 'Download Dispatches',
+  description: 'Download the current Future Dispatches data as an Excel file for offline analysis or sharing with team members.',
+  position: 'bottom'
+},
+{
+  target: '[data-tour="future-dispatches-search"]',
+  title: 'Search Products',
+  description: 'Search for specific products by material code, description, or category to quickly find their stock status.',
+  position: 'bottom'
+},
+{
+  target: '[data-tour="future-dispatches-header-product"]',
+  title: 'Product Details',
+  description: 'Material code, category, item description, and Due for Loading (DFL) — the total demand volume for each product.',
+  position: 'bottom'
+},
+{
+  target: '[data-tour="future-dispatches-header-days"]',
+  title: 'Dispatch Forecast',
+  description: 'Daily demand breakdown. Red-highlighted cells indicate where cumulative demand exceeds available inventory. Hover over any cell to see details.',
+  position: 'bottom'
+},
+{
+  target: '[data-tour="future-dispatches-header-tracking"]',
+  title: 'Tracking',
+  description: 'Inventory level, balance to produce, completion and availability dates, and product status — Critical (red), Urgent (orange), Monitor (yellow), or Sufficient (green).',
+  position: 'bottom'
+},
+{
+  target: '[data-tour="future-dispatches-safety-insights"]',
+  title: 'Safety Stock Insights',
+  description: 'Analysis of stock levels categorized by urgency — Critical products need immediate production, Urgent within 1-3 days, Monitor within the week, and Sufficient products are well-stocked.',
+  position: 'top'
+},
+{
+  target: '[data-tour="future-dispatches-history"]',
+  title: 'Upload History',
+  description: 'Track all file uploads. View which file is currently active, revert to previous uploads, or download past versions.',
+  position: 'top'
+}
+```
+
+---
+
+## 5. RE-APPLY MASTER DATA — EXCLUDE DONE, CANCELLED, IN PRODUCTION, AND ON-GOING
+
+When re-applying master data to existing orders, do NOT update orders that are Done, Cancelled, In Production, or On-going. Only update orders that are not currently being processed or completed.
+
+### STATUS RULES
+
+| Status | Apply master data changes? |
+|---|---|
+| Plotted | ✅ Yes |
+| Planned | ✅ Yes |
+| Hold | ✅ Yes |
+| Cut | ✅ Yes |
+| Uncombine | ✅ Yes |
+| Merge Back | ✅ Yes |
+| Custom status | ✅ Yes |
+| In Production | ❌ No — mid-production |
+| On-going batching | ❌ No — mid-production |
+| On-going pelleting | ❌ No — mid-production |
+| On-going bagging | ❌ No — mid-production |
+| Done | ❌ No — completed |
+| Cancel PO | ❌ No — cancelled |
+
+### FUNCTION
+
+```javascript
+function isOrderUpdatable(order) {
+  const nonUpdatableStatuses = [
+    'Done',
+    'Cancel PO',
+    'In Production',
+    'On-going batching',
+    'On-going pelleting',
+    'On-going bagging'
+  ];
+  
+  return !nonUpdatableStatuses.includes(order.status);
+}
+
+function reapplyMasterDataToOrders(masterData, allOrders) {
+  const updatedOrders = allOrders.map(order => {
+    // Skip non-updatable orders
+    if (!isOrderUpdatable(order)) {
+      return order;
+    }
+    
+    // Find matching product in master data
+    const product = masterData.find(
+      p => String(p.fgMaterialCode) === String(order.material_code_fg)
+    );
+    
+    if (!product) return order;
+    
+    // Apply master data updates
+    const updatedOrder = { ...order };
+    
+    if (product.fgItemDescription) updatedOrder.item_description = product.fgItemDescription;
+    if (product.sfg1MaterialCode) updatedOrder.material_code_sfg = product.sfg1MaterialCode;
+    if (product.sfgItemDescription) updatedOrder.sfg_item_description = product.sfgItemDescription;
+    if (product.form) updatedOrder.form = product.form;
+    if (product.fgWeight) updatedOrder.fg_weight = product.fgWeight;
+    if (product.thread) updatedOrder.thread = product.thread;
+    if (product.sacksCode) updatedOrder.sacks_code = product.sacksCode;
+    if (product.sacksDesc) updatedOrder.sacks_desc = product.sacksDesc;
+    if (product.tagsCode) updatedOrder.tags_code = product.tagsCode;
+    if (product.tagsDesc) updatedOrder.tags_desc = product.tagsDesc;
+    if (product.label1) updatedOrder.label_1 = product.label1;
+    if (product.label2) updatedOrder.label_2 = product.label2;
+    
+    // Update batch size based on line
+    const lineBatchMap = {
+      'Line 1': product.batchFm1,
+      'Line 2': product.batchFm1,
+      'Line 3': product.batchFm2,
+      'Line 4': product.batchFm2,
+      'Line 5': product.batchPmx,
+      'Line 6': product.batchFm3,
+      'Line 7': product.batchFm3,
+    };
+    
+    const newBatchSize = lineBatchMap[order.line];
+    if (newBatchSize) {
+      updatedOrder.batch_size = parseFloat(newBatchSize);
+      if (updatedOrder.volume && updatedOrder.batch_size) {
+        updatedOrder.batches = Math.ceil(parseFloat(updatedOrder.volume) / updatedOrder.batch_size);
+      }
+    }
+    
+    // Update run rate based on line
+    const lineRateMap = {
+      'Line 1': product.l1Rate,
+      'Line 2': product.l2Rate,
+      'Line 3': product.l3Rate,
+      'Line 4': product.l4Rate,
+      'Line 5': product.l5Rate,
+      'Line 6': product.l6Rate,
+      'Line 7': product.l7Rate,
+    };
+    
+    const newRunRate = lineRateMap[order.line];
+    if (newRunRate) {
+      updatedOrder.run_rate = parseFloat(newRunRate);
+      if (updatedOrder.volume && updatedOrder.run_rate > 0) {
+        updatedOrder.production_time = (parseFloat(updatedOrder.volume) / updatedOrder.run_rate).toFixed(2);
+      }
+    }
+    
+    return updatedOrder;
+  });
+  
+  return updatedOrders;
+}
+```
+
+### NOTIFICATION — MENTION WHAT WAS SKIPPED
+
+```javascript
+function handleReapplyMasterData() {
+  const updatableOrders = allOrders.filter(o => isOrderUpdatable(o));
+  const skippedOrders = allOrders.filter(o => !isOrderUpdatable(o));
+  
+  const updatedOrders = reapplyMasterDataToOrders(masterData, allOrders);
+  setAllOrders(updatedOrders);
+  
+  recalculateCompletionDates();
+  
+  let message = `Master data applied to ${updatableOrders.length} active order(s).`;
+  if (skippedOrders.length > 0) {
+    const doneCount = skippedOrders.filter(o => o.status === 'Done').length;
+    const cancelledCount = skippedOrders.filter(o => o.status === 'Cancel PO').length;
+    const inProgressCount = skippedOrders.filter(o => 
+      o.status === 'In Production' || o.status.startsWith('On-going')
+    ).length;
+    
+    const parts = [];
+    if (doneCount > 0) parts.push(`${doneCount} completed`);
+    if (cancelledCount > 0) parts.push(`${cancelledCount} cancelled`);
+    if (inProgressCount > 0) parts.push(`${inProgressCount} in progress`);
+    
+    message += ` ${parts.join(', ')} order(s) were not updated.`;
+  }
+  
+  showNotification('success', message);
+}
+```
+
+### ALSO APPLY SAME RULE TO FUTURE DISPATCHES RE-APPLY
+
+```javascript
+function handleReapplyFutureDispatches() {
+  const updatableOrders = allOrders.filter(o => isOrderUpdatable(o));
+  
+  updateAvailDatesForActiveOrders(updatableOrders, futureDispatchesData, dailyColumns, new Date());
+  updateAvailDateIcons(updatableOrders, futureDispatchesData);
+  autoGenerateTemplates(futureDispatchesData, updatableOrders, new Date(), dailyColumns);
+  
+  showNotification('success', `Future Dispatches data applied to ${updatableOrders.length} active order(s).`);
+}
+```
+
+---
+
+## VERIFICATION
+
+### Smart Combine criteria
+1. ✅ Combines based on: Material Code (FG), Material Code (SFG), Line, SCADA (Formula Version)
+2. ✅ Does NOT check Category, Form, or Batch Size
+3. ✅ All user-facing descriptions updated
+4. ✅ Tour step updated
+5. ✅ Chatbot prompt updated
+
+### Download Template
+6. ✅ "Download Template" visible next to "Edit Table"
+7. ✅ Layout: [Download Template] | [Edit Table]
+8. ✅ Downloads Master_Data_Template.xlsx
+9. ✅ Template has all 24 column headers in correct group order
+10. ✅ Sample row has "(example)" suffix on each value
+11. ✅ Instructions sheet included explaining columns
+12. ✅ Columns auto-sized
+
+### Header groups
+13. ✅ Group order: Product Details → Batch Sizes → Labeling → Packaging → Run Rates
+14. ✅ Product Details: FG Material Code, FG Item Description, SFG1 Material Code, SFG Item Description
+15. ✅ Batch Sizes: Batch FM1, Batch FM2, Batch FM3, Batch PMX
+16. ✅ Labeling: Form, FG Weight, Label 1, Label 2
+17. ✅ Packaging: Thread, Sacks Code, Sacks Desc, Tags Code, Tags Desc
+18. ✅ Run Rates: L1-L7 Rate
+19. ✅ Each group has distinct color
+20. ✅ Two-row header structure
+21. ✅ Data rows match column order
+
+### Rename to Future Dispatches
+22. ✅ Sidebar shows "Future Dispatches"
+23. ✅ Page header shows "Future Dispatches"
+24. ✅ All buttons updated
+25. ✅ All notifications updated
+26. ✅ All tour steps updated with new data-tour selectors
+27. ✅ Chatbot system prompt updated
+28. ✅ Download filename: Future_Dispatches_date.xlsx
+29. ✅ Route path: /future-dispatches
+30. ✅ localStorage keys migrated
+31. ✅ data-tour attributes all renamed
+32. ✅ Zero occurrences of "Next 10 Days" or "N10D" anywhere in the app
+
+### Re-apply exclusion
+33. ✅ Master data re-apply skips Done orders
+34. ✅ Master data re-apply skips Cancel PO orders
+35. ✅ Master data re-apply skips In Production orders
+36. ✅ Master data re-apply skips On-going orders
+37. ✅ Master data re-apply updates Plotted, Planned, Hold, Cut, Custom
+38. ✅ Notification shows count of updated and skipped with breakdown
+39. ✅ Future Dispatches re-apply follows same exclusion rules
+```

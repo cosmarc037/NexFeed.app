@@ -1,0 +1,461 @@
+```
+Fix: Calculate estimated completion dates in preview and make tables editable:
+
+---
+
+## 1. CALCULATE ESTIMATED COMPLETION DATE IN PREVIEW
+
+```javascript
+function calculateEstimatedCompletionDates(lineOrdersMap, changeoverRules) {
+  const results = {};
+  
+  for (const [line, orders] of Object.entries(lineOrdersMap)) {
+    if (!orders || orders.length === 0) {
+      results[line] = [];
+      continue;
+    }
+    
+    const enrichedOrders = [];
+    let cumulativeTime = 0;
+    let startDateTime = null;
+    
+    for (let i = 0; i < orders.length; i++) {
+      const order = { ...orders[i] };
+      
+      // Get start date and time for first order
+      if (i === 0) {
+        if (order.start_datetime) {
+          startDateTime = new Date(order.start_datetime);
+        } else if (order.start_date) {
+          // Parse start date and combine with default 08:00 time
+          const dateStr = String(order.start_date).substring(0, 10);
+          startDateTime = new Date(`${dateStr}T08:00:00`);
+        } else {
+          // Default: today at 08:00 AM
+          const today = new Date();
+          startDateTime = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 8, 0, 0);
+        }
+        
+        order.start_datetime = startDateTime.toISOString();
+      }
+      
+      // Calculate production time
+      const volume = parseFloat(order.volume_override || order.volume || order.total_volume_mt) || 0;
+      const runRate = getLineRunRate(normalizeLine(order.feedmill_line));
+      const productionTime = runRate > 0 ? volume / runRate : 0;
+      
+      order.production_time = productionTime;
+      order._productionTimeHrs = productionTime.toFixed(2);
+      
+      // Get changeover (already calculated in preview)
+      const changeover = order.changeover || 0;
+      order._changeoverHrs = changeover.toFixed(2);
+      
+      // Calculate this order's completion time
+      const orderStartTime = new Date(startDateTime.getTime() + cumulativeTime * 60 * 60 * 1000);
+      const totalOrderTime = productionTime + changeover; // Production + changeover to next order
+      const orderEndTime = new Date(orderStartTime.getTime() + totalOrderTime * 60 * 60 * 1000);
+      
+      order.estimated_completion_date = orderEndTime.toISOString();
+      order._estimatedCompletionDisplay = formatDateTime(orderEndTime);
+      
+      // Add to cumulative for next order
+      cumulativeTime += totalOrderTime;
+      
+      enrichedOrders.push(order);
+    }
+    
+    results[line] = enrichedOrders;
+  }
+  
+  return results;
+}
+
+function formatDateTime(date) {
+  if (!date) return '—';
+  const dateStr = new Date(date).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
+  const timeStr = new Date(date).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+  return `${dateStr} - ${timeStr}`;
+}
+```
+
+---
+
+## 2. UPDATE AUTO-SEQUENCE FLOW TO CALCULATE COMPLETION DATES
+
+```javascript
+async function handlePlantLevelAutoSequence() {
+  try {
+    setProcessingPhase('scanning');
+    // ... existing code ...
+    
+    // Run auto-sequence
+    const { lineOrdersMap, combinedOrders, placementLog } = await runAutoSequenceWithProgress(
+      ordersWithFreshN10D,
+      masterData,
+      n10dData,
+      ALL_LINES_ORDERED,
+      changeoverRules,
+      onProgress,
+      onPhaseChange
+    );
+    
+    // CRITICAL: Calculate estimated completion dates AFTER placement
+    setProcessingPhase('calculating-completion');
+    await new Promise(r => setTimeout(r, 200));
+    
+    const results = calculateEstimatedCompletionDates(lineOrdersMap, changeoverRules);
+    
+    // ... rest of code ...
+  } catch (error) {
+    // ...
+  }
+}
+```
+
+---
+
+## 3. ADD EDITABLE START DATE AND TIME IN PREVIEW
+
+```jsx
+// In PlantAfterRow.jsx — make Start Date and Start Time editable
+
+function PlantAfterRow({ order, onOrderUpdate, originalLineOrders }) {
+  const [editingField, setEditingField] = useState(null);
+  const [editValue, setEditValue] = useState('');
+  const inputRef = useRef(null);
+  
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (inputRef.current && !inputRef.current.contains(e.target)) {
+        setEditingField(null);
+      }
+    }
+    if (editingField) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [editingField]);
+  
+  function startEdit(fieldKey, currentValue) {
+    setEditingField(fieldKey);
+    setEditValue(currentValue || '');
+    setTimeout(() => inputRef.current?.focus(), 0);
+  }
+  
+  function saveEdit(fieldKey) {
+    if (editingField !== fieldKey) return;
+    
+    // Handle date/time updates
+    if (fieldKey === 'start_date') {
+      // Update and cascade completion dates
+      onOrderUpdate?.(order.id, { start_date: editValue });
+    } else if (fieldKey === 'start_time') {
+      // Combine date + time into start_datetime
+      const dateStr = order.start_date || new Date().toISOString().split('T')[0];
+      const startDateTime = `${dateStr}T${editValue}:00`;
+      onOrderUpdate?.(order.id, { start_datetime: startDateTime });
+    }
+    
+    setEditingField(null);
+  }
+  
+  function handleKeyDown(e, fieldKey) {
+    if (e.key === 'Enter') {
+      saveEdit(fieldKey);
+    } else if (e.key === 'Escape') {
+      setEditingField(null);
+    }
+  }
+  
+  const startDate = order.start_date ? new Date(order.start_date).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }) : '—';
+  const startTime = order.start_datetime ? new Date(order.start_datetime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }) : '08:00';
+  
+  return (
+    <tr className={`auto-sequence-row-after ${order._movement === 'new_to_line' ? 'as-movement-new' : ''}`}>
+      <td className="as-col-prio">{order.prio}</td>
+      <td className="as-col-fpr">{order.fpr}</td>
+      <td className="as-col-planned">
+        <div>{order.planned_order_fg || '—'}</div>
+        <div className="as-sub-text">{order.planned_order_sfg || '—'}</div>
+      </td>
+      <td className="as-col-material">{order.material_code_fg}</td>
+      <td className="as-col-desc">
+        <span className="as-desc-main">{order.item_description}</span>
+        <div className="as-sub-text">{order.category}</div>
+      </td>
+      <td className="as-col-form">{order.form}</td>
+      <td className="as-col-volume">{(order.volume_override || order.volume || order.total_volume_mt || 0).toFixed(1)} MT</td>
+      <td className="as-col-batches">{order.batches || '—'}</td>
+      <td className="as-col-production">
+        <span className="production-time-value">{order._productionTimeHrs || '0.00'}</span>
+        <span className="production-time-co">CO: {order._changeoverHrs || '0.00'}</span>
+      </td>
+      
+      {/* EDITABLE: Start Date */}
+      <td className="as-col-start-date">
+        {editingField === 'start_date' ? (
+          <input
+            ref={inputRef}
+            type="date"
+            value={order.start_date ? new Date(order.start_date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]}
+            onChange={(e) => setEditValue(e.target.value)}
+            onBlur={() => saveEdit('start_date')}
+            onKeyDown={(e) => handleKeyDown(e, 'start_date')}
+            className="as-edit-input as-edit-date"
+          />
+        ) : (
+          <span
+            className="as-editable-field"
+            onClick={() => startEdit('start_date', order.start_date)}
+            title="Click to edit start date"
+          >
+            {startDate}
+          </span>
+        )}
+      </td>
+      
+      {/* EDITABLE: Start Time */}
+      <td className="as-col-start-time">
+        {editingField === 'start_time' ? (
+          <input
+            ref={inputRef}
+            type="time"
+            value={startTime}
+            onChange={(e) => setEditValue(e.target.value)}
+            onBlur={() => saveEdit('start_time')}
+            onKeyDown={(e) => handleKeyDown(e, 'start_time')}
+            className="as-edit-input as-edit-time"
+          />
+        ) : (
+          <span
+            className="as-editable-field"
+            onClick={() => startEdit('start_time', startTime)}
+            title="Click to edit start time"
+          >
+            {startTime}
+          </span>
+        )}
+      </td>
+      
+      <td className="as-col-avail-date">
+        {order.target_avail_date ? (
+          <>
+            <span className="avail-date-value">{formatDate(order.target_avail_date)}</span>
+            {order.inferred_target_label && (
+              <span className="avail-date-label">{order.inferred_target_label}</span>
+            )}
+          </>
+        ) : (
+          <span className="avail-date-label">{order.inferred_target_label || '—'}</span>
+        )}
+      </td>
+      
+      {/* CALCULATED: Estimated Completion Date */}
+      <td className="as-col-completion-date">
+        <span className="completion-date-value">
+          {order._estimatedCompletionDisplay || formatDateTime(new Date(order.estimated_completion_date))}
+        </span>
+      </td>
+      
+      <td className="as-col-insight">
+        {order._sequenceInsight && (
+          <span className="sequence-insight-badge">
+            💡 {order._sequenceInsight.substring(0, 60)}...
+          </span>
+        )}
+      </td>
+    </tr>
+  );
+}
+```
+
+---
+
+## 4. ADD STYLING FOR EDITABLE FIELDS
+
+```css
+.as-editable-field {
+  display: inline-block;
+  padding: 4px 6px;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all 0.15s;
+  border: 1px solid transparent;
+}
+
+.as-editable-field:hover {
+  background: var(--color-hover-bg, #fef3c7);
+  border: 1px dashed var(--color-primary, #f59e0b);
+}
+
+.as-edit-input {
+  padding: 4px 6px;
+  border: 2px solid var(--color-primary, #3b82f6);
+  border-radius: 3px;
+  font-size: 11px;
+  font-family: inherit;
+  background: var(--color-input-bg, #ffffff);
+  color: var(--color-text, #1f2937);
+}
+
+.as-edit-date {
+  width: 110px;
+}
+
+.as-edit-time {
+  width: 70px;
+}
+
+.as-edit-input:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+}
+
+.as-col-start-date,
+.as-col-start-time,
+.as-col-completion-date {
+  min-width: 110px;
+  padding: 6px 8px;
+}
+
+.production-time-value {
+  display: block;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.production-time-co {
+  display: block;
+  font-size: 10px;
+  color: var(--color-text-secondary);
+}
+
+.completion-date-value {
+  display: block;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-text);
+}
+```
+
+---
+
+## 5. CASCADE COMPLETION DATES WHEN START DATE/TIME CHANGES
+
+```javascript
+function cascadeCompletionDates(updatedOrder, lineOrders, changeoverRules) {
+  const orderIndex = lineOrders.findIndex(o => o.id === updatedOrder.id);
+  
+  if (orderIndex === -1) return lineOrders;
+  
+  // Update the modified order
+  lineOrders[orderIndex] = { ...lineOrders[orderIndex], ...updatedOrder };
+  
+  // Get start time for cascading
+  let startDateTime = null;
+  
+  if (lineOrders[orderIndex].start_datetime) {
+    startDateTime = new Date(lineOrders[orderIndex].start_datetime);
+  } else if (lineOrders[orderIndex].start_date) {
+    const dateStr = String(lineOrders[orderIndex].start_date).substring(0, 10);
+    startDateTime = new Date(`${dateStr}T08:00:00`);
+  } else {
+    const today = new Date();
+    startDateTime = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 8, 0, 0);
+  }
+  
+  let cumulativeTime = 0;
+  
+  // Recalculate from the modified order onwards
+  for (let i = orderIndex; i < lineOrders.length; i++) {
+    const order = lineOrders[i];
+    
+    const volume = parseFloat(order.volume_override || order.volume || order.total_volume_mt) || 0;
+    const runRate = getLineRunRate(normalizeLine(order.feedmill_line));
+    const productionTime = runRate > 0 ? volume / runRate : 0;
+    
+    const changeover = order.changeover || 0;
+    
+    const orderStartTime = new Date(startDateTime.getTime() + cumulativeTime * 60 * 60 * 1000);
+    const totalOrderTime = productionTime + changeover;
+    const orderEndTime = new Date(orderStartTime.getTime() + totalOrderTime * 60 * 60 * 1000);
+    
+    lineOrders[i].estimated_completion_date = orderEndTime.toISOString();
+    lineOrders[i]._estimatedCompletionDisplay = formatDateTime(orderEndTime);
+    
+    cumulativeTime += totalOrderTime;
+  }
+  
+  return lineOrders;
+}
+```
+
+---
+
+## 6. PASS UPDATE HANDLER TO ROWS
+
+```jsx
+// In PlantAutoSequencePreview
+
+function handleLineOrderUpdate(line, orderId, updates) {
+  setSequencedResults(prev => {
+    const updated = { ...prev };
+    const lineOrders = [...(updated[line] || [])];
+    
+    const orderIndex = lineOrders.findIndex(o => o.id === orderId);
+    if (orderIndex === -1) return prev;
+    
+    const updatedOrder = { ...lineOrders[orderIndex], ...updates };
+    
+    // Cascade completion dates if start date/time changed
+    if (updates.start_date || updates.start_datetime) {
+      lineOrders = cascadeCompletionDates(updatedOrder, lineOrders, changeoverRules);
+    } else {
+      lineOrders[orderIndex] = updatedOrder;
+    }
+    
+    updated[line] = lineOrders;
+    return updated;
+  });
+}
+
+// In table rendering
+<PlantAfterRow
+  key={order.id}
+  order={order}
+  onOrderUpdate={(orderId, updates) => handleLineOrderUpdate(line, orderId, updates)}
+/>
+```
+
+---
+
+## VERIFICATION
+
+### Estimated completion dates
+1. ✅ First order: start date defaults to today, time defaults to 08:00 AM
+2. ✅ Production time calculated: Volume ÷ Run Rate
+3. ✅ Changeover included in total time
+4. ✅ Next order starts when previous ends (cumulative)
+5. ✅ Estimated completion = start time + production time + changeover
+
+### Editable fields
+6. ✅ Click Start Date field to edit
+7. ✅ Click Start Time field to edit
+8. ✅ Date input with calendar picker
+9. ✅ Time input with time picker
+10. ✅ Enter to save, Escape to cancel, click outside to save
+
+### Cascading
+11. ✅ Change start date/time → all subsequent orders recalculate
+12. ✅ Completion dates update automatically
+13. ✅ No gaps between orders (one ends, next starts)
+
+### Example
+- Order 1: Start 24 Apr 2026 08:00 AM
+  - Production: 1.24 hrs, Changeover: 0.10 hrs = 1.34 hrs total
+  - End: 24 Apr 2026 09:20 AM
+- Order 2: Start 24 Apr 2026 09:20 AM
+  - Production: 0.60 hrs, Changeover: 0.10 hrs = 0.70 hrs total
+  - End: 24 Apr 2026 10:02 AM
+```

@@ -1,0 +1,457 @@
+```
+Fix the following issues in the Smart Combine AI context and prompt:
+
+---
+
+## FIX 1: USE target_avail_date EVERYWHERE — NOT avail_date
+
+Replace ALL references to `o.avail_date` with `o.target_avail_date` in the combine analysis context builder and prompt builder.
+
+### HELPER FUNCTION — NORMALIZE AVAIL DATE FOR AI
+
+```javascript
+function normalizeAvailDateForAI(targetAvailDate) {
+  if (!targetAvailDate) return { display: 'No date', isDated: false, isoDate: null };
+  
+  const isISO = /^\d{4}-\d{2}-\d{2}/.test(targetAvailDate);
+  
+  if (isISO && !isNaN(Date.parse(targetAvailDate))) {
+    const date = new Date(targetAvailDate);
+    const display = date.toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    });
+    return { display, isDated: true, isoDate: targetAvailDate };
+  }
+  
+  // Non-dated — normalize the label for AI clarity
+  const raw = targetAvailDate.toLowerCase().trim();
+  
+  if (raw === 'stock_sufficient') return { display: 'No date (stock sufficient)', isDated: false, isoDate: null };
+  if (raw.includes('prio')) return { display: 'No date (priority replenishment)', isDated: false, isoDate: null };
+  if (raw.includes('safety')) return { display: 'No date (safety stock reorder)', isDated: false, isoDate: null };
+  if (raw.includes('sched')) return { display: 'No date (for scheduling)', isDated: false, isoDate: null };
+  
+  return { display: `No date (${targetAvailDate})`, isDated: false, isoDate: null };
+}
+```
+
+---
+
+## FIX 2: UPDATED CONTEXT BUILDER — CORRECT FIELD REFERENCES AND PRIO
+
+```javascript
+function buildCombineAnalysisContext(group, lineOrders, masterData, n10dData, changeoverRules) {
+  const line = group.line;
+  
+  // All current orders on this line, sorted by prio
+  const currentLineOrders = lineOrders
+    .filter(o => o.line === line && o.status !== 'Done' && o.status !== 'Cancel PO')
+    .sort((a, b) => a.prio - b.prio);
+  
+  // The orders being combined
+  const combiningOrders = group.orders;
+  
+  // Combined order details
+  const combinedVolume = combiningOrders.reduce((s, o) => s + (parseFloat(o.volume) || 0), 0);
+  const runRate = parseFloat(combiningOrders[0].run_rate) || 0;
+  const combinedProductionHours = runRate > 0 ? combinedVolume / runRate : 0;
+  const combinedForm = combiningOrders[0].form;
+  
+  // Determine avail date for combined order — use target_avail_date
+  const datedOrders = combiningOrders.filter(o => {
+    const avail = o.target_avail_date;
+    return avail && /^\d{4}-\d{2}-\d{2}/.test(avail) && !isNaN(Date.parse(avail));
+  });
+  
+  const nonDatedOrders = combiningOrders.filter(o => {
+    const avail = o.target_avail_date;
+    return !avail || !/^\d{4}-\d{2}-\d{2}/.test(avail) || isNaN(Date.parse(avail));
+  });
+  
+  let combinedAvailDate = null;
+  let combinedAvailDisplay = 'No date';
+  let availDateType = 'none';
+  
+  if (datedOrders.length > 0) {
+    const sorted = datedOrders.sort((a, b) => 
+      new Date(a.target_avail_date) - new Date(b.target_avail_date)
+    );
+    combinedAvailDate = sorted[0].target_avail_date;
+    const normalized = normalizeAvailDateForAI(combinedAvailDate);
+    combinedAvailDisplay = normalized.display;
+    availDateType = 'dated';
+  } else if (nonDatedOrders.length > 0) {
+    combinedAvailDate = nonDatedOrders[0].target_avail_date;
+    const normalized = normalizeAvailDateForAI(combinedAvailDate);
+    combinedAvailDisplay = normalized.display;
+    availDateType = 'non_dated';
+  }
+  
+  // Determine expected insertion prio
+  let expectedInsertionPrio;
+  if (datedOrders.length > 0) {
+    const earliestDated = datedOrders.sort((a, b) => 
+      new Date(a.target_avail_date) - new Date(b.target_avail_date)
+    )[0];
+    expectedInsertionPrio = earliestDated.prio;
+  } else {
+    expectedInsertionPrio = null; // AI decides
+  }
+  
+  // Orders that will be removed
+  const orderPrios = combiningOrders.map(o => o.prio).sort((a, b) => a - b);
+  const removedPrios = orderPrios.slice(1);
+  
+  // N10D data
+  const n10dProduct = n10dData?.find(
+    p => String(p.material_code_fg) === String(combiningOrders[0].material_code_fg)
+  );
+  const n10dStatus = n10dProduct ? getProductStatus(
+    n10dProduct.due_for_loading, n10dProduct.inventory,
+    getDailyColumns(), n10dProduct, new Date()
+  ) : null;
+  
+  // Base changeover
+  const baseChangeover = getBaseChangeover(combinedForm, changeoverRules.baseChangeover);
+  
+  // Build line context with CORRECT prio and normalized avail dates
+  const lineContext = currentLineOrders.map(o => {
+    const oN10d = n10dData?.find(p => String(p.material_code_fg) === String(o.material_code_fg));
+    const oStatus = oN10d ? getProductStatus(
+      oN10d.due_for_loading, oN10d.inventory,
+      getDailyColumns(), oN10d, new Date()
+    ) : null;
+    
+    const vol = parseFloat(o.volume) || 0;
+    const rate = parseFloat(o.run_rate) || 0;
+    const prodHrs = rate > 0 ? (vol / rate).toFixed(2) : '0.00';
+    
+    const availNormalized = normalizeAvailDateForAI(o.target_avail_date);
+    
+    return {
+      prio: o.prio,
+      name: o.item_description,
+      volume: o.volume,
+      form: o.form,
+      prodHours: prodHrs,
+      availDate: availNormalized.display,
+      isDated: availNormalized.isDated,
+      n10dStatus: oStatus || 'N/A',
+      completionDate: o.completion_date || '—',
+      changeover: (o._changeoverTotal ?? parseFloat(o.changeover) ?? 0).toFixed(2),
+      isBeingCombined: combiningOrders.some(co => co.id === o.id),
+      color: o.color || '—',
+      diameter: o.diameter || '—',
+      category: o.category || '—'
+    };
+  });
+  
+  // Calculate alerts
+  const calculatedAlerts = calculateCombineAlerts(group, currentLineOrders);
+  
+  return {
+    line,
+    combiningOrders: combiningOrders.map(o => {
+      const availNorm = normalizeAvailDateForAI(o.target_avail_date);
+      return {
+        prio: o.prio,
+        name: o.item_description,
+        volume: o.volume,
+        availDate: availNorm.display,
+        isDated: availNorm.isDated,
+        form: o.form
+      };
+    }),
+    combinedVolume,
+    combinedProductionHours: combinedProductionHours.toFixed(2),
+    combinedForm,
+    combinedAvailDisplay,
+    availDateType,
+    expectedInsertionPrio,
+    removedPrios,
+    n10dStatus,
+    n10dDfl: n10dProduct?.due_for_loading || null,
+    n10dInventory: n10dProduct?.inventory || null,
+    baseChangeover,
+    lineContext,
+    totalOrdersOnLine: currentLineOrders.length,
+    calculatedAlerts
+  };
+}
+```
+
+---
+
+## FIX 3: UPDATED AI PROMPT — CLEAR INSTRUCTIONS WITH CORRECT DATA
+
+```javascript
+function buildCombineAnalysisPrompt(context) {
+  let alertsContext = '';
+  
+  if (context.calculatedAlerts && context.calculatedAlerts.length > 0) {
+    alertsContext = `
+KNOWN ISSUES DETECTED:
+${context.calculatedAlerts.map(a => {
+  if (a.type === 'volume_ceiling') {
+    return `- VOLUME WARNING: ${a.message}`;
+  }
+  return `- DELAY WARNING: Order "${a.orderName}" (FPR: ${a.fpr}, Prio ${a.prio}) completion at ${a.completionDate} will be past its Avail Date of ${a.availDate} by approximately ${a.delayDays} days.`;
+}).join('\n')}
+
+You MUST include ALL of these warnings in your Alerts section. Do not omit any.
+`;
+  }
+  
+  // Build insertion position instruction
+  let insertionInstruction;
+  if (context.availDateType === 'dated' && context.expectedInsertionPrio !== null) {
+    insertionInstruction = `
+INSERTION RULE — DATED ORDER:
+The combined order has a dated avail date (${context.combinedAvailDisplay}).
+The order with the earliest avail date is currently at Priority ${context.expectedInsertionPrio}.
+The combined order MUST be inserted at Priority ${context.expectedInsertionPrio}.
+This is non-negotiable for dated orders — always use the position of the earliest dated order.
+State this clearly: "Priority ${context.expectedInsertionPrio}" as the insertion position.`;
+  } else {
+    insertionInstruction = `
+INSERTION RULE — NON-DATED ORDER:
+The combined order does NOT have a dated avail date (${context.combinedAvailDisplay}).
+You have freedom to determine the best insertion position based on:
+- Future Dispatches stock status (Critical > Urgent > Monitor > Sufficient)
+- Minimizing delays to downstream orders
+- Production efficiency
+Choose a specific priority number and explain your reasoning.`;
+  }
+
+  return `
+You are a production scheduling advisor for a feed manufacturing plant.
+The planner is considering combining orders on ${context.line}.
+
+ORDERS BEING COMBINED:
+${context.combiningOrders.map(o => `  Prio ${o.prio}: ${o.name} | ${o.volume} MT | Avail: ${o.availDate} (${o.isDated ? 'DATED' : 'NON-DATED'}) | Form: ${o.form}`).join('\n')}
+
+COMBINED ORDER AFTER MERGE:
+  Total Volume: ${context.combinedVolume} MT
+  Form: ${context.combinedForm}
+  Production Time: ${context.combinedProductionHours} hrs
+  Base Changeover: ${context.baseChangeover} hrs
+  Avail Date: ${context.combinedAvailDisplay} (${context.availDateType === 'dated' ? 'DATED' : 'NON-DATED'})
+  Future Dispatches Status: ${context.n10dStatus || 'N/A'}
+  DFL: ${context.n10dDfl || 'N/A'} MT | Inventory: ${context.n10dInventory || 'N/A'} MT
+
+ORDERS REMOVED AFTER MERGE: Priority ${context.removedPrios.join(', Priority ')}
+(These slots are eliminated and all orders below shift up to fill the gaps)
+
+CURRENT LINE SEQUENCE (${context.line}, ${context.totalOrdersOnLine} orders):
+${context.lineContext.map(o => `  Prio ${o.prio}: ${o.name} | ${o.volume} MT | Prod: ${o.prodHours} hrs | CO: ${o.changeover} hrs | Avail: ${o.availDate} (${o.isDated ? 'DATED' : 'NON-DATED'}) | N10D: ${o.n10dStatus} | Completion: ${o.completionDate}${o.isBeingCombined ? ' ← BEING COMBINED' : ''}`).join('\n')}
+
+${insertionInstruction}
+
+${alertsContext}
+
+IMPORTANT:
+- Use the EXACT priority numbers shown above. Do not invent priority numbers that don't exist.
+- The priority numbers in the current line sequence above are the REAL current positions.
+- After combining, the merged order takes one position and the removed slots shift everything up.
+- Do not reference "Prio 0" or priority numbers higher than ${context.totalOrdersOnLine}.
+
+RESPOND IN EXACTLY THIS FORMAT (no markdown, no # headers, no **bold**):
+
+Insertion Position:
+[State the exact priority number. Reference the specific orders and avail dates. Keep to 2-3 sentences.]
+
+Scheduling Impact:
+[Describe what happens to downstream orders. Name specific orders affected and quantify time shifts in hours. If no delays, state clearly. Keep to 2-4 sentences.]
+
+Alerts:
+[List ALL warnings. Each on its own line starting with ⚠. Include volume warnings and delay warnings. If none, state "No alerts — all orders remain on schedule."]
+  `;
+}
+```
+
+---
+
+## FIX 4: UPDATE calculateCombineAlerts TO USE target_avail_date
+
+```javascript
+function calculateCombineAlerts(group, lineOrders) {
+  const alerts = [];
+  const combiningOrders = group.orders;
+  const combinedVolume = combiningOrders.reduce((s, o) => s + (parseFloat(o.volume) || 0), 0);
+  
+  // Check downstream orders for avail date violations
+  lineOrders.forEach(o => {
+    if (combiningOrders.some(co => co.id === o.id)) return;
+    
+    // Use target_avail_date — NOT avail_date
+    const targetAvail = o.target_avail_date;
+    if (!targetAvail) return;
+    
+    // Check if dated
+    if (!/^\d{4}-\d{2}-\d{2}/.test(targetAvail) || isNaN(Date.parse(targetAvail))) return;
+    
+    const currentCompletion = o._calculatedCompletionTime;
+    if (!currentCompletion) return;
+    
+    const availDateObj = new Date(targetAvail);
+    if (isNaN(availDateObj.getTime())) return;
+    
+    if (currentCompletion > availDateObj) {
+      const delayMs = currentCompletion.getTime() - availDateObj.getTime();
+      const delayDays = Math.ceil(delayMs / (1000 * 60 * 60 * 24));
+      
+      const availDisplay = availDateObj.toLocaleDateString('en-US', {
+        year: 'numeric', month: 'long', day: 'numeric'
+      });
+      
+      alerts.push({
+        orderName: o.item_description,
+        fpr: o.fpr,
+        prio: o.prio,
+        availDate: availDisplay,
+        completionDate: o.completion_date,
+        delayDays: delayDays
+      });
+    }
+  });
+  
+  // Volume ceiling
+  if (combinedVolume > 200) {
+    alerts.push({
+      type: 'volume_ceiling',
+      message: `The combined total of ${combinedVolume} MT exceeds the recommended ceiling of 200 MT. Large combined orders may impact scheduling flexibility and downstream production.`
+    });
+  }
+  
+  return alerts;
+}
+```
+
+---
+
+## FIX 5: ALSO FIX THE APPROVE HANDLER — USE target_avail_date
+
+```javascript
+function handleApprove(group, analysis) {
+  const combiningOrders = group.orders;
+  
+  // Determine insertion prio — use target_avail_date
+  const datedOrders = combiningOrders.filter(o => {
+    const avail = o.target_avail_date;
+    return avail && /^\d{4}-\d{2}-\d{2}/.test(avail) && !isNaN(Date.parse(avail));
+  });
+  
+  let insertionPrio;
+  let combinedAvailDate;
+  
+  if (datedOrders.length > 0) {
+    const earliest = datedOrders.sort((a, b) => 
+      new Date(a.target_avail_date) - new Date(b.target_avail_date)
+    )[0];
+    insertionPrio = earliest.prio;
+    combinedAvailDate = earliest.target_avail_date;
+  } else {
+    const aiPrio = parseRecommendedPrio(analysis?.insertionPosition, group);
+    insertionPrio = aiPrio || Math.min(...combiningOrders.map(o => o.prio));
+    combinedAvailDate = combiningOrders[0].target_avail_date;
+  }
+  
+  // Create combined order
+  const combinedVolume = combiningOrders.reduce((s, o) => s + (parseFloat(o.volume) || 0), 0);
+  const baseOrder = { ...combiningOrders.find(o => o.prio === insertionPrio) || combiningOrders[0] };
+  
+  baseOrder.volume = combinedVolume;
+  baseOrder.target_avail_date = combinedAvailDate;
+  baseOrder.prio = insertionPrio;
+  baseOrder.batches = Math.ceil(combinedVolume / (parseFloat(baseOrder.batch_size) || 1));
+  baseOrder.bags = baseOrder.batches * (parseFloat(baseOrder.fg_weight) || 1) * 20;
+  
+  const runRate = parseFloat(baseOrder.run_rate) || 0;
+  baseOrder.production_time = runRate > 0 ? (combinedVolume / runRate).toFixed(2) : '0.00';
+  baseOrder._isCombined = true;
+  baseOrder._combinedFrom = combiningOrders.map(o => o.id);
+  
+  // Remove originals and insert combined
+  const orderIdsToRemove = combiningOrders.map(o => o.id);
+  let updatedOrders = allOrders.filter(o => !orderIdsToRemove.includes(o.id));
+  updatedOrders.push(baseOrder);
+  
+  // Re-sort and reassign prios
+  const lineOrders = updatedOrders
+    .filter(o => o.line === group.line)
+    .sort((a, b) => {
+      if (a.id === baseOrder.id) return insertionPrio - 0.5 - b.prio;
+      if (b.id === baseOrder.id) return a.prio - (insertionPrio - 0.5);
+      return a.prio - b.prio;
+    });
+  
+  lineOrders.forEach((o, idx) => {
+    o.prio = idx + 1;
+  });
+  
+  // Recalculate
+  recalculateAllChangeovers(updatedOrders, getDefaultChangeoverRules());
+  recalculateCompletionDates(updatedOrders);
+  
+  setAllOrders(updatedOrders);
+  showNotification('success', `Orders combined: ${baseOrder.item_description} (${combinedVolume} MT) at Priority ${insertionPrio}.`);
+}
+```
+
+---
+
+## FIX 6: GLOBAL SEARCH AND REPLACE — avail_date → target_avail_date
+
+Search the ENTIRE Smart Combine codebase (SmartCombinePanel.jsx and azureAI.js) for any reference to `o.avail_date` and replace with `o.target_avail_date`:
+
+```javascript
+// FIND ALL:
+o.avail_date
+order.avail_date
+co.avail_date
+
+// REPLACE WITH:
+o.target_avail_date
+order.target_avail_date
+co.target_avail_date
+```
+
+EXCEPT in UI column key definitions (where 'avail_date' is a column identifier for the table — leave those as is).
+
+---
+
+## VERIFICATION
+
+### Correct field usage
+1. ✅ All combine logic uses target_avail_date, not avail_date
+2. ✅ Dated check uses /^\d{4}-\d{2}-\d{2}/.test(target_avail_date)
+3. ✅ "prio replenish" correctly identified as NON-DATED
+4. ✅ "safety stocks" correctly identified as NON-DATED
+5. ✅ "2026-03-19" correctly identified as DATED
+6. ✅ null correctly identified as NON-DATED
+
+### Normalized display for AI
+7. ✅ "2026-03-19" → "March 19, 2026 (DATED)"
+8. ✅ "prio replenish" → "No date (priority replenishment) (NON-DATED)"
+9. ✅ "safety stocks" → "No date (safety stock reorder) (NON-DATED)"
+10. ✅ null → "No date (NON-DATED)"
+
+### Correct prio in AI output
+11. ✅ Prio 1 (March 19) + Prio 2 (March 22) → AI says "Priority 1"
+12. ✅ AI cannot reference prio numbers outside the actual range
+13. ✅ AI explicitly told the expected insertion prio for dated orders
+14. ✅ No "Prio 0" or "Prio 10" in output
+
+### Insertion logic
+15. ✅ Dated orders → combined takes prio of earliest avail date order
+16. ✅ Non-dated orders → AI determines best position
+17. ✅ Approve handler enforces earliest dated prio as override
+18. ✅ Fallback to AI recommendation for non-dated
+
+### Alerts
+19. ✅ Uses target_avail_date for delay calculations
+20. ✅ Volume ceiling included in alerts context
+21. ✅ AI instructed to include ALL warnings
+```

@@ -1,0 +1,214 @@
+```
+Please revisit this AI-powered sequence because it does not appear to be a convincing or successful changeover-reduction strategy, even though it is marked as Recommended.
+
+---
+
+## OBJECTIVE
+
+The selected AI strategy is:
+
+### `Swine Diameter Run Smoothing`
+Description:
+> Reorders swine flexible orders by diameter to reduce costly diameter and category changeovers, adjusting flexible dates within safe windows.
+
+However, the resulting metrics and table do not strongly support this as a successful recommended strategy.
+
+We need to review whether this sequence actually makes sense, whether the order positioning can still be improved further, and whether this strategy should really be recommended if it does not reduce total changeover versus Standard.
+
+---
+
+## WHAT LOOKS WRONG
+
+### 1. There is no actual time saved
+The strategy card shows:
+- Changeover time = **5.17 hr**
+- Time-saved = **0.00 hr**
+
+This means the resulting sequence is equal to the Standard baseline, not better.
+
+If the strategy claims to reduce changeover, then a result of `0.00 hr` saved is not a successful optimization.
+
+---
+
+### 2. The AI reasoning itself admits the intended savings were offset
+The analysis says:
+> "Measured: 5.17 total — equal to Standard baseline (5.17). The sequence rearranged orders but date or constraint limits offset the intended savings."
+
+This means:
+- the AI had an idea
+- but the final applied result did not produce an actual improvement
+
+That suggests the strategy is not successful enough to be Recommended as a changeover reduction strategy.
+
+---
+
+### 3. Faithfulness is low
+The strategy has:
+- Faithfulness = **60.1%**
+
+The reasoning also says:
+- `0 adjacent same-diameter swine pairs in After`
+
+This is especially problematic because the strategy is specifically about:
+- swine diameter run smoothing
+
+If the final table does not even create adjacent same-diameter swine pairs, then the strategy is barely being reflected in the sequence.
+
+---
+
+### 4. The sequence may still be improvable
+Based on the order table and the changeover rules, it seems possible that the order sequence could still be improved further to better reduce total changeover.
+
+Please do not stop at the first plausible sequence idea.
+Please evaluate whether a better date-safe arrangement exists that actually lowers the total changeover below Standard.
+
+---
+
+## REQUIRED REVIEW
+
+Please revisit this strategy and check whether:
+1. the current After-table sequence is actually the best valid low-changeover arrangement
+2. a better clustering is possible under the same date-safe constraints
+3. the AI is still focusing too narrowly on one local penalty rather than optimizing the full sequence
+4. this strategy should remain Recommended if it does not improve total changeover
+
+---
+
+## 1. RE-EVALUATE THE WHOLE SEQUENCE, NOT JUST ONE DIAMETER PENALTY
+
+The AI should optimize the full adjacent transition chain, not just one notable swine diameter mismatch.
+
+Please verify whether the current strategy is overly centered on:
+- one 3.0mm vs 4.0mm swine penalty
+- one category change
+
+and not doing enough to improve the total sequence globally.
+
+The optimizer should minimize total resulting changeover across all adjacent pairs.
+
+---
+
+## 2. SEARCH FOR A BETTER VALID ARRANGEMENT
+
+Please test whether a better valid sequence exists, using:
+- the full current lineup
+- real changeover rules
+- actual date constraints
+- movable/flexible status
+
+If there is a valid arrangement with lower total changeover than 5.17 hr, the app should find it.
+
+If not, then the strategy should not be described or recommended as a successful changeover-reduction sequence.
+
+---
+
+## 3. DO NOT RECOMMEND A STRATEGY THAT DOES NOT ACTUALLY BEAT STANDARD
+
+If the AI strategy results in:
+- the same changeover as Standard
+- or worse
+
+then it should not receive the `Recommended` badge for changeover reduction.
+
+Equal-to-Standard is not a successful optimization.
+
+At minimum:
+- if `Time-saved = 0.00 hr`
+- and the sequence does not visibly improve clustering
+then this strategy should not be recommended over Standard.
+
+---
+
+## 4. ALIGN THE STRATEGY NAME / DESCRIPTION WITH THE REAL RESULT
+
+If the final sequence does not actually create:
+- smoother swine diameter runs
+- meaningful same-diameter adjacency
+- lower total changeover
+
+then the title and description should be revised accordingly.
+
+For example, do not use a title like:
+- `Swine Diameter Run Smoothing`
+
+if the resulting After-table still has:
+- `0 adjacent same-diameter swine pairs`
+
+The wording must reflect what the table truly achieved.
+
+---
+
+## 5. REASSESS FAITHFULNESS AND RECOMMENDATION TOGETHER
+
+A strategy with:
+- 0.00 hr time saved
+- only 60.1% faithfulness
+- weak visible clustering
+
+should not be considered a strong recommended strategy.
+
+Please revisit:
+- the faithfulness calculation
+- the recommendation logic
+- the minimum threshold for recommending an AI strategy
+
+If the strategy does not deliver a measurable improvement, Standard Sequence should remain the safer default.
+
+---
+
+## 6. IF DATE CONSTRAINTS REALLY BLOCK IMPROVEMENT, SAY THAT CLEARLY
+
+If after full optimization the app determines:
+- no better valid arrangement exists
+- date-safe windows prevent any real reduction
+
+then that is okay — but the strategy should then be framed honestly, such as:
+- a constrained alternative with no net changeover gain
+- not a successful smoothing strategy
+
+And it should likely not be Recommended.
+
+---
+
+## 7. ADD DEBUG LOGGING FOR THIS CASE
+
+Temporarily log:
+
+```javascript
+console.debug('[Swine Diameter Strategy Review]', {
+  lineId,
+  strategyId,
+  standardChangeover: 5.17,
+  aiChangeover: strategyMetrics.changeover,
+  timeSaved: strategyMetrics.timeSaved,
+  faithfulness: strategyMetrics.faithfulness,
+  finalOrders: finalOrders.map((o, index) => ({
+    position: index + 1,
+    orderId: o.id,
+    item: o.item_description,
+    category: o.category,
+    color: o.color,
+    diameter: o.diameter,
+    availDate: o.avail_date,
+  })),
+  sameDiameterSwineAdjacencyCount,
+});
+```
+
+Also verify:
+- whether a better valid arrangement exists
+- whether the strategy was still marked Recommended despite no improvement
+- whether the title/description overstate what the table actually achieved
+
+---
+
+## VERIFICATION
+
+1. ✅ The AI strategy is re-evaluated against the full sequence, not just one local diameter penalty
+2. ✅ The app checks whether a better valid arrangement exists under the same date-safe constraints
+3. ✅ AI strategies are no longer Recommended if they do not actually beat Standard on total changeover
+4. ✅ Titles and descriptions match what the final After-table really achieves
+5. ✅ Faithfulness reflects the true visible alignment between strategy and result
+6. ✅ If no real improvement is possible, the strategy is framed honestly and is not misleadingly recommended
+7. ✅ Standard Sequence remains preferred when the AI strategy provides no actual changeover gain
+```

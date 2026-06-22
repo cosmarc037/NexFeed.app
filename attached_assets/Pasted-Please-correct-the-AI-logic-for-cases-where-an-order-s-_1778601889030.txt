@@ -1,0 +1,50 @@
+Please correct the AI logic for cases where an order’s projected Estimated Completion Date is later than its Avail Date.
+
+Example from the preview:
+- Avail Date = May 12, 2026
+- Estimated Completion Date = May 13, 2026 - 04:18 AM
+
+In this case, the AI is still effectively using May 12 for the order even though the order is projected to complete on May 13. This should be treated as a delay-risk case and should not be considered a valid same-day suggestion.
+
+IMPORTANT:
+Estimated Completion should generally be used as a guide, not a universal hard blocker for all orders. However, when the comparison is:
+
+Estimated Completion > Avail Date
+
+that is a meaningful conflict and must influence the AI decision.
+
+## Required behavior
+If an order’s projected Estimated Completion exceeds its Avail Date:
+- the AI should recognize the order as likely delayed
+- the AI should try to advance it earlier if feasible
+- the AI should try a better start anchor if feasible
+- the AI should not continue presenting the same date as if it is still valid
+- if no earlier feasible option exists, the AI should explicitly mark/explain the delay risk
+
+## Clarification
+This rule is specifically for conflict cases where:
+- completion is later than avail date
+
+This should not incorrectly affect cases where:
+- completion is earlier than avail date
+
+Example:
+- Avail Date = May 22
+- Estimated Completion = May 13
+This is not a problem and should not trigger forced correction.
+
+But this case:
+- Avail Date = May 12
+- Estimated Completion = May 13 04:18 AM
+is a problem and must be handled.
+
+## Sequence insight
+When this happens, the sequence insight should explain it clearly, for example:
+
+“This order is projected to complete after its avail date under the current sequence timing, so it should be advanced earlier or treated as delay-risk.”
+
+## Verification
+1. Orders with Estimated Completion later than Avail Date are treated as conflict cases
+2. The AI no longer keeps the same date suggestion without acknowledging the delay
+3. The AI attempts earlier placement or better anchoring where feasible
+4. If not feasible, the order is clearly explained/flagged as at risk

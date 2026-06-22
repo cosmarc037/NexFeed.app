@@ -1,0 +1,149 @@
+Please fix the linked-order clickability issue for Powermix/source orders across tab/view navigation.
+
+There is currently a bug where the item description text is clickable in one feedmill view, but after navigating to another view such as Powermix, the clickable behavior disappears until the page is refreshed or the user switches tabs again.
+
+This needs to be fixed so clickable linked-order navigation remains reliable without requiring refresh.
+
+---
+
+## ISSUE OBSERVED
+
+Current behavior:
+- user is in FM3
+- linked order item description is clickable
+- user navigates to Powermix
+- the linked item description is no longer clickable
+- user must refresh the page or switch tabs again to restore clickability
+
+This is incorrect.
+
+The clickable item description should remain functional across Orders navigation without needing refresh.
+
+---
+
+## REQUIRED BEHAVIOR
+
+For any valid linked Powermix/source order:
+- the item description name should remain clickable every time the row is rendered
+- regardless of whether the user arrived there from:
+  - All Feedmills
+  - Feedmill 1
+  - Feedmill 2
+  - Feedmill 3
+  - Powermix
+
+### Important
+The app should not require:
+- page refresh
+- tab toggle workaround
+- leaving and re-entering the page
+
+to restore clickability.
+
+---
+
+## WHAT TO CHECK
+
+Please audit the implementation for any of the following problems:
+
+1. click handler only attached on first render
+2. row/cell renderer not re-binding after Orders view changes
+3. stale memoized component state
+4. linked-order clickable state not recalculated after tab switch
+5. pointer-events / overlay / z-index issue blocking click in Powermix view after navigation
+6. route/view transition preserving stale DOM state without reattaching interactivity
+
+---
+
+## REQUIRED FIX
+
+Ensure that linked-order clickability is re-evaluated and re-bound whenever the Orders view context changes, including:
+- switching between feedmills
+- switching to Powermix
+- switching to All Feedmills
+- changing line sub-tabs
+- navigating back to a previously opened Orders view
+
+The clickable item description must be consistently interactive after every valid re-render.
+
+---
+
+## CLICKABILITY RULE
+
+The item description name itself remains the click target.
+
+Do not change the design to:
+- add icons
+- add separate link text
+- add buttons
+
+Keep the original design:
+- item description text is clickable if the row has a valid linked order
+
+But make sure the clickability remains active after tab/view changes.
+
+---
+
+## CONTEXT-AWARE NAVIGATION RULE MUST STILL WORK
+
+Preserve the previously agreed navigation behavior:
+
+### If user is in All Feedmills:
+- stay in All Feedmills
+- scroll to the linked row there
+- highlight it there
+
+### If user is in a specific feedmill / Powermix:
+- navigate to the appropriate feedmill view if needed
+- scroll to the linked row
+- highlight it
+
+Only the clickability persistence is being fixed here.
+Do not remove or change the navigation rules.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log:
+
+```javascript
+console.debug('[Powermix Clickability Bind Check]', {
+  currentViewMode, // all_feedmills | feedmill_1 | feedmill_2 | feedmill_3 | powermix
+  currentLineTab,
+  orderId,
+  linkedOrderId,
+  shouldBeClickable,
+  clickHandlerAttached,
+});
+```
+
+```javascript
+console.debug('[Powermix View Change Rebind]', {
+  previousViewMode,
+  nextViewMode,
+  rowsRebound,
+  linkedRowsDetected,
+});
+```
+
+```javascript
+console.debug('[Powermix Click Block Check]', {
+  orderId,
+  pointerEvents,
+  elementVisible,
+  overlayBlockingClick,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Linked item descriptions remain clickable after switching from FM3 to Powermix
+2. ✅ Linked item descriptions remain clickable after switching from Powermix to FM tabs
+3. ✅ Linked item descriptions remain clickable after switching into and out of All Feedmills
+4. ✅ No page refresh is required to restore clickability
+5. ✅ No workaround tab switch is required to restore clickability
+6. ✅ Item description text remains the only click target
+7. ✅ Existing linked-order navigation behavior remains intact

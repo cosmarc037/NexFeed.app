@@ -1,0 +1,607 @@
+```
+Update the Scheduling Impact section to be fully AI-generated with calculated data as fallback/comparison:
+
+---
+
+## 1. UPDATED AI PROMPT — FULL SCHEDULING IMPACT
+
+```javascript
+function buildSchedulingImpactPrompt(context, calculatedImpact) {
+  const hasEarlier = calculatedImpact.earlierOrders.length > 0;
+  const hasLater = calculatedImpact.laterOrders.length > 0;
+  const hasDeadlineMisses = calculatedImpact.deadlineMisses.length > 0;
+  
+  return `
+You are a production scheduling advisor for a feed manufacturing plant.
+Analyze the scheduling impact of combining orders on ${context.line}.
+
+COMBINED ORDER:
+  Product: ${context.combiningOrders[0]?.name}
+  Total Volume: ${context.combinedVolume} MT
+  Production Time: ${context.combinedProductionHours} hrs
+  Insertion Position: Priority ${context.insertionResult.prio}
+
+CALCULATED TIME SHIFTS (use as reference — these are accurate):
+${hasLater
+  ? 'Orders starting later:\n' + calculatedImpact.laterOrders.map(o => `  Prio ${o.prio}: ${o.name} — ${o.shiftFormatted} later`).join('\n')
+  : 'Orders starting later: None'}
+
+${hasEarlier
+  ? 'Orders starting earlier:\n' + calculatedImpact.earlierOrders.map(o => `  Prio ${o.prio}: ${o.name} — ${o.shiftFormatted} earlier`).join('\n')
+  : 'Orders starting earlier: None'}
+
+${hasDeadlineMisses
+  ? 'Orders at risk of missing avail date:\n' + calculatedImpact.deadlineMisses.map(o => `  Prio ${o.prio}: ${o.name} — new completion ${o.newCompletion} exceeds avail date ${o.availDate} (~${o.delayDays} days late)`).join('\n')
+  : 'Orders at risk of missing avail date: None'}
+
+ORDER CONTEXT (N10D status, avail dates):
+${context.lineContext
+  .filter(o => !o.isBeingCombined)
+  .map(o => `  Prio ${o.prio}: ${o.name} | N10D: ${o.n10dStatus} | Avail: ${o.availDate} (${o.isDated ? 'DATED' : 'NON-DATED'})`)
+  .join('\n')}
+
+RESPONSE FORMAT — follow this EXACTLY:
+
+You must output THREE labeled sections. Each section starts with its label on its own line. After all three sections, write a 3-5 sentence summary.
+
+Section 1 label: "Orders starting earlier:"
+Section 2 label: "Orders starting later:"
+Section 3 label: "Orders at risk of missing avail date:"
+
+RULES FOR EACH SECTION:
+
+Orders starting earlier:
+- If many orders have the SAME time shift, GROUP them into one line.
+  Format: ✅ Prio [range] ([count] orders) — all start ~[time] earlier. Notable: [list 2-3 important ones with N10D status].
+  Example: ✅ Prio 3–18 (16 orders) — all start ~10 min earlier. Notable: Gall 21 Chicken Layer (Prio 5, Critical), Gallimax 3 Maintenance (Prio 6, Urgent).
+- If orders have DIFFERENT time shifts, list individually but still group similar ones.
+  Example: ✅ Prio 3–11 (9 orders) — start ~10 min earlier.
+  ✅ Prio 12–18 (7 orders) — start ~20 min earlier.
+- If only 1-3 orders, list individually.
+  Example: ✅ Prio 17: Gallimax 3 Maintenance — starts 10 min earlier.
+- If no orders are earlier, write: "No orders starting earlier."
+
+Orders starting later:
+- List EACH delayed order individually — do not group.
+- Include N10D status and avail date context.
+  Format: ⚠ Prio [X]: [Name] — starts [time] later. [N10D status]. [Avail date info if dated].
+  Example: ⚠ Prio 5: Gall 21 Chicken Layer — starts 24 hrs 43 min later. Critical status with avail date March 19 — high risk of stockout.
+- If no orders are later, write: "No orders starting later."
+
+Orders at risk of missing avail date:
+- List EACH order individually — do not group.
+- Only include orders with DATED avail dates that will be missed.
+- Also include orders whose N10D status is Critical or Urgent even if their avail date is non-dated, if the time shift is significant.
+  Format: ⛔ Prio [X]: [Name] — new completion [date] exceeds avail date [date] (~[X] days late). [N10D status context].
+  Example: ⛔ Prio 5: Gall 21 Chicken Layer — new completion April 13 exceeds avail date March 19 (~25 days late). Critical status makes this the highest concern.
+- If no orders are at risk, write: "No orders at risk of missing their avail date."
+
+After the three sections, write a 3-5 sentence summary:
+- Each sentence on its OWN LINE.
+- Assess overall severity.
+- Highlight the most concerning orders (Critical/Urgent).
+- Note whether time savings offset delays.
+- Give a recommendation (safe to proceed, proceed with caution, not recommended).
+
+IMPORTANT:
+- Use the calculated time shifts as your reference — do NOT invent different times.
+- Always consider N10D status when assessing severity.
+- Always mention avail dates for dated orders.
+- Do NOT use markdown formatting (no **, ##, etc.).
+- Start each bullet with the appropriate icon (✅, ⚠, or ⛔).
+- Keep each section clean and scannable.
+  `;
+}
+```
+
+---
+
+## 2. RESPONSE PARSER — STRUCTURED SECTIONS
+
+```javascript
+function parseSchedulingImpactResponse(response) {
+  let cleaned = response.trim();
+  
+  // Remove markdown
+  cleaned = cleaned.replace(/\*\*/g, '');
+  cleaned = cleaned.replace(/#{1,6}\s*/g, '');
+  cleaned = cleaned.replace(/\*([^*]+)\*/g, '$1');
+  cleaned = cleaned.replace(/_([^_]+)_/g, '$1');
+  
+  const result = {
+    earlierSection: [],
+    laterSection: [],
+    deadlineSection: [],
+    summary: []
+  };
+  
+  // Split into sections
+  const earlierMatch = cleaned.match(/Orders starting earlier:\s*([\s\S]*?)(?=Orders starting later:|$)/i);
+  const laterMatch = cleaned.match(/Orders starting later:\s*([\s\S]*?)(?=Orders at risk|$)/i);
+  const deadlineMatch = cleaned.match(/Orders at risk of missing avail date:\s*([\s\S]*?)(?=\n\n[A-Z]|\n[A-Z][a-z]|$)/i);
+  
+  // Extract earlier lines
+  if (earlierMatch) {
+    const lines = earlierMatch[1].split('\n').map(l => l.trim()).filter(l => l.length > 0);
+    const sectionEnd = lines.findIndex(l => 
+      l.toLowerCase().startsWith('orders starting later') ||
+      l.toLowerCase().startsWith('orders at risk')
+    );
+    const sectionLines = sectionEnd >= 0 ? lines.slice(0, sectionEnd) : lines;
+    result.earlierSection = sectionLines.filter(l => 
+      l.startsWith('✅') || l.toLowerCase().includes('no orders starting earlier')
+    );
+  }
+  
+  // Extract later lines
+  if (laterMatch) {
+    const lines = laterMatch[1].split('\n').map(l => l.trim()).filter(l => l.length > 0);
+    const sectionEnd = lines.findIndex(l => 
+      l.toLowerCase().startsWith('orders at risk')
+    );
+    const sectionLines = sectionEnd >= 0 ? lines.slice(0, sectionEnd) : lines;
+    result.laterSection = sectionLines.filter(l => 
+      l.startsWith('⚠') || l.toLowerCase().includes('no orders starting later')
+    );
+  }
+  
+  // Extract deadline lines
+  if (deadlineMatch) {
+    const lines = deadlineMatch[1].split('\n').map(l => l.trim()).filter(l => l.length > 0);
+    // Deadline section ends when we hit the summary (non-icon lines after all ⛔ lines)
+    const deadlineLines = [];
+    const summaryLines = [];
+    let passedDeadlines = false;
+    
+    lines.forEach(l => {
+      if (l.startsWith('⛔') || l.toLowerCase().includes('no orders at risk')) {
+        deadlineLines.push(l);
+      } else if (deadlineLines.length > 0 || passedDeadlines) {
+        passedDeadlines = true;
+        summaryLines.push(l);
+      } else {
+        deadlineLines.push(l);
+      }
+    });
+    
+    result.deadlineSection = deadlineLines;
+    result.summary = summaryLines.filter(l => l.length > 0);
+  }
+  
+  // If summary not found in deadline section, try to find it at the end
+  if (result.summary.length === 0) {
+    const allSections = [
+      ...(result.earlierSection || []),
+      ...(result.laterSection || []),
+      ...(result.deadlineSection || [])
+    ];
+    const allSectionText = allSections.join('\n');
+    const remainingText = cleaned.replace(allSectionText, '').trim();
+    
+    // Find lines after the last section that aren't part of any section
+    const allLines = cleaned.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+    const lastIconIndex = allLines.reduce((max, l, i) => {
+      if (l.startsWith('✅') || l.startsWith('⚠') || l.startsWith('⛔') || 
+          l.toLowerCase().includes('no orders')) {
+        return i;
+      }
+      return max;
+    }, -1);
+    
+    if (lastIconIndex >= 0 && lastIconIndex < allLines.length - 1) {
+      result.summary = allLines.slice(lastIconIndex + 1).filter(l => 
+        !l.toLowerCase().startsWith('orders starting') &&
+        !l.toLowerCase().startsWith('orders at risk') &&
+        l.length > 0
+      );
+    }
+  }
+  
+  // Limit summary to 5 sentences
+  if (result.summary.length > 5) {
+    result.summary = result.summary.slice(0, 5);
+  }
+  
+  return result;
+}
+```
+
+---
+
+## 3. UPDATED DISPLAY COMPONENT
+
+```jsx
+function SchedulingImpactCard({ group, lineOrders, context }) {
+  const [calculatedImpact, setCalculatedImpact] = useState(null);
+  const [aiResponse, setAiResponse] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [useFallback, setUseFallback] = useState(false);
+  
+  const selectedOrderKey = group.orders.map(o => o.id).sort().join('|');
+  
+  useEffect(() => {
+    generateImpact();
+  }, [selectedOrderKey]);
+  
+  async function generateImpact() {
+    setIsLoading(true);
+    setAiResponse(null);
+    setUseFallback(false);
+    
+    // Step 1: Calculate (instant)
+    const calculated = buildSchedulingImpactData(group, lineOrders);
+    setCalculatedImpact(calculated);
+    
+    const hasAny = calculated.earlierOrders.length > 0 ||
+                   calculated.laterOrders.length > 0 ||
+                   calculated.deadlineMisses.length > 0;
+    
+    if (!hasAny) {
+      setIsLoading(false);
+      return;
+    }
+    
+    // Step 2: AI analysis
+    try {
+      const prompt = buildSchedulingImpactPrompt(context, calculated);
+      const response = await callAI(prompt);
+      const parsed = parseSchedulingImpactResponse(response);
+      
+      // Validate — check if AI output roughly aligns with calculated
+      const aiHasContent = parsed.earlierSection.length > 0 ||
+                           parsed.laterSection.length > 0 ||
+                           parsed.deadlineSection.length > 0;
+      
+      if (aiHasContent) {
+        setAiResponse(parsed);
+      } else {
+        console.warn('AI response had no content, using fallback');
+        setUseFallback(true);
+      }
+    } catch (error) {
+      console.error('Scheduling impact AI failed, using fallback:', error);
+      setUseFallback(true);
+    }
+    
+    setIsLoading(false);
+  }
+  
+  async function handleRefresh() {
+    setAiResponse(null);
+    setUseFallback(false);
+    await generateImpact();
+  }
+  
+  const hasNoImpact = calculatedImpact &&
+    calculatedImpact.earlierOrders.length === 0 &&
+    calculatedImpact.laterOrders.length === 0 &&
+    calculatedImpact.deadlineMisses.length === 0;
+  
+  return (
+    <div className="combine-card">
+      <div className="combine-card-header">
+        <span>📊 Scheduling Impact</span>
+        <button
+          className="combine-card-refresh"
+          onClick={handleRefresh}
+          title="Refresh analysis"
+        >
+          ↻ Refresh
+        </button>
+      </div>
+      
+      <div className="combine-card-body combine-card-body-text">
+        {isLoading && (
+          <span className="combine-card-loading">Analyzing scheduling impact...</span>
+        )}
+        
+        {!isLoading && hasNoImpact && (
+          <span className="scheduling-no-impact">
+            No scheduling impact — all orders remain on their current schedule.
+          </span>
+        )}
+        
+        {/* AI-generated output */}
+        {!isLoading && aiResponse && !useFallback && (
+          <SchedulingImpactAIDisplay response={aiResponse} />
+        )}
+        
+        {/* Calculated fallback */}
+        {!isLoading && useFallback && calculatedImpact && (
+          <SchedulingImpactFallback impact={calculatedImpact} />
+        )}
+      </div>
+    </div>
+  );
+}
+```
+
+### AI DISPLAY COMPONENT
+
+```jsx
+function SchedulingImpactAIDisplay({ response }) {
+  return (
+    <div className="scheduling-impact-ai">
+      {/* Earlier section */}
+      {response.earlierSection.length > 0 && (
+        <div className="scheduling-impact-section">
+          <div className="scheduling-impact-label scheduling-impact-faster">
+            Orders starting earlier:
+          </div>
+          {response.earlierSection.map((line, index) => (
+            <SchedulingImpactLine key={`earlier-${index}`} line={line} type="earlier" />
+          ))}
+        </div>
+      )}
+      
+      {/* Later section */}
+      {response.laterSection.length > 0 && (
+        <div className="scheduling-impact-section">
+          <div className="scheduling-impact-label scheduling-impact-delayed">
+            Orders starting later:
+          </div>
+          {response.laterSection.map((line, index) => (
+            <SchedulingImpactLine key={`later-${index}`} line={line} type="later" />
+          ))}
+        </div>
+      )}
+      
+      {/* Deadline section */}
+      {response.deadlineSection.length > 0 && (
+        <div className="scheduling-impact-section">
+          <div className="scheduling-impact-label scheduling-impact-deadline">
+            Orders at risk of missing avail date:
+          </div>
+          {response.deadlineSection.map((line, index) => (
+            <SchedulingImpactLine key={`deadline-${index}`} line={line} type="deadline" />
+          ))}
+        </div>
+      )}
+      
+      {/* Summary */}
+      {response.summary.length > 0 && (
+        <div className="scheduling-impact-ai-note">
+          {response.summary.map((sentence, index) => (
+            <p key={index} className="scheduling-impact-ai-sentence">
+              {sentence}
+            </p>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SchedulingImpactLine({ line, type }) {
+  // Strip leading icon if present — we'll add our own styling
+  let text = line.trim();
+  let icon = '';
+  
+  if (text.startsWith('✅')) {
+    icon = '✅';
+    text = text.replace(/^✅\s*/, '');
+  } else if (text.startsWith('⚠')) {
+    icon = '⚠';
+    text = text.replace(/^⚠\s*/, '');
+  } else if (text.startsWith('⛔')) {
+    icon = '⛔';
+    text = text.replace(/^⛔\s*/, '');
+  } else {
+    // No icon — assign default based on type
+    if (type === 'earlier') icon = '✅';
+    else if (type === 'later') icon = '⚠';
+    else if (type === 'deadline') icon = '⛔';
+  }
+  
+  // Check for "no orders" message
+  const isNoOrders = text.toLowerCase().includes('no orders');
+  
+  if (isNoOrders) {
+    return (
+      <div className="scheduling-impact-item scheduling-impact-item-none">
+        <span className="scheduling-impact-text-none">{text}</span>
+      </div>
+    );
+  }
+  
+  const itemClass = type === 'earlier' ? 'scheduling-impact-item-faster' :
+                    type === 'later' ? 'scheduling-impact-item-delayed' :
+                    'scheduling-impact-item-deadline';
+  
+  return (
+    <div className={`scheduling-impact-item ${itemClass}`}>
+      <span className="scheduling-impact-bullet">{icon}</span>
+      <span className="scheduling-impact-text">{text}</span>
+    </div>
+  );
+}
+```
+
+### CALCULATED FALLBACK COMPONENT
+
+```jsx
+function SchedulingImpactFallback({ impact }) {
+  return (
+    <div className="scheduling-impact-fallback">
+      <div className="scheduling-impact-fallback-note">
+        AI analysis unavailable — showing calculated data.
+      </div>
+      
+      {impact.laterOrders.length > 0 && (
+        <div className="scheduling-impact-section">
+          <div className="scheduling-impact-label scheduling-impact-delayed">
+            Orders starting later:
+          </div>
+          {impact.laterOrders.map((order, index) => (
+            <div key={index} className="scheduling-impact-item scheduling-impact-item-delayed">
+              <span className="scheduling-impact-bullet">⚠</span>
+              <span className="scheduling-impact-text">
+                Prio {order.prio}: {order.name} — starts <strong>{order.shiftFormatted} later</strong>
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+      
+      {impact.earlierOrders.length > 0 && (
+        <div className="scheduling-impact-section">
+          <div className="scheduling-impact-label scheduling-impact-faster">
+            Orders starting earlier:
+          </div>
+          {impact.earlierOrders.map((order, index) => (
+            <div key={index} className="scheduling-impact-item scheduling-impact-item-faster">
+              <span className="scheduling-impact-bullet">✅</span>
+              <span className="scheduling-impact-text">
+                Prio {order.prio}: {order.name} — starts <strong>{order.shiftFormatted} earlier</strong>
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+      
+      {impact.deadlineMisses.length > 0 && (
+        <div className="scheduling-impact-section">
+          <div className="scheduling-impact-label scheduling-impact-deadline">
+            Orders at risk of missing avail date:
+          </div>
+          {impact.deadlineMisses.map((order, index) => (
+            <div key={index} className="scheduling-impact-item scheduling-impact-item-deadline">
+              <span className="scheduling-impact-bullet">⛔</span>
+              <span className="scheduling-impact-text">
+                Prio {order.prio}: {order.name} — new completion <strong>{order.newCompletion}</strong> exceeds avail date <strong>{order.availDate}</strong> (~{order.delayDays} days late)
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+```
+
+---
+
+## 4. STYLING
+
+```css
+.scheduling-impact-ai {
+  display: flex;
+  flex-direction: column;
+}
+
+.scheduling-impact-section {
+  margin-bottom: 10px;
+}
+
+.scheduling-impact-section:last-of-type {
+  margin-bottom: 8px;
+}
+
+.scheduling-impact-label {
+  font-size: 11px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.scheduling-impact-delayed { color: #dc2626; }
+.scheduling-impact-faster { color: #16a34a; }
+.scheduling-impact-deadline { color: #dc2626; }
+
+.scheduling-impact-item {
+  display: flex;
+  gap: 6px;
+  padding: 3px 0;
+  font-size: 12px;
+  color: #374151;
+  line-height: 1.5;
+}
+
+.scheduling-impact-item-none {
+  padding: 3px 0;
+}
+
+.scheduling-impact-text-none {
+  font-size: 12px;
+  color: #9ca3af;
+  font-style: italic;
+}
+
+.scheduling-impact-bullet {
+  flex-shrink: 0;
+}
+
+.scheduling-impact-item-faster .scheduling-impact-bullet { color: #16a34a; }
+.scheduling-impact-item-delayed .scheduling-impact-bullet { color: #f59e0b; }
+.scheduling-impact-item-deadline .scheduling-impact-bullet { color: #dc2626; }
+
+.scheduling-impact-text {
+  font-size: 12px;
+  color: #374151;
+  line-height: 1.5;
+}
+
+.scheduling-impact-item-delayed .scheduling-impact-text strong { color: #dc2626; }
+.scheduling-impact-item-faster .scheduling-impact-text strong { color: #16a34a; }
+.scheduling-impact-item-deadline .scheduling-impact-text strong { color: #dc2626; }
+
+.scheduling-impact-ai-note {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #f3f4f6;
+}
+
+.scheduling-impact-ai-sentence {
+  font-size: 12px;
+  color: #6b7280;
+  line-height: 1.6;
+  margin: 0 0 6px 0;
+}
+
+.scheduling-impact-ai-sentence:last-child {
+  margin-bottom: 0;
+}
+
+.scheduling-impact-fallback-note {
+  font-size: 11px;
+  color: #9ca3af;
+  font-style: italic;
+  margin-bottom: 8px;
+  padding: 6px 10px;
+  background: #f9fafb;
+  border-radius: 4px;
+}
+```
+
+---
+
+## VERIFICATION
+
+### AI-generated output
+1. ✅ Earlier orders grouped when same time shift (e.g., "Prio 3–18 (16 orders) — all start ~10 min earlier")
+2. ✅ Notable orders highlighted with N10D status
+3. ✅ Later orders listed individually with N10D and avail date context
+4. ✅ Deadline misses listed individually with completion vs avail dates
+5. ✅ 3-5 sentence summary at the end, each on its own line
+
+### Icons
+6. ✅ ✅ for earlier orders
+7. ✅ ⚠ for later orders
+8. ✅ ⛔ for deadline misses
+9. ✅ "No orders..." message when section is empty
+
+### N10D consideration
+10. ✅ AI receives N10D status per order in context
+11. ✅ AI mentions Critical/Urgent orders as most concerning
+12. ✅ AI considers avail dates when assessing risk
+13. ✅ Deadline miss check includes Critical/Urgent non-dated orders with significant shifts
+
+### Fallback
+14. ✅ If AI fails → calculated bullet list shown
+15. ✅ Fallback note "AI analysis unavailable — showing calculated data"
+16. ✅ Fallback uses same styling as AI output
+
+### Re-analysis
+17. ✅ Strategy change triggers re-analysis
+18. ✅ Order removal triggers re-analysis
+19. ✅ Refresh button regenerates AI analysis
+```

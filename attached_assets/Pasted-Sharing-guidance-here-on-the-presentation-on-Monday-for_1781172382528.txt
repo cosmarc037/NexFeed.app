@@ -1,0 +1,20 @@
+Sharing guidance here on the presentation on Monday for MRD. I’ll be on leave  on Monday but ofcourse i’ll attend the 830am meeting
+Generally the flow is:
+#1 - timeline and next steps (to be taken care by BRS - already laid it down in the chat w them)
+#2 - end to end process (done already, this is the slide we were not able to show last time)
+#3 - then key slides for the presentation to the CEO*
+#4 - key UAT comments that were addressed (we need to show MRD some comments that occupied us past few days - to show to her that those are important comments)
+*For the key slides for the presentation to CEO (at most 5 slides)
+General guidance:
+- please make it super easy to understand but not oversimplified that they will say “ah simple lang ginawa natin”
+- the idea is that as if we’re pitching a new product (like how we did the primers of opgen/infoRM)
+- we try our best to quantify the benefits (based on numbers / estimates we have now)
+Flow could be (for your consideration, but please do change as needed or ask AI to be your thinking partner- the context / knowledge base of AI would be all of the (1) presentations done in the past (including weekly huddles + presentations when we briefed the iligan team/Ed) + (2) the context that we’ll be presenting to the CEO to share the app, get his approval for this to be rolled out in Iligan and potentially to the other plants as well (we want him to trust the app, see enormous quantified and qualitative benefits from it), show to him the automation and AI-based functionality (with focus on AI-based functionality since AI is the focus) that he would clearly understand even if he hasnt seen the app yet, show the natural next steps and extensions of the app, including the caveats) we want him to feel that we’re able to solve a real pain point, and we are able to bring in SME guidance + our AI dev capabilities to make this Proof of value happen. We also need to highlight the guardrails in AI to make sure it works well and wont go rougue
+^^ please consider this when you prompt AI to provide a detailed (but CEO friendly) 5- slide PPT.
+So on a high level (without limiting AI on what it’ll recommend), it could be.
+- pain point now (easy to understand) or the challenge at the plant. What it means to them if they just continue what they’re doing
+- our app - quantified and qualitative benefits (list down in easy to understand) with some snips - key features to highlight (for example xx% changeover time, financial metric etc)
+- how the iligan plant works process and after our app (like before manual now matic)
+- how it works: AI functionalities (press and sell on this further) and guardrails to AI — how did we test it to mKe sure it wont go haywire
+- extensions to the app and proposed next steps
+^^ this is only initial idea, but please feel free to ideate further (even with AI) given the context above

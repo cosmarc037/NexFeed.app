@@ -1,0 +1,119 @@
+Please fix the linked-order click behavior in Powermix / Line 5.
+
+The issue is more specific now:
+
+In Powermix / Line 5, the **item description name is not clickable at all** for source orders that created split orders.
+There is no usable click behavior there, even though the linked generated order exists.
+
+This must be corrected.
+
+---
+
+## ISSUE
+
+For source orders in Line 5 / Powermix:
+- the item description name is not actually clickable
+- there is no usable click target
+- the user cannot navigate from the source order to the generated split order
+
+This is different from the generated-order side, where clickability may already exist.
+
+The source Line 5 order itself must also support clickable navigation.
+
+---
+
+## REQUIRED BEHAVIOR
+
+If a Line 5 / Powermix order has a valid linked generated split order, then:
+
+- the **item description name itself** must be clickable
+- it must have actual click behavior in the Powermix view
+- clicking it must navigate to the generated split order
+- the app must not require refresh, tab switching, or workaround actions to enable the click
+
+This should work directly inside the Powermix / Line 5 page.
+
+---
+
+## IMPORTANT
+
+Stick to the original design:
+- no extra icon
+- no separate text link
+- no button
+
+Only the **item description name** should act as the click target.
+
+---
+
+## WHAT TO CHECK
+
+Please verify whether the Powermix / Line 5 table uses a different renderer or conditional logic from the feedmill tables.
+
+Possible issue:
+- clickable behavior may only be implemented for generated rows
+- but not for source Line 5 rows
+
+Please explicitly ensure that source Line 5 rows with linked generated orders are also marked and rendered as clickable.
+
+---
+
+## SOURCE-SIDE CLICKABILITY RULE
+
+A Powermix / Line 5 row should be clickable if:
+- it is a source order in Line 5
+- it has a valid linked generated split order
+- the linked order ID exists
+
+When those conditions are true:
+- item description text must become clickable
+- pointer cursor should appear
+- click action should work
+
+---
+
+## NAVIGATION RULE
+
+When user clicks the Line 5 source order item description:
+- if current view is Powermix, navigate to the feedmill/line containing the generated split order
+- if current view is All Feedmills, stay within All Feedmills and scroll to the generated row there
+
+This preserves the previously agreed context-aware navigation behavior.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log:
+
+```javascript
+console.debug('[Powermix Source Row Clickability]', {
+  orderId,
+  line: 'line_5',
+  isSourcePowermixOrder,
+  linkedGeneratedOrderId,
+  shouldBeClickable,
+  clickHandlerAttached,
+  rendererUsed,
+});
+```
+
+```javascript
+console.debug('[Powermix Source Click Navigation]', {
+  sourceOrderId,
+  linkedGeneratedOrderId,
+  currentViewMode,
+  navigationTriggered,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ In Powermix / Line 5, source orders with linked generated orders have clickable item description text
+2. ✅ Clicking the source order name works directly in Powermix without refresh
+3. ✅ No extra icon or separate text link is added
+4. ✅ Navigation from Line 5 source order to generated split order works correctly
+5. ✅ Context-aware navigation behavior remains intact
+6. ✅ Generated-order side clickability remains intact as well

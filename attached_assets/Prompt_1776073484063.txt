@@ -1,0 +1,516 @@
+```
+Implement the following changes to the Scheduling Impact section of Smart Combine:
+
+---
+
+## 1. SCHEDULING IMPACT — CALCULATED BULLET LIST + AI BRIEF NOTE
+
+The Scheduling Impact card now shows:
+- A calculated bullet list of delayed orders (from the two-pass simulation)
+- A calculated bullet list of faster orders
+- A brief AI note explaining the significance
+
+### HELPER — FORMAT TIME SHIFT
+
+```javascript
+function formatTimeShift(hours) {
+  const absHours = Math.abs(hours);
+  
+  if (absHours < 0.01) return '0 min';
+  
+  if (absHours >= 24) {
+    const days = Math.floor(absHours / 24);
+    const remainingHours = Math.floor(absHours % 24);
+    const remainingMins = Math.round((absHours % 1) * 60);
+    
+    if (days >= 2 && remainingHours === 0 && remainingMins === 0) {
+      return `${days} days`;
+    }
+    if (days >= 1 && remainingHours === 0 && remainingMins === 0) {
+      return `1 day`;
+    }
+    if (remainingHours > 0 && remainingMins > 0) {
+      return `${days} day${days > 1 ? 's' : ''} ${remainingHours} hr${remainingHours > 1 ? 's' : ''} ${remainingMins} min`;
+    }
+    if (remainingHours > 0) {
+      return `${days} day${days > 1 ? 's' : ''} ${remainingHours} hr${remainingHours > 1 ? 's' : ''}`;
+    }
+    return `${days} day${days > 1 ? 's' : ''}`;
+  }
+  
+  const wholeHours = Math.floor(absHours);
+  const mins = Math.round((absHours - wholeHours) * 60);
+  
+  if (wholeHours === 0) {
+    return `${mins} min`;
+  }
+  
+  if (mins === 0) {
+    return `${wholeHours} hr${wholeHours > 1 ? 's' : ''}`;
+  }
+  
+  return `${wholeHours} hr${wholeHours > 1 ? 's' : ''} ${mins} min`;
+}
+```
+
+### BUILD SCHEDULING IMPACT DATA — FROM TWO-PASS SIMULATION
+
+```javascript
+function buildSchedulingImpactData(group, lineOrders) {
+  const combiningOrders = group.orders;
+  const combiningIds = combiningOrders.map(o => o.id);
+  const line = group.line;
+  
+  const currentLineOrders = lineOrders
+    .filter(o => o.line === line && o.status !== 'Done' && o.status !== 'Cancel PO')
+    .sort((a, b) => a.prio - b.prio);
+  
+  // Pass 1 — Before (current schedule)
+  const beforeStart = {};
+  let runningTime = 0;
+  
+  currentLineOrders.forEach(order => {
+    beforeStart[order.id] = runningTime;
+    const vol = parseFloat(order.volume) || 0;
+    const rate = parseFloat(order.run_rate) || 0;
+    const prodHrs = rate > 0 ? vol / rate : 0;
+    const co = order._changeoverTotal ?? parseFloat(order.changeover) ?? 0;
+    runningTime += prodHrs + co;
+  });
+  
+  // Pass 2 — After (combined schedule)
+  const afterStart = {};
+  runningTime = 0;
+  let combinedDone = false;
+  
+  // Combined order details
+  const combinedVolume = combiningOrders.reduce((s, o) => s + (parseFloat(o.volume) || 0), 0);
+  const combinedRate = parseFloat(combiningOrders[0].run_rate) || 0;
+  const combinedProdHrs = combinedRate > 0 ? combinedVolume / combinedRate : 0;
+  const combinedCO = combiningOrders[0]._changeoverTotal ?? parseFloat(combiningOrders[0].changeover) ?? 0;
+  
+  // Determine lead order (earliest dated avail, or lowest prio)
+  const datedOrders = combiningOrders.filter(o => {
+    const avail = o.target_avail_date;
+    return avail && /^\d{4}-\d{2}-\d{2}/.test(avail) && !isNaN(Date.parse(avail));
+  });
+  
+  let leadOrderId;
+  if (datedOrders.length > 0) {
+    const earliest = datedOrders.sort((a, b) =>
+      new Date(a.target_avail_date) - new Date(b.target_avail_date)
+    )[0];
+    leadOrderId = earliest.id;
+  } else {
+    leadOrderId = combiningOrders.sort((a, b) => a.prio - b.prio)[0].id;
+  }
+  
+  currentLineOrders.forEach(order => {
+    if (combiningIds.includes(order.id)) {
+      if (order.id === leadOrderId && !combinedDone) {
+        // Lead order — inject combined production time
+        afterStart[order.id] = runningTime;
+        runningTime += combinedProdHrs + combinedCO;
+        combinedDone = true;
+      }
+      // Skip other combine members
+      return;
+    }
+    
+    // Non-combine order
+    afterStart[order.id] = runningTime;
+    const vol = parseFloat(order.volume) || 0;
+    const rate = parseFloat(order.run_rate) || 0;
+    const prodHrs = rate > 0 ? vol / rate : 0;
+    const co = order._changeoverTotal ?? parseFloat(order.changeover) ?? 0;
+    runningTime += prodHrs + co;
+  });
+  
+  // Calculate shifts for non-combine orders
+  const delayedOrders = [];
+  const fasterOrders = [];
+  
+  currentLineOrders.forEach(order => {
+    if (combiningIds.includes(order.id)) return;
+    if (beforeStart[order.id] === undefined || afterStart[order.id] === undefined) return;
+    
+    const shiftHrs = beforeStart[order.id] - afterStart[order.id];
+    // Negative = delayed, Positive = faster
+    
+    if (Math.abs(shiftHrs) < 0.01) return; // No significant change
+    
+    const entry = {
+      prio: order.prio,
+      name: order.item_description,
+      shiftHrs: Math.abs(shiftHrs),
+      shiftFormatted: formatTimeShift(Math.abs(shiftHrs))
+    };
+    
+    if (shiftHrs < 0) {
+      delayedOrders.push(entry);
+    } else {
+      fasterOrders.push(entry);
+    }
+  });
+  
+  // Sort delayed by most delay first
+  delayedOrders.sort((a, b) => b.shiftHrs - a.shiftHrs);
+  // Sort faster by most benefit first
+  fasterOrders.sort((a, b) => b.shiftHrs - a.shiftHrs);
+  
+  return { delayedOrders, fasterOrders };
+}
+```
+
+---
+
+## 2. AI BRIEF NOTE — ONLY THE SIGNIFICANCE EXPLANATION
+
+```javascript
+function buildSchedulingImpactNotePrompt(context, impactData) {
+  if (impactData.delayedOrders.length === 0 && impactData.fasterOrders.length === 0) {
+    return null; // No AI needed
+  }
+  
+  return `
+You are a production scheduling advisor. Provide a brief 1-2 sentence note about the significance of the following scheduling impact from combining orders on ${context.line}.
+
+Delayed orders:
+${impactData.delayedOrders.length > 0
+  ? impactData.delayedOrders.map(o => `- Prio ${o.prio}: ${o.name} — ${o.shiftFormatted} later`).join('\n')
+  : 'None'}
+
+Faster orders:
+${impactData.fasterOrders.length > 0
+  ? impactData.fasterOrders.map(o => `- Prio ${o.prio}: ${o.name} — ${o.shiftFormatted} earlier`).join('\n')
+  : 'None'}
+
+Product context:
+${impactData.delayedOrders.map(o => {
+  const lineOrder = context.lineContext.find(lo => lo.prio === o.prio);
+  return lineOrder ? `- ${o.name}: N10D status ${lineOrder.n10dStatus}, Avail: ${lineOrder.availDate}` : '';
+}).filter(Boolean).join('\n')}
+
+Write 1-2 sentences explaining whether these delays are concerning or acceptable. Mention if any delayed orders are Critical or Urgent. Do not repeat the list of orders. Do not use markdown. Keep it concise.
+  `;
+}
+```
+
+---
+
+## 3. SCHEDULING IMPACT DISPLAY COMPONENT
+
+```jsx
+function SchedulingImpactCard({ group, lineOrders, context }) {
+  const [impactData, setImpactData] = useState(null);
+  const [aiNote, setAiNote] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+  
+  useEffect(() => {
+    generateImpact();
+  }, []);
+  
+  async function generateImpact() {
+    setIsLoading(true);
+    
+    // Step 1: Calculate impact (instant)
+    const data = buildSchedulingImpactData(group, lineOrders);
+    setImpactData(data);
+    
+    // Step 2: Get AI note (async)
+    if (data.delayedOrders.length > 0 || data.fasterOrders.length > 0) {
+      try {
+        const prompt = buildSchedulingImpactNotePrompt(context, data);
+        if (prompt) {
+          const response = await callAI(prompt);
+          const cleaned = response.replace(/\*\*/g, '').replace(/#{1,6}\s*/g, '').trim();
+          setAiNote(cleaned);
+        }
+      } catch (error) {
+        console.error('AI note failed:', error);
+        setAiNote(null);
+      }
+    }
+    
+    setIsLoading(false);
+  }
+  
+  async function handleRefresh() {
+    setAiNote(null);
+    await generateImpact();
+  }
+  
+  const hasNoImpact = impactData && 
+    impactData.delayedOrders.length === 0 && 
+    impactData.fasterOrders.length === 0;
+  
+  return (
+    <div className="combine-card">
+      <div className="combine-card-header">
+        <span>📊 Scheduling Impact</span>
+        <button 
+          className="combine-card-refresh"
+          onClick={handleRefresh}
+          title="Refresh analysis"
+        >
+          ↻ Refresh
+        </button>
+      </div>
+      
+      <div className="combine-card-body combine-card-body-text">
+        {isLoading && !impactData && (
+          <span className="combine-card-loading">Analyzing scheduling impact...</span>
+        )}
+        
+        {hasNoImpact && (
+          <span className="scheduling-no-impact">
+            No scheduling impact — all orders remain on their current schedule.
+          </span>
+        )}
+        
+        {impactData && impactData.delayedOrders.length > 0 && (
+          <div className="scheduling-impact-section">
+            <div className="scheduling-impact-label scheduling-impact-delayed">
+              Delayed orders:
+            </div>
+            {impactData.delayedOrders.map((order, index) => (
+              <div key={index} className="scheduling-impact-item scheduling-impact-item-delayed">
+                <span className="scheduling-impact-bullet">⚠</span>
+                <span className="scheduling-impact-text">
+                  Prio {order.prio}: {order.name} — starts <strong>{order.shiftFormatted} later</strong>
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+        
+        {impactData && impactData.fasterOrders.length > 0 && (
+          <div className="scheduling-impact-section">
+            <div className="scheduling-impact-label scheduling-impact-faster">
+              Faster orders:
+            </div>
+            {impactData.fasterOrders.map((order, index) => (
+              <div key={index} className="scheduling-impact-item scheduling-impact-item-faster">
+                <span className="scheduling-impact-bullet">✅</span>
+                <span className="scheduling-impact-text">
+                  Prio {order.prio}: {order.name} — starts <strong>{order.shiftFormatted} earlier</strong>
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+        
+        {/* AI brief note */}
+        {aiNote && (
+          <div className="scheduling-impact-note">
+            {aiNote}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+## 4. STYLING
+
+```css
+.scheduling-no-impact {
+  font-size: 12px;
+  color: #16a34a;
+  font-style: italic;
+}
+
+.scheduling-impact-section {
+  margin-bottom: 10px;
+}
+
+.scheduling-impact-section:last-of-type {
+  margin-bottom: 8px;
+}
+
+.scheduling-impact-label {
+  font-size: 11px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.scheduling-impact-delayed {
+  color: #dc2626;
+}
+
+.scheduling-impact-faster {
+  color: #16a34a;
+}
+
+.scheduling-impact-item {
+  display: flex;
+  gap: 6px;
+  padding: 3px 0;
+  font-size: 12px;
+  color: #374151;
+  line-height: 1.5;
+}
+
+.scheduling-impact-item-delayed .scheduling-impact-bullet {
+  color: #f59e0b;
+  flex-shrink: 0;
+}
+
+.scheduling-impact-item-faster .scheduling-impact-bullet {
+  color: #16a34a;
+  flex-shrink: 0;
+}
+
+.scheduling-impact-text {
+  font-size: 12px;
+  color: #374151;
+}
+
+.scheduling-impact-text strong {
+  font-weight: 600;
+}
+
+.scheduling-impact-item-delayed .scheduling-impact-text strong {
+  color: #dc2626;
+}
+
+.scheduling-impact-item-faster .scheduling-impact-text strong {
+  color: #16a34a;
+}
+
+.scheduling-impact-note {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid #f3f4f6;
+  font-size: 12px;
+  color: #6b7280;
+  line-height: 1.6;
+  font-style: italic;
+}
+```
+
+---
+
+## 5. UPDATE THE COMBINE GROUP — USE NEW SCHEDULING IMPACT CARD
+
+```jsx
+function CombineGroup({ group, lineOrders, masterData, n10dData, changeoverRules }) {
+  // ... existing state for insertion and alerts ...
+  
+  return (
+    <div className="combine-group">
+      {/* Order cards */}
+      {group.orders.map(order => (
+        <CombineOrderCard key={order.id} order={order} />
+      ))}
+      
+      {/* Combined volume label */}
+      <div className="combine-volume-label">
+        Combined Volume: {group.combinedVolume} MT
+      </div>
+      
+      {/* Card 1: Combined Production Summary + Changeover Savings */}
+      <div className="combine-card">
+        {/* ... same as before ... */}
+      </div>
+      
+      {/* Card 2: Insertion Position — AI */}
+      <div className="combine-card">
+        <div className="combine-card-header">
+          <span>📍 Insertion Position</span>
+          <button className="combine-card-refresh" onClick={() => refreshSection('insertion')}>
+            ↻ Refresh
+          </button>
+        </div>
+        <div className="combine-card-body combine-card-body-text">
+          {isAnalyzing && !insertionAnalysis ? (
+            <span className="combine-card-loading">Analyzing optimal position...</span>
+          ) : (
+            <span>{insertionAnalysis || 'Unable to determine.'}</span>
+          )}
+        </div>
+      </div>
+      
+      {/* Card 3: Scheduling Impact — CALCULATED + AI note */}
+      <SchedulingImpactCard 
+        group={group} 
+        lineOrders={lineOrders}
+        context={analysisContext}
+      />
+      
+      {/* Card 4: Alerts — AI */}
+      <div className="combine-card combine-card-alerts">
+        <div className="combine-card-header combine-card-header-alerts">
+          <span>⚠ Alerts</span>
+          <button className="combine-card-refresh" onClick={() => refreshSection('alerts')}>
+            ↻ Refresh
+          </button>
+        </div>
+        <div className="combine-card-body combine-card-body-text">
+          {isAnalyzing && !alertsAnalysis ? (
+            <span className="combine-card-loading">Checking for alerts...</span>
+          ) : (
+            <CombineAlertsDisplay alerts={alertsAnalysis} />
+          )}
+        </div>
+      </div>
+      
+      {/* Actions */}
+      <div className="combine-group-actions">
+        <button 
+          className="combine-approve-btn"
+          onClick={() => handleApprove(group, { insertionPosition: insertionAnalysis })}
+          disabled={isAnalyzing}
+        >
+          Approve
+        </button>
+        <button 
+          className="combine-dismiss-btn"
+          onClick={() => handleDismiss(group)}
+        >
+          Dismiss
+        </button>
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+## VERIFICATION
+
+### Scheduling Impact display
+1. ✅ Shows "Delayed orders:" with bullet list of affected orders
+2. ✅ Shows "Faster orders:" with bullet list of benefited orders
+3. ✅ Each bullet: "⚠ Prio X: Product Name — starts X hrs Y min later"
+4. ✅ Each bullet: "✅ Prio X: Product Name — starts X hrs Y min earlier"
+5. ✅ "No scheduling impact — all orders remain on their current schedule." when clean
+6. ✅ Brief AI note at bottom explaining significance
+
+### Time formatting
+7. ✅ 24.71 hrs → "1 day 43 min later" (not "24.71 hrs later")
+8. ✅ 0.17 hrs → "10 min earlier"
+9. ✅ 15.91 hrs → "15 hrs 55 min later"
+10. ✅ 0 hrs → not shown (filtered out)
+
+### Calculated vs AI
+11. ✅ Bullet lists are calculated from two-pass simulation (always accurate)
+12. ✅ AI only provides 1-2 sentence significance note
+13. ✅ If AI fails, bullet list still shows correctly
+
+### Look and feel
+14. ✅ Same card style as Combined Production Summary
+15. ✅ Font sizes match (12px body, 11px labels)
+16. ✅ Delayed orders in red, faster orders in green
+17. ✅ AI note in grey italic with top border separator
+18. ✅ Refresh button in header
+
+### No old elements
+19. ✅ No prio range badges (removed)
+20. ✅ No "INTERSPERSED ORDERS" or "DOWNSTREAM ORDERS" labels
+21. ✅ No dense paragraph listing every order
+```

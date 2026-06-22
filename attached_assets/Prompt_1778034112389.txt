@@ -1,0 +1,276 @@
+```
+Revisit and fix the per-line summary totals in auto-sequence so Total Vol Before / After uses the actual effective displayed MT per order, not only the raw volume.
+
+---
+
+## OBJECTIVE
+
+The per-line summary is currently undercounting total MT because it appears to be summing raw order volume instead of the actual displayed/effective order volume.
+
+Example from the current screenshot:
+- Line 1 shows `Total Vol Before = 97.0 MT`
+- But the actual displayed order volumes are:
+  - 3 MT
+  - 72 MT (Original: 70 MT)
+  - 24 MT
+- Manual total = `99 MT`
+
+So the summary should show:
+- `99.0 MT`
+not
+- `97.0 MT`
+
+---
+
+## EXPECTED RULE FOR PER-LINE TOTAL VOLUME
+
+The per-line summary should use the **actual effective volume currently applied to the order**, not just the raw source volume.
+
+Use this logic:
+
+1. If an order has a **user override** (`volume_override`), use the override volume
+2. Else if the order is **app-adjusted / rounded up** because its raw MT is not divisible by batch size, use the app-adjusted effective volume
+3. Else if the order is already divisible and has no override, use the normal/base volume
+
+In short:
+- for combination logic, we intentionally use raw in some cases
+- but for **summary totals**, we must use the actual effective/displayed MT seen by the user
+
+This applies to:
+- Total Vol Before (MT)
+- Total Vol After (MT)
+
+---
+
+## 1. DEFINE A SHARED HELPER FOR EFFECTIVE DISPLAYED ORDER VOLUME
+
+Create or update a helper that returns the actual effective volume that the app is displaying / using operationally.
+
+### Suggested helper:
+```javascript
+function adjustVolumeToBatchCeiling(volume, batchSize) {
+  const v = parseFloat(volume || 0) || 0;
+  const b = parseFloat(batchSize || 0) || 0;
+
+  if (b <= 0) return Number(v.toFixed(2));
+
+  return Number((Math.ceil(v / b) * b).toFixed(2));
+}
+
+function getEffectiveOrderVolume(order) {
+  const overrideVolume = parseFloat(order.volume_override);
+  if (!Number.isNaN(overrideVolume)) {
+    return Number(overrideVolume.toFixed(2));
+  }
+
+  const combinedEffective = parseFloat(order._combined_effective_volume);
+  if (!Number.isNaN(combinedEffective)) {
+    return Number(combinedEffective.toFixed(2));
+  }
+
+  const explicitEffective = parseFloat(order._effectiveVolumeMT);
+  if (!Number.isNaN(explicitEffective)) {
+    return Number(explicitEffective.toFixed(2));
+  }
+
+  const rawVolume = parseFloat(
+    order.total_volume_mt ??
+    order.volume ??
+    order.volume_mt ??
+    0
+  ) || 0;
+
+  const batchSize = parseFloat(order.batch_size ?? order.batchSize ?? 0) || 0;
+
+  return adjustVolumeToBatchCeiling(rawVolume, batchSize);
+}
+```
+
+Important:
+- this helper is for **display/summary/operational totaling**
+- not for pre-combine raw-basis summation
+
+---
+
+## 2. USE EFFECTIVE VOLUME FOR PER-LINE TOTALS
+
+Wherever per-line summary is currently computing:
+- `Total Vol Before (MT)`
+- `Total Vol After (MT)`
+
+replace raw summation with effective-volume summation.
+
+### Example:
+```javascript
+function calculateLineTotalEffectiveMT(orders) {
+  return Number(
+    (orders || []).reduce((sum, order) => {
+      return sum + getEffectiveOrderVolume(order);
+    }, 0).toFixed(2)
+  );
+}
+```
+
+Then:
+```javascript
+const totalVolBefore = calculateLineTotalEffectiveMT(beforeOrdersForLine);
+const totalVolAfter = calculateLineTotalEffectiveMT(afterOrdersForLine);
+```
+
+Do not use:
+```javascript
+order.total_volume_mt
+```
+directly for line summary totals.
+
+---
+
+## 3. CLARIFY THE DIFFERENCE BETWEEN COMBINATION BASIS VS SUMMARY TOTAL
+
+This is important because the rules are intentionally different.
+
+### Combination logic
+- may use raw volume as the basis in some cases
+- especially for app-adjusted-only orders
+- per the previously agreed rules
+
+### Summary logic
+- must always use the **effective applied/displayed MT**
+- because the user expects the line summary to reflect what is actually scheduled
+
+So:
+- combination basis ≠ summary total basis
+
+Do not reuse the combine raw-basis helper for per-line summary totals.
+
+---
+
+## 4. MATCH THE PER-LINE SUMMARY TO WHAT THE USER SEES IN THE TABLE
+
+The summary should always match the visible order MT values.
+
+If the row shows:
+- `72 MT (Original: 70 MT)`
+
+then line summary must count:
+- `72`
+not
+- `70`
+
+If the row shows:
+- user override `8 MT`
+
+then line summary must count:
+- `8`
+not
+- original raw `10`
+
+This ensures the summary matches the actual displayed state.
+
+---
+
+## 5. APPLY THIS TO BOTH BEFORE AND AFTER TABLES
+
+The fix must apply consistently to:
+
+### Before summary
+- Total Vol Before (MT)
+
+### After summary
+- Total Vol After (MT)
+
+That means both summary calculations must total the effective displayed MT of the rows that belong to that line in that state.
+
+---
+
+## 6. ENSURE LINE HOURS REMAIN CONSISTENT WITH THE SAME EFFECTIVE VOLUME BASIS
+
+Because production hours are already based on the effective volume, the volume totals should align with those hour totals.
+
+This means:
+- if volume totals are corrected to effective volume
+- Total Hrs Before / After should continue to feel consistent with the totals shown
+
+If any mismatch exists between line total hours and line total effective MT, review whether the same helper basis is being used consistently.
+
+---
+
+## 7. DO NOT BREAK COMBINED ORDERS
+
+If an order is a combined order:
+- use the final effective combined volume actually scheduled
+- not stale raw child totals
+- not stale override leakage from main order
+
+Prefer:
+```javascript
+order._combined_effective_volume
+```
+if available.
+
+If not, fall back to standard effective-volume logic.
+
+---
+
+## 8. ADD DEBUG LOGGING TO VERIFY VOLUME TOTALING
+
+Temporarily log per-line volume breakdowns:
+
+```javascript
+console.debug('[Line Summary Volume Check]', {
+  line,
+  beforeBreakdown: (beforeOrdersForLine || []).map(order => ({
+    orderId: order.id,
+    rawVolume: order.total_volume_mt,
+    overrideVolume: order.volume_override,
+    effectiveVolume: getEffectiveOrderVolume(order),
+  })),
+  afterBreakdown: (afterOrdersForLine || []).map(order => ({
+    orderId: order.id,
+    rawVolume: order.total_volume_mt,
+    overrideVolume: order.volume_override,
+    effectiveVolume: getEffectiveOrderVolume(order),
+  })),
+  totalVolBefore,
+  totalVolAfter,
+});
+```
+
+This will help confirm:
+- the 72 MT row is contributing 72, not 70
+- overrides are respected
+- line summaries match the table
+
+---
+
+## 9. VERIFY AGAINST THE PROVIDED EXAMPLE
+
+For Line 1 before:
+- 3 MT
+- 72 MT (Original 70 MT)
+- 24 MT
+
+Expected total:
+- `99.0 MT`
+
+The summary must no longer show:
+- `97.0 MT`
+
+---
+
+## 10. VERIFICATION
+
+### Summary totals
+1. ✅ Total Vol Before uses effective displayed order volume
+2. ✅ Total Vol After uses effective displayed order volume
+3. ✅ User override volumes are respected in the summary
+4. ✅ App-adjusted rounded-up volumes are respected in the summary
+5. ✅ Already-divisible orders use their normal volume correctly
+
+### Consistency
+6. ✅ Line summary totals now match the actual row MT values shown in the table
+7. ✅ Combined orders use their final effective combined volume in totals
+8. ✅ The summary no longer undercounts by using raw-only totals
+
+### Example validation
+9. ✅ The provided Line 1 example now totals to 99.0 MT instead of 97.0 MT

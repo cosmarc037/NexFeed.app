@@ -1,0 +1,504 @@
+Please add a new isolated workspace in the left navigation called **Fulfillment (Demo)** and implement a connected **demo-only order/dispatch environment** for testing fulfillment-from-inventory logic without affecting the main application tabs.
+
+---
+
+# 1. ADD A NEW LEFT-NAVIGATION SECTION: `FULFILLMENT (DEMO)`
+
+Please add a new section in the left navigation **after Configurations** called:
+
+- `Fulfillment (Demo)`
+
+Under this new section, add duplicated/demo versions of these tabs:
+
+- `All Feedmills`
+- `Order History`
+- `Future Dispatches`
+
+### Goal
+Create a sandbox/demo workspace for testing a new fulfillment feature without impacting the main app’s live operational tabs.
+
+### Expected result
+Users can access a separate demo workspace from the left nav that looks and behaves similarly to the main app for the selected tabs, but is isolated from the main data/state.
+
+---
+
+# 2. DUPLICATE ONLY THESE THREE TABS INTO THE DEMO WORKSPACE
+
+Please duplicate the functionality of these main tabs into the new **Fulfillment (Demo)** workspace:
+
+- Main `Orders > All Feedmills`
+- Main `Configurations > Order History`
+- Main `Configurations > Future Dispatches`
+
+### Important
+These demo tabs should be:
+- functionally similar to the originals
+- visually familiar to users
+- but **data-isolated from the main tabs**
+
+### Expected result
+The demo workspace has its own:
+- Demo All Feedmills
+- Demo Order History
+- Demo Future Dispatches
+
+---
+
+# 3. THE DEMO TABS MUST BE CONNECTED TO EACH OTHER, BUT NOT TO THE MAIN TABS
+
+Please make the duplicated demo tabs function as one connected mini-workspace.
+
+## Demo internal connections
+### Demo All Feedmills
+Must connect to:
+- Demo Future Dispatches
+- Demo Order History
+
+### Demo Order History
+Must reflect:
+- demo orders that become `Done`
+- demo orders that become `Cancelled`
+
+### Demo Future Dispatches
+Must be the data source for:
+- fulfillment detection in Demo All Feedmills
+- demo auto-sequence logic that references future dispatches
+- demo product insights / target-date-based logic
+- any other behavior in Demo All Feedmills that would normally depend on Future Dispatches
+
+### Important
+These demo tabs must **not** be connected to the main versions of:
+- All Feedmills
+- Order History
+- Future Dispatches
+
+### Expected result
+The demo tabs are internally connected to each other, but isolated from the main workspace.
+
+---
+
+# 4. KEEP THE DEMO WORKSPACE CONNECTED TO SHARED CONFIGURATION/REFERENCE SOURCES
+
+Although the demo tabs should be isolated from the main operational tabs, they should still use the existing shared configuration/reference modules:
+
+- `Changeover Rules`
+- `Powermix Split`
+- `Master Data`
+
+### Expected result
+The demo workspace should still:
+- calculate changeovers using the current Changeover Rules
+- generate Powermix orders when applicable using the current Powermix Split rules
+- populate key order values using the current Master Data
+
+### Important
+Only these shared references should be shared.
+The demo tabs should not otherwise sync or mutate the main tabs.
+
+---
+
+# 5. DO NOT CONNECT THE DEMO WORKSPACE TO MAIN OVERVIEW, ANALYTICS, OR MONITORING
+
+Please ensure the new **Fulfillment (Demo)** workspace does **not** connect to or update:
+
+- `Dashboard > Overview`
+- `Dashboard > Analytics`
+- `Dashboard > Monitoring`
+
+### Reason
+We do not want demo actions to affect:
+- main dashboard metrics
+- main analytics charts
+- main production monitoring views
+
+### Expected result
+Any edits, sequence changes, done/cancelled updates, future dispatches uploads, fulfillment approvals, or generated pre-orders in the demo workspace must **not** update the main Overview, Analytics, or Monitoring sections.
+
+---
+
+# 6. PRESERVE FULL ORDER FUNCTIONALITY INSIDE DEMO ALL FEEDMILLS
+
+Please make sure the duplicated **Demo All Feedmills** tab preserves the same core order-management functionality as the main All Feedmills tab.
+
+### It should still support actions such as:
+- editing orders
+- drag-and-drop sequencing
+- cut
+- hold
+- cancel
+- done
+- auto-sequence
+- combining/uncombining
+- generated orders where applicable
+- other relevant order interactions that exist in the main All Feedmills workflow
+
+### Important
+These actions must operate only on the **demo dataset**.
+
+### Expected result
+The demo All Feedmills behaves like the real All Feedmills experience, but changes remain isolated to the demo workspace only.
+
+---
+
+# 7. ENSURE DEMO ORDER CHANGES STAY ONLY IN THE DEMO WORKSPACE
+
+Please enforce strict isolation so that any edits or changes made in the demo tabs stay only in the demo environment.
+
+### This includes:
+- status changes
+- sequencing changes
+- auto-sequence results
+- drag/drop reordering
+- done/cancelled updates
+- generated orders
+- fulfillment approvals/dismissals
+- future dispatch upload changes
+- inventory adjustments
+
+### Expected result
+Changes in:
+- Demo All Feedmills
+- Demo Future Dispatches
+- Demo Order History
+
+must not update:
+- Main All Feedmills
+- Main Future Dispatches
+- Main Order History
+
+---
+
+# 8. DEMO ORDER HISTORY SHOULD TRACK ONLY DONE/CANCELLED DEMO ORDERS
+
+Please make sure the duplicated **Demo Order History** follows the same purpose as the main Order History tab in Configurations.
+
+### Important clarification
+This is **not** the per-order activity log.
+
+It is the tab that lists:
+- completed orders
+- cancelled orders
+
+### Expected result
+If a user marks an order as:
+- `Done`
+- `Cancelled`
+
+inside **Demo All Feedmills**, that order should appear in **Demo Order History**, not the main Order History.
+
+---
+
+# 9. DEMO FUTURE DISPATCHES MUST BE ITS OWN DATASET AND UPLOAD TARGET
+
+Please ensure the duplicated **Demo Future Dispatches** is independently uploadable and isolated from the main Future Dispatches.
+
+### Required behavior
+- uploading a file to **Demo Future Dispatches** updates only Demo Future Dispatches
+- uploading a file to **Main Future Dispatches** updates only Main Future Dispatches
+
+### Expected result
+Users can test fulfillment logic using a demo-specific future dispatch dataset without changing the main future dispatch records.
+
+---
+
+# 10. IMPLEMENT THE FULFILLMENT-FROM-INVENTORY DEMO FEATURE IN DEMO ALL FEEDMILLS
+
+Please implement the fulfillment concept first in the duplicated **Demo All Feedmills** tab.
+
+### Goal
+If a demo order can be satisfied using available inventory from **Demo Future Dispatches**, the app should detect that and generate a pending replenishment/pre-production suggestion.
+
+---
+
+# 11. FULFILLMENT DETECTION RULE
+
+If an order in **Demo All Feedmills** has a matching product/inventory in **Demo Future Dispatches** and the available inventory can satisfy that order’s required volume, then the app should detect that the order can be fulfilled from inventory.
+
+### Example
+Demo order:
+- `Gallimax 200 MT`
+
+Demo Future Dispatches inventory:
+- `Gallimax 230 MT`
+
+Since inventory can satisfy the order volume:
+- the app should detect that this order is fulfillable from inventory
+
+### Important
+This should happen only within the **demo workspace** using the **demo Future Dispatches** dataset.
+
+---
+
+# 12. GENERATE A PENDING `PRE-ORDER` SUGGESTION BELOW THE ORDER TABLE
+
+When the app detects that a demo order can be fulfilled from inventory, it should generate a suggested replenishment order below the order table.
+
+### Expected behavior
+The suggestion should:
+- appear at the bottom of the sequence/order table
+- be visually distinct (for example grayed out / pending style)
+- show a badge such as:
+  - `Pre-order`
+
+### Important
+This should be a **pending suggestion**, not an automatically committed order.
+
+### Expected result
+Users can review the suggested pre-order before deciding whether to include it.
+
+---
+
+# 13. ADD APPROVAL DECISIONS FOR THE PENDING `PRE-ORDER`
+
+Please add decision controls on the generated pre-order suggestion, such as:
+
+- `Approve`
+- `Dismiss`
+
+### Behavior
+#### If user clicks `Approve`
+- the generated pre-order should be added into the demo sequence
+- this approval acts as the indicator that the original order was fulfilled using inventory
+- the demo Future Dispatches adjusted inventory should update accordingly
+
+#### If user clicks `Dismiss`
+- nothing happens
+- the pre-order is not added to the sequence
+- the original order is not treated as fulfilled from inventory
+- no inventory adjustment is applied from that suggestion
+
+### Expected result
+The user must explicitly confirm whether the inventory-based fulfillment should result in a replenishment/pre-order.
+
+---
+
+# 14. APPROVED `PRE-ORDER` SHOULD BECOME A NORMAL DEMO ORDER IN THE SEQUENCE
+
+Once a user approves the generated pre-order suggestion, it should become a normal order within the **demo** sequence.
+
+### Expected result
+After approval, the pre-order should support normal demo order behaviors such as:
+- sequencing
+- drag/drop
+- cut
+- auto-sequence
+- edits
+- combination
+- and other normal relevant order operations in Demo All Feedmills
+
+---
+
+# 15. DO NOT AUTOMATICALLY CHANGE THE ORIGINAL ORDER UNLESS THE PRE-ORDER IS APPROVED
+
+Please preserve this rule:
+
+- detection alone does not automatically finalize anything
+- the order is only considered fulfilled from inventory once the user **Approves** the generated pre-order suggestion
+
+### Expected result
+If the user dismisses the suggestion:
+- no fulfillment action is committed
+- no adjusted inventory update should be applied from that suggestion
+- no replenishment order is inserted
+
+---
+
+# 16. ADD `ADJUSTED INVENTORY` COLUMN TO DEMO FUTURE DISPATCHES
+
+Please add a new column in the duplicated **Demo Future Dispatches** after the `Inventory` column called:
+
+- `Adjusted Inventory`
+
+### Goal
+Show the effective inventory after subtracting inventory used to satisfy demo orders and adding the product’s average daily amount.
+
+---
+
+# 17. ADJUSTED INVENTORY FORMULA
+
+Please calculate **Adjusted Inventory** as:
+
+- `Adjusted Inventory = Inventory - satisfied order volume + Average Daily`
+
+### Example
+If:
+- Inventory = `230 MT`
+- Satisfied order volume = `200 MT`
+- Average Daily = `20 MT`
+
+Then:
+- Adjusted Inventory = `50 MT`
+
+### Important
+This calculation should apply within the **demo Future Dispatches** dataset based on demo fulfillment approvals.
+
+### Expected result
+Adjusted Inventory reflects the demo inventory after approved fulfillment usage and replenishment logic.
+
+---
+
+# 18. ADD A TOOLTIP TO EXPLAIN HOW ADJUSTED INVENTORY IS CALCULATED
+
+Please add a tooltip on the **Adjusted Inventory** column or values so users understand how it was computed.
+
+### Suggested explanation
+- `Adjusted Inventory = Inventory - fulfilled order volume + Average Daily`
+- or similar wording
+
+### Expected result
+Users can easily understand where the adjusted number came from.
+
+---
+
+# 19. MAKE DEMO AUTO-SEQUENCE AND RELATED FUTURE-DISPATCH LOGIC USE DEMO FUTURE DISPATCHES, NOT MAIN FUTURE DISPATCHES
+
+Any behavior inside **Demo All Feedmills** that normally depends on **Future Dispatches** should use the **Demo Future Dispatches** dataset instead of the main one.
+
+### This includes things like:
+- future-dispatch target dates
+- product insights
+- inventory-based fulfillment detection
+- any order prioritization logic that uses future dispatches
+- other order-side features currently dependent on Future Dispatches
+
+### Expected result
+Demo All Feedmills aligns with Demo Future Dispatches, not the main Future Dispatches.
+
+---
+
+# 20. KEEP THE DEMO WORKSPACE REVERSIBLE AND SAFE
+
+Please structure this as a demo/testing workspace that can evolve without disrupting the main app.
+
+### Goal
+Allow testing of the fulfillment approach safely before considering rollout into the main application.
+
+### Expected result
+The demo workspace should be modular, isolated, and safe for experimentation.
+
+---
+
+# IMPORTANT
+
+Please implement a new **Fulfillment (Demo)** workspace with these rules:
+
+## Demo tabs
+- Demo All Feedmills
+- Demo Order History
+- Demo Future Dispatches
+
+## Demo isolation
+These three tabs:
+- are connected to each other
+- are not connected to the main equivalents
+
+## Shared dependencies only
+They still use:
+- Changeover Rules
+- Powermix Split
+- Master Data
+
+## Fulfillment behavior
+If a demo order can be satisfied by demo Future Dispatches inventory:
+- generate a pending `Pre-order` suggestion below the order table
+- user can `Approve` or `Dismiss`
+- if approved:
+  - add it to the demo sequence
+  - treat that as fulfillment-from-inventory confirmation
+  - update Demo Future Dispatches `Adjusted Inventory`
+- if dismissed:
+  - nothing changes
+
+## Demo Order History
+Tracks only demo orders that become:
+- Done
+- Cancelled
+
+## Demo Future Dispatches
+Must be independently uploadable and isolated from the main Future Dispatches.
+
+---
+
+# DEBUG LOGGING
+
+Temporarily log demo workspace isolation and fulfillment flow.
+
+```javascript
+console.debug('[Fulfillment Demo Workspace]', {
+  workspace: 'fulfillment_demo',
+  connectedTabs: ['all_feedmills_demo', 'order_history_demo', 'future_dispatches_demo'],
+  isolatedFromMain: true,
+  sharedReferences: ['changeover_rules', 'powermix_split', 'master_data'],
+});
+```
+
+```javascript
+console.debug('[Fulfillment Demo Detection]', {
+  orderId,
+  product,
+  orderVolume,
+  demoInventory,
+  canBeSatisfiedFromInventory: demoInventory >= orderVolume,
+});
+```
+
+```javascript
+console.debug('[Fulfillment Demo Pre-Order Suggestion]', {
+  originalOrderId,
+  generatedPreOrderId,
+  badge: 'Pre-order',
+  pendingApproval: true,
+});
+```
+
+```javascript
+console.debug('[Fulfillment Demo Decision]', {
+  originalOrderId,
+  generatedPreOrderId,
+  decision, // 'approve' | 'dismiss'
+  addedToDemoSequence: decision === 'approve',
+});
+```
+
+```javascript
+console.debug('[Fulfillment Demo Adjusted Inventory]', {
+  product,
+  inventory,
+  satisfiedOrderVolume,
+  averageDaily,
+  adjustedInventory,
+});
+```
+
+```javascript
+console.debug('[Fulfillment Demo Order History Sync]', {
+  orderId,
+  status,
+  shouldAppearInDemoOrderHistory: ['done', 'cancelled'].includes(String(status).toLowerCase()),
+});
+```
+
+---
+
+# VERIFICATION
+
+1. ✅ A new left-nav section `Fulfillment (Demo)` exists after Configurations
+2. ✅ Demo tabs exist for `All Feedmills`, `Order History`, and `Future Dispatches`
+3. ✅ Demo tabs are internally connected to each other
+4. ✅ Demo tabs are isolated from the main equivalents
+5. ✅ Demo tabs still use shared `Changeover Rules`, `Powermix Split`, and `Master Data`
+6. ✅ Demo actions do not update main Overview, main Analytics, or main Monitoring
+7. ✅ Demo All Feedmills supports normal order operations such as edits, drag-drop, cut, and auto-sequence
+8. ✅ Demo done/cancelled orders appear in Demo Order History only
+9. ✅ Demo Future Dispatches can be uploaded independently from main Future Dispatches
+10. ✅ Demo All Feedmills uses Demo Future Dispatches for all future-dispatch-dependent logic
+11. ✅ If inventory can satisfy a demo order, a pending `Pre-order` suggestion is generated
+12. ✅ The pre-order suggestion appears below the order table and is visually identifiable
+13. ✅ Users can Approve or Dismiss the pre-order suggestion
+14. ✅ Approved pre-orders are added into the demo sequence
+15. ✅ Dismissed pre-orders do not affect the sequence
+16. ✅ Demo Future Dispatches includes an `Adjusted Inventory` column
+17. ✅ Adjusted Inventory is calculated using `Inventory - satisfied order volume + Average Daily`
+18. ✅ A tooltip explains the Adjusted Inventory calculation
+19. ✅ Demo workspace changes do not leak into the main tabs
+20. ✅ No UI errors or console errors are introduced

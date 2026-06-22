@@ -1,0 +1,84 @@
+Please also ensure that the **Production Time in the auto-sequence preview** is calculated strictly using:
+
+- `Volume / Run Rate`
+
+now that the **Run Rate is already displayed in the preview table**.
+
+---
+
+## Additional requirement: Production Time must use the displayed Run Rate
+
+Since the preview table now shows the row’s run rate under Production Time, please make sure the app actually uses that displayed run rate as the basis for the preview calculation.
+
+### Required rule
+For every preview row:
+
+- `Production Time = Volume / displayed Run Rate`
+
+### Expected result
+The preview production time should always match the row’s:
+- volume
+- displayed run rate
+
+---
+
+## Prevent invalid mismatches
+
+Please prevent cases where:
+- a row shows a valid run rate
+- but production time is inconsistent with that run rate
+- or a nonzero-volume order shows `0.00 hours`
+
+### Example
+If:
+- `Volume = 160 MT`
+- `Rate = 10.00`
+
+then production time should not be:
+- `0.00 hours`
+
+It should reflect:
+- `160 / 10.00 = 16.00 hours`
+
+### Expected result
+The preview should no longer show impossible production times when the volume and displayed rate are available.
+
+---
+
+## IMPORTANT
+
+Please enforce this in the auto-sequence preview:
+
+> Since the preview already shows the row’s Run Rate, the Production Time must be calculated from `Volume / Run Rate` using that displayed rate.
+
+This should eliminate miscalculation caused by hidden/default feedmill fallback rates or incorrect row logic.
+
+---
+
+## DEBUG LOGGING
+
+```javascript
+console.debug('[Auto-Sequence Preview Production Time From Displayed Rate]', {
+  line,
+  feedmill,
+  orderId,
+  volume,
+  displayedRate,
+  expectedProductionTime: displayedRate > 0 ? volume / displayedRate : null,
+  previewProductionTime,
+  matchesExpected:
+    displayedRate > 0
+      ? Math.abs(previewProductionTime - (volume / displayedRate)) < 0.01
+      : false,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Preview production time uses the displayed run rate
+2. ✅ Preview production time follows `Volume / Run Rate`
+3. ✅ Nonzero-volume orders no longer show impossible times like `0.00 hours`
+4. ✅ Preview values are internally consistent with displayed rate
+5. ✅ No UI errors or console errors are introduced

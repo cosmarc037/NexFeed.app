@@ -1,0 +1,795 @@
+```
+Implement the following feature:
+
+---
+
+## VOLUME OVERRIDE DIALOG — WITH AI IMPACT ANALYSIS
+
+When a user clicks on the Volume (MT) cell to edit it, instead of inline editing, a dialog opens with the current value pre-filled. The user types a new value, and the AI automatically analyzes the impact on following orders before the user confirms.
+
+---
+
+### 1. TRIGGER — CLICK ON VOLUME CELL
+
+Replace the inline edit behavior on the Volume (MT) cell with a dialog trigger:
+
+```jsx
+function VolumeCell({ order, allOrders }) {
+  const [showDialog, setShowDialog] = useState(false);
+  
+  return (
+    <>
+      <td 
+        className="volume-cell"
+        onClick={() => setShowDialog(true)}
+        style={{ cursor: 'pointer' }}
+      >
+        <span className="volume-value">{order.volume}</span>
+        <span className="volume-unit">MT</span>
+      </td>
+      
+      {showDialog && (
+        <VolumeOverrideDialog
+          order={order}
+          allOrders={allOrders}
+          onConfirm={(newVolume) => {
+            handleVolumeChange(order, newVolume);
+            setShowDialog(false);
+          }}
+          onCancel={() => setShowDialog(false)}
+        />
+      )}
+    </>
+  );
+}
+```
+
+---
+
+### 2. VOLUME OVERRIDE DIALOG
+
+```jsx
+function VolumeOverrideDialog({ order, allOrders, onConfirm, onCancel }) {
+  const [newVolume, setNewVolume] = useState(String(order.volume || ''));
+  const [impactAnalysis, setImpactAnalysis] = useState(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const debounceRef = useRef(null);
+  
+  const currentVolume = parseFloat(order.volume) || 0;
+  const parsedNewVolume = parseFloat(newVolume) || 0;
+  const volumeDiff = parsedNewVolume - currentVolume;
+  const isIncrease = volumeDiff > 0;
+  const isDecrease = volumeDiff < 0;
+  const isChanged = parsedNewVolume !== currentVolume && parsedNewVolume > 0;
+  
+  // Auto-generate impact analysis when new volume changes (debounced)
+  useEffect(() => {
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+    }
+    
+    if (!isChanged || parsedNewVolume <= 0) {
+      setImpactAnalysis(null);
+      return;
+    }
+    
+    debounceRef.current = setTimeout(() => {
+      generateImpactAnalysis();
+    }, 600); // 600ms debounce
+    
+    return () => clearTimeout(debounceRef.current);
+  }, [newVolume]);
+  
+  async function generateImpactAnalysis() {
+    setIsAnalyzing(true);
+    
+    try {
+      const context = buildImpactContext(order, parsedNewVolume, allOrders);
+      const prompt = buildImpactPrompt(context);
+      const response = await callAI(prompt);
+      
+      setImpactAnalysis(response);
+    } catch (error) {
+      console.error('Impact analysis failed:', error);
+      setImpactAnalysis('Unable to generate impact analysis. You can still proceed with the change.');
+    } finally {
+      setIsAnalyzing(false);
+    }
+  }
+  
+  function handleConfirm() {
+    if (parsedNewVolume > 0) {
+      onConfirm(parsedNewVolume);
+    }
+  }
+  
+  return (
+    <div className="dialog-overlay">
+      <div className="volume-dialog">
+        {/* Header */}
+        <div className="volume-dialog-header">
+          <span>📦 Override Volume</span>
+          <button className="dialog-close" onClick={onCancel}>✕</button>
+        </div>
+        
+        {/* Order info */}
+        <div className="volume-dialog-order-info">
+          <div className="volume-dialog-order-name">
+            {order.item_description}
+          </div>
+          <div className="volume-dialog-order-details">
+            FPR: {order.fpr} · Prio {order.prio} · {order.line}
+          </div>
+        </div>
+        
+        {/* Volume input */}
+        <div className="volume-dialog-input-section">
+          <div className="volume-input-row">
+            <div className="volume-input-group">
+              <label>Current Volume</label>
+              <div className="volume-current">
+                {currentVolume} MT
+              </div>
+            </div>
+            
+            <div className="volume-input-arrow">→</div>
+            
+            <div className="volume-input-group">
+              <label>New Volume</label>
+              <div className="volume-input-wrapper">
+                <input
+                  type="number"
+                  className="volume-input"
+                  value={newVolume}
+                  onChange={(e) => setNewVolume(e.target.value)}
+                  min="0"
+                  step="1"
+                  autoFocus
+                />
+                <span className="volume-input-unit">MT</span>
+              </div>
+            </div>
+          </div>
+          
+          {/* Volume change indicator */}
+          {isChanged && (
+            <div className={`volume-diff ${isIncrease ? 'volume-diff-increase' : 'volume-diff-decrease'}`}>
+              {isIncrease ? '▲' : '▼'} {Math.abs(volumeDiff).toFixed(1)} MT 
+              ({isIncrease ? '+' : ''}{((volumeDiff / currentVolume) * 100).toFixed(1)}%)
+            </div>
+          )}
+        </div>
+        
+        {/* Impact Analysis */}
+        <div className="volume-dialog-impact">
+          <div className="volume-impact-header">
+            <span>✨ Impact Analysis</span>
+            {isAnalyzing && (
+              <span className="volume-impact-loading">
+                <span className="refresh-spinning">🔄</span> Analyzing...
+              </span>
+            )}
+          </div>
+          
+          <div className="volume-impact-body">
+            {!isChanged && (
+              <div className="volume-impact-empty">
+                Enter a new volume to see the impact analysis.
+              </div>
+            )}
+            
+            {isChanged && isAnalyzing && !impactAnalysis && (
+              <div className="volume-impact-loading-text">
+                Calculating impact on following orders...
+              </div>
+            )}
+            
+            {isChanged && isAnalyzing && impactAnalysis && (
+              <div className="volume-impact-text" style={{ opacity: 0.5 }}>
+                {impactAnalysis}
+              </div>
+            )}
+            
+            {isChanged && !isAnalyzing && impactAnalysis && (
+              <div className="volume-impact-text">
+                {impactAnalysis}
+              </div>
+            )}
+          </div>
+        </div>
+        
+        {/* Footer */}
+        <div className="volume-dialog-footer">
+          <button className="volume-btn-cancel" onClick={onCancel}>
+            Cancel
+          </button>
+          <button 
+            className="volume-btn-confirm"
+            onClick={handleConfirm}
+            disabled={!isChanged || parsedNewVolume <= 0 || isAnalyzing}
+          >
+            Apply Change
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+### 3. BUILD IMPACT CONTEXT
+
+```javascript
+function buildImpactContext(order, newVolume, allOrders) {
+  const currentVolume = parseFloat(order.volume) || 0;
+  const volumeDiff = newVolume - currentVolume;
+  const isIncrease = volumeDiff > 0;
+  
+  // Get run rate for this line from Knowledge Base
+  const runRate = getRunRateForLine(order.line, order.material_code_fg);
+  
+  // Calculate time difference
+  const currentProductionTime = runRate > 0 ? currentVolume / runRate : 0;
+  const newProductionTime = runRate > 0 ? newVolume / runRate : 0;
+  const timeDiffHours = newProductionTime - currentProductionTime;
+  
+  // Get following orders on the same line (orders below this one)
+  const orderIndex = allOrders.findIndex(o => o.id === order.id);
+  const followingOrders = allOrders.slice(orderIndex + 1).filter(o => 
+    o.line === order.line && 
+    o.status !== 'Done' && 
+    o.status !== 'Cancel PO'
+  );
+  
+  // Get N10D data for following orders
+  const n10dData = getN10DProducts();
+  const followingWithN10D = followingOrders.map(o => {
+    const product = n10dData?.find(
+      p => String(p.material_code_fg) === String(o.material_code_fg)
+    );
+    
+    const n10dStatus = product ? getProductStatus(
+      product.due_for_loading,
+      product.inventory,
+      getDailyColumns(),
+      product,
+      new Date()
+    ) : null;
+    
+    return {
+      prio: o.prio,
+      name: o.item_description,
+      fpr: o.fpr,
+      volume: o.volume,
+      status: o.status,
+      availDate: o.avail_date,
+      completionDate: o.completion_date,
+      n10dStatus: n10dStatus,
+      dfl: product?.due_for_loading || null,
+      inventory: product?.inventory || null
+    };
+  });
+  
+  // Get N10D data for the current order
+  const currentProduct = n10dData?.find(
+    p => String(p.material_code_fg) === String(order.material_code_fg)
+  );
+  
+  const currentN10DStatus = currentProduct ? getProductStatus(
+    currentProduct.due_for_loading,
+    currentProduct.inventory,
+    getDailyColumns(),
+    currentProduct,
+    new Date()
+  ) : null;
+  
+  return {
+    order: {
+      prio: order.prio,
+      name: order.item_description,
+      fpr: order.fpr,
+      line: order.line,
+      currentVolume: currentVolume,
+      newVolume: newVolume,
+      volumeDiff: volumeDiff,
+      isIncrease: isIncrease,
+      availDate: order.avail_date,
+      completionDate: order.completion_date,
+      startDate: order.start_date,
+      startTime: order.start_time,
+      n10dStatus: currentN10DStatus,
+      dfl: currentProduct?.due_for_loading || null,
+      inventory: currentProduct?.inventory || null
+    },
+    production: {
+      runRate: runRate,
+      currentProductionTime: currentProductionTime.toFixed(2),
+      newProductionTime: newProductionTime.toFixed(2),
+      timeDiffHours: timeDiffHours.toFixed(2),
+      timeDiffMinutes: (timeDiffHours * 60).toFixed(0)
+    },
+    followingOrders: followingWithN10D,
+    followingCount: followingWithN10D.length
+  };
+}
+```
+
+---
+
+### 4. AI PROMPT
+
+```javascript
+function buildImpactPrompt(context) {
+  const { order, production, followingOrders, followingCount } = context;
+  
+  return `
+You are a production planning advisor for a feed manufacturing plant.
+A planner is changing the volume of an order. Analyze the impact on following orders.
+
+ORDER BEING CHANGED:
+- Product: ${order.name}
+- FPR: ${order.fpr} | Priority: ${order.prio} | Line: ${order.line}
+- Current Volume: ${order.currentVolume} MT → New Volume: ${order.newVolume} MT (${order.isIncrease ? '+' : ''}${order.volumeDiff.toFixed(1)} MT)
+- N10D Status: ${order.n10dStatus || 'N/A'}
+- DFL: ${order.dfl || 'N/A'} MT | Inventory: ${order.inventory || 'N/A'} MT
+- Current Avail Date: ${order.availDate || 'N/A'}
+- Current Completion: ${order.completionDate || 'N/A'}
+
+PRODUCTION TIME IMPACT:
+- Run Rate: ${production.runRate} MT/hr
+- Current Production Time: ${production.currentProductionTime} hrs
+- New Production Time: ${production.newProductionTime} hrs
+- Time Difference: ${order.isIncrease ? '+' : ''}${production.timeDiffHours} hrs (${order.isIncrease ? '+' : ''}${production.timeDiffMinutes} min)
+
+FOLLOWING ORDERS ON ${order.line} (${followingCount} orders after this one):
+${followingOrders.length > 0 
+  ? followingOrders.map(o => `
+  Priority ${o.prio}: ${o.name}
+  Volume: ${o.volume} MT | Status: ${o.status}
+  Avail Date: ${o.availDate || 'N/A'} | Completion: ${o.completionDate || 'N/A'}
+  N10D Status: ${o.n10dStatus || 'N/A'} | DFL: ${o.dfl || 'N/A'} MT | Inv: ${o.inventory || 'N/A'} MT
+  `).join('\n')
+  : 'No following orders on this line.'}
+
+RULES:
+- Analyze the time impact: how much will following orders be pushed forward or backward
+- Identify which following orders (if any) will miss their availability dates due to this change
+- For orders with N10D data, assess if the delay will affect stock levels (e.g., "Delaying this Sufficient product by 2 hours won't affect stock" or "Delaying this Urgent product could cause stockout")
+- If volume is DECREASED, mention that time is freed up and following orders can complete earlier
+- If volume is INCREASED, identify the specific orders at risk
+- Be specific — use product names, times, and dates
+- Use full month names
+- Do NOT use markdown formatting
+- Keep it concise — 3-6 sentences total
+
+FORMAT:
+[1-2 sentences about the direct time impact of the volume change]
+[1-2 sentences about impact on following orders — which ones are affected and how]
+[1-2 sentences about stock/N10D impact — whether the delay matters for stock levels]
+  `;
+}
+```
+
+---
+
+### 5. DIALOG STYLING
+
+```css
+.volume-dialog {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 480px;
+  background: #ffffff;
+  border-radius: 12px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.2);
+  z-index: 10001;
+  overflow: hidden;
+}
+
+.dialog-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 10000;
+}
+
+/* Header */
+.volume-dialog-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid #e5e7eb;
+  font-size: 15px;
+  font-weight: 700;
+  color: #1a1a1a;
+}
+
+.volume-dialog-header .dialog-close {
+  background: none;
+  border: none;
+  color: #9ca3af;
+  font-size: 18px;
+  cursor: pointer;
+}
+
+/* Order info */
+.volume-dialog-order-info {
+  padding: 12px 20px;
+  background: #f9fafb;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.volume-dialog-order-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1a1a1a;
+}
+
+.volume-dialog-order-details {
+  font-size: 11px;
+  color: #6b7280;
+  margin-top: 2px;
+}
+
+/* Volume input section */
+.volume-dialog-input-section {
+  padding: 16px 20px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.volume-input-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.volume-input-group {
+  flex: 1;
+}
+
+.volume-input-group label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  color: #6b7280;
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.volume-current {
+  font-size: 18px;
+  font-weight: 700;
+  color: #374151;
+  padding: 8px 0;
+}
+
+.volume-input-arrow {
+  font-size: 18px;
+  color: #9ca3af;
+  margin-top: 20px;
+}
+
+.volume-input-wrapper {
+  display: flex;
+  align-items: center;
+  border: 2px solid #fd5108;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.volume-input {
+  flex: 1;
+  padding: 8px 12px;
+  font-size: 18px;
+  font-weight: 700;
+  color: #1a1a1a;
+  border: none;
+  outline: none;
+  width: 100%;
+}
+
+.volume-input::-webkit-outer-spin-button,
+.volume-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.volume-input-unit {
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #6b7280;
+  background: #f9fafb;
+  border-left: 1px solid #e5e7eb;
+}
+
+/* Volume diff indicator */
+.volume-diff {
+  margin-top: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 4px;
+  display: inline-block;
+}
+
+.volume-diff-increase {
+  background: #fef2f2;
+  color: #dc2626;
+}
+
+.volume-diff-decrease {
+  background: #f0fdf4;
+  color: #16a34a;
+}
+
+/* Impact Analysis */
+.volume-dialog-impact {
+  padding: 0;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.volume-impact-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 20px;
+  background: #fff7ed;
+  border-bottom: 1px solid #fed7aa;
+  font-size: 12px;
+  font-weight: 600;
+  color: #92400e;
+}
+
+.volume-impact-loading {
+  font-size: 11px;
+  font-weight: 400;
+  color: #92400e;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.volume-impact-body {
+  padding: 14px 20px;
+  min-height: 60px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.volume-impact-text {
+  font-size: 12px;
+  color: #374151;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
+.volume-impact-empty {
+  font-size: 12px;
+  color: #9ca3af;
+  font-style: italic;
+}
+
+.volume-impact-loading-text {
+  font-size: 12px;
+  color: #92400e;
+  font-style: italic;
+}
+
+/* Footer */
+.volume-dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 14px 20px;
+}
+
+.volume-btn-cancel {
+  padding: 8px 20px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #6b7280;
+  background: #ffffff;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.volume-btn-cancel:hover {
+  background: #f9fafb;
+}
+
+.volume-btn-confirm {
+  padding: 8px 20px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #ffffff;
+  background: #fd5108;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.volume-btn-confirm:hover {
+  background: #e8490b;
+}
+
+.volume-btn-confirm:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Spinning animation */
+.refresh-spinning {
+  display: inline-block;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+```
+
+---
+
+### 6. APPLY VOLUME CHANGE AFTER CONFIRM
+
+```javascript
+function handleVolumeChange(order, newVolume) {
+  // Update the order volume
+  setAllOrders(prev => prev.map(o => {
+    if (o.id === order.id) {
+      const updatedOrder = { ...o, volume: newVolume };
+      
+      // Recalculate dependent fields
+      const batchSize = parseFloat(o.batch_size) || 1;
+      const newBatches = Math.ceil(newVolume / batchSize);
+      updatedOrder.batches = newBatches;
+      
+      // Recalculate production time using run rate
+      const runRate = getRunRateForLine(o.line, o.material_code_fg);
+      if (runRate > 0) {
+        const newProdTime = newVolume / runRate;
+        updatedOrder.production_time = newProdTime.toFixed(2);
+      }
+      
+      // Recalculate bags if applicable
+      const fgWeight = parseFloat(o.fg_weight) || 0;
+      if (fgWeight > 0) {
+        updatedOrder.bags = Math.ceil((newVolume * 1000) / fgWeight);
+      }
+      
+      return updatedOrder;
+    }
+    return o;
+  }));
+  
+  // Cascade completion dates for following orders
+  recalculateCompletionDates();
+  
+  showNotification('success', `Volume updated: ${order.item_description} → ${newVolume} MT`);
+}
+```
+
+---
+
+### 7. EXAMPLE DIALOG FLOW
+
+**User clicks on "80 MT" cell for Elite XP Startex at Prio 3:**
+
+```
+┌──────────────────────────────────────────────────┐
+│ 📦 Override Volume                           ✕  │
+├──────────────────────────────────────────────────┤
+│ Elite XP Startex, Mini-pellet 50kg               │
+│ FPR: 260330 · Prio 3 · Line 1                   │
+├──────────────────────────────────────────────────┤
+│                                                  │
+│ CURRENT VOLUME         →     NEW VOLUME          │
+│    80 MT                     [120] MT             │
+│                                                  │
+│ ▲ 40.0 MT (+50.0%)                              │
+│                                                  │
+├──────────────────────────────────────────────────┤
+│ ✨ Impact Analysis               🔄 Analyzing... │
+├──────────────────────────────────────────────────┤
+│                                                  │
+│ Increasing Elite XP Startex from 80 MT to        │
+│ 120 MT adds approximately 2.1 hours of           │
+│ production time at the current run rate of       │
+│ 19.10 MT/hr. This will push the completion       │
+│ of the 5 following orders on Line 1 by           │
+│ about 2 hours each.                              │
+│                                                  │
+│ Gallimax 3 Maintenance (Prio 4, Urgent)          │
+│ will see its completion shift from 2:30 PM       │
+│ to 4:36 PM on March 31, which is still           │
+│ within its availability window. However,         │
+│ the remaining Elite XP Startex orders            │
+│ (Sufficient) are not at risk since stock          │
+│ levels are adequate.                             │
+│                                                  │
+├──────────────────────────────────────────────────┤
+│                        [Cancel]  [Apply Change]  │
+└──────────────────────────────────────────────────┘
+```
+
+**User changes to 40 MT (decrease):**
+
+```
+│ CURRENT VOLUME         →     NEW VOLUME          │
+│    80 MT                     [40] MT              │
+│                                                  │
+│ ▼ 40.0 MT (-50.0%)                              │
+│                                                  │
+├──────────────────────────────────────────────────┤
+│ ✨ Impact Analysis                               │
+├──────────────────────────────────────────────────┤
+│                                                  │
+│ Decreasing Elite XP Startex from 80 MT to        │
+│ 40 MT frees up approximately 2.1 hours of        │
+│ production time. The 5 following orders on       │
+│ Line 1 will complete about 2 hours earlier       │
+│ than currently scheduled.                        │
+│                                                  │
+│ This is beneficial for Gallimax 3 Maintenance    │
+│ (Urgent) which will now complete well within     │
+│ its March 31 deadline. No stock risks            │
+│ identified for any following orders.             │
+│                                                  │
+```
+
+---
+
+## VERIFICATION
+
+### Dialog behavior
+1. ✅ Clicking Volume (MT) cell opens the dialog
+2. ✅ Current volume shown on the left
+3. ✅ Input field pre-filled with current volume, auto-focused
+4. ✅ Volume diff indicator shows increase (red) or decrease (green)
+5. ✅ Cancel closes dialog without changes
+6. ✅ Apply Change updates the volume and recalculates dependent fields
+
+### Impact analysis
+7. ✅ Auto-generates after 600ms debounce when user types new volume
+8. ✅ Shows "Analyzing..." while generating
+9. ✅ Old analysis shown at 50% opacity during refresh
+10. ✅ "Enter a new volume to see impact" when no change made
+
+### Content — Volume increase
+11. ✅ States the time added (in hours and minutes)
+12. ✅ Identifies which following orders are pushed
+13. ✅ Identifies which orders may miss their avail dates
+14. ✅ Assesses N10D stock impact for affected orders
+15. ✅ References specific product names, times, and dates
+
+### Content — Volume decrease
+16. ✅ States the time freed up
+17. ✅ Mentions following orders completing earlier
+18. ✅ Notes if decrease helps any Urgent/Critical orders meet deadlines
+
+### Apply change
+19. ✅ Volume updated in order table
+20. ✅ Batches recalculated
+21. ✅ Production time recalculated
+22. ✅ Bags recalculated
+23. ✅ Completion dates cascade to following orders
+24. ✅ Success notification shown
+
+### Edge cases
+25. ✅ Same volume entered → no impact analysis, Apply disabled
+26. ✅ Zero or negative volume → Apply disabled
+27. ✅ No following orders on the line → analysis says "No following orders affected"
+28. ✅ AI fails → fallback message shown, Apply still works
+```

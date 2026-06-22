@@ -1,0 +1,220 @@
+```
+Implement the following changes to the NexFeed application:
+
+---
+
+## NEXT 10 DAYS PAGE — MAKE 100% IDENTICAL TO KNOWLEDGE BASE LAYOUT
+
+The Next 10 Days page must be wrapped in the same white box container as the Knowledge Base page, with identical spacing, fonts, and layout structure.
+
+---
+
+### WHITE BOX CONTAINER
+
+Everything on the Next 10 Days page (title, search, AI insights, table, upload history) must be inside a SINGLE white box container, identical to the Knowledge Base.
+
+| Property | Value (match Knowledge Base exactly) |
+|---|---|
+| Background | White (#ffffff) |
+| Border | 1px solid #e5e7eb |
+| Border radius | 12px |
+| Box shadow | 0 1px 3px rgba(0,0,0,0.04) |
+| Padding | 24px |
+| Margin | Same as Knowledge Base container margins |
+
+---
+
+### LAYOUT INSIDE THE CONTAINER (TOP TO BOTTOM)
+
+```
+┌─ White Box Container ────────────────────────────────────────┐
+│                                                               │
+│  📊 Next 10 Days                [Re-apply]  [Upload Next 10] │
+│  Upload daily stock level data for production prioritization  │
+│                                                               │
+│  🔍 Search by code, description...   Showing 20 of 20        │
+│                                                               │
+│  ✨ AI Stock Insights                          ↻ Refresh      │
+│  [AI narrative text...]                                       │
+│                                                               │
+│  ┌─ Table ─────────────────────────────────────────────────┐  │
+│  │ PRODUCT DETAILS  │  NEXT 10 DAYS  │  TRACKING          │  │
+│  │ columns...       │  columns...    │  columns...         │  │
+│  │ data...          │  data...       │  data...            │  │
+│  └─────────────────────────────────────────────────────────┘  │
+│                                                               │
+│  Upload History                                               │
+│  📄 Dummy 10 Days.xlsx  Active                          ↓    │
+│     Uploaded: 03/19/2026 04:22 PM · 20 products              │
+│                                                               │
+└───────────────────────────────────────────────────────────────┘
+```
+
+---
+
+### SECTION 1: TITLE ROW
+
+Identical layout to Knowledge Base title row:
+
+```
+📊 Next 10 Days                          [Re-apply]  [Upload Next 10 Days]
+Upload daily stock level data for production prioritization
+```
+
+**Left side:**
+- Icon: 📊 (or bar chart icon matching the Knowledge Base's 📋 clipboard icon style — same size, same orange tint)
+- Title: "Next 10 Days"
+  - Font size: 16px (match Knowledge Base "Knowledge Base" title)
+  - Font weight: 700
+  - Color: Dark text (#1a1a1a)
+- Subtitle: "Upload daily stock level data for production prioritization"
+  - Font size: 12px (match Knowledge Base subtitle)
+  - Color: Grey (#6b7280)
+
+**Right side (same line as title):**
+- [↻ Re-apply to Existing Orders]
+  - Style: White/grey outlined button, matching Knowledge Base's "Re-apply to Existing Orders" button EXACTLY
+  - Border: 1px solid #d1d5db
+  - Text: 12px, dark grey (#374151)
+  - Icon: ↻ on the left
+  - Padding, height, border-radius: SAME as Knowledge Base button
+
+- [↑ Upload Next 10 Days]
+  - Style: Orange filled button, matching Knowledge Base's "Upload Knowledge Base" button EXACTLY
+  - Background: #fd5108
+  - Text: White, 12px, font-weight 600
+  - Icon: ↑ upload icon on the left
+  - Padding, height, border-radius: SAME as Knowledge Base button
+
+---
+
+### SECTION 2: SEARCH BAR
+
+Identical to Knowledge Base search bar:
+
+```
+🔍 Search by code, description, or category...    Showing 20 of 20 products
+```
+
+| Element | Styling (match Knowledge Base) |
+|---|---|
+| Search input width | Same as Knowledge Base (~280px) |
+| Search input height | Same as Knowledge Base |
+| Border | 1px solid #d1d5db |
+| Border radius | 6px |
+| Font size | 12px |
+| Placeholder text | "Search by code, description, or category..." |
+| 🔍 icon | Inside input, left side, grey |
+| Focus border | Orange (#fd5108) |
+| Product count | "Showing X of Y products" — orange text (#fd5108), 12px, same position as Knowledge Base |
+
+**Margin:** Same spacing below search bar as Knowledge Base has before its table.
+
+---
+
+### SECTION 3: AI STOCK INSIGHTS
+
+Positioned between search bar and table, same as currently implemented:
+
+- Light orange background (#fff7ed) — wait, you said cancel the light orange. Keep the current white card style as shown in your screenshot.
+- ✨ AI Stock Insights header with Refresh button.
+- Not collapsible, auto-generated.
+- Font sizes match the smaller sizes used in the container.
+
+**Font sizes inside AI Insights (match container font scale):**
+- Title "AI Stock Insights": 14px, bold
+- Insight text: 11px, regular, #4b5563
+
+---
+
+### SECTION 4: STOCK LEVEL TABLE
+
+The table sits inside the white container. Remove any separate container/border on the table itself — it inherits the white container's background.
+
+**Font sizes (smaller, matching Knowledge Base table):**
+
+| Element | Font Size |
+|---|---|
+| Main header groups (PRODUCT DETAILS, NEXT 10 DAYS, TRACKING) | 10px |
+| Sub-headers (column names) | 9px |
+| Data cell values | 11px |
+| Date column values | 10px |
+| Due for Loading (bold) | 11px |
+| Inventory (bold) | 11px |
+| Bal. to Produce | 11px |
+| Target Date | 11px |
+| Status text | 10px |
+| Material Code | 11px |
+| Category | 11px |
+| Item Description | 11px |
+
+**Row padding:** 8px vertical, 10px horizontal (compact, matching Knowledge Base row density).
+
+**Row borders:** 1px solid #f3f4f6 (very subtle, matching Knowledge Base).
+
+**No outer border on table** — the white container provides the visual boundary.
+
+---
+
+### SECTION 5: UPLOAD HISTORY
+
+Below the table, inside the same white container.
+
+```
+Upload History
+────────────────────────────────────────────────────
+📄 Dummy 10 Days.xlsx    Active                    ↓
+   Uploaded: 03/19/2026 04:22 PM · 20 products
+
+📄 Dummy 10 Days.xlsx                              ↓
+   Uploaded: 03/18/2026 08:15 AM · 20 products
+```
+
+**Match Knowledge Base upload history exactly:**
+
+| Element | Styling |
+|---|---|
+| "Upload History" title | 14px, font-weight 600, dark text (#1a1a1a) |
+| Margin top | 20px (space from table) |
+| File icon | 📄 grey document icon |
+| File name | 12px, dark text (#1a1a1a), font-weight 500 |
+| "Active" badge | Green text (#43a047), 11px, font-weight 600 |
+| Upload timestamp | 11px, grey (#6b7280) |
+| Product count | 11px, grey (#6b7280), "· X products" |
+| Download icon (↓) | Grey, right-aligned. Orange on hover. |
+| Entry padding | 10px vertical |
+| Entry border | 1px solid #f3f4f6 between entries |
+
+**Upload history is ONLY for Next 10 Days files.** It does NOT show Knowledge Base uploads or SAP uploads. Each section has its own independent upload history.
+
+**History entries:**
+- Show the last 5 uploads.
+- Most recent at the top.
+- Only the most recent has "Active" badge.
+
+---
+
+### FONT SIZE CONSISTENCY CHECK
+
+Ensure ALL fonts on the Next 10 Days page match the Knowledge Base page:
+
+| Element | Knowledge Base | Next 10 Days (must match) |
+|---|---|---|
+| Page title | 16px bold | 16px bold |
+| Subtitle | 12px grey | 12px grey |
+| Button text | 12px | 12px |
+| Search placeholder | 12px | 12px |
+| Product count | 12px orange | 12px orange |
+| Table headers | 9-10px uppercase | 9-10px uppercase |
+| Table data | 11px | 11px |
+| Upload history title | 14px bold | 14px bold |
+| Upload history details | 11px grey | 11px grey |
+
+---
+
+### REMOVE DUPLICATE ELEMENTS
+
+- ❌ Remove the separate upload drag-and-drop area that currently appears above the table. The "Upload Next 10 Days" button in the header handles uploads.
+- ❌ Remove the green "Stock levels are current" banner at the top. The upload history "Active" badge and the Alerts & Reminders panel handle this.
+- ❌ Remove the separate "Stock Level Preview (20 products) ↻ Refresh" header above the table. The search bar shows the count, and Re-apply button handles refresh.
+```

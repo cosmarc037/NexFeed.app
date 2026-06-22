@@ -1,0 +1,285 @@
+Clear. Here's the prompt:
+
+```
+Implement the following changes to the NexFeed application:
+
+---
+
+## 1. HA INFO — AUTO-POPULATE FROM NUMBER OF BATCHES
+
+HA Info should automatically match the Number of Batches value. Users should not need to manually type it.
+
+### AUTO-POPULATE BEHAVIOR
+
+- When an order is created or uploaded, HA Info is automatically set to the Number of Batches value.
+- When Number of Batches changes (due to volume change, cut, combine, etc.), HA Info auto-updates to match.
+- HA Info always equals Number of Batches — they are always in sync.
+
+**Examples:**
+```
+Volume: 80 MT, Batch Size: 4.00
+Number of Batches: 20
+HA Info: 20 ← auto-set
+
+Volume changes to 40 MT (cut order):
+Number of Batches: 10
+HA Info: 10 ← auto-updated
+```
+
+### LOCKED / READ-ONLY
+
+- HA Info field is **READ-ONLY** — users cannot manually edit it.
+- The field displays the value but the cell is not clickable/editable.
+- Cursor: default (not text cursor) when hovering.
+- Subtle visual indicator that it's locked:
+  - Slightly greyed background (#f9fafb) on the cell
+  - Or a small lock icon (🔒) next to the value, 10px, grey (#9ca3af)
+- Tooltip on hover: "Auto-calculated from Number of Batches"
+
+### TRIGGERS FOR AUTO-UPDATE
+
+HA Info recalculates whenever Number of Batches changes:
+
+| Event | HA Info updates? |
+|---|---|
+| SAP upload (new orders) | ✅ Yes |
+| Volume change | ✅ Yes (batches change → HA Info changes) |
+| Batch Size change | ✅ Yes (batches change → HA Info changes) |
+| Cut order (volume splits) | ✅ Yes (each portion gets its own HA Info) |
+| Merge back (volume combines) | ✅ Yes |
+| Combine orders | ✅ Yes (lead order's batches determine HA Info) |
+| Uncombine | ✅ Yes (each order recalculates) |
+| Knowledge Base re-apply | ✅ Yes (if batch size changes) |
+
+### READINESS CHECK
+
+- HA Info is auto-populated, so it should ALWAYS have a value.
+- Remove HA Info from the readiness check's "missing" list since it cannot be empty.
+- HA Info is considered "ready" as long as Number of Batches has a value.
+
+---
+
+## 2. READINESS CHECK — FIX PRODUCTION ORDER FG1 AND SFG1 VALIDATION
+
+The readiness check incorrectly reports Production Order FG1 and SFG1 as "not set" even when the user has typed values into the cells. Fix the validation logic.
+
+### THE BUG
+
+- User types a value like "1400051365" into Production Order FG1.
+- User types a value like "1000064915" into Production Order SFG1.
+- The readiness check still shows ❌ "Production Order FG1 — not set".
+- The readiness check still shows ❌ "Production Order SFG1 — not set".
+
+### POSSIBLE CAUSES AND FIXES
+
+**Cause 1: Checking the wrong field/property**
+
+The readiness check might be looking at a different field name than what the cell edit saves to.
+
+```javascript
+// WRONG — checking a field that doesn't get updated by cell edit
+if (!order.production_order_fg1) → shows as missing
+
+// The cell edit might be saving to:
+order.prod_order_fg1
+order.productionOrderFG1
+order.fg1_production_order
+```
+
+**Fix:** Ensure the readiness check evaluates the SAME field that the cell edit writes to. Check the field name mapping between the table cell and the data model.
+
+**Cause 2: Type mismatch**
+
+The user types "1400051365" which might be saved as a string, but the readiness check expects a number (or vice versa).
+
+```javascript
+// WRONG — strict type check
+if (order.production_order_fg1 === null || order.production_order_fg1 === undefined)
+
+// The value might be "1400051365" (string) which passes the null check
+// but fails some other validation
+```
+
+**Fix:** The readiness check for Production Order FG1 and SFG1 should simply check: "Does this field have any non-empty value?"
+
+**Cause 3: Validation checking format/length**
+
+The check might require a specific format that the entered value doesn't match.
+
+**Fix:** Update the validation to match the actual format used.
+
+### CORRECT VALIDATION LOGIC
+
+**Production Order FG1:**
+```javascript
+function isProductionOrderFG1Valid(value) {
+  // Check 1: Is it not empty?
+  if (!value || String(value).trim() === '') {
+    return false; // missing
+  }
+  
+  // Check 2: Is it a valid format? (10-digit number)
+  const trimmed = String(value).trim();
+  const isValidFormat = /^\d{10}$/.test(trimmed);
+  
+  return isValidFormat;
+}
+```
+
+**Production Order SFG1:**
+```javascript
+function isProductionOrderSFG1Valid(value) {
+  // Same logic as FG1
+  if (!value || String(value).trim() === '') {
+    return false;
+  }
+  
+  const trimmed = String(value).trim();
+  const isValidFormat = /^\d{10}$/.test(trimmed);
+  
+  return isValidFormat;
+}
+```
+
+**Valid values (10 digits):**
+```
+✅ 1400051365
+✅ 1000064915
+✅ 1400051410
+✅ 1000064926
+```
+
+**Invalid values:**
+```
+❌ "" (empty)
+❌ "abc" (not numeric)
+❌ "14000" (too short, only 5 digits)
+❌ "14000513650" (too long, 11 digits)
+❌ "1400-051365" (contains non-digit characters)
+```
+
+### READINESS CHECK ERROR MESSAGES
+
+When Production Order FG1 or SFG1 fails validation, show the appropriate message:
+
+| Condition | Message |
+|---|---|
+| Field is empty | "Production Order FG1 — not set" |
+| Field has value but wrong format | "Production Order FG1 — invalid format (must be 10 digits)" |
+| Field is valid | ✅ Pass (not shown in missing list) |
+
+### ALSO APPLY TO PRODUCTION ORDER SFGPMX
+
+Same 10-digit validation:
+```javascript
+function isProductionOrderSFGPMXValid(value) {
+  if (!value || String(value).trim() === '') {
+    return false;
+  }
+  const trimmed = String(value).trim();
+  return /^\d{10}$/.test(trimmed);
+}
+```
+
+### COMPLETE READINESS CHECK — ALL FIELDS
+
+Here's the full readiness check with corrected validations:
+
+```javascript
+function getReadinessStatus(order) {
+  const missing = [];
+  
+  // Production Orders — 10-digit number check
+  if (!isValid10Digit(order.production_order_fg1)) {
+    missing.push('Production Order FG1');
+  }
+  if (!isValid10Digit(order.production_order_sfg1)) {
+    missing.push('Production Order SFG1');
+  }
+  if (!isValid10Digit(order.production_order_sfgpmx)) {
+    // SFGPMX might be optional for some orders
+    // Only flag if the field exists and is expected
+    if (order.requires_sfgpmx) {
+      missing.push('Production Order SFGPMX');
+    }
+  }
+  
+  // HA Info — auto-populated, should never be missing
+  // Skip check — it mirrors Number of Batches
+  
+  // HA Prep — user confirms
+  if (!order.ha_prep || order.ha_prep === 'Not confirmed') {
+    missing.push('HA Prep');
+  }
+  
+  // SCADA — user sets
+  if (!order.scada || String(order.scada).trim() === '') {
+    missing.push('SCADA');
+  }
+  
+  // PV — user sets
+  if (!order.pv || String(order.pv).trim() === '') {
+    missing.push('PV');
+  }
+  
+  // Completion Date — should be set (from cascade or manual)
+  if (!order.completion_date) {
+    missing.push('Completion Date');
+  }
+  
+  // Material Code (FG)
+  if (!order.material_code_fg || String(order.material_code_fg).trim() === '') {
+    missing.push('Material Code (FG)');
+  }
+  
+  // Batch Size
+  if (!order.batch_size || order.batch_size <= 0) {
+    missing.push('Batch Size');
+  }
+  
+  // Return readiness status
+  if (missing.length === 0) {
+    return { ready: true, icon: 'green_check', missing: [] };
+  } else {
+    return { ready: false, icon: 'warning', missing: missing };
+  }
+}
+
+function isValid10Digit(value) {
+  if (!value) return false;
+  const trimmed = String(value).trim();
+  return /^\d{10}$/.test(trimmed);
+}
+```
+
+### DEBUG STEPS
+
+After implementing the fix:
+
+1. Open an order in the interactive table.
+2. Type "1400051365" into Production Order FG1 cell.
+3. Type "1000064915" into Production Order SFG1 cell.
+4. Check the readiness indicator — it should now recognize these as valid.
+5. If still showing as missing:
+   - Console.log the field value after cell edit: `console.log('FG1 value:', order.production_order_fg1, typeof order.production_order_fg1)`
+   - Console.log the field value in the readiness check: `console.log('Checking FG1:', value, typeof value)`
+   - Compare the field names to find the mismatch.
+
+---
+
+## 3. FIELDS USER MANUALLY EDITS VS AUTO-POPULATED
+
+For clarity, here's the breakdown of what's auto vs manual:
+
+| Field | How it's set | Editable by user? |
+|---|---|---|
+| HA Info | AUTO — mirrors Number of Batches | ❌ Locked, read-only |
+| SCADA | MANUAL — user types value | ✅ Yes |
+| PV | MANUAL — user types value | ✅ Yes |
+| HA Prep | MANUAL — user confirms | ✅ Yes |
+| Production Order FG1 | MANUAL — user types 10-digit number | ✅ Yes |
+| Production Order SFG1 | MANUAL — user types 10-digit number | ✅ Yes |
+| Production Order SFGPMX | MANUAL — user types 10-digit number | ✅ Yes |
+| Number of Batches | AUTO — calculated from Volume ÷ Batch Size | ❌ Locked |
+| Completion Date | AUTO — cascaded from Start Date + Production Hours | ❌ Locked (cascade) |
+```

@@ -1,0 +1,412 @@
+Please enhance the **Auto-Sequence AI** so that its sequencing recommendations are more executable, more faithful to actual plant rules, and more transparent to the user.
+
+The current AI already considers urgency, deadlines, changeovers, flexible advancement, profitability, and other sequencing signals. This request is to improve how the AI reasons and how its output is structured and applied.
+
+---
+
+# 1. MAKE THE AI SEQUENCE TRUE PRODUCTION ENTITIES, NOT JUST RAW ORDERS
+
+Please revise the AI sequencing input/output model so that it sequences the actual **production entities** used by the scheduler.
+
+### This should include entities such as:
+- standalone orders
+- combined groups
+- generated/re-order entities
+- linked source/generated production units where applicable
+
+### Important
+If combining happens before AI sequencing, then the AI should rank the **post-combination production entities**, not only the raw individual orders.
+
+### Goal
+Make the AI sequence the same units that the scheduler and preview/apply flow actually use.
+
+### Expected result
+The AI recommendation becomes more faithful to the final executable schedule.
+
+---
+
+# 2. USE STABLE BACKEND IDS / ENTITY IDS EVERYWHERE IN THE AI SEQUENCING FLOW
+
+Please ensure all AI sequencing is tied to stable backend identifiers such as:
+- `entity_id`
+- `order_id`
+- `production_group_id`
+
+### Goal
+Avoid ambiguity caused by:
+- repeated product names
+- repeated material codes
+- unstable UI row order
+- post-combination grouping
+
+### Expected result
+Every AI recommendation can be mapped cleanly from:
+- input
+- output
+- preview
+- apply-to-schedule
+- transparency table
+- history log
+
+---
+
+# 3. GIVE THE AI EXPLICIT DEPENDENCY CONSTRAINTS BETWEEN ENTITIES
+
+Please improve the AI context so it understands entity dependencies, not just isolated rows.
+
+### Examples of dependencies the AI should understand
+- generated re-order must not be placed before source order
+- source/generated entities may need proximity
+- combined groups are indivisible
+- some entities must remain after or before another entity
+- some linked entities should not be separated beyond a practical threshold if such rules exist
+
+### Goal
+Reduce cases where the deterministic layer has to heavily correct the AI’s proposed sequence.
+
+### Expected result
+The AI’s suggested sequencing becomes more operationally valid from the start.
+
+---
+
+# 4. GIVE THE AI MORE EXPLICIT LINE-LEVEL AND DAY-LEVEL WORKLOAD CONTEXT
+
+Please enrich the AI input with line/day workload shape, not only order-level fields.
+
+### Examples of additional context
+- total hours loaded per day on each line
+- remaining daily capacity
+- lightly loaded vs congested days
+- front-loaded vs back-loaded schedule shape
+- idle windows / underutilized days
+- over-capacity or near-capacity days
+- cumulative run hours up to each deadline window
+
+### Goal
+Help the AI make more realistic placement recommendations, not just relative ranking decisions.
+
+### Expected result
+The AI can better judge whether advancing or delaying an order actually improves the schedule.
+
+---
+
+# 5. GIVE THE AI A STRONGER NOTION OF DATE FEASIBILITY, NOT JUST RANKING
+
+Please improve the AI output so it reasons separately about:
+- rank/order in sequence
+- suggested date
+- placement feasibility
+
+### Goal
+Avoid situations where the AI gives a rank that later conflicts with date-based sorting or feasibility rules.
+
+### Expected result
+The AI output should better align ranking with actual date viability.
+
+---
+
+# 6. HAVE THE AI RETURN STRUCTURED OUTPUT WITH MORE EXECUTION FIELDS
+
+Please make the AI return more structured sequencing output for each entity.
+
+### Suggested fields
+- `entity_id`
+- `ai_rank`
+- `suggested_date`
+- `reason`
+- `primary_goal`
+- `secondary_goal`
+- `must_be_before_ids`
+- `must_be_after_ids`
+- `risk_note`
+- `confidence_note` if available
+
+### Goal
+Make the AI output easier to execute deterministically and easier to explain in the UI.
+
+### Expected result
+The app can apply and audit AI sequencing recommendations more reliably.
+
+---
+
+# 7. GIVE THE AI EXPLICIT CONTEXT ABOUT HARD CONSTRAINTS ENFORCED BY THE APP
+
+Please make sure the AI prompt/context explicitly includes the real operational rules enforced by the app, including but not limited to:
+
+- in-production orders cannot be moved
+- critical / urgent / MTO orders may be pinned by deadline
+- shutdown lines cannot receive orders
+- line eligibility restrictions
+- combined entities are indivisible
+- generated/source dependencies
+- chronology / avail-date constraints
+- completion-feasibility constraints
+- any other real refinement-layer rule currently used by the scheduler
+
+### Goal
+Help the AI propose strategies that are closer to what the app can actually apply.
+
+### Expected result
+AI Rank and Final Rank should diverge less often because the AI understands the true operating rules better.
+
+---
+
+# 8. MAKE THE AI MORE AWARE OF RUN-RATE QUALITY / DATA CONFIDENCE
+
+Please give the AI visibility into run-rate reliability where possible.
+
+### Suggested context
+- whether a run rate exists
+- whether it is valid or missing
+- whether it comes from master data / historical data / another trusted source
+- optional confidence level if available
+
+### Goal
+Prevent the AI from over-optimizing around weak or uncertain production-time assumptions.
+
+### Expected result
+The AI can make better sequencing decisions when run-rate quality varies.
+
+---
+
+# 9. INCLUDE RISK-AWARE REASONING, NOT JUST OPTIMIZATION
+
+Please expand the AI’s reasoning beyond pure optimization and include risk awareness.
+
+### Examples of risk signals
+- risk of deadline breach
+- risk of overloading a specific day
+- risk of causing downstream congestion
+- risk introduced by aggressive advancement
+- risk due to uncertain run-rate assumptions
+- risk created by heavy reshuffling
+
+### Goal
+Make the strategies more operationally balanced, not just theoretically optimal.
+
+### Expected result
+The AI can propose strategies that trade off efficiency against schedule stability and deadline risk more intelligently.
+
+---
+
+# 10. IMPROVE ROW-LEVEL EXPLANATIONS SO THE AI EXPLAINS THE ACTUAL PLACEMENT
+
+Please make the AI generate row-level reasons that explain the actual placement of each entity in the final resolved sequence.
+
+### The explanation should help answer:
+- why this entity stayed where it is
+- why it moved earlier
+- why it moved later
+- why it could not follow the raw AI rank
+- why it was pinned or constrained
+- why it sits next to its neighboring entities
+
+### Goal
+Make the transparency table more useful and less generic.
+
+### Expected result
+The user can understand why a specific entity is in a specific place.
+
+---
+
+# 11. ADD LEARNING CONTEXT FROM COMMON DETERMINISTIC CORRECTIONS
+
+Please consider feeding the AI higher-level context about common correction patterns that the deterministic layer frequently makes.
+
+### Examples
+- AI often proposes moving generated orders ahead of source orders
+- AI often proposes positions later overridden by MTO deadline protection
+- AI often clusters entities in ways the final chronological sort breaks
+
+### Goal
+Reduce repeated mismatch between AI suggestion and final applied result.
+
+### Expected result
+The AI gradually proposes strategies that require fewer downstream corrections.
+
+---
+
+# 12. KEEP `AI RANK` AND `FINAL RANK`, AND IMPROVE TRANSPARENCY WHEN THEY DIFFER
+
+Please preserve the distinction between:
+- `AI Rank`
+- `Final Rank`
+
+and continue to show differences in the transparency layer.
+
+### Important
+When they differ, provide better reasoning using the richer AI/context-aware explanation model.
+
+### Expected result
+Users can clearly see:
+- what the AI wanted
+- what the app actually applied
+- why the difference happened
+
+---
+
+# 13. KEEP THE PREVIEW SORTED BY FINAL RESOLVED ORDER, AND APPLY USING THAT SAME ORDER
+
+Please preserve the existing requirement that:
+- the preview table is sorted by the final resolved sequence
+- apply-to-schedule uses the exact same sorted dataset
+
+### Goal
+The user should always see the same ordered list that will be committed.
+
+### Expected result
+No drift between preview and apply order.
+
+---
+
+# 14. KEEP THE MAIN PREVIEW CLEAN, BUT IMPROVE THE COLLAPSIBLE TRANSPARENCY TABLE
+
+Please keep the main preview table focused on the final sequence, but improve the collapsible explanation section below it.
+
+### In the collapsible section, show fields such as:
+- `Final Rank`
+- `AI Rank`
+- `Entity / Order ID`
+- `Product`
+- `Current Line`
+- `Proposed Line`
+- `Moved?`
+- `Adjusted by Rules?`
+- `Reason`
+- `Constraint Note`
+- optional risk/confidence notes if available
+
+### Goal
+Provide strong transparency without cluttering the main sequencing preview.
+
+### Expected result
+Users can review both the clean final sequence and the detailed adjustment explanation when needed.
+
+---
+
+# 15. APPLY THESE IMPROVEMENTS TO AUTO-SEQUENCE ACROSS ALL RELEVANT VIEWS
+
+Please apply these AI improvements to the auto-sequence workflow across:
+- `All Feedmills`
+- `Feedmill 1`
+- `Feedmill 2`
+- `Feedmill 3`
+- `Powermix`
+- and all lines from `Line 1` to `Line 7`
+
+### Expected result
+The AI sequencing becomes more consistent, more executable, and more explainable across the full scheduling workflow.
+
+---
+
+# IMPORTANT
+
+Please improve the Auto-Sequence AI in the following ways:
+
+## Better modeling
+- sequence real production entities, not only raw orders
+- use stable backend/entity IDs
+- include dependencies between linked entities
+
+## Better AI context
+- include hard constraints enforced by the app
+- include line/day workload shape
+- include run-rate validity / confidence
+- include risk signals
+
+## Better AI output
+- return structured ranked IDs/entities
+- include suggested dates and dependency hints
+- generate better row-level placement reasons
+
+## Better transparency
+- preserve AI Rank vs Final Rank
+- keep preview sorted by final resolved order
+- keep apply using the same order
+- improve the collapsible transparency table below the preview
+
+The goal is to make AI sequencing:
+- closer to what the app can actually apply
+- less likely to be heavily corrected later
+- and easier for users to understand and trust
+
+---
+
+# DEBUG LOGGING
+
+Temporarily log the richer AI sequencing context and output.
+
+```javascript
+console.debug('[Auto-Sequence AI Entity Input]', {
+  strategyName,
+  entities: aiInputEntities?.map(e => ({
+    entityId: e.entityId,
+    entityType: e.entityType,
+    memberOrderIds: e.memberOrderIds,
+    currentLine: e.currentLine,
+    effectiveAvailDate: e.effectiveAvailDate,
+    runRate: e.runRate,
+    runRateConfidence: e.runRateConfidence,
+  })),
+});
+```
+
+```javascript
+console.debug('[Auto-Sequence AI Structured Output]', {
+  strategyName,
+  primaryGoal,
+  secondaryGoal,
+  aiSequence: aiOutput?.sequence?.map(e => ({
+    entityId: e.entity_id,
+    aiRank: e.ai_rank,
+    suggestedDate: e.suggested_date,
+    mustBeBeforeIds: e.must_be_before_ids,
+    mustBeAfterIds: e.must_be_after_ids,
+    riskNote: e.risk_note,
+  })),
+});
+```
+
+```javascript
+console.debug('[Auto-Sequence AI vs Final Rank Drift]', {
+  entityId,
+  aiRank,
+  finalRank,
+  adjustedByRules: aiRank !== finalRank,
+  adjustmentReason,
+  constraintNote,
+});
+```
+
+```javascript
+console.debug('[Auto-Sequence AI Constraint Context]', {
+  includesConstraints: [
+    'in_production_locked',
+    'critical_or_mto',
+    'shutdown_lines',
+    'line_eligibility',
+    'combined_entities',
+    'generated_source_dependencies',
+    'chronological_avail_date',
+    'completion_feasibility',
+  ],
+});
+```
+
+---
+
+# VERIFICATION
+
+1. ✅ AI sequences true production entities / groups
+2. ✅ Stable backend/entity IDs are used throughout the AI sequencing flow
+3. ✅ AI understands dependency relationships between linked entities
+4. ✅ AI receives richer line/day workload context
+5. ✅ AI receives hard constraint context from the app
+6. ✅ AI output is structured and execution-friendly
+7. ✅ AI reasons are more specific to actual row placement
+8. ✅ AI Rank vs Final Rank differences are easier to explain
+9. ✅ Preview remains sorted by final resolved order
+10. ✅ Apply uses the same ordered dataset shown in preview
+11. ✅ Transparency table provides clearer row-level explanations
+12. ✅ The improvements work across all relevant lines/feedmills
+13. ✅ No UI errors or console errors are introduced

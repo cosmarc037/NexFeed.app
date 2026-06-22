@@ -1,0 +1,586 @@
+```
+Implement proper AI strategies with margin-based profit optimization:
+
+---
+
+## 1. REBUILD AI STRATEGY GENERATION — WITH MARGIN & CHANGEOVER LOGIC
+
+```javascript
+async function generateSequenceStrategies(ordersByLine, n10dData, masterData, changeoverRules) {
+  const strategies = {};
+  
+  // Enrich all orders with margin data from masterData
+  const enrichedByLine = enrichOrdersWithMargin(ordersByLine, masterData);
+  
+  // STRATEGY 1: Standard Sequence (Rule-Based) — Chronological sort only
+  strategies.standard = generateStandardSequence(enrichedByLine);
+  
+  // STRATEGY 2: AI Balanced — Optimize changeovers, suggest flexible MTS dates
+  strategies.ai_balanced = await generateAIBalancedSequence(
+    enrichedByLine,
+    n10dData,
+    masterData,
+    changeoverRules,
+    { optimizeForProfit: false }
+  );
+  
+  // STRATEGY 3: AI Profit-Optimized — Prioritize high-margin, suggest dates, optimize changeovers
+  strategies.ai_profit = await generateAIBalancedSequence(
+    enrichedByLine,
+    n10dData,
+    masterData,
+    changeoverRules,
+    { optimizeForProfit: true }
+  );
+  
+  // Determine recommendation based on metrics
+  strategies.recommended = determineRecommendation(strategies);
+  
+  return strategies;
+}
+
+function enrichOrdersWithMargin(ordersByLine, masterData) {
+  const result = {};
+  
+  for (const [line, orders] of Object.entries(ordersByLine)) {
+    result[line] = orders.map(order => {
+      const materialCode = String(order.material_code_fg || '').trim();
+      const mdEntry = masterData.find(md =>
+        String(md.material_code_fg || '').trim() === materialCode
+      );
+      
+      const margin = mdEntry ? (parseFloat(mdEntry.margin) || 0) : 0;
+      const volume = order.volume_override || order.volume || order.total_volume_mt || 0;
+      const productionTime = order.production_time || 0;
+      const changeover = order.changeover || 0;
+      const runtimeTotal = productionTime + changeover;
+      
+      return {
+        ...order,
+        _margin: margin,
+        _marginTotal: margin * volume,  // Total margin contribution
+        _profitRate: runtimeTotal > 0 ? margin / runtimeTotal : 0,  // Margin per hour
+        _runtimeTotal: runtimeTotal,
+      };
+    });
+  }
+  
+  return result;
+}
+
+function generateStandardSequence(enrichedByLine) {
+  const result = {};
+  
+  for (const [line, orders] of Object.entries(enrichedByLine)) {
+    // Sort chronologically by avail date (MTO dates first, then N10D dates)
+    const sorted = sortOrdersChronologically(orders);
+    
+    sorted.forEach((o, i) => {
+      o.prio = i + 1;
+      o._noDateChange = true;  // Standard doesn't suggest new dates
+    });
+    
+    result[line] = sorted;
+  }
+  
+  return {
+    id: 'standard',
+    name: 'Standard Sequence',
+    theme: 'Rule-Based',
+    description: 'Orders sorted chronologically by availability dates and N10D thresholds',
+    icon: '📋',
+    color: 'blue',
+    orders: result,
+    metrics: calculateStrategyMetrics(result),
+    isAIRecommended: false,
+  };
+}
+
+async function generateAIBalancedSequence(enrichedByLine, n10dData, masterData, changeoverRules, options) {
+  const { optimizeForProfit } = options;
+  
+  // Build AI prompt
+  const prompt = buildAISequencePrompt(enrichedByLine, optimizeForProfit);
+  
+  let aiResult = { strategy: {}, reasoning: '', dateAdjustments: [] };
+  
+  try {
+    const response = await callAzureOpenAI(prompt);
+    aiResult = parseAIResponse(response);
+  } catch (error) {
+    console.error('AI sequence generation failed:', error);
+    // Fallback to standard
+    return generateStandardSequence(enrichedByLine);
+  }
+  
+  // Apply AI reordering and date suggestions
+  const result = {};
+  
+  for (const [line, orders] of Object.entries(enrichedByLine)) {
+    const aiLineResult = aiResult.strategy?.[line] || [];
+    
+    if (aiLineResult.length === 0) {
+      // No AI suggestion for this line
+      const sorted = sortOrdersChronologically(orders);
+      sorted.forEach((o, i) => o.prio = i + 1);
+      result[line] = sorted;
+      continue;
+    }
+    
+    // Build AI suggestion map
+    const aiMap = new Map();
+    for (const aiOrder of aiLineResult) {
+      aiMap.set(String(aiOrder.order_id), {
+        suggestedDate: aiOrder.suggested_date,
+        reasoning: aiOrder.reasoning,
+        position: aiOrder.position,
+      });
+    }
+    
+    // Apply AI suggestions to orders
+    const ordersWithAISuggestions = orders.map(order => {
+      const aiSuggestion = aiMap.get(String(order.id));
+      
+      if (aiSuggestion?.suggestedDate) {
+        // Validate suggested date
+        const validation = validateAISuggestedDate(order, aiSuggestion.suggestedDate, n10dData);
+        
+        if (validation.isValid) {
+          return {
+            ...order,
+            target_avail_date: aiSuggestion.suggestedDate,
+            _aiSuggestedDate: aiSuggestion.suggestedDate,
+            _originalAvailDate: order.target_avail_date,
+            _aiReasoning: aiSuggestion.reasoning,
+            _dateAdjustedByAI: true,
+          };
+        }
+      }
+      
+      return order;
+    });
+    
+    // Sort by AI's suggested position (which preserves avail date order but optimizes changeovers)
+    const sorted = ordersWithAISuggestions
+      .map((o, i) => ({ ...o, _aiPosition: i }))
+      .sort((a, b) => {
+        const posA = aiMap.get(String(a.id))?.position ?? a._aiPosition;
+        const posB = aiMap.get(String(b.id))?.position ?? b._aiPosition;
+        return posA - posB;
+      });
+    
+    // Assign priorities
+    sorted.forEach((o, i) => {
+      o.prio = i + 1;
+    });
+    
+    result[line] = sorted;
+  }
+  
+  return {
+    id: optimizeForProfit ? 'ai_profit' : 'ai_balanced',
+    name: optimizeForProfit ? 'AI Profit-Optimized' : 'AI Balanced',
+    theme: optimizeForProfit ? 'AI-Powered (Profit-Optimized)' : 'AI-Powered (Balanced)',
+    description: optimizeForProfit
+      ? 'AI prioritizes high-margin orders and optimizes changeovers while respecting MTO deadlines'
+      : 'AI intelligently repositions orders to minimize changeovers and suggests flexible MTS dates within safe windows',
+    icon: optimizeForProfit ? '💰' : '🤖',
+    color: optimizeForProfit ? 'green' : 'purple',
+    orders: result,
+    metrics: calculateStrategyMetrics(result),
+    aiReasoning: aiResult.reasoning || '',
+    dateAdjustments: aiResult.dateAdjustments || [],
+    isAIRecommended: false,
+  };
+}
+
+function buildAISequencePrompt(enrichedByLine, optimizeForProfit) {
+  const allOrders = Object.values(enrichedByLine).flat();
+  
+  // Categorize orders
+  const mtoOrders = allOrders.filter(o => isMTOOrder(o));
+  const criticalOrders = allOrders.filter(o => o._n10dStatus === 'Critical');
+  const urgentOrders = allOrders.filter(o => o._n10dStatus === 'Urgent' || o._n10dStatus === 'prio replenish');
+  const monitorOrders = allOrders.filter(o => o._n10dStatus === 'Monitor');
+  const flexibleOrders = allOrders.filter(o => 
+    o._n10dStatus === 'Sufficient' || 
+    (o.inferred_target_label && !isMTOOrder(o) && !criticalOrders.includes(o) && !urgentOrders.includes(o) && !monitorOrders.includes(o))
+  );
+  
+  const orderDetails = allOrders.map(o => ({
+    id: o.id,
+    description: o.item_description,
+    volume: o.volume || o.total_volume_mt,
+    category: o.category,
+    color: o.color,
+    diameter: o.diameter,
+    form: o.form,
+    margin: o._margin,
+    profit_rate: o._profitRate?.toFixed(2),
+    current_avail_date: o.target_avail_date,
+    is_mto: isMTOOrder(o),
+    is_critical: o._n10dStatus === 'Critical',
+    is_urgent: o._n10dStatus === 'Urgent' || o._n10dStatus === 'prio replenish',
+    is_monitor: o._n10dStatus === 'Monitor',
+    is_flexible: o._n10dStatus === 'Sufficient' || (!isMTOOrder(o) && !criticalOrders.includes(o) && !urgentOrders.includes(o) && !monitorOrders.includes(o)),
+    n10d_days_remaining: calculateN10DDaysRemaining(o),
+    production_hours: o.production_time,
+    changeover_hours: o.changeover,
+  }));
+  
+  return `You are an AI production scheduler. Analyze and reorder these orders to optimize ${optimizeForProfit ? 'profitability and changeover efficiency' : 'changeover efficiency'}.
+
+## CURRENT ORDERS (${allOrders.length} total):
+${JSON.stringify(orderDetails, null, 2)}
+
+## CRITICAL CONSTRAINTS (NON-NEGOTIABLE):
+1. **MTO orders (is_mto: true)**: NEVER change their current_avail_date. They have contractual deadlines.
+2. **Critical orders (is_critical: true)**: MUST be produced FIRST (today/ASAP). Do not defer.
+3. **Urgent/Monitor orders**: Must complete before their current_avail_date with minimum 1.5-hour slack.
+4. **All must-deliver orders**: Completion date ≤ current_avail_date (with 1.5-hour buffer minimum).
+
+## FLEXIBLE ORDERS (CAN BE REPOSITIONED):
+- Orders marked is_flexible: true
+- These have no strict target date (Stock Sufficient in N10D)
+- Can be produced ANY time within a safe window: [today+2, N10D threshold OR current_avail_date]
+- Use these to fill gaps and minimize changeovers
+
+## MATERIAL COMPATIBILITY (For Changeover Minimization):
+Group orders by: category → color → diameter → form
+Orders with identical attributes have ZERO changeover.
+Orders with different attributes have changeover cost (use provided changeover matrix).
+
+## OPTIMIZATION OBJECTIVE:
+${optimizeForProfit ? `
+### PROFIT-OPTIMIZED STRATEGY:
+1. **High profit-rate orders first**: Sort by profit_rate DESC
+   - profit_rate = margin / (production_hours + changeover_hours)
+   - Higher profit_rate = produce earlier (capture profit sooner)
+2. **High absolute margin orders**: Prioritize among same profit-rate tier
+3. **Fill gaps with low-profit orders**: Use flexible/sufficient orders to fill remaining capacity
+4. **Minimize changeovers**: Group by material compatibility, but ONLY within above profit hierarchy
+5. **Flexible order repositioning**: Move flexible orders to earlier/later slots if it:
+   - Reduces changeover for high-margin orders
+   - Doesn't violate any constraint
+   - Stays within [today+2, N10D threshold]
+` : `
+### BALANCED STRATEGY (Minimize Changeovers):
+1. **Preserve critical/urgent/monitor order deadline positions**: Don't move them
+2. **Reorder MTS/flexible orders**: Group by material compatibility to minimize changeovers
+   - Same category+color+diameter+form = zero changeover (top priority)
+   - Same category+color = 0.5 hour (medium priority)
+   - Different = higher changeover (last priority)
+3. **Flexible order repositioning**: Move flexible orders to earlier/later slots if it reduces changeover
+   - Must stay within [today+2, N10D threshold]
+   - Example: Move order C next to order A if they share materials, even if A was originally first
+4. **Suggest production dates**: For flexible MTS orders, suggest optimal dates within safe window
+   - Early in window = safety buffer
+   - Late in window = fill production gaps
+`}
+
+## RESPONSE FORMAT (VALID JSON ONLY):
+{
+  "strategy": {
+    "line_1": [
+      {
+        "position": 1,
+        "order_id": "xxx",
+        "suggested_date": "2026-04-27",
+        "reasoning": "Critical order, must produce first"
+      },
+      {
+        "position": 2,
+        "order_id": "yyy",
+        "suggested_date": "2026-04-28",
+        "reasoning": "High profit-rate (12.5/hr), grouped with order above to minimize changeover"
+      }
+    ]
+  },
+  "reasoning": "Overall strategy explanation",
+  "dateAdjustments": [
+    { "order_id": "yyy", "original": "2026-05-10", "new": "2026-04-28", "reason": "Flexible MTS, moved to reduce changeover and earlier production" }
+  ]
+}
+
+INSTRUCTIONS:
+- Return orders in OPTIMAL SEQUENCE (position matters)
+- Every order must have a position
+- Suggested dates MUST be within [today+2, current_avail_date] for flexible orders
+- MTO orders: suggested_date = current_avail_date (never change)
+- Include brief reasoning for each reordering decision
+- Return ONLY valid JSON. No markdown, no explanation outside JSON.`;
+}
+
+function validateAISuggestedDate(order, suggestedDate, n10dData) {
+  if (!suggestedDate) return { isValid: true };
+  
+  const isMTO = isMTOOrder(order);
+  
+  // MTO orders: never change
+  if (isMTO) {
+    return { isValid: false, reason: 'MTO cannot be changed' };
+  }
+  
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  
+  const buffer2Days = new Date(today);
+  buffer2Days.setDate(buffer2Days.getDate() + 2);
+  
+  const suggestedDateObj = new Date(suggestedDate);
+  
+  // Can't suggest before today+2
+  if (suggestedDateObj < buffer2Days) {
+    return { isValid: false, reason: 'Before today+2 buffer' };
+  }
+  
+  // Get N10D threshold (red highlight date)
+  const n10dThreshold = getN10DThreshold(order, n10dData);
+  
+  if (n10dThreshold) {
+    const thresholdObj = new Date(n10dThreshold);
+    thresholdObj.setHours(23, 59, 59, 999);
+    
+    if (suggestedDateObj > thresholdObj) {
+      return { isValid: false, reason: 'Beyond N10D threshold' };
+    }
+  }
+  
+  // Check against hard avail date
+  if (order.target_avail_date && /^\d{4}-\d{2}-\d{2}/.test(String(order.target_avail_date))) {
+    const availDateObj = new Date(order.target_avail_date);
+    availDateObj.setHours(23, 59, 59, 999);
+    
+    if (suggestedDateObj > availDateObj) {
+      return { isValid: false, reason: 'Beyond avail date' };
+    }
+  }
+  
+  return { isValid: true };
+}
+
+function getN10DThreshold(order, n10dData) {
+  // N10D threshold = the red highlight date (day 10 from N10D)
+  // For Stock Sufficient orders, this is typically 10 days from today
+  const materialCode = String(order.material_code_fg || '').trim();
+  const n10dEntry = n10dData?.find(n =>
+    String(n.material_code || n.material_code_fg || '').trim() === materialCode
+  );
+  
+  if (n10dEntry && n10dEntry.target_date && /^\d{4}-\d{2}-\d{2}/.test(String(n10dEntry.target_date))) {
+    return n10dEntry.target_date;
+  }
+  
+  // Fallback: 10 days from today
+  const fallback = new Date();
+  fallback.setDate(fallback.getDate() + 10);
+  return fallback.toISOString().split('T')[0];
+}
+
+function calculateN10DDaysRemaining(order) {
+  if (!order.target_avail_date || !/^\d{4}-\d{2}-\d{2}/.test(String(order.target_avail_date))) {
+    return 999;
+  }
+  
+  const deadline = new Date(order.target_avail_date);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  
+  const daysRemaining = Math.ceil((deadline - today) / (1000 * 60 * 60 * 24));
+  return Math.max(0, daysRemaining);
+}
+
+function sortOrdersChronologically(orders) {
+  return [...orders].sort((a, b) => {
+    // MTO orders first (hard dates)
+    const isMTOA = isMTOOrder(a);
+    const isMTOB = isMTOOrder(b);
+    
+    if (isMTOA && !isMTOB) return -1;
+    if (!isMTOA && isMTOB) return 1;
+    
+    // Then by N10D category (critical → urgent → monitor → sufficient)
+    const catA = getOrderCategory(a);
+    const catB = getOrderCategory(b);
+    const catPriority = { 'critical': 0, 'urgent': 1, 'monitor': 2, 'sufficient': 3 };
+    
+    if (catPriority[catA] !== catPriority[catB]) {
+      return catPriority[catA] - catPriority[catB];
+    }
+    
+    // Finally by avail date
+    const dateA = a.target_avail_date ? new Date(a.target_avail_date).getTime() : Infinity;
+    const dateB = b.target_avail_date ? new Date(b.target_avail_date).getTime() : Infinity;
+    
+    return dateA - dateB;
+  });
+}
+
+function getOrderCategory(order) {
+  if (order._n10dStatus === 'Critical') return 'critical';
+  if (order._n10dStatus === 'Urgent' || order.inferred_target_label === 'prio replenish') return 'urgent';
+  if (order._n10dStatus === 'Monitor') return 'monitor';
+  return 'sufficient';
+}
+
+function isMTOOrder(order) {
+  // MTO = has hard contractual avail date (not N10D inferred)
+  if (!order.target_avail_date) return false;
+  
+  const dateStr = String(order.target_avail_date);
+  
+  // If it's a real date AND not sourced from N10D inference
+  if (/^\d{4}-\d{2}-\d{2}/.test(dateStr) && !order._dateSourceIsN10D && order._n10dStatus !== 'Sufficient') {
+    return true;
+  }
+  
+  return false;
+}
+
+function calculateStrategyMetrics(ordersByLine) {
+  const allOrders = Object.values(ordersByLine).flat();
+  
+  const mtoOrders = allOrders.filter(o => isMTOOrder(o));
+  const totalOrders = allOrders.length;
+  
+  // Check for MTO violations
+  let minSlack = Infinity;
+  let violations = 0;
+  
+  mtoOrders.forEach(o => {
+    if (o._estimatedCompletion && o.target_avail_date) {
+      const completionTime = new Date(o._estimatedCompletion);
+      const availDate = new Date(o.target_avail_date);
+      availDate.setHours(23, 59, 59, 999);
+      
+      const slackHours = (availDate - completionTime) / (1000 * 60 * 60);
+      
+      if (slackHours < 1.5) violations++;
+      minSlack = Math.min(minSlack, slackHours);
+    }
+  });
+  
+  const riskLevel = violations > 0 ? 'Violated' : minSlack < 12 ? 'High' : minSlack < 48 ? 'Medium' : 'Low';
+  
+  // Total profit
+  const totalMargin = allOrders.reduce((sum, o) => sum + (o._marginTotal || 0), 0);
+  
+  return {
+    totalOrders,
+    mtoCount: mtoOrders.length,
+    minSlackHours: minSlack === Infinity ? null : minSlack.toFixed(1),
+    riskLevel,
+    violations,
+    totalMargin: totalMargin.toFixed(2),
+  };
+}
+
+function determineRecommendation(strategies) {
+  // Recommend AI Balanced if safe (no violations)
+  // Prefer AI Profit if it's also safe and more profitable
+  
+  if (strategies.ai_balanced?.metrics.violations === 0) {
+    strategies.ai_balanced.isAIRecommended = true;
+    return 'ai_balanced';
+  }
+  
+  if (strategies.ai_profit?.metrics.violations === 0 && 
+      parseFloat(strategies.ai_profit.metrics.totalMargin) > parseFloat(strategies.ai_balanced?.metrics.totalMargin || 0)) {
+    strategies.ai_profit.isAIRecommended = true;
+    return 'ai_profit';
+  }
+  
+  strategies.standard.isAIRecommended = true;
+  return 'standard';
+}
+```
+
+---
+
+## 2. UPDATE AVAIL DATE DISPLAY — SHOW ORIGINAL → AI-SUGGESTED
+
+```jsx
+function renderAvailDateCell(order) {
+  const isAISuggested = order._dateAdjustedByAI;
+  const originalDate = order._originalAvailDate;
+  const currentDate = order.target_avail_date;
+  
+  // If AI changed it, show comparison
+  if (isAISuggested && originalDate && originalDate !== currentDate) {
+    return (
+      <div className="avail-date-comparison">
+        <span className="avail-date-original" title={`Original: ${formatDate(originalDate)}`}>
+          {formatDate(originalDate)}
+        </span>
+        <span className="avail-date-arrow">→</span>
+        <span className="avail-date-ai" title={order._aiReasoning}>
+          ✨ {formatDate(currentDate)}
+        </span>
+      </div>
+    );
+  }
+  
+  // No AI change - show as normal
+  if (currentDate && /^\d{4}-\d{2}-\d{2}/.test(String(currentDate))) {
+    return <span className="avail-date-value">{formatDate(currentDate)}</span>;
+  }
+  
+  // N10D label
+  if (order.inferred_target_label) {
+    return <span className="avail-date-label">{order.inferred_target_label}</span>;
+  }
+  
+  return <span>—</span>;
+}
+```
+
+Styling:
+
+```css
+.avail-date-comparison {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+}
+
+.avail-date-original {
+  text-decoration: line-through;
+  color: #9ca3af;
+  opacity: 0.6;
+}
+
+.avail-date-arrow {
+  color: #d1d5db;
+  font-weight: 700;
+  font-size: 9px;
+}
+
+.avail-date-ai {
+  color: #7c3aed;
+  font-weight: 600;
+  font-style: italic;
+}
+
+.dark-mode .avail-date-original {
+  color: #6b7280;
+}
+
+.dark-mode .avail-date-ai {
+  color: #c4b5fd;
+}
+```
+
+---
+
+## KEY DIFFERENCES NOW:
+
+| Aspect | Standard | AI Balanced | AI Profit-Optimized |
+|--------|----------|-------------|-------------------|
+| **Sorting basis** | Avail date only | Material compatibility + avail date | Profit rate + material compat + avail date |
+| **Changeover optimization** | None | Yes (groups similar materials) | Yes (high-margin first) |
+| **Date suggestions** | None | Suggests for flexible MTS | Suggests for flexible MTS |
+| **Margin consideration** | No | No | **YES** (high-margin earlier) |
+| **Visual difference** | All yellow dates | Some purple dates (AI adjusted) | **More purple dates + higher-margin orders move earlier** |
+
+The key: **AI Profit should show visibly different ordering** where high-margin items move up the queue!

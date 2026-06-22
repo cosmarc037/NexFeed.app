@@ -1,0 +1,538 @@
+```
+Update the Actions Taken section to be AI-generated with calculated fallback:
+
+---
+
+## 1. ENRICH PLACEMENT LOG WITH FULL CONTEXT
+
+When building the placement log during the combine/place algorithm, store all the decision data:
+
+```javascript
+// In plantLevelCombineAndPlace — when placing a combined order
+placementLog.push({
+  type: 'combined',
+  product: baseOrder.item_description,
+  materialCode: baseOrder.material_code_fg,
+  ordersCount: combineGroup.orders.length,
+  fromLines: [...new Set(combineGroup.orders.map(o => o._originalLine))],
+  toLine: bestLine,
+  totalVolume: combinedVolume,
+  individualVolumes: combineGroup.orders.map(o => ({
+    name: o.item_description,
+    volume: parseFloat(o.volume) || 0,
+    fromLine: o._originalLine,
+    fpr: o.fpr
+  })),
+  lineScores: lineScores.map(ls => ({
+    line: ls.line,
+    feedmill: ls.feedmill,
+    runRate: getFeedmillRunRate(ls.feedmill),
+    totalMTBefore: (lineOrdersMap[ls.line] || []).reduce((s, o) => s + (parseFloat(o.volume) || 0), 0),
+    queueTimeBefore: ls.queueTime,
+    totalMTAfter: null, // Will be filled after placement
+    queueTimeAfter: null
+  })),
+  bestLineReason: {
+    line: bestLine,
+    feedmill: lineScores[0].feedmill,
+    runRate: getFeedmillRunRate(lineScores[0].feedmill),
+    queueTime: lineScores[0].queueTime,
+    totalMTBefore: lineScores[0].totalMTBefore
+  },
+  changeoversSaved: combineGroup.orders.length - 1,
+  baseChangeover: getBaseChangeover(baseOrder.form, changeoverRules?.baseChangeover),
+  timeSaved: (combineGroup.orders.length - 1) * getBaseChangeover(baseOrder.form, changeoverRules?.baseChangeover)
+});
+
+// For moved orders
+placementLog.push({
+  type: 'moved',
+  product: order.item_description,
+  materialCode: order.material_code_fg,
+  fromLine: order._movedFromLine,
+  toLine: bestLine,
+  volume: parseFloat(order.volume) || 0,
+  fpr: order.fpr,
+  lineScores: lineScores.map(ls => ({
+    line: ls.line,
+    feedmill: ls.feedmill,
+    runRate: getFeedmillRunRate(ls.feedmill),
+    totalMTBefore: (lineOrdersMap[ls.line] || []).reduce((s, o) => s + (parseFloat(o.volume) || 0), 0),
+    queueTimeBefore: ls.queueTime
+  })),
+  bestLineReason: {
+    line: bestLine,
+    feedmill: lineScores[0].feedmill,
+    runRate: getFeedmillRunRate(lineScores[0].feedmill),
+    queueTime: lineScores[0].queueTime
+  },
+  fromLineReason: {
+    line: order._movedFromLine,
+    queueTime: lineScores.find(ls => ls.line === order._movedFromLine)?.queueTime || 0
+  }
+});
+
+// After placement, update the after values
+// (Do this after recalculating queue times)
+placementLog[placementLog.length - 1].lineScores.forEach(ls => {
+  const updatedLineOrders = lineOrdersMap[ls.line] || [];
+  ls.totalMTAfter = updatedLineOrders.reduce((s, o) => s + (parseFloat(o.volume) || 0), 0);
+  ls.queueTimeAfter = calculateLineQueueTime(updatedLineOrders, ls.feedmill);
+});
+```
+
+---
+
+## 2. AI PROMPT — BATCH ALL ACTIONS
+
+```javascript
+function buildActionsPrompt(placementLog) {
+  return `
+You are a production scheduling advisor. Explain each action taken during a plant-level auto-sequence.
+
+For EACH action below, write a detailed 3-5 sentence explanation covering:
+- WHAT happened (combined/moved)
+- WHY the destination line was chosen (show queue time comparison with actual numbers)
+- HOW queue time was calculated (Total MT on line ÷ Feedmill run rate = queue time)
+- IMPACT (changeovers saved, load balancing, etc.)
+
+ACTIONS TO EXPLAIN:
+
+${placementLog.map((entry, index) => {
+  if (entry.type === 'combined') {
+    return `
+ACTION ${index + 1}: COMBINED
+Product: ${entry.product}
+Orders Combined: ${entry.ordersCount}
+Total Volume: ${entry.totalVolume} MT
+Individual Orders:
+${entry.individualVolumes.map(iv => `  - ${iv.name} (${iv.volume} MT) from ${getLineShortName(iv.fromLine)}, FPR: ${iv.fpr}`).join('\n')}
+Destination: ${getLineShortName(entry.toLine)}
+Line Options Evaluated:
+${entry.lineScores.map(ls => `  - ${getLineShortName(ls.line)} (${ls.feedmill}): ${ls.totalMTBefore} MT ÷ ${ls.runRate} MT/hr = ${ls.queueTimeBefore.toFixed(2)} hrs queue time`).join('\n')}
+Best Line: ${getLineShortName(entry.bestLineReason.line)} — lowest queue time at ${entry.bestLineReason.queueTime.toFixed(2)} hrs
+Changeovers Saved: ${entry.changeoversSaved} × ${entry.baseChangeover.toFixed(2)} hrs = ${entry.timeSaved.toFixed(2)} hrs saved
+Max Combine Cap: 180 MT (${entry.totalVolume <= 180 ? 'within limit' : 'exceeds — split required'})
+`;
+  }
+  
+  if (entry.type === 'moved') {
+    return `
+ACTION ${index + 1}: MOVED
+Product: ${entry.product}
+Volume: ${entry.volume} MT
+FPR: ${entry.fpr}
+From: ${getLineShortName(entry.fromLine)} → To: ${getLineShortName(entry.toLine)}
+Line Options Evaluated:
+${entry.lineScores.map(ls => `  - ${getLineShortName(ls.line)} (${ls.feedmill}): ${ls.totalMTBefore} MT ÷ ${ls.runRate} MT/hr = ${ls.queueTimeBefore.toFixed(2)} hrs queue time`).join('\n')}
+Best Line: ${getLineShortName(entry.bestLineReason.line)} — lowest queue time at ${entry.bestLineReason.queueTime.toFixed(2)} hrs
+Original Line Queue: ${getLineShortName(entry.fromLineReason.line)} had ${entry.fromLineReason.queueTime.toFixed(2)} hrs queue time
+`;
+  }
+  
+  return '';
+}).join('\n')}
+
+RESPONSE FORMAT:
+
+For each action, write:
+
+ACTION [number]:
+[Your 3-5 sentence explanation]
+
+RULES:
+- Number each action to match the action numbers above.
+- Include ACTUAL queue time numbers and calculations in your explanation.
+- Show the formula: "Total MT ÷ Run Rate = Queue Time" with real values.
+- Compare at least 2-3 line options when explaining why a line was chosen.
+- For combined orders: mention how many changeovers are eliminated and time saved.
+- For moved orders: explain why the original line was not optimal.
+- Do NOT use markdown (no **, ##, etc.).
+- Each action explanation should be a cohesive paragraph, not bullet points.
+- Keep each explanation to 3-5 sentences.
+- Use line short names (L1, L2, etc.) throughout.
+  `;
+}
+```
+
+---
+
+## 3. PARSE AI RESPONSE — SPLIT INTO PER-ACTION EXPLANATIONS
+
+```javascript
+function parseActionsResponse(response, placementLog) {
+  let cleaned = response.trim();
+  cleaned = cleaned.replace(/\*\*/g, '');
+  cleaned = cleaned.replace(/#{1,6}\s*/g, '');
+  
+  const explanations = {};
+  
+  // Try to split by "ACTION X:" pattern
+  const actionPattern = /ACTION\s*(\d+)\s*:/gi;
+  const parts = cleaned.split(actionPattern);
+  
+  // parts will be: [preamble, "1", explanation1, "2", explanation2, ...]
+  for (let i = 1; i < parts.length; i += 2) {
+    const actionNum = parseInt(parts[i]);
+    const explanation = parts[i + 1]?.trim();
+    
+    if (actionNum && explanation) {
+      // Clean up — remove leading/trailing whitespace and empty lines
+      const cleanedExplanation = explanation
+        .split('\n')
+        .map(l => l.trim())
+        .filter(l => l.length > 0)
+        .join(' ')
+        .trim();
+      
+      // Map to placement log index (0-based)
+      explanations[actionNum - 1] = cleanedExplanation;
+    }
+  }
+  
+  // Validate — ensure we have explanations for all actions
+  const allFound = placementLog.every((_, index) => explanations[index]);
+  
+  if (!allFound) {
+    console.warn('AI did not provide explanations for all actions. Some will use fallback.');
+  }
+  
+  return explanations;
+}
+```
+
+---
+
+## 4. FALLBACK — TEMPLATE-BASED EXPLANATIONS
+
+```javascript
+function generateFallbackExplanation(entry) {
+  if (entry.type === 'combined') {
+    const lineComparisons = entry.lineScores
+      .slice(0, 3)
+      .map(ls => `${getLineShortName(ls.line)} had ${ls.totalMTBefore.toFixed(1)} MT with a queue time of ${ls.queueTimeBefore.toFixed(2)} hrs (${ls.totalMTBefore.toFixed(1)} MT ÷ ${ls.runRate} MT/hr)`)
+      .join(', ');
+    
+    return `${entry.ordersCount} orders of ${entry.product} were combined into a single ${entry.totalVolume} MT run on ${getLineShortName(entry.toLine)}. ${getLineShortName(entry.bestLineReason.line)} was selected because it had the lowest queue time at ${entry.bestLineReason.queueTime.toFixed(2)} hrs — ${lineComparisons}. The combined volume of ${entry.totalVolume} MT is within the 180 MT cap. This eliminates ${entry.changeoversSaved} changeover${entry.changeoversSaved > 1 ? 's' : ''}, saving approximately ${formatTimeShift(entry.timeSaved)} of production time.`;
+  }
+  
+  if (entry.type === 'moved') {
+    const fromScore = entry.lineScores.find(ls => ls.line === entry.fromLine);
+    const toScore = entry.lineScores.find(ls => ls.line === entry.toLine);
+    
+    const lineComparisons = entry.lineScores
+      .slice(0, 3)
+      .map(ls => `${getLineShortName(ls.line)}: ${ls.totalMTBefore.toFixed(1)} MT ÷ ${ls.runRate} MT/hr = ${ls.queueTimeBefore.toFixed(2)} hrs`)
+      .join(', ');
+    
+    return `${entry.product} (${entry.volume} MT) was moved from ${getLineShortName(entry.fromLine)} to ${getLineShortName(entry.toLine)} to balance production load. ${getLineShortName(entry.fromLine)} had a queue time of ${fromScore?.queueTimeBefore.toFixed(2) || '—'} hrs while ${getLineShortName(entry.toLine)} had ${toScore?.queueTimeBefore.toFixed(2) || '—'} hrs (${lineComparisons}). Moving this order helps distribute the workload more evenly across lines.`;
+  }
+  
+  return 'Action details unavailable.';
+}
+```
+
+---
+
+## 5. ACTIONS TAKEN COMPONENT
+
+```jsx
+function PlantActionsTaken({ placementLog }) {
+  const [aiExplanations, setAiExplanations] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [useFallback, setUseFallback] = useState(false);
+  
+  useEffect(() => {
+    generateExplanations();
+  }, []);
+  
+  async function generateExplanations() {
+    setIsLoading(true);
+    
+    if (placementLog.length === 0) {
+      setIsLoading(false);
+      return;
+    }
+    
+    try {
+      const prompt = buildActionsPrompt(placementLog);
+      const response = await callAI(prompt);
+      const parsed = parseActionsResponse(response, placementLog);
+      
+      // Check if we got at least 50% of explanations
+      const coveredCount = Object.keys(parsed).length;
+      if (coveredCount >= placementLog.length * 0.5) {
+        setAiExplanations(parsed);
+      } else {
+        console.warn(`AI only covered ${coveredCount}/${placementLog.length} actions. Using fallback.`);
+        setUseFallback(true);
+      }
+    } catch (error) {
+      console.error('AI actions explanation failed:', error);
+      setUseFallback(true);
+    }
+    
+    setIsLoading(false);
+  }
+  
+  async function handleRefresh() {
+    setAiExplanations(null);
+    setUseFallback(false);
+    await generateExplanations();
+  }
+  
+  if (placementLog.length === 0) {
+    return (
+      <div className="plant-actions-section">
+        <div className="plant-actions-header">
+          <h3 className="plant-summary-title">📋 Actions Taken</h3>
+        </div>
+        <div className="plant-actions-empty">No actions taken — all orders remain on their original lines.</div>
+      </div>
+    );
+  }
+  
+  return (
+    <div className="plant-actions-section">
+      <div className="plant-actions-header">
+        <h3 className="plant-summary-title">📋 Actions Taken</h3>
+        <button className="plant-actions-refresh" onClick={handleRefresh}>
+          ↻ Refresh
+        </button>
+      </div>
+      
+      {isLoading && (
+        <div className="plant-actions-loading">Analyzing actions...</div>
+      )}
+      
+      {!isLoading && placementLog.map((entry, index) => {
+        const explanation = (!useFallback && aiExplanations && aiExplanations[index])
+          ? aiExplanations[index]
+          : generateFallbackExplanation(entry);
+        
+        const isAI = !useFallback && aiExplanations && aiExplanations[index];
+        
+        return (
+          <div key={index} className="plant-action-card">
+            {/* Action header */}
+            <div className="plant-action-header">
+              {entry.type === 'combined' ? (
+                <>
+                  <span className="plant-action-icon plant-action-combine">🔗</span>
+                  <span className="plant-action-title">
+                    Combined <strong>{entry.ordersCount}</strong> orders of <strong>{entry.product}</strong> ({entry.totalVolume} MT) → <strong>{getLineShortName(entry.toLine)}</strong>
+                  </span>
+                </>
+              ) : entry.type === 'moved' ? (
+                <>
+                  <span className="plant-action-icon plant-action-move">↗</span>
+                  <span className="plant-action-title">
+                    Moved <strong>{entry.product}</strong> ({entry.volume} MT) {getLineShortName(entry.fromLine)} → <strong>{getLineShortName(entry.toLine)}</strong>
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span className="plant-action-icon plant-action-place">📌</span>
+                  <span className="plant-action-title">
+                    Placed <strong>{entry.product}</strong> ({entry.volume} MT) → <strong>{getLineShortName(entry.toLine)}</strong>
+                  </span>
+                </>
+              )}
+            </div>
+            
+            {/* Explanation */}
+            <div className={`plant-action-explanation ${isAI ? '' : 'plant-action-fallback'}`}>
+              {explanation}
+            </div>
+            
+            {/* Sub-orders for combined */}
+            {entry.type === 'combined' && entry.individualVolumes && (
+              <div className="plant-action-sub-orders">
+                {entry.individualVolumes.map((iv, subIdx) => (
+                  <span key={subIdx} className="plant-action-sub-chip">
+                    {getLineShortName(iv.fromLine)} · {iv.volume} MT
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+```
+
+---
+
+## 6. USE IN SUMMARY TAB
+
+```jsx
+function PlantSummaryTab({ summaryStats, placementLog }) {
+  return (
+    <div className="plant-summary-tab">
+      {/* Per-line summary table */}
+      <div className="plant-summary-section">
+        <h3 className="plant-summary-title">📊 Per-Line Summary</h3>
+        {/* ... existing summary table ... */}
+      </div>
+      
+      {/* Actions Taken — AI-powered */}
+      <PlantActionsTaken placementLog={placementLog} />
+    </div>
+  );
+}
+```
+
+---
+
+## 7. STYLING
+
+```css
+/* Actions section */
+.plant-actions-section {
+  margin-bottom: 24px;
+}
+
+.plant-actions-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.plant-actions-refresh {
+  padding: 4px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #ea580c;
+  background: none;
+  border: 1px solid #fed7aa;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.plant-actions-refresh:hover {
+  background: #fff7ed;
+}
+
+.plant-actions-loading {
+  font-size: 12px;
+  color: #9ca3af;
+  font-style: italic;
+  padding: 12px 0;
+}
+
+.plant-actions-empty {
+  font-size: 12px;
+  color: #9ca3af;
+  font-style: italic;
+  padding: 12px 0;
+}
+
+/* Action card */
+.plant-action-card {
+  background: #f9fafb;
+  border: 1px solid #f3f4f6;
+  border-radius: 8px;
+  padding: 14px 16px;
+  margin-bottom: 10px;
+}
+
+/* Action header */
+.plant-action-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.plant-action-icon {
+  flex-shrink: 0;
+  font-size: 16px;
+  margin-top: 1px;
+}
+
+.plant-action-title {
+  font-size: 13px;
+  color: #374151;
+  line-height: 1.5;
+}
+
+.plant-action-title strong {
+  color: #1a1a1a;
+}
+
+/* Explanation */
+.plant-action-explanation {
+  font-size: 12px;
+  color: #6b7280;
+  line-height: 1.7;
+  padding: 10px 14px;
+  background: #ffffff;
+  border-radius: 6px;
+  border: 1px solid #f3f4f6;
+}
+
+.plant-action-fallback {
+  border-left: 3px solid #e5e7eb;
+}
+
+/* Sub-order chips */
+.plant-action-sub-orders {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.plant-action-sub-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: 1px solid #bfdbfe;
+}
+```
+
+---
+
+## VERIFICATION
+
+### AI-generated explanations
+1. ✅ Each action has a 3-5 sentence AI explanation
+2. ✅ Explains WHY the destination line was chosen
+3. ✅ Shows queue time calculation: Total MT ÷ Run Rate = Queue Time
+4. ✅ Compares 2-3 line options with actual numbers
+5. ✅ For combined: mentions changeovers eliminated and time saved
+6. ✅ For moved: explains why original line was not optimal
+7. ✅ Uses line short names (L1, L2, etc.)
+
+### Fallback
+8. ✅ If AI fails → template-based explanation shown
+9. ✅ Fallback includes queue time numbers and calculations
+10. ✅ Fallback has subtle left border to differentiate
+11. ✅ Fallback still includes line comparisons
+
+### Batch prompt
+12. ✅ All actions sent in one AI call
+13. ✅ Response parsed per ACTION number
+14. ✅ If AI skips an action → fallback used for that specific action
+15. ✅ If AI covers < 50% → all fallback
+
+### Display
+16. ✅ Action header: icon + template summary (Combined X orders of Y...)
+17. ✅ Explanation below in white card
+18. ✅ Sub-order chips for combined orders (L1 · 80 MT, L3 · 60 MT)
+19. ✅ Refresh button to regenerate AI explanations
+
+### Data accuracy
+20. ✅ Placement log stores full line scores with queue times
+21. ✅ Placement log stores run rates per feedmill
+22. ✅ Placement log stores individual order volumes
+23. ✅ All numbers in AI prompt match calculated values
+```

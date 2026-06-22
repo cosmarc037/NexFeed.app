@@ -1,0 +1,631 @@
+```
+Implement the following changes to ensure the three AI sections (Insertion Position, Scheduling Impact, Alerts) re-analyze when the combine strategy changes or orders are added/removed:
+
+---
+
+## 1. TRACK SELECTED ORDERS AND STRATEGY AS DEPENDENCIES
+
+The three AI sections must re-trigger when:
+- Strategy changes (Max Consolidation ↔ Best Pair)
+- An order is removed via × button
+- An order is re-added
+
+### STATE MANAGEMENT
+
+```javascript
+function CombineGroup({ group, lineOrders, masterData, n10dData, changeoverRules }) {
+  const [selectedStrategy, setSelectedStrategy] = useState('max'); // 'max' or 'best_pair'
+  const [selectedOrders, setSelectedOrders] = useState(group.orders);
+  
+  // AI states
+  const [insertionAnalysis, setInsertionAnalysis] = useState(null);
+  const [impactData, setImpactData] = useState(null);
+  const [aiNote, setAiNote] = useState(null);
+  const [alertsAnalysis, setAlertsAnalysis] = useState(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(true);
+  
+  // Create a key that changes whenever selected orders change
+  const selectedOrderKey = selectedOrders
+    .map(o => o.id)
+    .sort()
+    .join('|');
+  
+  // Re-analyze whenever selected orders change
+  useEffect(() => {
+    if (selectedOrders.length >= 2) {
+      generateAllAnalyses();
+    } else {
+      // Not enough orders to combine
+      setInsertionAnalysis(null);
+      setImpactData(null);
+      setAiNote(null);
+      setAlertsAnalysis(null);
+      setIsAnalyzing(false);
+    }
+  }, [selectedOrderKey]);
+  
+  // Handle strategy change
+  function handleStrategyChange(strategy) {
+    setSelectedStrategy(strategy);
+    
+    if (strategy === 'max') {
+      // All orders
+      setSelectedOrders(group.orders);
+    } else if (strategy === 'best_pair') {
+      // Find best pair — closest avail dates
+      const bestPair = findBestPair(group.orders);
+      setSelectedOrders(bestPair);
+    }
+  }
+  
+  // Handle order removal via × button
+  function handleRemoveOrder(orderId) {
+    setSelectedOrders(prev => prev.filter(o => o.id !== orderId));
+  }
+  
+  // Handle order re-add
+  function handleAddOrder(order) {
+    setSelectedOrders(prev => {
+      if (prev.some(o => o.id === order.id)) return prev;
+      return [...prev, order].sort((a, b) => a.prio - b.prio);
+    });
+  }
+  
+  // Generate all analyses for current selected orders
+  async function generateAllAnalyses() {
+    setIsAnalyzing(true);
+    setInsertionAnalysis(null);
+    setImpactData(null);
+    setAiNote(null);
+    setAlertsAnalysis(null);
+    
+    try {
+      // Build context with SELECTED orders, not all group orders
+      const currentGroup = {
+        ...group,
+        orders: selectedOrders,
+        combinedVolume: selectedOrders.reduce((s, o) => s + (parseFloat(o.volume) || 0), 0)
+      };
+      
+      const context = buildCombineAnalysisContext(currentGroup, lineOrders, masterData, n10dData, changeoverRules);
+      
+      // 1. Insertion Position (AI)
+      const insertionPrompt = buildCombineAnalysisPrompt(context);
+      const insertionResponse = await callAI(insertionPrompt);
+      const parsed = parseCombineAnalysisResponse(insertionResponse);
+      
+      const cleanedInsertion = cleanInsertionResponse(
+        parsed.insertionPosition,
+        context.insertionResult.prio
+      );
+      setInsertionAnalysis(cleanedInsertion);
+      setAlertsAnalysis(parsed.alerts);
+      
+      // 2. Scheduling Impact (calculated + AI note)
+      const impact = buildSchedulingImpactData(currentGroup, lineOrders);
+      setImpactData(impact);
+      
+      if (impact.delayedOrders.length > 0 || impact.fasterOrders.length > 0) {
+        const notePrompt = buildSchedulingImpactNotePrompt(context, impact);
+        if (notePrompt) {
+          const noteResponse = await callAI(notePrompt);
+          const cleanedNote = cleanSchedulingNote(noteResponse);
+          setAiNote(cleanedNote);
+        }
+      }
+    } catch (error) {
+      console.error('Combine analysis failed:', error);
+      setInsertionAnalysis('Unable to determine. Review manually.');
+      setAlertsAnalysis('Please verify scheduling impact before approving.');
+    } finally {
+      setIsAnalyzing(false);
+    }
+  }
+  
+  // Refresh individual sections
+  async function refreshSection(section) {
+    const currentGroup = {
+      ...group,
+      orders: selectedOrders,
+      combinedVolume: selectedOrders.reduce((s, o) => s + (parseFloat(o.volume) || 0), 0)
+    };
+    
+    const context = buildCombineAnalysisContext(currentGroup, lineOrders, masterData, n10dData, changeoverRules);
+    
+    try {
+      if (section === 'insertion') {
+        setInsertionAnalysis(null);
+        const prompt = buildCombineAnalysisPrompt(context);
+        const response = await callAI(prompt);
+        const parsed = parseCombineAnalysisResponse(response);
+        const cleaned = cleanInsertionResponse(parsed.insertionPosition, context.insertionResult.prio);
+        setInsertionAnalysis(cleaned);
+      }
+      
+      if (section === 'scheduling') {
+        setImpactData(null);
+        setAiNote(null);
+        const impact = buildSchedulingImpactData(currentGroup, lineOrders);
+        setImpactData(impact);
+        
+        if (impact.delayedOrders.length > 0 || impact.fasterOrders.length > 0) {
+          const notePrompt = buildSchedulingImpactNotePrompt(context, impact);
+          if (notePrompt) {
+            const noteResponse = await callAI(notePrompt);
+            const cleaned = cleanSchedulingNote(noteResponse);
+            setAiNote(cleaned);
+          }
+        }
+      }
+      
+      if (section === 'alerts') {
+        setAlertsAnalysis(null);
+        const prompt = buildCombineAnalysisPrompt(context);
+        const response = await callAI(prompt);
+        const parsed = parseCombineAnalysisResponse(response);
+        setAlertsAnalysis(parsed.alerts);
+      }
+    } catch (error) {
+      console.error(`Refresh ${section} failed:`, error);
+    }
+  }
+  
+  // Recalculate summary data based on selected orders
+  const combinedVolume = selectedOrders.reduce((s, o) => s + (parseFloat(o.volume) || 0), 0);
+  const batchSize = parseFloat(selectedOrders[0]?.batch_size) || 1;
+  const combinedBatches = Math.ceil(combinedVolume / batchSize);
+  const fgWeight = parseFloat(selectedOrders[0]?.fg_weight) || 1;
+  const combinedBags = combinedBatches * fgWeight * 20;
+  const runRate = parseFloat(selectedOrders[0]?.run_rate) || 0;
+  const combinedProdTime = runRate > 0 ? combinedVolume / runRate : 0;
+  const separateProdTime = selectedOrders.reduce((s, o) => {
+    const v = parseFloat(o.volume) || 0;
+    const r = parseFloat(o.run_rate) || 0;
+    return s + (r > 0 ? v / r : 0);
+  }, 0);
+  
+  // Changeover savings
+  const savedChangeovers = selectedOrders.length - 1;
+  const baseChangeover = getBaseChangeover(selectedOrders[0]?.form, changeoverRules.baseChangeover);
+  const savedTime = savedChangeovers * baseChangeover;
+  
+  // Removed orders (for display)
+  const removedOrders = group.orders.filter(
+    o => !selectedOrders.some(so => so.id === o.id)
+  );
+  
+  return (
+    <div className="combine-group">
+      {/* Strategy selector */}
+      <div className="combine-strategy-section">
+        <div className="combine-strategy-label">COMBINE STRATEGY</div>
+        
+        <button
+          className={`combine-strategy-option ${selectedStrategy === 'max' ? 'selected' : ''}`}
+          onClick={() => handleStrategyChange('max')}
+        >
+          <span className="combine-strategy-name">Max Consolidation</span>
+          <span className="combine-strategy-desc">
+            Combine all {group.orders.length} orders → 1 run · Max changeover savings
+          </span>
+        </button>
+        
+        <button
+          className={`combine-strategy-option ${selectedStrategy === 'best_pair' ? 'selected' : ''}`}
+          onClick={() => handleStrategyChange('best_pair')}
+        >
+          <span className="combine-strategy-name">Best Pair</span>
+          <span className="combine-strategy-desc">
+            {getBestPairDescription(group.orders)}
+          </span>
+        </button>
+      </div>
+      
+      {/* Order cards — with × to remove */}
+      {group.orders.map(order => {
+        const isSelected = selectedOrders.some(o => o.id === order.id);
+        
+        return (
+          <div 
+            key={order.id} 
+            className={`combine-order-card ${isSelected ? '' : 'combine-order-deselected'}`}
+          >
+            <CombineOrderCard order={order} />
+            {isSelected ? (
+              <button 
+                className="combine-order-remove"
+                onClick={() => handleRemoveOrder(order.id)}
+                title="Remove from combination"
+                disabled={selectedOrders.length <= 2}
+              >
+                ×
+              </button>
+            ) : (
+              <button 
+                className="combine-order-add"
+                onClick={() => handleAddOrder(order)}
+                title="Add back to combination"
+              >
+                +
+              </button>
+            )}
+          </div>
+        );
+      })}
+      
+      {/* Not enough orders warning */}
+      {selectedOrders.length < 2 && (
+        <div className="combine-insufficient-warning">
+          ⚠ At least 2 orders are required to combine. Add more orders above.
+        </div>
+      )}
+      
+      {/* Only show analysis sections if 2+ orders selected */}
+      {selectedOrders.length >= 2 && (
+        <>
+          {/* Combined volume label */}
+          <div className="combine-volume-label">
+            Combined Volume: {combinedVolume} MT
+          </div>
+          
+          {/* Card 1: Combined Production Summary + Changeover Savings */}
+          <div className="combine-card">
+            <div className="combine-card-header">
+              <span>📊 Combined Production Summary</span>
+            </div>
+            <div className="combine-card-body">
+              <div className="combine-card-row">
+                <span>Combined Volume</span>
+                <span className="combine-card-value">{combinedVolume} MT</span>
+              </div>
+              <div className="combine-card-row">
+                <span>Batch Size</span>
+                <span className="combine-card-value">{batchSize} MT</span>
+              </div>
+              <div className="combine-card-row">
+                <span>Number of Batches</span>
+                <span className="combine-card-value">{combinedBatches}</span>
+              </div>
+              <div className="combine-card-row">
+                <span>Total Bags</span>
+                <span className="combine-card-value">{combinedBags}</span>
+              </div>
+              <div className="combine-card-row">
+                <span>Production Time (separate)</span>
+                <span className="combine-card-value">{formatProductionTime(separateProdTime)}</span>
+              </div>
+              <div className="combine-card-row">
+                <span>Production Time (combined)</span>
+                <span className="combine-card-value">{formatProductionTime(combinedProdTime)}</span>
+              </div>
+            </div>
+            
+            <div className="combine-card-divider"></div>
+            <div className="combine-card-header combine-card-header-sub">
+              <span>⏱ Changeover Savings</span>
+            </div>
+            <div className="combine-card-body">
+              <div className="combine-card-row">
+                <span>Changeovers eliminated</span>
+                <span className="combine-card-value">
+                  {savedChangeovers} × {formatProductionTime(baseChangeover)} = {formatProductionTime(savedTime)}
+                </span>
+              </div>
+              <div className="combine-card-row">
+                <span>Total time saved</span>
+                <span className="combine-card-value combine-card-value-success">
+                  ✅ {formatProductionTime(savedTime)} saved
+                </span>
+              </div>
+            </div>
+          </div>
+          
+          {/* Card 2: Insertion Position — AI */}
+          <div className="combine-card">
+            <div className="combine-card-header">
+              <span>📍 Insertion Position</span>
+              <button 
+                className="combine-card-refresh"
+                onClick={() => refreshSection('insertion')}
+                title="Refresh analysis"
+              >
+                ↻ Refresh
+              </button>
+            </div>
+            <div className="combine-card-body combine-card-body-text">
+              {isAnalyzing && !insertionAnalysis ? (
+                <span className="combine-card-loading">Re-analyzing optimal position...</span>
+              ) : (
+                <span>{insertionAnalysis || 'Unable to determine.'}</span>
+              )}
+            </div>
+          </div>
+          
+          {/* Card 3: Scheduling Impact — calculated + AI note */}
+          <div className="combine-card">
+            <div className="combine-card-header">
+              <span>📊 Scheduling Impact</span>
+              <button 
+                className="combine-card-refresh"
+                onClick={() => refreshSection('scheduling')}
+                title="Refresh analysis"
+              >
+                ↻ Refresh
+              </button>
+            </div>
+            <div className="combine-card-body combine-card-body-text">
+              {isAnalyzing && !impactData ? (
+                <span className="combine-card-loading">Re-analyzing scheduling impact...</span>
+              ) : (
+                <>
+                  {impactData && impactData.delayedOrders.length === 0 && impactData.fasterOrders.length === 0 && (
+                    <span className="scheduling-no-impact">
+                      No scheduling impact — all orders remain on their current schedule.
+                    </span>
+                  )}
+                  
+                  {impactData && impactData.delayedOrders.length > 0 && (
+                    <div className="scheduling-impact-section">
+                      <div className="scheduling-impact-label scheduling-impact-delayed">
+                        Delayed orders:
+                      </div>
+                      {impactData.delayedOrders.map((order, index) => (
+                        <div key={index} className="scheduling-impact-item scheduling-impact-item-delayed">
+                          <span className="scheduling-impact-bullet">⚠</span>
+                          <span className="scheduling-impact-text">
+                            Prio {order.prio}: {order.name} — starts <strong>{order.shiftFormatted} later</strong>
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  
+                  {impactData && impactData.fasterOrders.length > 0 && (
+                    <div className="scheduling-impact-section">
+                      <div className="scheduling-impact-label scheduling-impact-faster">
+                        Faster orders:
+                      </div>
+                      {impactData.fasterOrders.map((order, index) => (
+                        <div key={index} className="scheduling-impact-item scheduling-impact-item-faster">
+                          <span className="scheduling-impact-bullet">✅</span>
+                          <span className="scheduling-impact-text">
+                            Prio {order.prio}: {order.name} — starts <strong>{order.shiftFormatted} earlier</strong>
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  
+                  {aiNote && (
+                    <div className="scheduling-impact-ai-note">
+                      {aiNote.map((sentence, index) => (
+                        <p key={index} className="scheduling-impact-ai-sentence">
+                          {sentence}
+                        </p>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+          
+          {/* Card 4: Alerts — AI */}
+          <div className="combine-card combine-card-alerts">
+            <div className="combine-card-header combine-card-header-alerts">
+              <span>⚠ Alerts</span>
+              <button 
+                className="combine-card-refresh"
+                onClick={() => refreshSection('alerts')}
+                title="Refresh analysis"
+              >
+                ↻ Refresh
+              </button>
+            </div>
+            <div className="combine-card-body combine-card-body-text">
+              {isAnalyzing && !alertsAnalysis ? (
+                <span className="combine-card-loading">Re-analyzing alerts...</span>
+              ) : (
+                <CombineAlertsDisplay alerts={alertsAnalysis} />
+              )}
+            </div>
+          </div>
+          
+          {/* Actions */}
+          <div className="combine-group-actions">
+            <button 
+              className="combine-approve-btn"
+              onClick={() => handleApprove(
+                { ...group, orders: selectedOrders },
+                { insertionPosition: insertionAnalysis }
+              )}
+              disabled={isAnalyzing || selectedOrders.length < 2}
+            >
+              Approve
+            </button>
+            <button 
+              className="combine-dismiss-btn"
+              onClick={() => handleDismiss(group)}
+            >
+              Dismiss
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+```
+
+---
+
+## 2. HELPER — FIND BEST PAIR
+
+```javascript
+function findBestPair(orders) {
+  if (orders.length <= 2) return orders;
+  
+  // Find pair with closest avail dates
+  const datedOrders = orders.filter(o => {
+    const avail = o.target_avail_date;
+    return avail && /^\d{4}-\d{2}-\d{2}/.test(avail) && !isNaN(Date.parse(avail));
+  });
+  
+  if (datedOrders.length >= 2) {
+    const sorted = datedOrders.sort((a, b) =>
+      new Date(a.target_avail_date) - new Date(b.target_avail_date)
+    );
+    
+    let bestPair = [sorted[0], sorted[1]];
+    let minDiff = Math.abs(
+      new Date(sorted[1].target_avail_date) - new Date(sorted[0].target_avail_date)
+    );
+    
+    for (let i = 1; i < sorted.length - 1; i++) {
+      const diff = Math.abs(
+        new Date(sorted[i + 1].target_avail_date) - new Date(sorted[i].target_avail_date)
+      );
+      if (diff < minDiff) {
+        minDiff = diff;
+        bestPair = [sorted[i], sorted[i + 1]];
+      }
+    }
+    
+    return bestPair;
+  }
+  
+  // No dated orders — return first two by prio
+  return orders.sort((a, b) => a.prio - b.prio).slice(0, 2);
+}
+
+function getBestPairDescription(orders) {
+  const pair = findBestPair(orders);
+  const remaining = orders.length - 2;
+  return `FPR ${pair[0].fpr} + FPR ${pair[1].fpr} · Closest avail dates · ${remaining} order(s) remain separate`;
+}
+```
+
+---
+
+## 3. STYLING FOR DESELECTED ORDERS AND LOADING
+
+```css
+/* Deselected order card */
+.combine-order-deselected {
+  opacity: 0.4;
+  position: relative;
+}
+
+.combine-order-deselected::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(255, 255, 255, 0.3);
+  pointer-events: none;
+  border-radius: 8px;
+}
+
+/* Remove button */
+.combine-order-remove {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1px solid #d1d5db;
+  background: #ffffff;
+  color: #6b7280;
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.combine-order-remove:hover {
+  color: #dc2626;
+  border-color: #dc2626;
+  background: #fef2f2;
+}
+
+.combine-order-remove:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+/* Add back button */
+.combine-order-add {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1px solid #d1d5db;
+  background: #ffffff;
+  color: #16a34a;
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.combine-order-add:hover {
+  border-color: #16a34a;
+  background: #f0fdf4;
+}
+
+/* Insufficient warning */
+.combine-insufficient-warning {
+  padding: 10px 14px;
+  background: #fefce8;
+  border: 1px solid #fde68a;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #92400e;
+  margin: 8px 0;
+}
+
+/* Order card wrapper */
+.combine-order-card {
+  position: relative;
+}
+```
+
+---
+
+## VERIFICATION
+
+### Strategy change triggers re-analysis
+1. ✅ Switch to "Max Consolidation" → all orders selected → AI re-analyzes
+2. ✅ Switch to "Best Pair" → 2 orders selected → AI re-analyzes
+3. ✅ Loading state shows "Re-analyzing..." during transition
+4. ✅ All three cards update: Insertion Position, Scheduling Impact, Alerts
+5. ✅ Combined Production Summary also updates (existing behavior preserved)
+
+### Order removal triggers re-analysis
+6. ✅ Click × on an order → order deselected → AI re-analyzes
+7. ✅ × button disabled when only 2 orders remain
+8. ✅ Deselected order appears faded with + button to re-add
+9. ✅ Click + to re-add → AI re-analyzes again
+
+### Correct context per selection
+10. ✅ AI receives only the SELECTED orders, not all group orders
+11. ✅ Insertion position recalculated for selected orders only
+12. ✅ Scheduling impact simulated with selected orders only
+13. ✅ Alerts checked against selected orders only
+14. ✅ Combined volume, batches, bags reflect selected orders
+
+### Edge cases
+15. ✅ Less than 2 orders → analysis cards hidden, warning shown
+16. ✅ Approve uses selectedOrders, not group.orders
+17. ✅ Refresh on individual card uses current selectedOrders
+18. ✅ Deselected orders don't affect analysis
+```

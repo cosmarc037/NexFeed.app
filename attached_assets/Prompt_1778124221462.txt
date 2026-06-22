@@ -1,0 +1,183 @@
+```
+Update the changeover logic so the last order in the table sequence for a line shows `CO: 0.00`, since there is no next order to transition into.
+
+---
+
+## OBJECTIVE
+
+Right now, the last order in a line can still display the base/default changeover, such as:
+- `CO: 0.17`
+
+This is misleading.
+
+If changeover is the transition from the current order to the next order, then the final order in the sequence should have:
+
+### `CO: 0.00`
+
+because there is no order after it.
+
+---
+
+## EXAMPLE
+
+In the current table, the last order is:
+- `Elite XP Startex, Mini-pellet 50kg`
+
+It still shows:
+- `CO: 0.17`
+
+But since it is the last order, it should show:
+- `CO: 0.00`
+
+---
+
+## REQUIRED RULE
+
+For every line sequence:
+- if an order has a valid next order, calculate changeover normally
+- if an order is the last valid order in the sequence, set its changeover to `0.00`
+
+Do not apply the default/base changeover to the last row.
+
+---
+
+## 1. DEFINE CHANGEOVER AS A TRANSITION TO THE NEXT ORDER
+
+The row-level changeover should represent:
+- current order → next valid order on the same line
+
+So:
+- row N = transition to row N+1
+- last row = no next row
+- therefore:
+  - `changeover = 0.00`
+
+---
+
+## 2. DETECT THE LAST VALID ORDER IN THE LINE SEQUENCE
+
+When building or rendering the line’s order list:
+- identify the last valid production order
+- if there is no next valid order after it, assign zero changeover
+
+### Suggested logic:
+```javascript
+function computeLineChangeovers(lineOrders) {
+  return (lineOrders || []).map((order, index, arr) => {
+    const nextOrder = arr[index + 1];
+
+    if (!nextOrder) {
+      return {
+        ...order,
+        _displayChangeoverHrs: 0,
+      };
+    }
+
+    return {
+      ...order,
+      _displayChangeoverHrs: calculateTransitionChangeover(order, nextOrder),
+    };
+  });
+}
+```
+
+Important:
+- do not fallback to base/default CO when `nextOrder` does not exist
+
+---
+
+## 3. OVERRIDE BASE/DEFAULT CHANGEOVER FOR THE FINAL ORDER
+
+Even if the system has a default/base changeover such as `0.17`, it must not be applied to the final row.
+
+### Required behavior:
+```javascript
+if (!nextOrder) {
+  changeover = 0;
+}
+```
+
+This must override any default CO logic.
+
+---
+
+## 4. APPLY THIS TO THE ORDER TABLE DISPLAY
+
+The table should display:
+- `CO: 0.00`
+
+for the final row on the line.
+
+This applies to:
+- line order table
+- before/after preview tables
+- auto-sequence preview
+- any place where row-level CO is shown
+
+---
+
+## 5. UPDATE TOTAL CHANGEOVER ACCORDINGLY
+
+Once the final row changeover becomes `0.00`:
+- total line changeover must decrease accordingly
+- total hours including changeover must also update
+- tooltip breakdowns must remain consistent
+
+The row-level and summary-level values must match.
+
+---
+
+## 6. USE THE NEXT VALID PRODUCTION ORDER, NOT JUST ANY VISIBLE ROW IF FILTERS EXIST
+
+If there are filters or statuses that affect what counts as the next actual production order:
+- use the next valid production order in the real sequence
+- if none exists, set CO to 0.00
+
+Do not assign changeover just because a non-relevant hidden/status row exists.
+
+---
+
+## 7. APPLY TO BOTH BEFORE AND AFTER STATES
+
+This should work consistently in:
+- Before tables
+- After tables
+- live order tables
+- preview tables
+
+Any final order in the sequence should show:
+- `CO: 0.00`
+
+---
+
+## 8. ADD DEBUG LOGGING TO VERIFY LAST-ROW CO
+
+Temporarily log:
+
+```javascript
+console.debug('[Last Row Changeover]', {
+  line,
+  rows: (lineOrders || []).map((order, index, arr) => ({
+    orderId: order.id,
+    index,
+    isLast: index === arr.length - 1,
+    nextOrderId: arr[index + 1]?.id ?? null,
+    displayedCO: order._displayChangeoverHrs,
+  })),
+});
+```
+
+This helps verify:
+- the final row is correctly detected
+- the final row now gets 0.00 changeover
+- default 0.17 is no longer leaking into the last order
+
+---
+
+## 9. VERIFICATION
+
+1. ✅ The last order in the line now shows `CO: 0.00`
+2. ✅ Base/default changeover is no longer incorrectly used for the final row
+3. ✅ Total line changeover updates correctly
+4. ✅ Total hours including changeover remain consistent with the row-level values
+5. ✅ Before/After and live tables all follow the same rule

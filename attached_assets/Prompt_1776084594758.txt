@@ -1,0 +1,316 @@
+```
+Add priority numbers to each order card in the Smart Combine panel:
+
+---
+
+## UPDATE ORDER CARD — ADD PRIO NUMBER
+
+```jsx
+function CombineOrderCard({ order, isSelected, onRemove, onAdd, canRemove }) {
+  return (
+    <div className={`combine-order-card ${isSelected ? '' : 'combine-order-deselected'}`}>
+      <div className="combine-order-card-inner">
+        {/* Prio badge — left side */}
+        <div className="combine-order-prio">
+          <span className="combine-order-prio-badge">{order.prio}</span>
+        </div>
+        
+        {/* Order details — existing layout */}
+        <div className="combine-order-details">
+          {/* Row 1: FPR, Prod Hours, Volume */}
+          <div className="combine-order-row">
+            <span className="combine-order-fpr">FPR: {order.fpr}</span>
+            <span className="combine-order-prod">{formatProductionTime(order.production_time)}</span>
+            <span className="combine-order-volume">{order.volume} MT</span>
+          </div>
+          
+          {/* Row 2: FG, CD, Availability label */}
+          <div className="combine-order-row combine-order-row-sub">
+            <span className="combine-order-fg">FG: {order.material_code_fg_short || order.material_code_fg}</span>
+            <span className="combine-order-cd">CD: {formatDate(order.target_avail_date)}</span>
+            <span className="combine-order-avail-label">Availability</span>
+          </div>
+          
+          {/* Row 3: SFG, CT, Avail type */}
+          <div className="combine-order-row combine-order-row-sub">
+            <span className="combine-order-sfg">SFG: {order.material_code_sfg_short || order.material_code_sfg}</span>
+            <span className="combine-order-ct">CT: {order.creation_time || '—'}</span>
+            <span className={`combine-order-avail-type ${getAvailClass(order.target_avail_date)}`}>
+              {getAvailDisplay(order.target_avail_date)}
+            </span>
+          </div>
+        </div>
+      </div>
+      
+      {/* Remove / Add button */}
+      {isSelected ? (
+        <button 
+          className="combine-order-remove"
+          onClick={() => onRemove(order.id)}
+          title="Remove from combination"
+          disabled={!canRemove}
+        >
+          ×
+        </button>
+      ) : (
+        <button 
+          className="combine-order-add"
+          onClick={() => onAdd(order)}
+          title="Add back to combination"
+        >
+          +
+        </button>
+      )}
+    </div>
+  );
+}
+```
+
+---
+
+## STYLING
+
+```css
+.combine-order-card {
+  position: relative;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  margin-bottom: 6px;
+  overflow: hidden;
+}
+
+.combine-order-card-inner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 36px 10px 10px;
+}
+
+/* Prio badge */
+.combine-order-prio {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-top: 2px;
+}
+
+.combine-order-prio-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #f3f4f6;
+  border: 1px solid #d1d5db;
+  font-size: 11px;
+  font-weight: 700;
+  color: #374151;
+}
+
+/* Order details — takes remaining space */
+.combine-order-details {
+  flex: 1;
+  min-width: 0;
+}
+
+.combine-order-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+  color: #374151;
+  line-height: 1.6;
+}
+
+.combine-order-row-sub {
+  font-size: 10px;
+  color: #6b7280;
+}
+
+.combine-order-fpr {
+  font-weight: 600;
+  color: #1a1a1a;
+  font-size: 11px;
+}
+
+.combine-order-prod {
+  font-size: 11px;
+  color: #374151;
+}
+
+.combine-order-volume {
+  font-weight: 600;
+  font-size: 11px;
+  color: #1a1a1a;
+  text-align: right;
+}
+
+.combine-order-fg,
+.combine-order-sfg {
+  font-size: 10px;
+  color: #9ca3af;
+}
+
+.combine-order-cd,
+.combine-order-ct {
+  font-size: 10px;
+  color: #9ca3af;
+}
+
+.combine-order-avail-label {
+  font-size: 10px;
+  color: #9ca3af;
+  text-align: right;
+}
+
+.combine-order-avail-type {
+  font-size: 10px;
+  font-weight: 600;
+  text-align: right;
+}
+
+/* Avail type colors */
+.combine-order-avail-prio {
+  color: #16a34a;
+}
+
+.combine-order-avail-safety {
+  color: #ca8a04;
+}
+
+.combine-order-avail-dated {
+  color: #6b7280;
+}
+
+.combine-order-avail-stock {
+  color: #16a34a;
+}
+
+/* Remove button — positioned top right */
+.combine-order-remove {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1px solid #d1d5db;
+  background: #ffffff;
+  color: #6b7280;
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.combine-order-remove:hover {
+  color: #dc2626;
+  border-color: #dc2626;
+  background: #fef2f2;
+}
+
+.combine-order-remove:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+/* Add back button */
+.combine-order-add {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1px solid #d1d5db;
+  background: #ffffff;
+  color: #16a34a;
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.combine-order-add:hover {
+  border-color: #16a34a;
+  background: #f0fdf4;
+}
+
+/* Deselected state */
+.combine-order-deselected {
+  opacity: 0.4;
+}
+
+.combine-order-deselected .combine-order-prio-badge {
+  background: #e5e7eb;
+  border-color: #d1d5db;
+  color: #9ca3af;
+}
+```
+
+---
+
+## HELPER — AVAIL DATE DISPLAY
+
+```javascript
+function getAvailDisplay(targetAvailDate) {
+  if (!targetAvailDate) return '—';
+  
+  const raw = targetAvailDate.toLowerCase().trim();
+  
+  if (raw.includes('prio')) return 'prio replenish';
+  if (raw.includes('safety')) return 'safety stocks';
+  if (raw === 'stock_sufficient') return 'stock sufficient';
+  if (raw.includes('sched')) return 'for sched';
+  
+  if (/^\d{4}-\d{2}-\d{2}/.test(targetAvailDate)) {
+    return new Date(targetAvailDate).toLocaleDateString('en-US', {
+      month: 'short', day: 'numeric', year: 'numeric'
+    });
+  }
+  
+  return targetAvailDate;
+}
+
+function getAvailClass(targetAvailDate) {
+  if (!targetAvailDate) return '';
+  
+  const raw = targetAvailDate.toLowerCase().trim();
+  
+  if (raw.includes('prio')) return 'combine-order-avail-prio';
+  if (raw.includes('safety')) return 'combine-order-avail-safety';
+  if (raw === 'stock_sufficient') return 'combine-order-avail-stock';
+  if (/^\d{4}-\d{2}-\d{2}/.test(targetAvailDate)) return 'combine-order-avail-dated';
+  
+  return '';
+}
+```
+
+---
+
+## VERIFICATION
+
+### Prio display
+1. ✅ Each order card shows the CURRENT prio number from the order table
+2. ✅ Prio displayed in a circular badge on the left side
+3. ✅ Badge has same font size (11px) as other text in the card
+4. ✅ Badge has grey background with subtle border
+5. ✅ Prio numbers match the order table (e.g., 1, 4, 7, 10 — not 1, 2, 3, 4)
+
+### Layout
+6. ✅ Prio badge aligned to top-left of card
+7. ✅ Order details (FPR, FG, SFG, volumes, dates) to the right of badge
+8. ✅ × remove button at top-right
+9. ✅ Three rows: FPR/Prod/Volume, FG/CD/Availability, SFG/CT/AvailType
+
+### Deselected state
+10. ✅ Deselected cards faded (opacity 0.4)
+11. ✅ Deselected prio badge greyed out
+12. ✅ + button shows instead of × for deselected cards
+```

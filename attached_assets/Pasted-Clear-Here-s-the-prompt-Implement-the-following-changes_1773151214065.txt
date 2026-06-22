@@ -1,0 +1,225 @@
+Clear. Here's the prompt:
+
+```
+Implement the following changes to the NexFeed application:
+
+---
+
+## SMART COMBINE — ENHANCED AI INSIGHTS
+
+Update the Smart Combine recommendation cards to include detailed, actionable AI insights based on production calculations, scheduling impact, and gap utilization analysis.
+
+---
+
+### INSIGHT 1 — COMBINED PRODUCTION CALCULATION
+
+When orders are grouped for combining, the AI must calculate and display the combined production metrics.
+
+**Calculations:**
+- **Combined Total Volume (MT):** Sum of all orders' Volume in the group.
+- **Batch Size:** Same across all orders in the group (since Batch Size is a combine matching criteria).
+- **Number of Batches:** Calculated from Combined Total Volume ÷ Batch Size (rounded up to nearest whole number).
+- **Total Bags:** Calculated based on the combined volume and packaging (same formula used elsewhere in the app).
+- **Total Production Hours:** Number of Batches × Run Rate per batch.
+
+**Display in the Insights section of the recommendation card:**
+
+```
+📊 Combined Production Summary
+───────────────────────────────────────────────
+Combined Volume:        12 MT
+Batch Size:             4 MT
+Number of Batches:      3
+Total Bags:             240
+Production Time:        4 hours 30 min
+───────────────────────────────────────────────
+```
+
+**Important:** The Number of Batches is NOT simply the sum of individual orders' batches. It is recalculated from the combined volume and batch size. Example:
+- Order A: 8 MT, Batch Size 4 MT = 2 batches
+- Order B: 4 MT, Batch Size 4 MT = 1 batch
+- Combined: 12 MT ÷ 4 MT = 3 batches (not 2 + 1 = 3, but calculated fresh from 12 ÷ 4)
+- In this case the result is the same, but the system must always recalculate from combined volume, not sum individual batch counts, to handle rounding correctly.
+
+---
+
+### INSIGHT 2 — INCREMENTAL TIME IMPACT ON LEAD ORDER
+
+The AI must show the scheduling impact of combining — specifically how much additional production time is added to the lead order and whether the extended completion still meets the Avail Date.
+
+**Calculation:**
+- **Current lead order production time:** [X] hours (before combining)
+- **Additional production time from child orders:** Combined group production time - Lead order production time = incremental time added
+- **New completion Date/Time:** Lead order's Start Date/Time + Combined group production time
+- **Avail Date check:** Compare new completion Date/Time against the lead order's Avail Date (or the earliest Avail Date in the group)
+
+**Display in the Insights section:**
+
+**Scenario A — Completion still meets Avail Date:** ✅
+```
+⏱ Scheduling Impact
+───────────────────────────────────────────────
+Lead order production time:     2 hours 15 min
+Additional time from combining: + 4 hours 00 min
+New total production time:      6 hours 15 min
+
+Current completion:    March 21, 2026 10:15 AM
+New completion:        March 21, 2026 02:15 PM
+Avail Date:            March 22, 2026
+
+✅ Combining extends completion by 4 hours for
+   [Item Description]. New completion (March 21,
+   02:15 PM) is still before the Avail Date
+   (March 22). Safe to combine.
+───────────────────────────────────────────────
+```
+
+**Scenario B — Completion is tight but still meets Avail Date:** ⚠️
+```
+⏱ Scheduling Impact
+───────────────────────────────────────────────
+Lead order production time:     2 hours 15 min
+Additional time from combining: + 8 hours 00 min
+New total production time:      10 hours 15 min
+
+Current completion:    March 21, 2026 10:15 AM
+New completion:        March 21, 2026 06:15 PM
+Avail Date:            March 22, 2026
+
+⚠️ Combining extends completion by 8 hours for
+   [Item Description]. New completion (March 21,
+   06:15 PM) is still before the Avail Date
+   (March 22), but the margin is tight (17 hours
+   45 min remaining). Downstream orders may be
+   affected.
+───────────────────────────────────────────────
+```
+
+**Scenario C — Completion EXCEEDS Avail Date:** 🔴
+```
+⏱ Scheduling Impact
+───────────────────────────────────────────────
+Lead order production time:     2 hours 15 min
+Additional time from combining: + 20 hours 00 min
+New total production time:      22 hours 15 min
+
+Current completion:    March 21, 2026 10:15 AM
+New completion:        March 22, 2026 08:15 AM
+Avail Date:            March 22, 2026
+
+🔴 WARNING: Combining extends completion by 20
+   hours for [Item Description]. New completion
+   (March 22, 08:15 AM) is ON the Avail Date
+   (March 22). This leaves zero margin and risks
+   missing the deadline. Consider keeping orders
+   separate.
+───────────────────────────────────────────────
+```
+
+**Scenario D — Completion goes BEYOND Avail Date:** 🔴
+```
+⏱ Scheduling Impact
+───────────────────────────────────────────────
+Lead order production time:     6 hours 00 min
+Additional time from combining: + 24 hours 00 min
+New total production time:      30 hours 00 min
+
+Current completion:    March 21, 2026 02:00 PM
+New completion:        March 23, 2026 08:00 AM
+Avail Date:            March 22, 2026
+
+🔴 CONFLICT: Combining extends completion beyond
+   the Avail Date. New completion (March 23,
+   08:00 AM) exceeds Avail Date (March 22) by
+   1 day 8 hours. DO NOT combine these orders.
+   The lead order will miss its deadline.
+───────────────────────────────────────────────
+```
+
+**Downstream cascade impact:**
+- Additionally, the AI should note if combining will push downstream orders:
+  - "Combining will delay the next order ([Item Description], Prio [X]) by [Y] hours. Verify downstream orders are not affected."
+
+---
+
+### INSIGHT 3 — SMART DISMISSAL RECOMMENDATION (GAP UTILIZATION)
+
+The AI must proactively recommend NOT combining orders when keeping them separate allows non-dated orders (safety stocks, prio replenish) to be inserted in the time gap, maximizing plant utilization.
+
+**Trigger condition:**
+- The AI checks if there are ANY pending non-dated orders (prio replenish, safety stocks) in the same line that are currently unscheduled or placed at the end of the timeline.
+- If non-dated orders exist AND keeping the orders separate would create a time gap between them where non-dated orders could be inserted, the AI recommends dismissing the combine.
+
+**Logic:**
+1. Calculate the time gap if orders are kept SEPARATE:
+   - Order A completes at [time]. Order B starts at [time based on its own Avail Date anchor].
+   - Gap = Order B Start - Order A Completion.
+2. Check if any non-dated orders' production time fits within this gap.
+3. If YES — recommend not combining.
+
+**Display in the Insights section:**
+
+```
+💡 Recommendation: Consider NOT combining
+───────────────────────────────────────────────
+FPR 260311's Avail Date (March 28) is 6 days
+after FPR 260309's Avail Date (March 22).
+
+If kept separate:
+• FPR 260309 completes: March 21, 02:15 PM
+• FPR 260311 needs to start by: March 27, 09:45 PM
+• Available gap: ~5 days 7 hours
+
+Pending non-dated orders that could fill this gap:
+• [Item Description] (safety stocks) — 4 hrs 30 min
+• [Item Description] (prio replenish) — 3 hrs 15 min
+• [Item Description] (safety stocks) — 6 hrs 00 min
+  Total: 13 hrs 45 min
+
+Keeping orders separate allows you to insert
+these 3 non-dated orders in the gap, maximizing
+plant utilization. Combining would eliminate
+this opportunity.
+
+[Dismiss — Keep Separate]  [Approve Anyway]
+───────────────────────────────────────────────
+```
+
+**When this recommendation does NOT apply:**
+- If there are NO pending non-dated orders in the line — the AI does not show this recommendation (no gap fillers available, so combining is fine).
+- If the gap between orders is too small to fit any non-dated order — the AI does not show this recommendation.
+- If both orders have the SAME Avail Date or very close Avail Dates (no meaningful gap) — the AI does not show this recommendation.
+
+**Button behavior when recommendation is shown:**
+- **[Dismiss — Keep Separate]:** Dismisses the combine recommendation. The orders remain separate. Same as the existing Dismiss button but with clearer labeling.
+- **[Approve Anyway]:** The user overrides the AI recommendation and proceeds with the combine. The combine happens as normal. The History column logs: "Combined despite AI recommendation to keep separate — [Timestamp] by [User]."
+
+---
+
+### INSIGHT DISPLAY ORDER IN THE CARD
+
+Within each Smart Combine recommendation card, the insights are displayed in this order:
+
+```
+[Order details — 3-column table layout per order]
+
+📊 Combined Production Summary
+[Combined volume, batches, bags, production time]
+
+⏱ Scheduling Impact
+[Incremental time, new completion, Avail Date check]
+
+💡 Recommendation (if applicable)
+[Smart dismissal recommendation with gap analysis]
+
+[Approve / Approve Anyway]  [Dismiss / Dismiss — Keep Separate]
+```
+
+**If Insight 3 (smart dismissal) is triggered:**
+- The Approve button changes to "Approve Anyway" (Orange outline, not filled — to indicate it's overriding a recommendation).
+- The Dismiss button changes to "Dismiss — Keep Separate" (Green filled — to indicate it's the recommended action).
+
+**If Insight 3 is NOT triggered:**
+- The Approve button remains "Approve" (Orange filled — primary action).
+- The Dismiss button remains "Dismiss" (Grey outline — secondary action).
+```

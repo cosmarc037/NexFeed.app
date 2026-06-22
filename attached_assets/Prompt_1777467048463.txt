@@ -1,0 +1,428 @@
+```
+Improve the per-line AI strategy generation so the AI creates truly distinct, useful sequencing strategies that are meaningfully different from the Standard Sequence.
+
+---
+
+## PROBLEM TO FIX
+
+The current AI-generated strategy names and descriptions are too generic and too close to the Standard Sequence.
+
+Examples of weak strategies currently being produced:
+- "Critical First"
+- "Critical First, Then Flexible"
+- "Critical Priority First"
+
+These are not helpful because the Standard Sequence already prioritizes near-date / critical orders through chronological sorting based on avail dates and N10D logic.
+
+So the AI is currently suggesting strategies that do not meaningfully differ from the baseline.
+
+We need the AI to generate:
+- more unique strategies
+- more operationally useful strategies
+- strategies that use the richer context available in the app
+- strategies that are visibly different from Standard in the preview table
+
+---
+
+## OBJECTIVE
+
+For each line:
+- keep Standard Sequence as the rule-based baseline
+- generate exactly 2 AI sequencing strategies
+- ensure both AI strategies are materially different from Standard
+- ensure both AI strategies are distinct from each other
+- ensure the AI uses full line context:
+  - current line orders
+  - standard sequence
+  - avail dates
+  - N10D / future dispatch data
+  - live changeover rules
+  - material compatibility
+  - master data margin / profitability inputs
+  - production time
+- ensure the AI-generated strategy output actually drives the preview table sequence
+
+---
+
+## 1. EXPLICITLY TELL THE AI WHAT STANDARD ALREADY DOES
+
+In the AI strategy prompt, clearly tell the model:
+
+- The Standard Sequence already sorts by avail dates / N10D / rule-based urgency
+- Therefore, simply proposing "critical first" or "prioritize urgent orders first" is NOT a valid AI strategy unless it results in a materially different sequencing pattern than Standard
+- The AI strategies must improve or alter sequencing beyond what Standard already does
+
+Add instructions like:
+
+### REQUIRED IN PROMPT:
+```text
+The Standard Sequence already handles chronology, urgent/critical date protection, and N10D-driven ordering.
+Do NOT propose an AI strategy whose main idea is simply "critical first", "urgent first", or "sort by dates", unless it creates a meaningfully different sequence from the standard baseline.
+Your AI strategies must go beyond the baseline and introduce a distinct sequencing idea such as:
+- reducing changeovers through material grouping
+- improving profitability positioning
+- creating better slack distribution
+- clustering compatible runs
+- smoothing line flow
+- balancing risk and profitability differently
+```
+
+---
+
+## 2. GIVE THE AI THE STANDARD BASELINE AS CONTEXT
+
+For each line, pass the current Standard Sequence order to the AI so it knows what the baseline already looks like.
+
+The AI should be able to compare against:
+- current order lineup
+- standard sequence order
+- dates
+- statuses
+- materials
+- production time
+- profitability context
+
+### Add to line prompt context:
+```javascript
+{
+  line: 'Line 2',
+  current_standard_sequence: [
+    { position: 1, order_id: 'A1', avail_date: '2026-04-29', material_signature: 'Swine|Brown|4.00mm|P' },
+    { position: 2, order_id: 'A2', avail_date: '2026-04-30', material_signature: 'Swine|Brown|4.00mm|P' },
+    ...
+  ]
+}
+```
+
+This helps the AI avoid rephrasing standard logic as if it were a new strategy.
+
+---
+
+## 3. PASS FULL CONTEXT TO THE AI
+
+For each line strategy prompt, include:
+
+### A. Orders
+For every order in the line:
+- order_id
+- item description
+- material code
+- form
+- volume
+- production hours
+- current / standard sequence position
+- avail date
+- original avail date if changed
+- N10D status
+- MTO / protected flag
+- critical / urgent / monitor / sufficient status
+- category
+- color
+- diameter
+- material signature
+- profit score inputs:
+  - margin
+  - production hours
+  - changeover hours
+  - profit score
+
+### B. Changeover rules
+Inject the live changeover rules from the Changeover Rules tab into the prompt.
+
+### C. Master data context
+Include profitability context from master data:
+- margin %
+- computed profit score
+- any other useful commercial context already available
+
+### D. Future Dispatches / N10D context
+Include:
+- N10D status
+- target/avail date basis
+- protected or flexible classification
+
+### E. Standard baseline
+Include the current standard sequence for that line.
+
+The AI should have enough context to make a real sequencing decision.
+
+---
+
+## 4. REQUIRE THE TWO AI STRATEGIES TO BE DISTINCT FROM EACH OTHER
+
+Tell the AI explicitly:
+
+- Generate exactly 2 different AI strategies
+- The two strategies must not be near-duplicates
+- They should differ in primary objective or sequencing logic
+- If the line has too little flexibility, explain that and still produce the best two distinct valid alternatives possible
+
+### Required prompt instruction:
+```text
+The two AI strategies must be meaningfully different from each other.
+Do not generate near-duplicate strategies with only minor wording changes.
+Each strategy should have a distinct operational focus.
+```
+
+---
+
+## 5. REQUIRE THE AI STRATEGIES TO DIFFER FROM STANDARD
+
+Tell the AI:
+
+- If the resulting order sequence is effectively the same as Standard, do not present that as a new AI strategy
+- Only output an AI strategy if it creates a meaningful sequencing alternative
+
+### Required prompt instruction:
+```text
+Do not output an AI strategy if its resulting sequence is effectively the same as the Standard Sequence.
+An AI strategy must produce a meaningfully different order arrangement, date placement, or optimization focus.
+```
+
+If there is genuinely little room to improve:
+- the AI can still return a constrained alternative
+- but it should explain that flexibility is limited on that line
+
+---
+
+## 6. IMPROVE THE AI STRATEGY PROMPT STRUCTURE
+
+Update the per-line prompt builder.
+
+### Suggested function:
+```javascript
+function buildAILineStrategyPrompt({
+  line,
+  lineOrders,
+  standardSequence,
+  changeoverRules,
+  masterData,
+  n10dData,
+}) {
+  // return prompt
+}
+```
+
+### Prompt should include:
+- role: AI scheduling strategist
+- line lineup after combine + placement + N10D
+- standard sequence baseline
+- hard constraints
+- full order context
+- live changeover rules
+- profitability context
+- instruction to create 2 unique alternatives beyond standard
+- output structure
+
+### Required instruction block:
+```text
+You are analyzing one production line after the app has already:
+1. combined compatible orders
+2. assigned orders to the optimal line
+3. applied N10D / future-dispatch date logic
+4. built the Standard Sequence using date- and rule-based ordering
+
+Your job is to propose exactly 2 AI sequencing alternatives for this line.
+
+Important:
+- The Standard Sequence already covers chronology, critical/urgent protection, and rule-based date priority
+- Therefore, do NOT propose a strategy whose main idea is simply "critical first", "urgent first", or "sort by dates"
+- Your strategies must be genuinely different from Standard
+- Your two AI strategies must also be meaningfully different from each other
+- Use the provided order, changeover, profitability, and N10D context
+- Respect all hard constraints
+```
+
+---
+
+## 7. REQUIRE THE AI TO EXPLAIN WHAT MAKES EACH STRATEGY DIFFERENT
+
+For each AI strategy, require:
+- `difference_from_standard`
+- `distinct_focus`
+- `reasoning_summary`
+
+### Example required response fields:
+```json
+{
+  "strategy_name": "Material Continuity Focus",
+  "subtitle": "AI-generated strategy",
+  "short_description": "Groups compatible materials to reduce changeovers while preserving date safety.",
+  "difference_from_standard": "Unlike Standard, this strategy pulls compatible flexible orders closer together to reduce setup loss.",
+  "distinct_focus": "Changeover reduction and material continuity",
+  "reasoning_summary": "This strategy intentionally deviates from the date-only baseline by grouping compatible materials inside safe windows to improve line flow."
+}
+```
+
+This helps both the card UI and debugging.
+
+---
+
+## 8. APPLY THE AI OUTPUT TO THE PREVIEW TABLE
+
+This is critical.
+
+If the AI returns a strategy:
+- with specific order sequencing
+- with suggested dates
+
+then the After table preview for that selected strategy must reflect:
+- the exact returned order sequence
+- the exact validated dates
+- recomputed row values:
+  - production time
+  - changeover
+  - estimated completion
+  - sequence insights
+  - metrics
+
+Do not just display the AI strategy name while keeping the old sequence.
+
+### Required implementation behavior:
+1. map AI order sequence back to row objects
+2. apply valid suggested dates
+3. recompute final row calculations
+4. update preview table rows
+5. regenerate sequence insights based on the selected AI strategy
+
+---
+
+## 9. VALIDATE AI STRATEGY UNIQUENESS BEFORE SHOWING IT
+
+Add a uniqueness validator after AI returns the 2 strategies.
+
+### Check:
+- Are the strategy names different?
+- Are the sequences materially different from Standard?
+- Are the two AI sequences materially different from each other?
+
+If not:
+- regenerate one strategy
+- or apply a fallback derived variation
+- but do not show duplicate or trivial strategies
+
+### Suggested helper:
+```javascript
+function areStrategiesMeaningfullyDifferent(seqA, seqB) {
+  // compare order positions, suggested dates, and changed flexible order placements
+  // return true only if enough actual difference exists
+}
+```
+
+Also compare AI strategies against Standard using the same logic.
+
+---
+
+## 10. ADD UNIQUENESS THRESHOLD
+
+A strategy should only count as distinct if it changes something meaningful, such as:
+- different ordering of at least 2 flexible orders
+- different suggested dates for flexible orders
+- different material clustering pattern
+- different profit-score prioritization
+- different changeover behavior
+
+Do not count:
+- trivial wording changes
+- same order list with same dates but different title
+
+---
+
+## 11. ENSURE AI HAS ACCESS TO:
+The prompt and context builder must include data derived from:
+
+### A. Changeover Rules tab
+- live configured changeover values
+- feedmill/line-specific changes
+- color / diameter / category / form impacts
+
+### B. Master Data tab
+- margin %
+- any profitability fields used in scoring
+- material code linkage
+
+### C. Future Dispatches / N10D tab
+- statuses
+- target dates
+- flexibility windows
+- protected vs flexible meaning
+
+### D. Orders table
+- current order lineup
+- dates
+- production hours
+- material properties
+- line assignment
+- standard sequence position
+
+The AI must not operate on generic order text alone.
+
+---
+
+## 12. UPDATE SEQUENCE INSIGHT TO MATCH SELECTED AI STRATEGY
+
+Once a strategy is selected:
+- the Sequence Insight column must explain the placement under that exact strategy
+- insight should reference the actual strategy name and objective
+- insight should change when switching between Standard, AI Option 1, and AI Option 2
+
+Do not reuse old generic balanced/profit text.
+
+---
+
+## 13. FALLBACK GUIDANCE FOR LOW-FLEXIBILITY LINES
+
+If a line has almost no sequencing flexibility:
+- AI may still generate two valid options
+- but it should explain why the options are constrained
+- still avoid generic “critical first” wording if that simply mirrors Standard
+
+Example acceptable constrained strategy description:
+- “Limited Flexibility with Material Clustering”
+- “Safe Slack Preservation”
+
+Not acceptable:
+- “Critical First” if that is already what Standard does
+
+---
+
+## 14. RECOMMENDED BADGE SHOULD STILL ONLY COMPETE BETWEEN THE 2 AI OPTIONS
+
+Keep:
+- Standard = never recommended
+- only AI Option 1 vs AI Option 2 are eligible
+
+Recommendation can still use:
+- slack
+- risk
+- optimization effect
+- profitability metric
+
+But only after ensuring both strategies are valid and distinct.
+
+---
+
+## 15. VERIFICATION
+
+### AI quality
+1. ✅ AI no longer suggests trivial strategies like “critical first” when Standard already does that
+2. ✅ AI strategies are meaningfully different from Standard
+3. ✅ AI Option 1 and AI Option 2 are meaningfully different from each other
+4. ✅ Strategy names are more unique and context-aware
+
+### Context completeness
+5. ✅ AI prompt includes Changeover Rules data
+6. ✅ AI prompt includes Master Data profitability context
+7. ✅ AI prompt includes N10D / Future Dispatches context
+8. ✅ AI prompt includes current line orders and standard baseline
+
+### Preview correctness
+9. ✅ Selected AI strategy is actually reflected in the preview table
+10. ✅ AI-suggested sequence order is applied to the rows
+11. ✅ AI-suggested dates are applied if valid
+12. ✅ Metrics and row calculations are recomputed after applying strategy
+
+### UX
+13. ✅ Strategy cards show more useful AI-generated sequencing ideas
+14. ✅ Sequence Insight matches the selected AI strategy
+15. ✅ The user can clearly see that the AI strategies are not just renamed Standard logic

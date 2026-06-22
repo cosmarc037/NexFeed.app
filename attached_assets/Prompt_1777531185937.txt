@@ -1,0 +1,298 @@
+```
+Fix the "Changeover time (time-saved)" metric so it is calculated directly from each strategy’s own final After table, with Standard Sequence used as the baseline for comparison.
+
+---
+
+## OBJECTIVE
+
+The "Changeover time (time-saved)" metric must be based on the actual final After-table rows shown for each strategy.
+
+Correct logic per line:
+
+1. Build the Standard Sequence After table
+2. Sum the displayed CO values from the Standard After table
+3. Build each AI strategy’s After table
+4. Sum the displayed CO values from that AI strategy’s own After table
+5. Compare AI total CO against Standard total CO
+6. Show:
+   - Standard: baseline changeover time only
+   - AI strategy: total changeover time + time saved vs Standard
+
+Right now, all cards are showing the same value (e.g. 4.66 hr), which means the metric is likely being reused from a shared baseline or calculated from the wrong source.
+
+---
+
+## 1. USE THE FINAL AFTER TABLE AS THE SOURCE OF TRUTH
+
+For every strategy card:
+- do not use a shared line-level changeover metric
+- do not use a pre-strategy baseline copied into all cards
+- do not use a generic placeholder
+- do not use Before-table values
+
+Use only the final executed After-table rows for that strategy.
+
+The source of truth must be the same row-level CO values already shown in the After table.
+
+---
+
+## 2. CALCULATE STANDARD BASELINE TOTAL CHANGEOVER HOURS FROM STANDARD AFTER TABLE
+
+After Standard Sequence is fully built for the line:
+- sum all final row CO values shown in the Standard After table
+
+### Helper:
+```javascript
+function getRowDisplayedChangeover(order) {
+  const candidates = [
+    order.changeover,
+    order._changeoverHrs,
+    order._changeover,
+    order.change_over,
+  ];
+
+  for (const val of candidates) {
+    const parsed = parseFloat(val);
+    if (!Number.isNaN(parsed)) return parsed;
+  }
+
+  return 0;
+}
+
+function calculateAfterTableTotalChangeover(lineOrders) {
+  return Number(
+    (lineOrders || []).reduce((sum, order) => {
+      return sum + getRowDisplayedChangeover(order);
+    }, 0).toFixed(2)
+  );
+}
+```
+
+Then:
+```javascript
+const standardTotalCO = calculateAfterTableTotalChangeover(standardAfterOrders);
+```
+
+Store:
+```javascript
+standard.metrics.totalChangeoverHours = standardTotalCO;
+standard.metrics.timeSavedHours = null;
+standard.metrics.rawTimeSavedHours = null;
+standard.metrics.standardChangeoverHours = standardTotalCO;
+```
+
+Important:
+- `standardAfterOrders` must be the actual rows used in the Standard After table
+- not the Before table
+- not a shared raw order list
+
+---
+
+## 3. CALCULATE EACH AI STRATEGY TOTAL CHANGEOVER HOURS FROM ITS OWN AFTER TABLE
+
+For every AI strategy:
+- after the strategy is executed
+- after dates are assigned
+- after final order sequence is built
+- after row-level CO values are finalized
+
+sum the row CO values from that AI strategy’s own After table.
+
+Example:
+```javascript
+const aiStrategyTotalCO = calculateAfterTableTotalChangeover(aiStrategyAfterOrders);
+```
+
+Then compare against Standard:
+```javascript
+const rawSaved = standardTotalCO - aiStrategyTotalCO;
+const displaySaved = Math.max(0, rawSaved);
+```
+
+Store:
+```javascript
+strategy.metrics.totalChangeoverHours = aiStrategyTotalCO;
+strategy.metrics.standardChangeoverHours = standardTotalCO;
+strategy.metrics.rawTimeSavedHours = Number(rawSaved.toFixed(2));
+strategy.metrics.timeSavedHours = Number(displaySaved.toFixed(2));
+```
+
+Important:
+- `aiStrategyAfterOrders` must be the actual rows shown when that strategy is selected
+- not Standard rows
+- not reused from another strategy
+- not computed before final row CO values exist
+
+---
+
+## 4. CALCULATE THESE METRICS ONLY AFTER FINAL STRATEGY EXECUTION IS COMPLETE
+
+Correct sequence for each strategy:
+
+### Standard
+1. build Standard After table
+2. finalize order rows
+3. finalize row CO values
+4. sum total CO
+5. store Standard baseline metric
+
+### AI Strategy
+1. apply AI strategy
+2. build AI After table
+3. finalize order rows
+4. finalize row CO values
+5. sum total CO from AI After table
+6. compare to Standard baseline
+7. store time-saved metric
+
+Do not calculate strategy metrics before final row CO values are available.
+
+---
+
+## 5. ENSURE EACH STRATEGY CARD USES ITS OWN METRICS OBJECT
+
+Make sure the UI is not accidentally reading the same metric object for all cards.
+
+Check that:
+- Standard card reads `standard.metrics.totalChangeoverHours`
+- AI Option 1 reads `aiOption1.metrics.totalChangeoverHours`
+- AI Option 2 reads `aiOption2.metrics.totalChangeoverHours`
+
+Do not reuse a shared `lineSummary.totalChangeoverHours` for all cards.
+
+Each card must bind to its own strategy-specific metrics.
+
+---
+
+## 6. UPDATE THE CARD DISPLAY LOGIC
+
+### Standard
+Show:
+- total baseline changeover time only
+
+Example:
+- `4.66 hr`
+
+### AI strategies
+Show:
+- total strategy changeover time
+- saved time compared to Standard
+
+Example:
+- `4.10 hr (0.56 hr saved)`
+
+If no savings:
+- `4.66 hr (no savings)`
+or
+- `4.66 hr (0.00 hr saved)`
+
+Recommended rendering:
+```jsx
+<div className="metric-row">
+  <span>Changeover time (time-saved)</span>
+  <strong>
+    {strategy.id === 'standard'
+      ? formatHours(strategy.metrics.totalChangeoverHours)
+      : strategy.metrics.timeSavedHours > 0
+        ? `${formatHours(strategy.metrics.totalChangeoverHours)} (${formatHours(strategy.metrics.timeSavedHours)} saved)`
+        : `${formatHours(strategy.metrics.totalChangeoverHours)} (no savings)`}
+  </strong>
+</div>
+```
+
+---
+
+## 7. VERIFY AGAINST ACTUAL DISPLAYED CO VALUES
+
+The card metric must match the actual After table row values.
+
+Example:
+If AI Strategy 1 After table shows row CO:
+- 1.83
+- 1.33
+- 1.17
+- 0.33
+
+Then the card must show:
+- total = `4.66 hr`
+
+If AI Strategy 2 shows:
+- 1.50
+- 1.00
+- 0.83
+- 0.33
+
+Then the card must show:
+- total = `3.66 hr`
+- time saved = `1.00 hr saved` if Standard was 4.66 hr
+
+Do not allow all strategies to show the same number unless the row sums are truly identical.
+
+---
+
+## 8. ADD DEBUG LOGGING TO TRACE METRICS PER STRATEGY
+
+Temporarily add:
+
+```javascript
+console.debug('[Strategy CO Metric]', {
+  line,
+  strategyId: strategy.id,
+  totalChangeoverHours: strategy.metrics.totalChangeoverHours,
+  standardChangeoverHours: strategy.metrics.standardChangeoverHours,
+  rawTimeSavedHours: strategy.metrics.rawTimeSavedHours,
+  displayTimeSavedHours: strategy.metrics.timeSavedHours,
+  orderCount: strategy.orders?.length,
+});
+```
+
+Also log row-by-row source values:
+
+```javascript
+console.debug('[Strategy CO Rows]', {
+  line,
+  strategyId: strategy.id,
+  rowCOs: (strategy.orders || []).map(order => ({
+    orderId: order.id,
+    co: getRowDisplayedChangeover(order),
+  })),
+});
+```
+
+This will help confirm that:
+- each strategy is summing its own final rows
+- not reusing Standard values
+
+---
+
+## 9. KEEP THE CURRENT CARD METRIC ORDER
+
+Do not change the visible row order.
+Keep:
+
+1. Min. slack
+2. MTS adjusted
+3. Changeover time (time-saved)
+4. Faithfulness
+
+Only fix the changeover/time-saved calculation and display source.
+
+---
+
+## 10. VERIFICATION
+
+### Source of truth
+1. ✅ Standard total changeover hours are summed from Standard After-table row CO values
+2. ✅ AI strategy total changeover hours are summed from that strategy’s own After-table row CO values
+3. ✅ Time saved is calculated as Standard total CO minus AI strategy total CO
+4. ✅ Metrics are no longer copied from a shared line-level baseline
+
+### UI behavior
+5. ✅ Standard shows only baseline total changeover time
+6. ✅ AI strategies show total changeover time plus saved time when applicable
+7. ✅ If no savings exist, card shows `no savings` only when the AI total truly matches or exceeds Standard
+
+### Consistency
+8. ✅ Card metric matches the actual row CO values shown in the After table
+9. ✅ Different strategies can now show different changeover totals when their row sequences differ
+10. ✅ Time-saved metric now reflects true difference from Standard

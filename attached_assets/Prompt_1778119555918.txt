@@ -1,0 +1,196 @@
+```
+Add a completion notification sound for Plant-Level Auto-Sequence so users are alerted when the process finishes successfully and the preview is ready.
+
+---
+
+## OBJECTIVE
+
+Plant-Level Auto-Sequence can take some time to finish.
+
+Users may switch tabs or browse other sites while the process is running, so we want to add a notification sound when the run completes successfully.
+
+This will let users know:
+- auto-sequence has finished
+- the preview is ready
+- they can return to the app and review the result
+
+---
+
+## REQUIRED BEHAVIOR
+
+Play a short notification sound when auto-sequence completes successfully.
+
+### Trigger condition
+Play the sound only when:
+- the auto-sequence run finishes successfully
+- the preview/results are ready for review
+
+### Do NOT play the sound when:
+- the run is cancelled
+- the run fails with an error
+- the modal is closed before completion unless the run still completes successfully and preview is ready
+
+---
+
+## 1. ADD A SUCCESS COMPLETION SOUND
+
+Use a short, subtle success notification sound.
+
+Recommended characteristics:
+- brief
+- non-intrusive
+- noticeable but not alarming
+
+Examples:
+- soft chime
+- light bell
+- single success tone
+
+Avoid:
+- loud alarms
+- repeated sounds
+- harsh system beeps
+
+---
+
+## 2. TRIGGER THE SOUND ONLY AFTER SUCCESSFUL COMPLETION
+
+When the full auto-sequence pipeline completes and the preview is successfully available:
+- play the completion sound once
+
+### Example flow:
+```javascript
+await runAutoSequence();
+showPreviewResults();
+playAutoSequenceCompleteSound();
+```
+
+Important:
+- do not play the sound before the results are actually ready
+- do not play it at intermediate steps
+- do not play it multiple times for the same run
+
+---
+
+## 3. DO NOT PLAY SOUND ON CANCEL OR ERROR
+
+If the run is cancelled:
+- no completion sound
+
+If the run fails:
+- no completion sound
+
+### Example:
+```javascript
+try {
+  await runAutoSequence();
+  if (!autoSequenceCancelled) {
+    showPreviewResults();
+    playAutoSequenceCompleteSound();
+  }
+} catch (err) {
+  if (autoSequenceCancelled || err?.name === 'AbortError') {
+    return; // no sound
+  }
+
+  // real error path - no sound
+}
+```
+
+---
+
+## 4. IMPLEMENT AUDIO SAFELY FOR BROWSER RESTRICTIONS
+
+Browsers may restrict audio playback unless there was a prior user gesture.
+
+Since users click the auto-sequence action before the run starts, this should typically be enough.
+
+Still, implement playback safely:
+- initialize/preload the sound after the user starts the run
+- catch playback errors silently
+- do not let sound issues break the auto-sequence flow
+
+### Example:
+```javascript
+let autoSequenceCompleteAudio = null;
+
+function prepareAutoSequenceAudio() {
+  if (!autoSequenceCompleteAudio) {
+    autoSequenceCompleteAudio = new Audio('/sounds/auto-sequence-complete.mp3');
+    autoSequenceCompleteAudio.preload = 'auto';
+  }
+}
+
+function playAutoSequenceCompleteSound() {
+  if (!autoSequenceCompleteAudio) return;
+
+  autoSequenceCompleteAudio.currentTime = 0;
+  autoSequenceCompleteAudio.play().catch(() => {
+    // fail silently if browser blocks playback
+  });
+}
+```
+
+Call `prepareAutoSequenceAudio()` when the user starts auto-sequence.
+
+---
+
+## 5. RESET SOUND STATE CLEANLY BETWEEN RUNS
+
+If the user runs auto-sequence multiple times:
+- the sound should still work each time a run completes successfully
+- resetting `currentTime = 0` before play is recommended
+
+Do not let one run’s completion block future sound playback.
+
+---
+
+## 6. OPTIONAL: SHOW VISUAL COMPLETION TOAST TOGETHER WITH SOUND
+
+Optional but recommended:
+When the sound plays, also show a toast like:
+- `Auto-sequence complete. Preview is ready.`
+or
+- `Plant-Level Auto-Sequence finished successfully.`
+
+This gives both:
+- audible feedback
+- visual confirmation
+
+But the sound is the main requested feature.
+
+---
+
+## 7. KEEP THE SOUND SUBTLE AND PLAY IT ONLY ONCE
+
+Do not loop the sound.
+Do not repeat it automatically.
+Play it once per successful run.
+
+---
+
+## 8. ADD DEBUG LOGGING IF NEEDED
+
+Temporarily log:
+```javascript
+console.debug('[AutoSequence Completion Sound]', {
+  completed: true,
+  cancelled: autoSequenceCancelled,
+  previewReady: true,
+});
+```
+
+This helps confirm:
+- sound only fires on successful completion
+- not on cancel/error
+
+---
+
+## 9. VERIFICATION
+
+1. ✅ A notification sound plays when auto-sequence finishes successfully
+2. ✅ The sound plays only once per completed run
+3. ✅ The sound does not play when the run is cancelled
+4. ✅ The sound does not play when the run errors out
+5. ✅ The preview is already ready when the sound plays
+6. ✅ Browser audio restrictions are handled safely without breaking the flow

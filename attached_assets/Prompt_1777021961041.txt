@@ -1,0 +1,323 @@
+```
+Fix: Retain changeover when order marked as Done:
+
+---
+
+## 1. STORE ORIGINAL CHANGEOVER BEFORE STATUS CHANGE
+
+```javascript
+// In OrderStatusChange handler:
+
+async function handleStatusChange(orderId, newStatus) {
+  const order = allOrders.find(o => o.id === orderId);
+  
+  if (!order) return;
+  
+  const updateData = {
+    status: newStatus,
+  };
+  
+  // If changing TO "Done" — freeze the current changeover
+  if (newStatus === 'Done' && order.status !== 'Done') {
+    updateData.frozen_changeover = order.changeover || 0;  // Store current CO
+    updateData.changeover_frozen_at = new Date().toISOString();
+  }
+  
+  // If changing FROM "Done" to something else — unfreeze
+  if (order.status === 'Done' && newStatus !== 'Done') {
+    updateData.frozen_changeover = null;
+    updateData.changeover_frozen_at = null;
+  }
+  
+  try {
+    await updateOrderMutation.mutateAsync({
+      id: orderId,
+      data: updateData
+    });
+    
+    toast.success(`Order marked as ${newStatus}`);
+  } catch (error) {
+    toast.error(`Status update failed: ${error.message}`);
+  }
+}
+```
+
+---
+
+## 2. UPDATE calculatePreviewChangeovers — RESPECT FROZEN CHANGEOVER
+
+```javascript
+function calculatePreviewChangeovers(orders, changeoverRules) {
+  for (let i = 0; i < orders.length; i++) {
+    const currentOrder = orders[i];
+    
+    // FROZEN changeover (order is Done): keep as-is, don't recalculate
+    if (currentOrder.frozen_changeover != null) {
+      currentOrder.changeover = currentOrder.frozen_changeover;
+      currentOrder._changeoverCalculated = false;
+      currentOrder._isFrozen = true;
+      continue;
+    }
+    
+    // Done/Cancel orders that don't have frozen changeover: no changeover
+    if (currentOrder.status === 'Done' || currentOrder.status === 'Cancel PO' || 
+        currentOrder.status === 'In Production' || currentOrder.status === 'On-going') {
+      currentOrder.changeover = 0;
+      currentOrder._changeoverTotal = 0;
+      currentOrder._changeoverDetails = 'Order is ' + currentOrder.status.toLowerCase();
+      currentOrder._changeoverCalculated = false;
+      continue;
+    }
+    
+    // Last order on line: no changeover
+    if (i === orders.length - 1) {
+      currentOrder.changeover = 0;
+      currentOrder._changeoverTotal = 0;
+      currentOrder._changeoverDetails = 'Last order — no changeover';
+      currentOrder._changeoverCalculated = true;
+      continue;
+    }
+    
+    // Find next ACTIVE order (skip Done/Cancel/In Production/On-going)
+    let nextOrder = null;
+    for (let j = i + 1; j < orders.length; j++) {
+      if (orders[j].status !== 'Done' && orders[j].status !== 'Cancel PO' &&
+          orders[j].status !== 'In Production' && orders[j].status !== 'On-going') {
+        nextOrder = orders[j];
+        break;
+      }
+    }
+    
+    // No active order after this one: no changeover
+    if (!nextOrder) {
+      currentOrder.changeover = 0;
+      currentOrder._changeoverTotal = 0;
+      currentOrder._changeoverDetails = 'No active orders following';
+      currentOrder._changeoverCalculated = true;
+      continue;
+    }
+    
+    // Calculate changeover based on NEXT ACTIVE order
+    const changeover = calculateChangeoverBetween(currentOrder, nextOrder, changeoverRules);
+    currentOrder.changeover = changeover;
+    currentOrder._changeoverTotal = changeover;
+    currentOrder._changeoverDetails = `CO: ${changeover.toFixed(2)} hrs`;
+    currentOrder._changeoverCalculated = true;
+  }
+}
+```
+
+---
+
+## 3. UPDATE cascadeSchedule — RESPECT FROZEN CHANGEOVER
+
+```javascript
+async function cascadeSchedule(orders, startIndex = 0) {
+  for (let i = startIndex; i < orders.length; i++) {
+    const order = orders[i];
+    
+    // If changeover is frozen (order is Done): use frozen value, don't recalculate
+    if (order.frozen_changeover != null) {
+      order.changeover = order.frozen_changeover;
+      order._isFrozen = true;
+      continue;
+    }
+    
+    // Skip other locked statuses
+    if (order.status === 'Done' || order.status === 'Cancel PO' || 
+        order.status === 'In Production' || order.status === 'On-going') {
+      order.changeover = 0;
+      continue;
+    }
+    
+    // Calculate changeover to NEXT ACTIVE order
+    let changeover = 0;
+    let nextActiveOrder = null;
+    
+    for (let j = i + 1; j < orders.length; j++) {
+      if (orders[j].status !== 'Done' && orders[j].status !== 'Cancel PO' &&
+          orders[j].status !== 'In Production' && orders[j].status !== 'On-going') {
+        nextActiveOrder = orders[j];
+        break;
+      }
+    }
+    
+    if (nextActiveOrder) {
+      changeover = calculateChangeoverBetween(order, nextActiveOrder, changeoverRules);
+    }
+    
+    order.changeover = changeover;
+    order._isFrozen = false;
+    
+    // ... rest of cascade logic ...
+  }
+}
+```
+
+---
+
+## 4. UPDATE ORDER TABLE — SHOW CHANGEOVER WITH TOOLTIP (NO LOCK ICON)
+
+```jsx
+function renderChangeoverCell(order) {
+  const isFrozen = order.frozen_changeover != null;
+  
+  return (
+    <td
+      className={`order-cell changeover-cell ${isFrozen ? 'changeover-frozen' : ''}`}
+      title={isFrozen ? `Changeover frozen when marked Done: ${order.frozen_changeover?.toFixed(2)} hrs` : ''}
+    >
+      <span className={`changeover-value ${isFrozen ? 'changeover-frozen-text' : ''}`}>
+        {order.changeover?.toFixed(2) || '0.00'} hrs
+      </span>
+    </td>
+  );
+}
+```
+
+Styling:
+
+```css
+.changeover-cell {
+  position: relative;
+  min-width: 80px;
+}
+
+.changeover-value {
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.changeover-frozen {
+  background: #f3f4f6;
+}
+
+.dark-mode .changeover-frozen {
+  background: #2d3748;
+}
+
+.changeover-frozen-text {
+  color: #9ca3af;
+  opacity: 0.8;
+}
+
+.changeover-frozen:hover {
+  background: #e5e7eb;
+  cursor: help;
+}
+
+.dark-mode .changeover-frozen:hover {
+  background: #3d3748;
+}
+```
+
+---
+
+## 5. UPDATE ORDER DETAILS — SHOW FROZEN STATUS WITH TOOLTIP
+
+```jsx
+function renderChangeoverInfo(order) {
+  const isFrozen = order.frozen_changeover != null;
+  
+  return (
+    <div className="order-detail-section">
+      <label>Changeover</label>
+      <div
+        className={`changeover-info ${isFrozen ? 'changeover-info-frozen' : ''}`}
+        title={isFrozen ? `Retained from when order was marked Done on ${formatDateTime(order.changeover_frozen_at)}` : ''}
+      >
+        <span className="changeover-value">
+          {order.changeover?.toFixed(2) || '0.00'} hrs
+        </span>
+        
+        {isFrozen && (
+          <span className="changeover-status-badge">
+            Retained
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+```
+
+Styling:
+
+```css
+.changeover-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--color-bg-secondary);
+  border-radius: 4px;
+  border: 1px solid transparent;
+}
+
+.changeover-info-frozen {
+  background: #f3f4f6;
+  border: 1px solid #d1d5db;
+}
+
+.dark-mode .changeover-info-frozen {
+  background: #2d3748;
+  border: 1px solid #4b5563;
+}
+
+.changeover-info-frozen:hover {
+  cursor: help;
+  opacity: 0.9;
+}
+
+.changeover-status-badge {
+  font-size: 10px;
+  font-weight: 700;
+  color: #6b7280;
+  background: #e5e7eb;
+  padding: 2px 6px;
+  border-radius: 10px;
+  text-transform: uppercase;
+}
+
+.dark-mode .changeover-status-badge {
+  color: #9ca3af;
+  background: #3d3748;
+}
+```
+
+---
+
+## 6. UPDATE DB SCHEMA — ADD FROZEN CHANGEOVER FIELDS
+
+```javascript
+// Add these fields to order:
+{
+  // ... existing fields ...
+  frozen_changeover: 0.83,  // Changeover value when marked Done
+  changeover_frozen_at: '2026-04-24T10:30:00Z',  // When it was frozen
+}
+```
+
+---
+
+## VERIFICATION
+
+### Changeover retention
+1. ✅ Order is Prio 2, CO: 0.83
+2. ✅ Mark as Done → frozen_changeover set to 0.83
+3. ✅ Changeover remains 0.83 (not recalculated to 0.17)
+4. ✅ Shows "Retained" badge without lock icon
+
+### Tooltip
+5. ✅ Hover over changeover → tooltip shows it's frozen
+6. ✅ Explains when it was frozen (timestamp)
+7. ✅ No visual clutter (no icon, just tooltip)
+
+### Re-opening
+8. ✅ If status changed back from Done → frozen_changeover cleared
+9. ✅ Changeover recalculated normally
+
+### Other statuses
+10. ✅ In Production, On-going also preserve their changeover
+11. ✅ Cancel PO: changeover = 0 (not frozen)
+```

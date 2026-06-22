@@ -1,0 +1,319 @@
+Please add a new KPI to the auto-sequence strategy cards called **Daily utilization**, including an expandable per-day breakdown, and use this KPI as a major factor in recommendation logic.
+
+---
+
+## OBJECTIVE
+
+Enhance the auto-sequence strategy cards by adding a new KPI that helps users understand not only sequence-level changeover impact, but also how well each proposed sequence utilizes line capacity across days.
+
+Right now the cards show:
+- MTS adjusted
+- Changeover time
+- Time-saved
+- Orders at risk
+
+We want to add:
+
+- **Daily utilization**
+
+This should help users see whether a sequence improves daily line loading and capacity usage, especially for MTS-advancement strategies that may pull work into earlier underutilized days.
+
+This is important because total changeover alone can be misleading when orders are spread across multiple dates.
+
+---
+
+## WHY THIS KPI IS NEEDED
+
+Currently, changeover is counted for the sequence as a whole, without giving users visibility into how the selected strategy utilizes capacity per day.
+
+Example:
+- Order A: 2.00 hrs on May 11
+- Order B: 1.20 hrs on May 12
+- Order C: 0.30 hrs on May 13
+- Changeovers total = 1.33 hrs
+
+This may make the strategy look worse or better in total, but it does not show whether the sequence:
+- fills underutilized days
+- uses available capacity more effectively
+- balances production hours better across the planning window
+
+So we want a KPI that reflects **daily capacity utilization**.
+
+---
+
+## NEW KPI TO ADD ON THE CARD
+
+Add a fifth KPI to each strategy card:
+
+- `Daily utilization ▸   +14.0%`  (collapsed)
+- `Daily utilization ▾   +14.0%`  (expanded)
+
+This KPI should:
+- compare the selected strategy’s average daily utilization vs the Standard Sequence
+- show the improvement or decline as a percentage
+- support expand/collapse behavior to reveal a per-day breakdown
+
+This should apply to:
+- Standard Sequence
+- AI sequence cards
+
+---
+
+## 1. HOW TO CALCULATE DAILY UTILIZATION
+
+Each day has a total capacity of **24 hours**, because the plant operates 24/7.
+
+For each date in the proposed sequence:
+
+### Used hours for that date
+Used hours should include:
+- total production hours for orders scheduled on that date
+- plus changeover hours assigned to that date
+
+### Daily utilization %
+```text
+daily_utilization_percent = (used_hours_for_that_day / 24) * 100
+```
+
+### Example
+If a date has:
+- total used hours = 18.0
+
+Then:
+- daily utilization = 18 / 24 = 75.0%
+
+This is the value shown in the per-day breakdown.
+
+---
+
+## 2. HOW TO CALCULATE THE CARD-LEVEL “DAILY UTILIZATION” KPI
+
+For each strategy:
+
+### Step A
+Compute the daily utilization % for each date in that strategy’s resulting sequence.
+
+Example:
+- Date 1 = 75.0%
+- Date 2 = 95.8%
+- Date 3 = 62.5%
+
+### Step B
+Compute the **average daily utilization** across those dates.
+
+Example:
+- (75.0 + 95.8 + 62.5) / 3 = 77.8%
+
+### Step C
+Compare it against the Standard Sequence average daily utilization.
+
+Example:
+- Standard average = 50.0%
+- AI strategy average = 77.8%
+- improvement = `+27.8%`
+
+### Card display
+Show:
+- `Daily utilization ▸   +27.8%`
+
+This means:
+- average daily utilization for this strategy is 27.8 percentage points higher than Standard Sequence
+
+---
+
+## 3. CARD DISPLAY FORMAT
+
+Keep the KPI layout simple and aligned with the current card style.
+
+Visible card KPIs should now be:
+
+- MTS adjusted
+- Changeover time
+- Time-saved
+- Orders at risk
+- Daily utilization
+
+### Daily utilization row format
+Collapsed:
+- `Daily utilization ▸      +14.0%`
+
+Expanded:
+- `Daily utilization ▾      +14.0%`
+
+Keep the chevron behavior exactly like this:
+- `▸` when collapsed
+- `▾` when expanded
+
+The percentage should be:
+- green when improved / positive
+- red when lower / negative
+
+No “Moderate” status is needed.
+
+---
+
+## 4. EXPANDED PER-DAY BREAKDOWN
+
+When the user expands the Daily utilization row, show a per-day breakdown like this:
+
+```text
+Daily utilization ▾      +14.0%
+
+May 11 2026    5 orders    18 hours    75.0%
+May 12 2026    7 orders    23 hours    95.8%
+May 13 2026    3 orders    15 hours    62.5%
+
+Capacity utilization: Improved
+```
+
+### Per-day row fields
+Each row should show:
+- Date
+- Number of orders scheduled that day
+- Total used hours for that day
+- Daily utilization %
+
+### Important
+The displayed `X hours` should already represent:
+- production hours + changeovers for that day
+
+So the visible hours are the full used capacity for that date.
+
+Do not add extra comparison-to-standard numbers in the expanded rows.
+
+The expanded rows should show only raw utilization values for the selected strategy.
+
+---
+
+## 5. FOOTER STATUS TEXT
+
+At the bottom of the expanded breakdown, show a simple qualitative status:
+
+- `Capacity utilization: Improved`
+or
+- `Capacity utilization: Low`
+
+### Rules
+- If the daily utilization improvement vs Standard is positive → show `Improved` in green
+- If negative → show `Low` in red
+
+No “Moderate” state is needed.
+
+---
+
+## 6. STANDARD SEQUENCE SHOULD ALSO SHOW DAILY UTILIZATION
+
+The Standard Sequence card should also include the Daily utilization KPI and expandable breakdown.
+
+### Expected behavior
+For Standard:
+- the improvement vs itself would be `0.0%`
+- but the per-day breakdown should still be visible if expanded
+
+This allows fair comparison across all strategies.
+
+---
+
+## 7. USE DAILY UTILIZATION AS A MAJOR FACTOR IN RECOMMENDATION LOGIC
+
+This KPI should not be display-only.
+
+Update recommendation logic so that:
+
+- **Daily utilization is a major factor**
+- **Changeover is a moderate weighted factor**
+
+This is because the planning value of better daily line usage can outweigh small changes in total changeover.
+
+So if an AI strategy meaningfully improves daily utilization while staying operationally valid, it should be strongly favored in recommendation logic.
+
+---
+
+## 8. KEEP OTHER METRICS WORKING
+
+Do not remove or break the existing card metrics:
+- MTS adjusted
+- Changeover time
+- Time-saved
+- Orders at risk
+
+This is an additive enhancement only.
+
+---
+
+## 9. ALIGN DAILY UTILIZATION WITH THE ACTUAL RESULTING SEQUENCE
+
+The utilization metrics must be computed from the actual proposed sequence result shown in the preview, not rough estimates.
+
+Use the actual resulting:
+- dates
+- order distribution
+- production hours
+- changeovers per day
+
+The card and expanded breakdown should reflect the same actual simulation used by the preview.
+
+---
+
+## 10. ADD THE BREAKDOWN TO AI REASONING ONLY IF HELPFUL, BUT CARD EXPANDER IS PRIMARY
+
+The main requirement is to show this directly in the card via expand/collapse.
+
+If helpful, the same summary can also be mentioned in AI reasoning, but that is secondary.
+
+The card expander is the primary UX for this KPI.
+
+---
+
+## 11. ADD DEBUG LOGGING FOR UTILIZATION CALCULATION
+
+Temporarily log:
+
+```javascript
+console.debug('[Daily Utilization KPI]', {
+  strategyId,
+  title: strategy.title,
+  standardAverageUtilization,
+  strategyAverageUtilization,
+  utilizationDelta,
+  perDay: perDayBreakdown.map(day => ({
+    date: day.date,
+    orderCount: day.orderCount,
+    usedHours: day.usedHours,
+    utilizationPercent: day.utilizationPercent,
+  })),
+});
+```
+
+This helps verify:
+- daily rows are correct
+- average utilization is correct
+- delta vs Standard is correct
+- recommendation logic sees the same values
+
+---
+
+## 12. VERIFICATION
+
+1. ✅ Each strategy card now includes a fifth KPI: `Daily utilization`
+2. ✅ The KPI shows as:
+   - `Daily utilization ▸ +X.X%` when collapsed
+   - `Daily utilization ▾ +X.X%` when expanded
+3. ✅ The shown percentage is the average daily utilization improvement vs Standard Sequence
+4. ✅ Daily utilization is calculated using:
+   - `(production hours + changeovers for that day) / 24 hours`
+5. ✅ Expanded breakdown shows, per day:
+   - date
+   - number of orders
+   - total used hours
+   - daily utilization %
+6. ✅ The displayed daily “hours” already include both production and changeovers
+7. ✅ Expanded rows show raw values only, without extra per-day vs-standard comparison
+8. ✅ A footer status is shown:
+   - `Capacity utilization: Improved` (green)
+   - or `Capacity utilization: Low` (red)
+9. ✅ Standard Sequence also supports the same Daily utilization KPI and expanded breakdown
+10. ✅ Daily utilization is used as a major factor in recommendation logic
+11. ✅ Changeover becomes a moderate weighted factor relative to daily utilization
+12. ✅ The KPI is based on the actual resulting sequence shown in preview, not rough estimates
+13. ✅ Existing metrics (MTS adjusted, Changeover time, Time-saved, Orders at risk) continue to work as before

@@ -1,0 +1,188 @@
+Please hide the Faithfulness metric from the AI sequence UI for now, without removing the underlying logic or data.
+
+---
+
+## OBJECTIVE
+
+We want to temporarily hide Faithfulness from the user-facing sequence UI.
+
+This is a presentation change only.
+
+### Important:
+- Do **not** remove Faithfulness calculation
+- Do **not** remove Faithfulness storage
+- Do **not** remove Faithfulness from internal logic if it is still being used
+- Just hide it from the visible UI for now
+
+---
+
+## REQUIRED BEHAVIOR
+
+### Hide Faithfulness from:
+1. the AI sequence strategy cards
+2. the AI reasoning panel / expanded reasoning view
+
+### Keep showing on the strategy cards:
+- MTS adjusted
+- Changeover time
+- Time-saved
+
+Faithfulness should remain available internally, but should not be rendered in the visible interface.
+
+---
+
+## 1. HIDE FAITHFULNESS ON THE STRATEGY CARDS
+
+Update the AI sequence cards so they only display these visible metrics:
+
+- `MTS adjusted`
+- `Changeover time`
+- `Time-saved`
+
+Do not display:
+- `Faithfulness`
+
+This applies to all AI strategy cards.
+
+### Example
+Current card:
+- MTS adjusted
+- Changeover time
+- Time-saved
+- Faithfulness
+
+Updated card:
+- MTS adjusted
+- Changeover time
+- Time-saved
+
+---
+
+## 2. HIDE FAITHFULNESS INSIDE THE AI REASONING PANEL
+
+In the expanded AI reasoning / “View AI reasoning” section:
+- do not render Faithfulness
+- do not render visible Faithfulness labels, values, or summary references
+
+If Faithfulness is currently shown in:
+- summary chips
+- explanation blocks
+- footer text
+- confidence sections
+remove it from the visible output
+
+Again:
+- keep it in the underlying data if needed
+- just do not show it in the UI
+
+---
+
+## 3. DO NOT REMOVE FAITHFULNESS FROM INTERNAL DATA STRUCTURES
+
+Keep Faithfulness intact internally.
+
+That means it can still exist in:
+- strategy objects
+- API responses
+- internal scoring logic
+- recommendation logic
+- logs/debug output
+- future UI restoration
+
+This is only a temporary hide, not a deletion.
+
+---
+
+## 4. DO NOT BREAK RECOMMENDATION LOGIC IF IT STILL USES FAITHFULNESS
+
+If Faithfulness is still part of internal recommendation logic or any hidden scoring:
+- keep that behavior working
+- do not remove the value from calculations unless separately requested
+
+The only requested change is:
+- hide from user-facing display
+
+---
+
+## 5. REMOVE VISIBLE REFERENCES TO FAITHFULNESS IN AI REASONING TEXT IF THEY APPEAR
+
+If any AI reasoning text explicitly says things like:
+- `Faithfulness: 75%`
+- `Strongly reflected`
+- `Adequately reflected`
+- `Low faithfulness`
+- or any similar visible faithfulness phrasing
+
+hide or suppress those visible references for now.
+
+If needed:
+- keep them in raw/internal metadata
+- but do not show them in rendered reasoning content
+
+---
+
+## 6. KEEP THE IMPLEMENTATION EASY TO REVERSE LATER
+
+Please implement this in a way that is easy to restore later.
+
+For example:
+- UI flag
+- conditional rendering
+- feature toggle
+- simple display guard
+
+That way we can re-enable Faithfulness later without rebuilding the full logic.
+
+### Example
+```javascript
+const SHOW_FAITHFULNESS = false;
+```
+
+Then:
+- cards render it only if true
+- reasoning panel renders it only if true
+
+---
+
+## 7. OPTIONAL: ADD A HIDDEN FEATURE FLAG OR CONFIG SWITCH
+
+Optional but recommended:
+Use a feature flag such as:
+- `showSequenceFaithfulness`
+- `SHOW_FAITHFULNESS_METRIC`
+
+Set it to `false` for now.
+
+This makes it easy to turn back on later.
+
+---
+
+## 8. ADD DEBUG LOGGING IF NEEDED
+
+Optional debug check:
+
+```javascript
+console.debug('[Faithfulness UI Hidden]', {
+  stillCalculated: strategy.faithfulness != null,
+  renderedOnCard: false,
+  renderedInReasoning: false,
+});
+```
+
+This helps confirm:
+- the value still exists internally
+- but is not shown in the UI
+
+---
+
+## VERIFICATION
+
+1. ✅ Faithfulness is no longer visible on AI sequence strategy cards
+2. ✅ Faithfulness is no longer visible inside the AI reasoning panel
+3. ✅ Strategy cards now show only:
+   - MTS adjusted
+   - Changeover time
+   - Time-saved
+4. ✅ Faithfulness is still retained internally in data/logic
+5. ✅ Recommendation/scoring logic using Faithfulness is not broken
+6. ✅ The change is easy to reverse later if we want to re-show Faithfulness

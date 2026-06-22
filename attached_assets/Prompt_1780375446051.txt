@@ -1,0 +1,80 @@
+Please move the **AI vs Final Sequence — Adjustment Details** section so it appears **outside the preview table**, as a separate collapsible section placed **below the Before/After tables**.
+
+## 1. DO NOT EMBED THE `AI VS FINAL SEQUENCE` SECTION INSIDE THE TABLE AREA
+
+The `AI vs Final Sequence — Adjustment Details` section should not appear visually embedded inside or attached to the table body/scroll area.
+
+### Goal
+Make the explanation section feel like a separate supporting section, not part of the actual preview table layout.
+
+### Expected result
+The Before/After tables remain clean and focused on the sequence preview itself.
+
+---
+
+## 2. PLACE THE `AI VS FINAL SEQUENCE` SECTION BELOW THE BEFORE/AFTER TABLES
+
+Please position the collapsible:
+- `AI vs Final Sequence — Adjustment Details`
+
+as a standalone section **below** the Before and After tables.
+
+### Expected result
+The order of layout should be:
+
+1. Before table
+2. After table
+3. AI vs Final Sequence — Adjustment Details
+
+### Goal
+Keep the preview area and the transparency/audit area visually separate.
+
+---
+
+## 3. KEEP IT COLLAPSIBLE
+
+Please keep this section collapsible/expandable as previously requested.
+
+### Expected result
+Users can expand it only when they want more detail about:
+- AI rank
+- final rank
+- adjustments
+- reasons
+
+---
+
+## 4. PRESERVE THE SAME CONTENT, ONLY CHANGE THE PLACEMENT
+
+Please do not remove the content already planned for the section.
+
+### Keep the same purpose/content such as:
+- AI Rank
+- Final Rank
+- entity/order ID
+- product
+- moved / adjusted status
+- reason
+- constraint note
+
+### Expected result
+Only the placement/layout changes; the informational content remains intact.
+
+---
+
+## IMPORTANT
+
+Please move the **AI vs Final Sequence — Adjustment Details** section **outside the table**, and place it as a **standalone collapsible block below the Before/After tables**.
+
+This should make it feel like a separate transparency section rather than part of the preview table itself.
+
+---
+
+## VERIFICATION
+
+1. ✅ The AI vs Final Sequence section is no longer visually embedded in the table area
+2. ✅ It appears below the Before/After tables
+3. ✅ It remains collapsible
+4. ✅ Its content remains intact
+5. ✅ The preview tables remain visually cleaner
+6. ✅ No UI errors or layout regressions are introduced

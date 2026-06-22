@@ -1,0 +1,194 @@
+Please thoroughly audit and correct the Avail Date suggestion / display logic in the auto-sequence preview.
+
+There appears to be stale or hard-coded fallback behavior causing orders to still show `May 12` as the Avail Date even when the visible schedule already shows:
+- Start Date on May 13
+- Estimated Completion Date on May 13
+- and the urgency/category rules no longer justify keeping May 12
+
+This needs to be fixed first before further refinement, because the Avail Date logic appears internally inconsistent.
+
+---
+
+## PRIMARY ISSUE TO CHECK
+
+There may be hard-coded or stale logic in the application that keeps reusing an earlier date (such as May 12) even after:
+- the order has been resequenced
+- the order’s start has shifted
+- the estimated completion is already on a later date
+- or the category logic implies a different avail date basis
+
+Please audit where Avail Date is currently sourced from and verify whether it is:
+- stale
+- cached incorrectly
+- inherited incorrectly
+- defaulted incorrectly
+- or hard-coded in preview logic
+
+---
+
+## REQUIRED RULES FOR AVAIL DATE / AI DATE BASIS
+
+Please enforce the following rules clearly:
+
+### 1. CRITICAL ORDERS
+If an order is **Critical** and there is **no target date from Future Dispatches** that the AI/app can use as the planning deadline, then:
+
+## use TODAY’s date
+
+This means:
+- the app should not keep an old earlier date like May 12 if the current planning context is already May 13
+- the AI must anchor critical no-target orders to the current day
+
+This should be recomputed properly, not left stale.
+
+---
+
+### 2. URGENT AND MONITOR ORDERS
+If an order is **Urgent** or **Monitor**, then the AI may advance it earlier, but:
+
+## it must not go beyond the target date from Future Dispatches
+
+Example:
+- target date = May 20
+- acceptable AI-suggested dates = May 13 to May 20
+- unacceptable AI-suggested dates = May 21 onward
+
+So these orders:
+- can be advanced earlier
+- but cannot be pushed later than their target date
+
+Please ensure this is correctly enforced.
+
+---
+
+### 3. STOCK SUFFICIENT ORDERS
+If an order is **Stock Sufficient**, then it is flexible.
+
+The AI may:
+- advance it earlier
+- keep it near target
+- or produce it later
+
+with a flexibility window of:
+
+## up to 14 days
+
+This flexibility should be used for:
+- load balancing
+- changeover reduction
+- profitability strategies
+- utilization improvement
+
+Please ensure this category is not treated as tightly as urgent/monitor.
+
+---
+
+## CONSISTENCY CHECK
+
+The app should ensure Avail Date logic is internally consistent with:
+- order urgency category
+- future dispatch target date, if available
+- today’s date, if no target exists for critical orders
+- AI-suggested date strategy
+- current preview timing context
+
+The Avail Date shown should not remain stuck on an old date just because that was previously inferred earlier in the flow.
+
+---
+
+## IMPORTANT CLARIFICATION
+
+Do **not** force Avail Date to equal Start Date or Estimated Completion Date.
+
+Avail Date remains the requirement / planning deadline field.
+
+However, the app must still ensure that the Avail Date shown is the correct one based on:
+- urgency bucket
+- Future Dispatch target logic
+- critical fallback logic
+- stock-sufficient flexibility rules
+
+Right now, the problem is not that Avail Date differs from Start/Completion.
+
+The problem is that the Avail Date itself appears wrong or stale.
+
+---
+
+## RECOMMENDED AUDIT QUESTIONS
+
+Please check the code path and verify:
+
+1. Is Avail Date coming from Future Dispatch target if one exists?
+2. If no target exists, is the order category logic being applied correctly?
+3. For Critical orders with no target, is TODAY being used dynamically?
+4. Is the preview still showing a previously cached inferred date even after resequencing?
+5. Is Avail Date recalculated after AI sequence changes?
+6. Is there any hard-coded fallback to an older date like May 12?
+7. Are category-based date windows applied consistently?
+
+---
+
+## EXPECTED BEHAVIOR AFTER FIX
+
+### Critical
+- no target date available
+- Avail Date should use TODAY
+
+### Urgent / Monitor
+- can be advanced earlier
+- cannot be scheduled beyond target date
+
+### Stock Sufficient
+- flexible
+- can move later up to 14 days
+- can also move earlier if strategy supports it
+
+---
+
+## SEQUENCE INSIGHT ALIGNMENT
+
+Once this is corrected, the Sequence Insight should also use the correct avail date logic in its reasoning.
+
+For example:
+- if the order is Critical with no target, insight should reference current urgency and today-based requirement
+- if the order is Urgent/Monitor, insight should reference target-date protection
+- if the order is Stock Sufficient, insight can reference flexible placement window
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log:
+
+```javascript
+console.debug('[AI Avail Date Derivation]', {
+  orderId,
+  urgencyBucket, // critical | urgent | monitor | stock_sufficient
+  futureDispatchTargetDate,
+  todayDateUsed,
+  computedAvailDate,
+  previousAvailDate,
+  sourceRuleApplied, // critical_today | future_dispatch_target | flexible_stock_window
+  wasRecomputedAfterSequencing: true,
+});
+Also log if a stale date is being reused:
+
+
+javascript
+Run Code
+Copy code
+console.debug('[AI Avail Date Stale Check]', {
+  orderId,
+  oldAvailDate,
+  recomputedAvailDate,
+  usingStaleValue: oldAvailDate !== recomputedAvailDate,
+});
+
+VERIFICATION
+✅ Critical orders with no future dispatch target now use TODAY’s date
+✅ Urgent and Monitor orders can be advanced earlier but never beyond their target date
+✅ Stock Sufficient orders are treated as flexible up to 14 days
+✅ Avail Date is recomputed correctly after sequencing changes
+✅ Old stale inferred dates like May 12 are no longer incorrectly retained
+✅ The displayed Avail Date is aligned with the category logic and target-date rules
+✅ Sequence Insight uses the corrected avail date basis

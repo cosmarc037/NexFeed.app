@@ -1,0 +1,60 @@
+Okay, let's focus one feature at a time, starting with AI Balanced sequence.
+
+Check the snips, snip #1 is the standard sequence and snip #2 is the AI balanced sequence. 
+
+It's not working as expected because it looks like nothing changes. For example:
+- The avail dates from both standard and balanced are the same. Only difference is the color
+- The AI wasn't able to analyze the orders to determine which position should an order be placed in order to reduce the changeovers. For example, three orders have the same target dates based on the N10D, 1000000000934, 1000000000241, and 1000000000939, and they are chronologically sorted. However, based on these three orders, 1000000000934 is different (Gamefowl - Yellow). The fourth order is 1000000000546 and its material is gamefowl - yellow. Instead of letting 1000000000934 comes first, the AI should be able to identify that its best to place 1000000000934 next to 1000000000546, to reduce changeovers since these three orders are stock sufficient and thus the AI can freely move them.
+
+That's why it is also similar to what I mentioned earlier:
+"Just make sure that actual dates, critical, urgent, and monitor dates, won't be compromise that will result in a delay. The AI can also explore on the stock sufficient orders, since they are stock sufficient, meaning they don't have like target dates unlike with critical, urgent, or monitor. Since we only have 10 days from the N10D, if order doesn't have red highlights / threshold, it means that these orders can be produced beyond the target date (since they don't have target date). For example, if order A doesn't have a target date because in the next 10 days, it won't go beyond the threshold, the AI can suggest dates beyond the its target date. So for example, if order A's target date is April 30 (day 10), the AI can suggest dates maybe may 8 or may 9. And this will be helpful to lower the changeovers because for example, if we have three orders, order A, B, and C. Order A's target date is April 30 (day 10) and Order B is May 10, and Order C is also May 10. Order B and C have different materials (category, color, diameter), but order A and C are similar. Since order A have no strict target date because its stock sufficient, they the AI can suggest to place order A next to order C, to minimize the changeovers"
+
+The expected result for the AI balanced sequence is that the AI will analyze the orders, determine how the orders can be position, placed, or sequence by considering the avail date, N10D status, and the material compatibility for reduce changeovers, and what I always highlight, for the AI to suggest dates based on its analysis, not just copying the date from the N10D date or similar to the standard sequence dates. Always have the AI analyze the orders so it could analyze and determine what's the best date an order could have, as long as it follows the N10D dates (not going beyond the red threshold and can only select dates below), if stocks sufficient, AI can select up to 14 days beyond the N10D date (moderate flexibility).
+
+Here's an example for clarity:
+- standard sequence table:
+Order A: 1000000000934
+Gallimax Pigeon Pellet, 50kg
+Gamefowl · Yellow · 3.00mm
+14 May 2026 - N10D - stock sufficient
+
+Order B: 1000000000241
+Elite XP Startex, Mini-pellet 50kg
+Swine · Brown · 3.00mm
+14 May 2026 - N10D - stock sufficient
+
+Order C: 1000000000939
+Classic Hog Growex, Pellet 50kg
+Swine · Brown · 4.00mm
+14 May 2026 - N10D - stock sufficient
+
+Order D: 1000000000546
+Salto Conditioner P 1kg (Bundle)
+Gamefowl · Yellow · 3.00mm
+22 May 2026 - MTO
+
+- But in the AI balanced sequence, where the AI analyzes the orders, the sequence should be like this:
+
+Order B: 1000000000241
+Elite XP Startex, Mini-pellet 50kg
+Swine · Brown · 3.00mm
+4 May 2026
+
+Order C: 1000000000939
+Classic Hog Growex, Pellet 50kg
+Swine · Brown · 4.00mm
+7 May 2026
+
+Order A: 1000000000934
+Gallimax Pigeon Pellet, 50kg
+Gamefowl · Yellow · 3.00mm
+21 May 2026
+
+Order D: 1000000000546
+Salto Conditioner P 1kg (Bundle)
+Gamefowl · Yellow · 3.00mm
+22 May 2026
+
+See the differences? See how the AI moves the orders to reduce the changeovers? See how the AI provides a suggested dates for MTS orders based on its analysis? That should be the expected result for AI balanced sequence, where the AI analyzes the orders, determines where can an order be placed to reduce changeovers, and suggest dates for the MTS orders.
+
+Don't hesitate to ask questions

@@ -1,0 +1,281 @@
+Please update the **Orders at Risk** logic in the **auto-sequence / AI strategy cards** so that orders are also considered at risk if their projected completion exceeds the **5:00 PM allowance time**.
+
+---
+
+## 1. PRESERVE THE CURRENT “ORDERS AT RISK” FRAMEWORK
+
+The application already has an **Orders at Risk** feature in the auto-sequence / AI strategy cards.
+
+Please preserve the current overall behavior and structure, including the existing logic where:
+
+- Critical orders are treated as at risk
+- Urgent orders are only counted if the timing simulation confirms they will actually be late in that proposed sequence
+- Monitor orders are tracked internally but not shown in the visible count
+- non-flagged orders can still become at risk if the timing simulation pushes them past their deadline
+- the final visible count is based on the refined post-sequencing timing simulation
+- the card still displays:
+  - the total number of at-risk orders
+  - the severity label (`Low` / `High`)
+- the metric can still feed into strategy scoring
+
+### Expected result
+The existing Orders at Risk framework remains intact.
+
+---
+
+## 2. ADD A NEW “5:00 PM ALLOWANCE TIME” RISK CONDITION
+
+Please add a new business rule:
+
+> An order should also be considered **at risk** if its projected completion is expected to exceed **5:00 PM**.
+
+### New at-risk condition
+An order is at risk if:
+- it is projected to miss its `target_avail_date`
+- **or**
+- its projected completion time exceeds **5:00 PM**
+
+### Expected result
+Orders that are projected to finish after **5:00 PM** should be counted in **Orders at Risk**, even if they are not otherwise late by avail date.
+
+---
+
+## 3. APPLY THE 5:00 PM RULE USING THE REFINED TIMING SIMULATION
+
+Please apply this new rule in the **accurate/refined pass**, where the app already simulates projected completion times after sequencing and changeovers.
+
+### Goal
+The 5:00 PM rule should be based on the actual projected completion datetime of the order in the proposed sequence.
+
+This means the check should happen after considering:
+- sequence order
+- start times
+- production hours
+- changeover hours
+- timing propagation across the sequence
+
+### Expected result
+The app should not use a rough estimate or static field for this new rule.
+It should use the same sequence-aware timing simulation already used for deadline risk detection.
+
+---
+
+## 4. DEFINE THE 5:00 PM THRESHOLD CLEARLY
+
+Please treat an order as at risk when its projected completion time is:
+
+- **later than 5:00 PM**
+
+### Rule
+- `Projected Completion Time <= 5:00 PM` → not at risk under this specific rule
+- `Projected Completion Time > 5:00 PM` → at risk under this specific rule
+
+### Example
+- `4:45 PM` → not at risk due to the 5:00 PM rule
+- `5:00 PM` → not at risk due to the 5:00 PM rule
+- `5:01 PM` → at risk
+- `6:20 PM` → at risk
+
+### Expected result
+The cutoff is strictly **beyond 5:00 PM**, not equal to 5:00 PM.
+
+---
+
+## 5. INCLUDE THESE ORDERS IN THE VISIBLE “ORDERS AT RISK” COUNT
+
+If an order exceeds the **5:00 PM allowance time**, it should be included in the visible **Orders at Risk** count shown on the AI strategy card.
+
+### Expected result
+The card count should now reflect:
+- orders late against `target_avail_date`
+- Critical orders already at risk
+- and orders projected to finish after **5:00 PM**
+
+### Important
+Please avoid double-counting the same order if it qualifies under multiple at-risk conditions.
+
+Use the same deduplicated set-based approach already used by the refined count.
+
+---
+
+## 6. UPDATE THE AI REASONING / BREAKDOWN TO REFLECT THE NEW RISK TYPE
+
+Please update the **View AI reasoning** or equivalent breakdown so that the new risk condition can be explained clearly.
+
+### Goal
+Users should be able to understand whether an order is at risk because:
+- it is overdue
+- it is delayed / would miss avail date
+- or it is projected to exceed the **5:00 PM allowance time**
+
+### Suggested wording
+Examples:
+- `Orders at risk: 3 (1 overdue, 1 delayed, 1 exceeds 5:00 PM allowance)`
+- `1 order is projected to complete after the 5:00 PM allowance time`
+- `Risk increased because one order finishes beyond the 5:00 PM cutoff`
+
+### Expected result
+The AI reasoning should clearly reflect this new risk source when applicable.
+
+---
+
+## 7. LET THIS NEW RULE CONTRIBUTE TO STRATEGY COMPARISON AS PART OF THE EXISTING RISK METRIC
+
+Please let the new 5:00 PM risk rule feed into the existing **Orders at Risk** metric used in strategy comparison/scoring.
+
+### Important
+Do not create a completely separate unrelated metric unless necessary.
+
+Instead, treat this as an additional way an order can enter the existing at-risk set.
+
+### Expected result
+If one sequence causes more orders to finish after 5:00 PM than another, that should be reflected in the strategy comparison via the updated Orders at Risk count.
+
+---
+
+## 8. DO NOT REMOVE THE EXISTING DEADLINE-BASED RISK LOGIC
+
+Please preserve the current risk behavior related to:
+- Critical orders
+- Urgent orders validated by simulation
+- target availability date misses
+- post-changeover timing simulation
+
+This request is to **add** the 5:00 PM allowance-time rule, not to replace the deadline-based logic.
+
+### Expected result
+Orders can now be counted as at risk for either:
+- deadline/date reasons
+- or allowance-time exceedance
+- or both, with no double-counting
+
+---
+
+## 9. HANDLE EXAMPLES CORRECTLY
+
+Please ensure the updated Orders at Risk logic behaves like this:
+
+### Example A — Late by deadline
+Projected completion:
+- `May 25, 2026, 3:00 PM`
+
+Target avail date:
+- `May 24, 2026`
+
+Result:
+- at risk due to deadline miss
+
+### Example B — On time by date, but exceeds 5:00 PM
+Projected completion:
+- `May 25, 2026, 5:30 PM`
+
+Target avail date:
+- `May 26, 2026`
+
+Result:
+- still at risk due to exceeding the 5:00 PM allowance time
+
+### Example C — Meets both conditions
+Projected completion:
+- `May 25, 2026, 6:15 PM`
+
+Target avail date:
+- `May 25, 2026, 12:00 PM` or equivalent earlier timing
+
+Result:
+- at risk, but counted only once in the total
+
+### Example D — Safe order
+Projected completion:
+- `May 25, 2026, 4:40 PM`
+
+Target avail date:
+- `May 26, 2026`
+
+Result:
+- not at risk
+
+---
+
+## 10. APPLY THIS TO THE AUTO-SEQUENCE STRATEGY CARDS AND RELATED RISK OUTPUTS
+
+Please ensure this updated risk logic appears consistently wherever **Orders at Risk** is displayed or used in the auto-sequence flow, including:
+
+- AI strategy cards
+- View AI reasoning breakdown
+- sequence comparison logic
+- any internal strategy scoring input tied to ordersAtRisk
+
+### Expected result
+The new 5:00 PM rule should be reflected consistently across the relevant auto-sequence outputs.
+
+---
+
+## IMPORTANT
+
+Please preserve the current Orders at Risk logic and add this new rule:
+
+> Any order projected to complete **after 5:00 PM** should also be counted as **at risk**.
+
+This should be evaluated during the existing refined timing simulation, added into the same at-risk set, and surfaced in the visible card count and AI reasoning.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log the additional 5:00 PM risk evaluation alongside the existing at-risk logic.
+
+```javascript
+console.debug('[Orders At Risk Evaluation]', {
+  orderId,
+  projectedCompletionDatetime,
+  targetAvailDate,
+  isCritical,
+  isUrgent,
+  missesDeadline: projectedCompletionDatetime > targetAvailDate,
+  exceedsFivePmAllowance:
+    projectedCompletionDatetime &&
+    new Date(projectedCompletionDatetime).getHours() >= 17 &&
+    (
+      new Date(projectedCompletionDatetime).getHours() > 17 ||
+      new Date(projectedCompletionDatetime).getMinutes() > 0
+    ),
+});
+```
+
+```javascript
+console.debug('[Orders At Risk Set Update]', {
+  orderId,
+  addedBecauseOfDeadlineMiss,
+  addedBecauseOfFivePmAllowance,
+  finalIncludedInRiskSet,
+});
+```
+
+```javascript
+console.debug('[Orders At Risk Card Summary]', {
+  ordersAtRiskCount,
+  overdueCount,
+  delayedCount,
+  exceedsFivePmCount,
+  severityLabel: ordersAtRiskCount > 0 ? 'High' : 'Low',
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ The current Orders at Risk framework remains intact
+2. ✅ Critical orders are still counted as at risk
+3. ✅ Urgent orders are still only counted when the simulation confirms they will actually be late
+4. ✅ Monitor orders are still not shown in the visible Orders at Risk count
+5. ✅ Orders projected to miss their target avail date are still counted as at risk
+6. ✅ Orders projected to complete after **5:00 PM** are now also counted as at risk
+7. ✅ Orders finishing exactly at **5:00 PM** are not counted under the new 5:00 PM rule
+8. ✅ Orders finishing after **5:00 PM** are counted even if they do not miss the target avail date
+9. ✅ Orders that satisfy multiple risk conditions are counted only once in the total
+10. ✅ The AI reasoning breakdown can indicate when risk is due to exceeding the 5:00 PM allowance time
+11. ✅ The updated Orders at Risk count is reflected in the AI strategy cards
+12. ✅ The updated Orders at Risk count still feeds correctly into strategy comparison/scoring
+13. ✅ No UI errors or console errors are introduced

@@ -1,0 +1,174 @@
+Clear. Here's the prompt:
+
+```
+Implement the following changes to the NexFeed application:
+
+---
+
+## SMART COMBINE — UPDATED ORDER ROW LAYOUT
+
+Redesign the individual order rows within each Smart Combine recommendation card to show more production details in a cleaner layout.
+
+**Current layout (to be replaced):**
+```
+FPR: 260309             25 min           8 MT        ×
+FG: 5873012             March 19, 2026   safety stocks
+SFG: 5920950            01:18 AM
+```
+
+**New layout:**
+
+Each order row within a combine card has THREE columns and up to FIVE lines:
+
+```
+LEFT COLUMN              MIDDLE COLUMN                    RIGHT COLUMN
+
+FPR: 260309              25 min                                    8    ×
+FG: 5873012              CD: March 19, 2026                metric tons (MT)
+SFG: 5920950             CT: 01:43 AM
+                         Availability: March 19, 2026
+```
+
+For non-dated orders:
+```
+LEFT COLUMN              MIDDLE COLUMN                    RIGHT COLUMN
+
+FPR: 260309              38 min                                   12    ×
+FG: 5873012              CD: March 19, 2026                metric tons (MT)
+SFG: 5920950             CT: 02:06 AM
+                         Availability: prio replenish
+```
+
+When Completion Date is not yet calculated (Start Date not set):
+```
+LEFT COLUMN              MIDDLE COLUMN                    RIGHT COLUMN
+
+FPR: 260309              25 min                                    8    ×
+FG: 5873012              CD: —                             metric tons (MT)
+SFG: 5920950             CT: —
+                         Availability: safety stocks
+```
+
+---
+
+### LEFT COLUMN — Order Identifiers
+
+Line 1: **FPR: [value]**
+- "FPR:" label in regular grey text
+- Value in bold, dark text
+- Same size as current FPR display
+
+Line 2: **FG: [value]**
+- "FG:" label in regular grey text
+- Value in smaller, lighter grey text (existing hierarchy)
+
+Line 3: **SFG: [value]**
+- "SFG:" label in regular grey text
+- Value in smaller, lighter grey text (existing hierarchy)
+
+---
+
+### MIDDLE COLUMN — Production & Scheduling Details
+
+Line 1: **Production time**
+- Display the production hours/minutes for this individual order
+- Format: "25 min", "1 hr 3 min", "4 hrs 18 min"
+- Regular text, dark grey
+
+Line 2: **CD: [Completion Date]**
+- "CD:" label in grey text
+- Completion Date value in dark text
+- Format: "CD: March 19, 2026"
+- If no Completion Date (not yet calculated): "CD: —" in grey
+
+Line 3: **CT: [Completion Time]**
+- "CT:" label in grey text
+- Completion Time value in dark text
+- Format: "CT: 01:43 AM" (12-hour format with AM/PM)
+- If no Completion Time (not yet calculated): "CT: —" in grey
+
+Line 4: **Availability: [value]**
+- "Availability:" label in grey text
+- Value depends on the order type:
+  - Valid date: "Availability: March 19, 2026" — dark text
+  - Non-date: "Availability: prio replenish" — orange text (#fd5108)
+  - Non-date: "Availability: safety stocks" — orange text (#fd5108)
+  - Non-date: "Availability: for sched" — orange text (#fd5108)
+- The Availability label is always grey; only the VALUE changes color based on type.
+
+---
+
+### RIGHT COLUMN — Volume + Remove Button
+
+**Volume display (right-aligned):**
+
+Line 1: **[number]** — The volume number
+- Same font size as the FPR value (matching size as requested)
+- Bold, dark text
+- Right-aligned
+- Example: "8", "12", "20", "80"
+
+Line 2: **metric tons (MT)** — Unit label
+- Smaller font size
+- Grey text (#a1a8b3)
+- Right-aligned
+- Appears on EVERY order row
+
+**Remove button (×):**
+- Small × button positioned to the right of the volume number (Line 1)
+- Same behavior as current: click to exclude order from combine group
+- Grey by default, red on hover
+
+---
+
+### COMPLETE CARD EXAMPLE
+
+```
+╔═══════════════════════════════════════════════════════════════════╗
+║  Elite XP Startex, Mini-pellet 50kg | Combine Group 1            ║
+║                                                                   ║
+║  Material Code (FG)    1000000000241                              ║
+║  Category              Hogs                                       ║
+║  Form                  MP                                         ║
+║  Batch Size            4.00                                       ║
+║  Line                  Line 1                                     ║
+║                                                                   ║
+║  ┌───────────────────────────────────────────────────────────┐    ║
+║  │ FPR: 260309          25 min                         8   × │    ║
+║  │ FG: 5873012          CD: March 19, 2026    metric tons (MT)│   ║
+║  │ SFG: 5920950         CT: 01:43 AM                         │    ║
+║  │                      Availability: safety stocks          │    ║
+║  └───────────────────────────────────────────────────────────┘    ║
+║                                                                   ║
+║  ┌───────────────────────────────────────────────────────────┐    ║
+║  │ FPR: 260309          38 min                        12   × │    ║
+║  │ FG: 5873009          CD: March 19, 2026    metric tons (MT)│   ║
+║  │ SFG: 5920947         CT: 02:06 AM                         │    ║
+║  │                      Availability: safety stocks          │    ║
+║  └───────────────────────────────────────────────────────────┘    ║
+║                                                                   ║
+║  ┌───────────────────────────────────────────────────────────┐    ║
+║  │ FPR: 260309          1 hr 3 min                    20   × │    ║
+║  │ FG: 5873011          CD: March 19, 2026    metric tons (MT)│   ║
+║  │ SFG: 5920949         CT: 05:10 AM                         │    ║
+║  │                      Availability: safety stocks          │    ║
+║  └───────────────────────────────────────────────────────────┘    ║
+║                                                                   ║
+║  Combined Volume: 40 MT                                           ║
+║                                                                   ║
+║  [Insights & Warnings]                                            ║
+║  [Approve]  [Dismiss]                                             ║
+╚═══════════════════════════════════════════════════════════════════╝
+```
+
+---
+
+### SPACING AND ALIGNMENT
+
+- Left column: Left-aligned, starts at the left edge of the order row card.
+- Middle column: Left-aligned, positioned after the left column with consistent spacing. All middle column values align vertically (production time, CD, CT, Availability all start at the same x-position).
+- Right column: Right-aligned, positioned at the right edge of the order row card. The volume number and "metric tons (MT)" label are both right-aligned. The × button sits to the right of or slightly above the volume number.
+- Vertical spacing between lines: Consistent, compact but readable (~4-6px between lines).
+- Vertical spacing between order row cards: ~12-16px.
+- Each order row card has a subtle border or separator line between them (light grey, as shown in current design).
+```

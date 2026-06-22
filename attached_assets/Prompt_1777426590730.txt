@@ -1,0 +1,281 @@
+```
+Update the AI Profit-Optimized terminology so it uses "Profit Score" instead of "Profit Rate" everywhere the profitability calculation is shown.
+
+---
+
+## OBJECTIVE
+
+The current AI Profit-Optimized insight uses the term:
+
+- "Profit Rate = Margin ÷ (Production Hours + Changeover Hours)"
+
+However, the `Margin` field in master data is stored as a **percentage**, not as an absolute contribution value or currency amount.
+
+Because of that:
+- the arithmetic is still valid as a ranking formula
+- but calling it "Profit Rate" is misleading
+- it is more accurate to treat it as a **profitability score / ranking score**
+
+We will rename it to:
+
+## **Profit Score**
+
+This keeps the current logic intact, but makes the terminology more accurate and easier to defend.
+
+---
+
+## 1. DO NOT CHANGE THE CALCULATION LOGIC
+
+Keep the existing formula as-is:
+
+```javascript
+profitScore = margin / (productionHours + changeoverHours)
+```
+
+Where:
+- margin = percentage value from master data
+- productionHours = final row production hours
+- changeoverHours = final row changeover hours
+
+Only the terminology and explanatory text should change.
+
+---
+
+## 2. RENAME INTERNAL DISPLAY VARIABLES WHERE APPROPRIATE
+
+If there are display/helper variables named like:
+- `profitRate`
+- `formattedProfitRate`
+- `profitRateLabel`
+
+consider renaming them to:
+- `profitScore`
+- `formattedProfitScore`
+- `profitScoreLabel`
+
+If a wider refactor is risky, it is okay to keep internal variable names for now, but all **UI text, AI prompt text, and user-facing explanations** must say **Profit Score**, not Profit Rate.
+
+---
+
+## 3. UPDATE THE AI INSIGHT CONTEXT FIELD NAME FOR USER-FACING PROFIT EXPLANATION
+
+If feasible, update the insight context from:
+
+```javascript
+profitRate: Number(profitRate.toFixed(2))
+```
+
+to:
+
+```javascript
+profitScore: Number(profitRate.toFixed(2))
+```
+
+If changing field names across the whole flow is too risky, then:
+- keep the internal field
+- but map it into the prompt as `profitScore`
+
+Preferred approach:
+
+```javascript
+const profitScore = calculateDisplayedProfitRate({
+  margin,
+  productionHours,
+  changeoverHours,
+});
+
+ctx.profitScore = Number(profitScore.toFixed(2));
+```
+
+And stop exposing `profitRate` to the prompt if possible.
+
+---
+
+## 4. UPDATE AI INSIGHT PROMPT TEXT
+
+Anywhere the prompt currently says:
+- Profit Rate
+- profit per hour
+- higher profit rate
+- lower profit rate
+
+replace it with:
+- Profit Score
+- higher profit score
+- lower profit score
+- profitability score based on margin percentage and time consumed
+
+### Example update:
+```javascript
+function buildStrategyInsightsPrompt({ strategyId, lineContexts }) {
+  return `
+You are generating row-level sequencing explanations for a production scheduling system.
+
+The selected strategy is: ${strategyId}
+
+IMPORTANT:
+- Use the provided numeric values exactly as given
+- Do not estimate or replace margin, productionHours, changeoverHours, or profitScore
+- If marginFound is false, explain that margin data is unavailable
+- If strategy is ai_profit, use the formula exactly as:
+  Profit Score = Margin ÷ (Production Hours + Changeover Hours)
+- Margin is stored as a percentage, so explain this as a profitability score, not as currency profit per hour
+
+Return valid JSON only.
+
+### Order contexts:
+${JSON.stringify(lineContexts, null, 2)}
+`;
+}
+```
+
+---
+
+## 5. UPDATE ALL AI PROFIT SHORT/LONG INSIGHT PHRASING
+
+### Replace examples like:
+- "Prioritized here due to higher profit rate among safe flexible orders."
+- "Profit Rate = 18.00 ÷ (2.00 + 0.83) = 6.36 profit/hr."
+
+### With:
+- "Prioritized here due to a higher profit score among safe flexible orders."
+- "Profit Score = 18.00 ÷ (2.00 + 0.83) = 6.36."
+
+### Expanded example:
+```json
+{
+  "short": "Prioritized here due to a higher profit score among safe flexible orders.",
+  "long": "This order was placed earlier because it offers a stronger profitability score than other safe flexible options. Profit Score = 18.00 ÷ (2.00 + 0.83) = 6.36."
+}
+```
+
+---
+
+## 6. UPDATE SYSTEM FALLBACK INSIGHTS
+
+If you have fallback AI Profit insight text like:
+
+```javascript
+return {
+  short: 'Scheduled using profit-optimized sequencing.',
+  long: `This order was evaluated using profit-rate logic. Profit Rate = ${ctx.margin.toFixed(2)} ÷ (${ctx.productionHours.toFixed(2)} + ${ctx.changeoverHours.toFixed(2)}) = ${ctx.profitRate.toFixed(2)} profit/hr.`,
+};
+```
+
+Replace with:
+
+```javascript
+return {
+  short: 'Scheduled using profit-optimized sequencing.',
+  long: `This order was evaluated using profitability scoring. Profit Score = ${ctx.margin.toFixed(2)} ÷ (${ctx.productionHours.toFixed(2)} + ${ctx.changeoverHours.toFixed(2)}) = ${ctx.profitScore.toFixed(2)}.`,
+};
+```
+
+If `marginFound === false`, keep the missing-margin explanation.
+
+---
+
+## 7. UPDATE ANY UI LABELS / METRICS / TOOLTIPS
+
+Search for any user-facing occurrences of:
+- Profit Rate
+- profit/hr
+- profit per hour
+
+Replace them with one of:
+- Profit Score
+- profitability score
+- higher/lower profit score
+
+This includes:
+- Sequence Insight column text
+- expanded "more/less" text
+- strategy cards if profit metric appears there
+- tooltips
+- AI explanation modal if used
+
+Do not show `/hr` if margin is percentage-based.
+
+---
+
+## 8. UPDATE AI PROFIT STRATEGY DESCRIPTION IF NEEDED
+
+If there is any strategy description that says something like:
+- “Prioritizes higher profit per hour”
+
+replace with:
+- “Prioritizes higher profitability opportunities”
+- or
+- “Prioritizes orders with stronger profit score while preserving schedule safety”
+
+Suggested wording:
+```javascript
+description: 'AI prioritizes safer high-profit-score opportunities while preserving hard date constraints and practical scheduling'
+```
+
+---
+
+## 9. KEEP THE CALCULATION CONSISTENT
+
+Even though the label changes, the formula remains:
+
+```javascript
+profitScore = margin / (productionHours + changeoverHours)
+```
+
+Example:
+- margin = 18.7
+- productionHours = 2.98
+- changeoverHours = 0.17
+- Profit Score = 18.7 ÷ (2.98 + 0.17) = 5.94
+
+This should now be displayed as:
+- **Profit Score = 18.7 ÷ (2.98 + 0.17) = 5.94**
+
+Not:
+- Profit Rate = ... = 5.94/hr
+
+---
+
+## 10. OPTIONAL: ADD A SLIGHTLY CLEARER EXPLANATION IN LONG INSIGHT
+
+For AI-generated long insights, encourage wording like:
+
+- “Profit Score is a profitability ranking based on margin percentage divided by total consumed line hours.”
+- “A higher profit score means the order provides stronger profitability relative to the production and changeover time it consumes.”
+
+This helps users understand what the score means.
+
+---
+
+## 11. VERIFY AI OUTPUT DOES NOT SAY "per hour" ANYMORE
+
+The current wrong phrasing:
+- "0/hr"
+- "5.94/hr"
+- "44.05/hr"
+
+must be fully removed from user-facing text for profit strategy.
+
+If you still want a compact label, use:
+- `Score: 5.94`
+not
+- `5.94/hr`
+
+---
+
+## VERIFICATION
+
+1. User-facing text no longer says "Profit Rate"
+2. User-facing text no longer says "profit/hr" or "/hr"
+3. Sequence Insight now says "Profit Score"
+4. AI Profit insight explains the formula as:
+   Profit Score = Margin ÷ (Production Hours + Changeover Hours)
+5. Existing calculation logic remains unchanged
+6. AI-generated short and long texts use the new wording
+7. Fallback/system-generated profit insights also use "Profit Score"
+8. Strategy descriptions and labels no longer imply literal currency profit per hour
+9. Example text now reads:
+   `Profit Score = 18.7 ÷ (2.98 + 0.17) = 5.94`
+10. The terminology is now aligned with margin being percentage-based
+```

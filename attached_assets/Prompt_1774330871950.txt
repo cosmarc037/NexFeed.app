@@ -1,0 +1,463 @@
+```
+Implement the following feature in the NexFeed application:
+
+---
+
+## ADD SINGLE ORDER — NEW FEATURE
+
+Allow users to manually add a single new order directly from the order table, with AI-powered impact analysis before insertion.
+
+---
+
+### 1. BUTTON PLACEMENT
+
+Add an "Add Order" button in the line header container, next to the line label and order count.
+
+**Layout:**
+```
+┌─────────────────────────────────────────────────────────┐
+│ 📋 Line 1  |  + Add Order                   10 orders   │
+├─────────────────────────────────────────────────────────┤
+│ [Table...]                                               │
+└─────────────────────────────────────────────────────────┘
+```
+
+**"+ Add Order" button styling:**
+
+| Property | Value |
+|---|---|
+| Text | "+ Add Order" |
+| Font size | 12px |
+| Font weight | 500 |
+| Color | Orange (#fd5108) |
+| Background | Transparent |
+| Border | None |
+| Cursor | Pointer |
+| Hover | Underline, slightly darker orange |
+| Position | Right of the line label, separated by a " | " divider |
+
+**Available on:**
+- ✅ Each individual line tab (Line 1, Line 2, etc.) — the order goes to that specific line
+- ✅ "All" tab — the dialog will include a line selector for the user to choose which line
+
+---
+
+### 2. ADD ORDER DIALOG
+
+When the user clicks "+ Add Order", a dialog appears with the order details form.
+
+**Dialog layout:**
+
+```
+╔══════════════════════════════════════════════════════════════╗
+║                                                              ║
+║  + Add New Order                                        ✕    ║
+║  Manually create a new production order                      ║
+║                                                              ║
+║  ┌─ Order Details ────────────────────────────────────────┐  ║
+║  │                                                        │  ║
+║  │  FPR:              260324 (auto-generated)             │  ║
+║  │                                                        │  ║
+║  │  Item Description:  [▼ Search or select product...]    │  ║
+║  │                                                        │  ║
+║  │  Material Code (FG): 1000000000241 (auto-populated)    │  ║
+║  │                                                        │  ║
+║  │  Form:              MP (auto-populated)                │  ║
+║  │                                                        │  ║
+║  │  Volume (MT):       [Enter volume...]                  │  ║
+║  │                     ⚠ 30 MT is not divisible by batch  │  ║
+║  │                       size 4.00. Suggested: 32 MT      │  ║
+║  │                                                        │  ║
+║  │  Batch Size:        4.00 (auto-populated)              │  ║
+║  │                                                        │  ║
+║  │  Batches:           8 (auto-calculated)                │  ║
+║  │                                                        │  ║
+║  └────────────────────────────────────────────────────────┘  ║
+║                                                              ║
+║  ┌─ Scheduling ───────────────────────────────────────────┐  ║
+║  │                                                        │  ║
+║  │  Line:              [▼ Line 1]  (auto-suggested)       │  ║
+║  │                     💡 This product has run rate        │  ║
+║  │                        history on Line 1 and Line 5    │  ║
+║  │                                                        │  ║
+║  │  Availability:      [▼ Select type...]                 │  ║
+║  │                     Options:                           │  ║
+║  │                     • Set specific date                │  ║
+║  │                     • Prio replenish                   │  ║
+║  │                     • Safety stocks                    │  ║
+║  │                     • For sched                        │  ║
+║  │                     • Custom text...                   │  ║
+║  │                                                        │  ║
+║  └────────────────────────────────────────────────────────┘  ║
+║                                                              ║
+║  ┌─ Planned Orders (Optional) ────────────────────────────┐  ║
+║  │                                                        │  ║
+║  │  Planned Order FG:  [Enter 10-digit number...]         │  ║
+║  │  Planned Order SFG: [Enter 10-digit number...]         │  ║
+║  │  Planned Order PMX: [Enter 10-digit number...]         │  ║
+║  │                                                        │  ║
+║  └────────────────────────────────────────────────────────┘  ║
+║                                                              ║
+║  ┌─ 🤖 Impact Analysis ──────────────────────────────────┐  ║
+║  │                                                        │  ║
+║  │  [AI-generated impact analysis appears here after      │  ║
+║  │   user fills in the required fields]                   │  ║
+║  │                                                        │  ║
+║  └────────────────────────────────────────────────────────┘  ║
+║                                                              ║
+║                    [Cancel]    [Add Order]                    ║
+║                                                              ║
+╚══════════════════════════════════════════════════════════════╝
+```
+
+---
+
+### 3. FIELD DETAILS
+
+#### FPR — AUTO-GENERATED
+
+| Property | Value |
+|---|---|
+| Format | YYMMDD based on today's date |
+| Example | If today is March 24, 2026 → FPR = "260324" |
+| Editable | ❌ Read-only, auto-generated |
+| Display | Grey text showing "(auto-generated)" next to the value |
+
+#### ITEM DESCRIPTION — SEARCHABLE DROPDOWN
+
+| Property | Value |
+|---|---|
+| Type | Searchable dropdown / autocomplete |
+| Data source | Knowledge Base products |
+| Placeholder | "Search or select product..." |
+| Search | User types to filter — searches across Item Description AND Material Code |
+| Display | Dropdown shows: Item Description + Material Code + Category |
+
+**Dropdown option format:**
+```
+┌──────────────────────────────────────────────────────┐
+│ Elite XP Startex, Mini-pellet 50kg                    │
+│ 1000000000241 · Hogs                                  │
+├──────────────────────────────────────────────────────┤
+│ Elite XP Growex 2, Pellet 50kg                        │
+│ 1000000000244 · Hogs                                  │
+├──────────────────────────────────────────────────────┤
+│ Elite XP Pre-startex, Mini-pellet 25kg                │
+│ 1000000000240 · Hogs                                  │
+└──────────────────────────────────────────────────────┘
+```
+
+**On selection:**
+- Item Description fills in
+- Material Code (FG) auto-populates
+- Form auto-populates
+- Batch Size auto-populates (from Knowledge Base)
+- Line auto-suggests (based on run rate history from Knowledge Base)
+- Category fills in (shown as secondary text)
+
+#### MATERIAL CODE (FG) — AUTO-POPULATED
+
+| Property | Value |
+|---|---|
+| Type | Read-only after Item Description is selected |
+| Auto-populated from | Knowledge Base lookup |
+| If user types Material Code first | Reverse lookup — auto-populate Item Description |
+
+#### FORM — AUTO-POPULATED
+
+| Property | Value |
+|---|---|
+| Type | Read-only after Item Description is selected |
+| Auto-populated from | Knowledge Base |
+| Values | MP, P, CS, MP-CS, etc. |
+
+#### VOLUME (MT) — USER INPUT
+
+| Property | Value |
+|---|---|
+| Type | Number input |
+| Placeholder | "Enter volume..." |
+| Validation | Must be greater than 0 |
+
+**Batch size divisibility warning:**
+
+When the user enters a volume that is NOT divisible by the batch size:
+
+```
+┌──────────────────────────────────────────────────────┐
+│ Volume (MT):  [30]                                    │
+│ ⚠ 30 MT is not divisible by batch size 4.00.         │
+│   Suggested volume: 32 MT (8 batches)                 │
+│   [Use 32 MT]                                         │
+└──────────────────────────────────────────────────────┘
+```
+
+| Element | Styling |
+|---|---|
+| Warning text | 11px, amber (#92400e) |
+| Warning background | Light orange (#fff7ed) |
+| Warning border | 1px solid #fed7aa, border-radius 6px |
+| [Use XX MT] button | Small orange text link, 11px, cursor pointer |
+| On click "Use XX MT" | Volume updates to the suggested amount |
+
+When volume IS divisible:
+- No warning shown
+- Batches auto-calculates: Volume ÷ Batch Size
+
+#### BATCH SIZE — AUTO-POPULATED
+
+| Property | Value |
+|---|---|
+| Type | Read-only |
+| Auto-populated from | Knowledge Base based on selected product AND line |
+| Display | Number with 2 decimals (e.g., "4.00") |
+
+#### BATCHES — AUTO-CALCULATED
+
+| Property | Value |
+|---|---|
+| Type | Read-only |
+| Calculation | Volume ÷ Batch Size (rounded up) |
+| Updates | Automatically when Volume or Batch Size changes |
+
+#### LINE — AUTO-SUGGESTED WITH WARNING
+
+| Property | Value |
+|---|---|
+| Type | Dropdown selector |
+| Options | Line 1, Line 2, Line 3, Line 4, Line 5, Line 6, Line 7 |
+| Auto-suggestion | Based on Knowledge Base run rate history for the selected product |
+
+**When a product has run rate history on specific lines:**
+```
+Line:  [▼ Line 1]  (auto-suggested)
+💡 This product has production history on Line 1 and Line 5.
+   Run rate: Line 1 = 55 min/batch, Line 5 = 60 min/batch
+```
+
+- 💡 Info note in blue (#3b82f6), 11px
+- Shows which lines have history and their run rates
+- Auto-selects the line with the best (lowest) run rate
+
+**When a product has NO run rate history on the selected line:**
+```
+Line:  [▼ Line 3]
+⚠ This product has no production history on Line 3. 
+  Consider placing on Line 1 or Line 5 where it has 
+  been produced before.
+```
+
+- ⚠ Warning in amber (#f59e0b), 11px
+- Suggests alternative lines with history
+- User can still proceed with Line 3 if they want
+
+**When a product has NO run rate history on ANY line:**
+```
+Line:  [▼ Line 1]
+⚠ This product has no production history on any line. 
+  Run rate will need to be manually configured.
+```
+
+**If opened from a specific line tab (e.g., Line 1):**
+- Line is pre-selected to that line
+- Still editable — user can change to another line
+
+**If opened from the "All" tab:**
+- Line is auto-suggested based on Knowledge Base
+- User must confirm or change
+
+#### AVAILABILITY — DROPDOWN WITH OPTIONS
+
+| Property | Value |
+|---|---|
+| Type | Dropdown with options + custom date picker |
+
+**Options:**
+```
+┌──────────────────────────────────────┐
+│ Set specific date...          📅     │  ← opens date picker
+├──────────────────────────────────────┤
+│ Prio replenish                       │
+├──────────────────────────────────────┤
+│ Safety stocks                        │
+├──────────────────────────────────────┤
+│ For sched                            │
+├──────────────────────────────────────┤
+│ Custom text...                  ✏️   │  ← opens text input
+└──────────────────────────────────────┘
+```
+
+- "Set specific date" → opens a date picker inline
+- "Prio replenish", "Safety stocks", "For sched" → sets the value directly
+- "Custom text" → opens a text input for the user to type any value
+
+#### PLANNED ORDERS — OPTIONAL USER INPUT
+
+| Field | Type | Validation |
+|---|---|---|
+| Planned Order FG | Text input | Optional, 10-digit number if provided |
+| Planned Order SFG | Text input | Optional, 10-digit number if provided |
+| Planned Order PMX | Text input | Optional, 10-digit number if provided |
+
+Placeholder: "Enter 10-digit number..." in grey italic
+
+---
+
+### 4. IMPACT ANALYSIS — AI-POWERED
+
+After the user fills in the required fields (Item Description, Volume, Line, Availability), the AI automatically generates an impact analysis.
+
+#### TRIGGER
+
+The impact analysis generates when:
+- All required fields are filled (Item Description + Volume + Line + Availability)
+- Any required field changes (re-generates with updated data)
+
+#### DISPLAY
+
+```
+┌─ 🤖 Impact Analysis ────────────────────────────────────┐
+│                                                          │
+│  Based on the details provided, here's what will happen  │
+│  when this order is added:                               │
+│                                                          │
+│  📍 Insertion Position                                   │
+│  This order will be placed at Prio 3, between Salto      │
+│  Conditioner (Mar 22) and Elite XP Startex (Mar 28),     │
+│  based on its availability date of March 25.             │
+│                                                          │
+│  ⏱ Production Impact                                    │
+│  Adding 32 MT (8 batches) of Elite XP Growex 2 will      │
+│  add approximately 4.2 hours of production time to       │
+│  Line 1. This includes 0.17 hours of changeover time.   │
+│                                                          │
+│  ⚠ Downstream Effects                                   │
+│  Orders currently at Prio 3 and below will shift down    │
+│  by 1 position. Completion dates for the following       │
+│  orders will be delayed by approximately 4.4 hours:      │
+│  • Elite XP Startex (80 MT) — Prio 3 → Prio 4           │
+│  • Elite XP Startex (80 MT) — Prio 4 → Prio 5           │
+│  • ... and 6 more orders                                 │
+│                                                          │
+│  📅 Deadline Risk                                        │
+│  No orders are at risk of missing their deadlines due    │
+│  to this insertion. All completion dates remain within    │
+│  their target dates.                                     │
+│                                                          │
+│  OR (if there's a risk):                                 │
+│  ⚠ Gallimax 3 Maintenance (Target: Mar 19) may be       │
+│  delayed. Current estimated completion is already tight  │
+│  — adding this order could push it past its deadline.    │
+│  Consider placing this order after Gallimax 3.           │
+│                                                          │
+└──────────────────────────────────────────────────────────┘
+```
+
+#### IMPACT ANALYSIS STYLING
+
+| Property | Value |
+|---|---|
+| Container background | Light grey (#f9fafb) |
+| Container border | 1px solid #e5e7eb |
+| Container border-radius | 8px |
+| Container padding | 16px |
+| Title "🤖 Impact Analysis" | 14px, font-weight 600, dark text |
+| Body text | 12px, grey (#4b5563), line-height 1.6 |
+| Topic headings (📍, ⏱, ⚠, 📅) | 12px, font-weight 600, dark text |
+| Product references | 12px, semi-bold, dark text |
+| Separator between topics | 1px dashed #e5e7eb, 10px margin |
+
+#### LOADING STATE
+
+While the AI is generating:
+```
+┌─ 🤖 Impact Analysis ────────────────────────────────────┐
+│                                                          │
+│  Analyzing impact... ⏳                                  │
+│                                                          │
+└──────────────────────────────────────────────────────────┘
+```
+
+#### EMPTY STATE (REQUIRED FIELDS NOT FILLED)
+
+```
+┌─ 🤖 Impact Analysis ────────────────────────────────────┐
+│                                                          │
+│  Fill in the required fields above to see the impact     │
+│  analysis for this new order.                            │
+│                                                          │
+└──────────────────────────────────────────────────────────┘
+```
+
+---
+
+### 5. DIALOG BUTTONS
+
+| Button | Styling | Behavior |
+|---|---|---|
+| Cancel | Grey outlined, 14px | Closes dialog, no order created |
+| Add Order | Orange filled (#fd5108), white text, 14px, font-weight 600 | Creates the order and inserts it at the correct position |
+
+**"Add Order" button is DISABLED until:**
+- Item Description is selected
+- Volume is entered (> 0)
+- Line is selected
+- Availability is set
+
+**Disabled state:**
+- Background: #f3f4f6
+- Text: #d1d5db
+- Cursor: not-allowed
+
+---
+
+### 6. ON "ADD ORDER" CLICK — INSERTION BEHAVIOR
+
+**Step 1:** Create the new order with all the filled-in details.
+
+**Step 2:** Determine insertion position:
+- If avail date is a specific date → insert at the correct chronological position among dated orders
+- If avail date is "prio replenish" or "safety stocks" → insert at the bottom of active orders (above Done/Cancelled), below all dated orders
+- If the order has a matching N10D target date → the auto-sequence can later reposition it
+
+**Step 3:** Recalculate cascade:
+- All downstream orders' completion dates recascade
+
+**Step 4:** Renumber Prio:
+- All active orders renumber from 1
+
+**Step 5:** Show success toast:
+```
+✅ Order Added
+
+Elite XP Growex 2 (32 MT) has been added to Line 1 
+at Prio 3. Downstream orders have been shifted.
+```
+
+**Step 6:** Close the dialog.
+
+**Step 7:** Scroll the table to the newly inserted order and briefly highlight it (yellow flash, 2 seconds).
+
+---
+
+### 7. DIALOG STYLING
+
+| Property | Value |
+|---|---|
+| Max width | 600px |
+| Max height | 80vh (scrollable if content exceeds) |
+| Background | White |
+| Border radius | 12px |
+| Padding | 24px 28px |
+| Overlay | Semi-transparent black (rgba(0,0,0,0.4)) |
+| Title font | 18px, font-weight 700 |
+| Subtitle font | 12px, grey (#6b7280) |
+| Section headers ("Order Details", "Scheduling", etc.) | 13px, font-weight 600, dark text, uppercase |
+| Section container | Light border (1px solid #f3f4f6), border-radius 8px, padding 16px |
+| Field labels | 12px, grey (#6b7280) |
+| Field values / inputs | 14px, dark text |
+| Input borders | 1px solid #d1d5db, border-radius 6px |
+| Input focus border | Orange (#fd5108) |
+| Input padding | 10px 12px |
+| Input height | 40px |
+```

@@ -1,0 +1,393 @@
+```
+Fix per-feedmill auto-sequence to work like per-line but scoped to the feedmill's lines:
+
+---
+
+## 1. UPDATE handleFeedmillAutoSequence — SAME AS PER-LINE BUT FOR MULTIPLE LINES
+
+```javascript
+async function handleFeedmillAutoSequence(feedmill) {
+  const feedmillLines = getFeedmillLines(feedmill);
+  
+  if (feedmillLines.length === 0) {
+    toast.error(`No lines found for ${feedmill}`);
+    return;
+  }
+  
+  const feedmillShortName = getFeedmillShortName(feedmill);
+  const normalizedFeedmillLines = feedmillLines.map(l => normalizeLine(l));
+  
+  try {
+    // Get all active orders
+    const allActiveOrders = enrichedOrders.filter(
+      o => o.status !== 'Done' && o.status !== 'Cancel PO' &&
+           o.status !== 'In Production' && o.status !== 'On-going' &&
+           !o.parent_id
+    );
+    
+    // Step 1: Find candidates from OTHER lines that can move to this feedmill
+    const feedmillOrders = allActiveOrders.filter(o =>
+      normalizedFeedmillLines.includes(normalizeLine(o.feedmill_line))
+    );
+    
+    const otherLineOrders = allActiveOrders.filter(o =>
+      !normalizedFeedmillLines.includes(normalizeLine(o.feedmill_line))
+    );
+    
+    // Step 2: Check which external orders can be produced on any of the feedmill's lines
+    const candidates = [];
+    
+    for (const order of otherLineOrders) {
+      // Skip Planned orders — they stay on their line
+      if (order.status === 'Planned') continue;
+      
+      const materialCode = String(order.material_code_fg || '').trim();
+      if (!materialCode) continue;
+      
+      // Check if this order can run on ANY of the feedmill's lines
+      const eligibleFeedmillLines = normalizedFeedmillLines.filter(line =>
+        canProduceOnLine(order, line, masterData)
+      );
+      
+      if (eligibleFeedmillLines.length === 0) continue;
+      
+      const orderVolume = parseFloat(order.volume) || parseFloat(order.total_volume_mt) || 0;
+      const currentLine = normalizeLine(order.feedmill_line);
+      const currentLineRunRate = getLineRunRate(currentLine);
+      const currentLineMT = allActiveOrders
+        .filter(o => normalizeLine(o.feedmill_line) === currentLine)
+        .reduce((sum, o) => sum + (parseFloat(o.volume) || parseFloat(o.total_volume_mt) || 0), 0);
+      const currentQueueTime = currentLineRunRate > 0 ? currentLineMT / currentLineRunRate : Infinity;
+      
+      // Find best feedmill line for this order
+      let bestLine = null;
+      let bestQueueTime = Infinity;
+      
+      for (const fmLine of eligibleFeedmillLines) {
+        const lineMT = feedmillOrders
+          .filter(o => normalizeLine(o.feedmill_line) === fmLine)
+          .reduce((sum, o) => sum + (parseFloat(o.volume) || parseFloat(o.total_volume_mt) || 0), 0);
+        const lineRunRate = getLineRunRate(fmLine);
+        const queueTime = lineRunRate > 0 ? lineMT / lineRunRate : Infinity;
+        
+        if (queueTime < bestQueueTime) {
+          bestQueueTime = queueTime;
+          bestLine = fmLine;
+        }
+      }
+      
+      // Only suggest if moving improves queue time
+      if (bestLine && bestQueueTime < currentQueueTime) {
+        candidates.push({
+          order,
+          volume: orderVolume,
+          fromLine: currentLine,
+          toBestLine: bestLine,
+          currentQueueTime,
+          bestQueueTime,
+          improvement: currentQueueTime - bestQueueTime,
+          eligibleLines: eligibleFeedmillLines,
+        });
+      }
+    }
+    
+    // Step 3: Also look for combinable matches WITHIN and INTO feedmill
+    const combineMatches = [];
+    
+    for (const fmOrder of feedmillOrders) {
+      const materialCode = String(fmOrder.material_code_fg || '').trim();
+      const formulaVersion = fmOrder.formula_version || '—';
+      
+      if (!materialCode) continue;
+      
+      // Look for matches from OTHER lines
+      for (const extOrder of otherLineOrders) {
+        if (extOrder.status === 'Planned') continue;
+        
+        const extMaterial = String(extOrder.material_code_fg || '').trim();
+        const extFormula = extOrder.formula_version || '—';
+        
+        if (extMaterial !== materialCode || extFormula !== formulaVersion) continue;
+        
+        const fmVolume = parseFloat(fmOrder.volume_override || fmOrder.volume || fmOrder.total_volume_mt) || 0;
+        const extVolume = parseFloat(extOrder.volume || extOrder.total_volume_mt) || 0;
+        
+        if (fmVolume + extVolume > 180) continue;
+        
+        // Check if external order can run on the feedmill order's line
+        const fmLine = normalizeLine(fmOrder.feedmill_line);
+        if (!canProduceOnLine(extOrder, fmLine, masterData)) continue;
+        
+        combineMatches.push({
+          feedmillOrder: fmOrder,
+          externalOrder: extOrder,
+          combinedVolume: fmVolume + extVolume,
+          targetLine: fmLine,
+        });
+      }
+      
+      // Also look for combinable orders WITHIN the feedmill's own lines
+      for (const otherFmOrder of feedmillOrders) {
+        if (otherFmOrder.id === fmOrder.id) continue;
+        if (otherFmOrder._processed) continue;
+        
+        const otherMaterial = String(otherFmOrder.material_code_fg || '').trim();
+        const otherFormula = otherFmOrder.formula_version || '—';
+        
+        if (otherMaterial !== materialCode || otherFormula !== formulaVersion) continue;
+        
+        const fmVolume = parseFloat(fmOrder.volume_override || fmOrder.volume || fmOrder.total_volume_mt) || 0;
+        const otherVolume = parseFloat(otherFmOrder.volume_override || otherFmOrder.volume || otherFmOrder.total_volume_mt) || 0;
+        
+        if (fmVolume + otherVolume > 180) continue;
+        
+        combineMatches.push({
+          feedmillOrder: fmOrder,
+          externalOrder: otherFmOrder,
+          combinedVolume: fmVolume + otherVolume,
+          targetLine: normalizeLine(fmOrder.feedmill_line),
+          isWithinFeedmill: true,
+        });
+      }
+    }
+    
+    // Step 4: Also check if orders can be moved BETWEEN the feedmill's own lines
+    const internalMoves = [];
+    
+    for (const fmOrder of feedmillOrders) {
+      if (fmOrder.status === 'Planned') continue;
+      
+      const currentLine = normalizeLine(fmOrder.feedmill_line);
+      const orderVolume = parseFloat(fmOrder.volume) || parseFloat(fmOrder.total_volume_mt) || 0;
+      
+      // Check other feedmill lines
+      for (const otherLine of normalizedFeedmillLines) {
+        if (otherLine === currentLine) continue;
+        if (!canProduceOnLine(fmOrder, otherLine, masterData)) continue;
+        
+        const currentLineMT = feedmillOrders
+          .filter(o => normalizeLine(o.feedmill_line) === currentLine)
+          .reduce((sum, o) => sum + (parseFloat(o.volume) || parseFloat(o.total_volume_mt) || 0), 0);
+        const otherLineMT = feedmillOrders
+          .filter(o => normalizeLine(o.feedmill_line) === otherLine)
+          .reduce((sum, o) => sum + (parseFloat(o.volume) || parseFloat(o.total_volume_mt) || 0), 0);
+        
+        const currentQT = getLineRunRate(currentLine) > 0 ? currentLineMT / getLineRunRate(currentLine) : Infinity;
+        const otherQT = getLineRunRate(otherLine) > 0 ? otherLineMT / getLineRunRate(otherLine) : Infinity;
+        
+        if (otherQT < currentQT) {
+          internalMoves.push({
+            order: fmOrder,
+            volume: orderVolume,
+            fromLine: currentLine,
+            toLine: otherLine,
+            currentQueueTime: currentQT,
+            newQueueTime: otherQT,
+            improvement: currentQT - otherQT,
+          });
+        }
+      }
+    }
+    
+    // Step 5: If no candidates at all, show message
+    if (candidates.length === 0 && combineMatches.length === 0 && internalMoves.length === 0) {
+      toast.info(`No optimization opportunities found for ${feedmillShortName}. Lines are already optimal.`);
+      return;
+    }
+    
+    // Step 6: Run the full sequence with the identified opportunities
+    // Combine all orders: feedmill orders + candidates to move in
+    const allOrdersForSequence = [
+      ...feedmillOrders,
+      ...candidates.map(c => c.order),
+    ];
+    
+    // Remove duplicates
+    const uniqueOrders = [];
+    const seenIds = new Set();
+    for (const order of allOrdersForSequence) {
+      if (!seenIds.has(order.id)) {
+        uniqueOrders.push(order);
+        seenIds.add(order.id);
+      }
+    }
+    
+    // Show processing overlay
+    setProcessingPhase('scanning');
+    setProcessingStats({ processed: 0, total: uniqueOrders.length, combined: 0, moved: 0 });
+    setShowProcessingOverlay(true);
+    setProcessingLabel(`${feedmillShortName} Auto-Sequence`);
+    
+    await new Promise(r => setTimeout(r, 100));
+    
+    const onProgress = (stats) => {
+      setProcessingStats(prev => ({ ...prev, ...stats }));
+    };
+    
+    const onPhaseChange = (phase) => {
+      setProcessingPhase(phase);
+    };
+    
+    // Run auto-sequence scoped to feedmill lines
+    const { lineOrdersMap, combinedOrders, placementLog } = await runAutoSequenceWithProgress(
+      uniqueOrders,
+      masterData, n10dData,
+      normalizedFeedmillLines,
+      changeoverRules,
+      onProgress, onPhaseChange
+    );
+    
+    // Build snapshot and results
+    const snapshot = {};
+    normalizedFeedmillLines.forEach(line => {
+      snapshot[line] = allActiveOrders
+        .filter(o => normalizeLine(o.feedmill_line) === line && !o.parent_id)
+        .sort((a, b) => (a.priority_seq || 0) - (b.priority_seq || 0))
+        .map(o => ({ ...JSON.parse(JSON.stringify(o)) }));
+    });
+    
+    const results = {};
+    normalizedFeedmillLines.forEach(line => {
+      const lineOrders = lineOrdersMap[line] || [];
+      if (lineOrders.length === 0) {
+        results[line] = [];
+        return;
+      }
+      
+      const originalLineOrders = snapshot[line] || [];
+      const withMovement = lineOrders.map((order, newIndex) => {
+        const newPrio = newIndex + 1;
+        const originalIndex = originalLineOrders.findIndex(o => o.id === order.id);
+        let movement = 'same';
+        let movementDelta = 0;
+        
+        if (originalIndex >= 0) {
+          const originalPrio = originalIndex + 1;
+          movementDelta = originalPrio - newPrio;
+          if (movementDelta > 0) movement = 'up';
+          else if (movementDelta < 0) movement = 'down';
+        } else {
+          movement = 'new_to_line';
+        }
+        
+        return {
+          ...order,
+          prio: newPrio,
+          _originalPrio: originalIndex >= 0 ? originalIndex + 1 : -1,
+          _movement: movement,
+          _movementDelta: Math.abs(movementDelta),
+        };
+      });
+      
+      results[line] = withMovement;
+    });
+    
+    setProcessingPhase('done');
+    await new Promise(r => setTimeout(r, 500));
+    
+    const stats = calculatePlantSummary(snapshot, results, combinedOrders, placementLog, normalizedFeedmillLines);
+    
+    setShowProcessingOverlay(false);
+    
+    // Show preview using the same PlantAutoSequencePreview component
+    setFeedmillSequenceSnapshot(snapshot);
+    setFeedmillSequenceResults(results);
+    setFeedmillSummaryStats(stats);
+    setFeedmillPlacementLog(placementLog);
+    setFeedmillCombinedOrders(combinedOrders);
+    setCurrentFeedmillForPreview(feedmill);
+    setShowFeedmillAutoSequencePreview(true);
+    
+  } catch (error) {
+    console.error('Feedmill auto-sequence error:', error);
+    setShowProcessingOverlay(false);
+    toast.error(`Auto-sequence failed: ${error.message}`);
+  }
+}
+```
+
+---
+
+## 2. PREVIEW — REUSE PLANT PREVIEW WITH FEEDMILL SCOPE
+
+```jsx
+{showFeedmillAutoSequencePreview && currentFeedmillForPreview && (
+  <PlantAutoSequencePreview
+    title={`✨ ${getFeedmillShortName(currentFeedmillForPreview)} Auto-Sequence`}
+    subtitle={`Find orders to move, combine & optimize — ${currentFeedmillForPreview} (${getFeedmillLines(currentFeedmillForPreview).map(l => getLineShortLabel(l)).join(' & ')})`}
+    originalSnapshot={feedmillSequenceSnapshot}
+    sequencedResults={feedmillSequenceResults}
+    summaryStats={feedmillSummaryStats}
+    placementLog={feedmillPlacementLog}
+    combinedOrders={feedmillCombinedOrders}
+    allLines={getFeedmillLines(currentFeedmillForPreview).map(l => normalizeLine(l))}
+    masterData={masterData}
+    n10dData={n10dData}
+    changeoverRules={changeoverRules}
+    onApplySequence={async (results) => {
+      await handlePlantApply(results);
+      setShowFeedmillAutoSequencePreview(false);
+    }}
+    onCancel={() => setShowFeedmillAutoSequencePreview(false)}
+  />
+)}
+```
+
+---
+
+## 3. UPDATE ALL BUTTON LABELS
+
+```jsx
+// All Feedmills tab
+<button onClick={handlePlantLevelAutoSequence}>
+  ✨ Auto-Sequence (All)
+</button>
+
+// Per Feedmill "All" sub-tab
+<button onClick={() => handleFeedmillAutoSequence(currentFeedmill)}>
+  ✨ Auto-Sequence ({getFeedmillShortName(currentFeedmill)})
+</button>
+
+// Per Line tab
+<button onClick={() => handleLineAutoSequence(currentLine)}>
+  ✨ Auto-Sequence ({getLineShortLabel(currentLine)})
+</button>
+```
+
+---
+
+## VERIFICATION
+
+### Per-feedmill does THREE things
+1. ✅ Finds orders from OTHER lines that can move INTO the feedmill's lines
+2. ✅ Finds combinable matches across all lines INTO the feedmill
+3. ✅ Moves orders BETWEEN the feedmill's own lines if queue time improves
+4. ✅ Combines orders WITHIN the feedmill's own lines
+
+### Scoping
+5. ✅ FM1 only targets Line 1 & Line 2
+6. ✅ FM2 only targets Line 3 & Line 4
+7. ✅ FM3 only targets Line 5, Line 6 & Line 7
+8. ✅ Scans ALL lines for candidates but only places on feedmill's lines
+
+### Labels
+9. ✅ All Feedmills: "Auto-Sequence (All)"
+10. ✅ FM1 tab: "Auto-Sequence (FM1)"
+11. ✅ FM2 tab: "Auto-Sequence (FM2)"
+12. ✅ FM3 tab: "Auto-Sequence (FM3)"
+13. ✅ Line 1: "Auto-Sequence (L1)"
+14. ✅ Line 7: "Auto-Sequence (L7)"
+
+### Preview
+15. ✅ Reuses PlantAutoSequencePreview component
+16. ✅ Only shows feedmill's lines as tabs
+17. ✅ Title: "FM2 Auto-Sequence"
+18. ✅ Subtitle shows feedmill name and lines
+19. ✅ Same apply function as plant-level
+
+### Edge cases
+20. ✅ No candidates found → toast message instead of empty preview
+21. ✅ Planned orders not moved from other lines
+22. ✅ Queue time compared before suggesting moves
+23. ✅ 180 MT cap on combines
+```

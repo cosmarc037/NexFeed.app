@@ -1,0 +1,191 @@
+Please revise the Order History revert behavior and add revert eligibility checks for diverted orders.
+
+---
+
+## OBJECTIVE
+
+We want to simplify how revert entries are displayed in Order History, and also make sure users can only revert diverted orders when the affected line or feedmill is already back in operation.
+
+This applies to:
+- Line shutdown revert
+- Feedmill shutdown revert
+- Override volume revert
+
+---
+
+## REQUIRED DISPLAY CHANGE FOR REVERT ENTRIES
+
+For revert entries, do not repeat the original shutdown reason anymore.
+
+Instead, use a simpler details/sub-text format centered on the fact that the action was reverted.
+
+---
+
+## 1. LINE SHUTDOWN REVERT DISPLAY
+
+### Action
+- `Line shutdown: Line Y -> Line X`
+
+### Details
+- `Reverted. Moved from Prio B -> A`
+
+### Example
+Action:
+- `Line shutdown: Line 7 -> Line 4`
+
+Details:
+- `Reverted. Moved from Prio 6 -> 2`
+
+Do not repeat the original shutdown reason in revert entries.
+
+---
+
+## 2. FEEDMILL SHUTDOWN REVERT DISPLAY
+
+### Action
+- `Feedmill shutdown: Line Y -> Line X`
+
+### Details
+- `Reverted. Moved from Prio B -> A`
+
+### Example
+Action:
+- `Feedmill shutdown: Line 7 -> Line 4`
+
+Details:
+- `Reverted. Moved from Prio 6 -> 2`
+
+Do not repeat the original shutdown reason in revert entries.
+
+---
+
+## 3. OVERRIDE VOLUME REVERT DISPLAY
+
+### Action
+- `Override volume: NEW MT -> OLD MT`
+
+### Details
+- `Reverted.`
+
+### Example
+Action:
+- `Override volume: 6 MT -> 3 MT`
+
+Details:
+- `Reverted.`
+
+Keep it simple.
+
+---
+
+## 4. REVERT SHOULD ONLY BE ALLOWED WHEN THE SHUTDOWN IS RESUMED
+
+Add a functional rule for diverted orders:
+
+If an order was diverted because of:
+- line shutdown
+or
+- feedmill shutdown
+
+then the user should only be allowed to revert that order back to its original line if the affected line/feedmill is already resumed and no longer in shutdown.
+
+### Required behavior
+- if the original line/feedmill is still shutdown → revert is not allowed
+- if the original line/feedmill is resumed/active again → revert is allowed
+
+This prevents users from restoring orders back to lines/feedmills that are still unavailable.
+
+---
+
+## 5. APPLY THE REVERT ELIGIBILITY CHECK TO:
+
+### A. Line shutdown revert
+Allow revert only if the original line is no longer shutdown.
+
+### B. Feedmill shutdown revert
+Allow revert only if the original feedmill / line destination is no longer shutdown.
+
+Do not allow revert while the original operational source is still unavailable.
+
+---
+
+## 6. DO NOT APPLY SHUTDOWN ELIGIBILITY RULE TO OVERRIDE VOLUME REVERT
+
+Override volume revert is unrelated to line/feedmill shutdown status.
+
+So:
+- shutdown status should not block volume revert
+- override volume can be reverted normally based on the relevant edit/permission rules
+
+---
+
+## 7. IF REVERT IS BLOCKED, SHOW A CLEAR USER MESSAGE
+
+If a user tries to revert a diverted order while the original line/feedmill is still shutdown, block the action and show a clear explanation.
+
+Example messages:
+- `Cannot revert order while the original line is still in shutdown.`
+- `Cannot revert order until the feedmill is back in operation.`
+
+This should be explicit and user-friendly.
+
+---
+
+## 8. KEEP NORMAL SHUTDOWN HISTORY ENTRIES AS-IS
+
+Only simplify the **revert** entries.
+
+Normal shutdown entries should still remain:
+
+### Line shutdown
+- `Line shutdown: Line X -> Line Y`
+- `[selected shutdown reason]. Moved from Prio A -> B`
+
+### Feedmill shutdown
+- `Feedmill shutdown: Line X -> Line Y`
+- `[selected shutdown reason]. Moved from Prio A -> B`
+
+The simplification only applies to reverted entries.
+
+---
+
+## 9. ADD DEBUG LOGGING FOR REVERT ELIGIBILITY
+
+Temporarily log:
+
+```javascript
+console.debug('[Shutdown Revert Check]', {
+  orderId,
+  eventType,
+  originalLine,
+  currentLine,
+  originalPriority,
+  currentPriority,
+  originalSourceActive,
+  revertAllowed,
+});
+```
+
+This helps verify:
+- whether revert is correctly blocked while shutdown is active
+- whether revert becomes available once resumed
+
+---
+
+## VERIFICATION
+
+1. ✅ Line shutdown revert entries now display:
+   - action = `Line shutdown: Line Y -> Line X`
+   - details = `Reverted. Moved from Prio B -> A`
+2. ✅ Feedmill shutdown revert entries now display:
+   - action = `Feedmill shutdown: Line Y -> Line X`
+   - details = `Reverted. Moved from Prio B -> A`
+3. ✅ Override volume revert entries now display:
+   - action = `Override volume: NEW MT -> OLD MT`
+   - details = `Reverted.`
+4. ✅ Original shutdown reasons are no longer repeated in revert entries
+5. ✅ Diverted orders can only be reverted when the original line/feedmill is resumed and no longer shutdown
+6. ✅ Revert is blocked while the original line/feedmill is still shutdown
+7. ✅ Clear user feedback is shown when revert is not allowed
+8. ✅ Override volume revert is not blocked by shutdown-status logic
+9. ✅ Normal non-revert shutdown entries still show the selected shutdown reason as before

@@ -1,0 +1,387 @@
+```
+Implement the following fixes:
+
+---
+
+## FIX 1: YELLOW HIGHLIGHTS — ONLY FOR ORDERS THAT CAN DIVERT OUTSIDE FEEDMILL
+
+Currently, ALL orders on a shutdown line show yellow highlights. Only orders that have run rates on lines OUTSIDE the feedmill should be yellow. Orders that can only go to the partner line within the same feedmill should have a white/normal background.
+
+### THE PROBLEM
+
+The highlight logic is not checking whether the order can divert outside the feedmill. It's applying yellow to everything.
+
+### THE FIX
+
+Update the order row class assignment to strictly check `_canDivertOutsideFeedmill`:
+
+```jsx
+function OrderRow({ order, lineShutdowns }) {
+  const isLineShutdown = lineShutdowns[order.line]?.isShutdown;
+  const isDivertible = order._isDivertible && isLineShutdown;
+  
+  // ONLY yellow if can divert OUTSIDE feedmill
+  const isYellowHighlight = isDivertible && order._canDivertOutsideFeedmill === true;
+  // White background if can ONLY divert within feedmill
+  const isWhiteWithNote = isDivertible && !order._canDivertOutsideFeedmill && order._canDivertWithinFeedmill === true;
+  // Cannot divert at all
+  const isStuck = isLineShutdown && !isDivertible;
+  
+  let rowClass = 'order-row';
+  if (isYellowHighlight) {
+    rowClass += ' order-row-divertible-outside'; // Yellow background
+  }
+  // White rows — NO extra class added
+  
+  return (
+    <tr 
+      className={rowClass}
+      onContextMenu={(e) => {
+        if (isDivertible) {
+          e.preventDefault();
+          showDivertContextMenu(e, order);
+        }
+      }}
+    >
+      {/* ... other cells ... */}
+      <td className="item-description-cell">
+        <div className="item-desc-name">{order.item_description}</div>
+        <div className="item-desc-meta">
+          <span className="item-desc-category">{order.category}</span>
+          {order.color && (
+            <>
+              <span className="item-desc-separator">|</span>
+              <span className="item-desc-color">{order.color}</span>
+            </>
+          )}
+          {order.diameter && (
+            <>
+              <span className="item-desc-separator">|</span>
+              <span className="item-desc-diameter">{order.diameter}mm</span>
+            </>
+          )}
+        </div>
+        
+        {/* Yellow row note — can divert outside feedmill */}
+        {isYellowHighlight && (
+          <div className="item-desc-divert-hint divert-hint-outside">
+            ⚠ Line shutdown — right-click to divert to other feedmill lines
+          </div>
+        )}
+        
+        {/* White row note — can only divert within feedmill */}
+        {isWhiteWithNote && (
+          <div className="item-desc-divert-hint divert-hint-within">
+            ⚠ Line shutdown — right-click to divert
+          </div>
+        )}
+        
+        {/* Cannot divert at all */}
+        {isStuck && (
+          <div className="item-desc-divert-hint divert-hint-stuck">
+            🔒 Cannot be diverted — awaiting line resume
+          </div>
+        )}
+      </td>
+    </tr>
+  );
+}
+```
+
+### ALSO FIX THE MARKING FUNCTION
+
+Ensure `_canDivertOutsideFeedmill` is set correctly:
+
+```javascript
+function markDivertibleOrders(allOrders, lineShutdowns, masterData) {
+  const shutdownLines = Object.entries(lineShutdowns)
+    .filter(([line, info]) => info.isShutdown)
+    .map(([line]) => line);
+  
+  allOrders.forEach(order => {
+    // Reset ALL markers
+    order._isDivertible = false;
+    order._canDivertOutsideFeedmill = false;
+    order._canDivertWithinFeedmill = false;
+    order._divertNote = null;
+    order._highlightType = null;
+    order._availableDivertLines = { partnerLines: [], outsideLines: [], allLines: [] };
+    
+    // Skip Done and Cancelled
+    if (order.status === 'Done' || order.status === 'Cancel PO') return;
+    
+    // Only process orders on SHUTDOWN lines
+    if (!shutdownLines.includes(order.line)) return;
+    
+    const orderFeedmill = LINE_TO_FEEDMILL_MAP[order.line];
+    const feedmillLines = FEEDMILL_LINE_MAP[orderFeedmill];
+    
+    // Check if ENTIRE feedmill is shutdown
+    const allFeedmillLinesShutdown = feedmillLines.every(l => shutdownLines.includes(l));
+    
+    // Partner lines in same feedmill (not shutdown)
+    const partnerLines = feedmillLines.filter(
+      l => l !== order.line && !shutdownLines.includes(l)
+    );
+    
+    // Get master data for this product
+    const md = masterData.find(
+      m => String(m.fgMaterialCode) === String(order.material_code_fg)
+    );
+    
+    const lineRateMap = md ? {
+      'Line 1': parseFloat(md.l1Rate) || 0,
+      'Line 2': parseFloat(md.l2Rate) || 0,
+      'Line 3': parseFloat(md.l3Rate) || 0,
+      'Line 4': parseFloat(md.l4Rate) || 0,
+      'Line 5': parseFloat(md.l5Rate) || 0,
+      'Line 6': parseFloat(md.l6Rate) || 0,
+      'Line 7': parseFloat(md.l7Rate) || 0,
+    } : {};
+    
+    // Outside feedmill lines with run rate > 0
+    const outsideLines = Object.keys(LINE_TO_FEEDMILL_MAP).filter(
+      l => !feedmillLines.includes(l) && 
+           !shutdownLines.includes(l) && 
+           lineRateMap[l] > 0
+    );
+    
+    const canDivertOutside = outsideLines.length > 0;
+    const canDivertWithin = partnerLines.length > 0;
+    
+    // Store available lines
+    order._availableDivertLines = {
+      partnerLines: partnerLines,
+      outsideLines: outsideLines,
+      allLines: [...partnerLines, ...outsideLines]
+    };
+    
+    if (allFeedmillLinesShutdown) {
+      // FEEDMILL SHUTDOWN — yellow only if can go outside
+      if (canDivertOutside) {
+        order._isDivertible = true;
+        order._canDivertOutsideFeedmill = true;
+        order._canDivertWithinFeedmill = false;
+        order._highlightType = 'yellow';
+      }
+      // No partner lines available (all shutdown), can't go outside = stuck
+    } else {
+      // SINGLE LINE SHUTDOWN
+      if (canDivertOutside) {
+        // CAN go outside feedmill → YELLOW
+        order._isDivertible = true;
+        order._canDivertOutsideFeedmill = true;
+        order._canDivertWithinFeedmill = canDivertWithin;
+        order._highlightType = 'yellow';
+      } else if (canDivertWithin) {
+        // Can ONLY go to partner line → WHITE with note
+        order._isDivertible = true;
+        order._canDivertOutsideFeedmill = false;
+        order._canDivertWithinFeedmill = true;
+        order._highlightType = 'white';
+      } else {
+        // Cannot go anywhere
+        order._isDivertible = false;
+        order._canDivertOutsideFeedmill = false;
+        order._canDivertWithinFeedmill = false;
+        order._highlightType = null;
+      }
+    }
+  });
+}
+```
+
+---
+
+## FIX 2: IMPROVE AI INSIGHT — DETAILED SHUTDOWN ANALYSIS
+
+The AI insight should provide more specific, actionable analysis including which orders will be delayed, estimated delay times, N10D stock impact, and clear diversion recommendations.
+
+### UPDATED AI PROMPT
+
+```javascript
+function buildShutdownInsightPrompt(context) {
+  const shutdownInfo = context.shutdownLines[0]; // Primary shutdown line
+  
+  return `
+You are a production planning advisor for a feed manufacturing plant.
+${shutdownInfo.line} has been shut down since ${shutdownInfo.since} due to ${shutdownInfo.reason}.
+Provide a detailed analysis for the production insights panel.
+
+SHUTDOWN LINE: ${shutdownInfo.line} (${shutdownInfo.feedmill})
+AFFECTED ORDERS: ${shutdownInfo.orderCount} orders, ${shutdownInfo.totalVolume} MT total
+
+PARTNER LINE(S) AVAILABLE: ${shutdownInfo.partnerLines.length > 0 
+  ? shutdownInfo.partnerLines.map(l => `${l} (current load: ${shutdownInfo.partnerLineLoad[l]} orders, ${shutdownInfo.partnerLineVolume[l]} MT)`).join(', ')
+  : 'None — all feedmill lines shutdown'}
+
+AFFECTED ORDERS DETAIL:
+${shutdownInfo.orders.map(o => `
+  Prio ${o.prio}: ${o.name}
+  - Volume: ${o.volume} MT | Form: ${o.form} | FPR: ${o.fpr || 'N/A'}
+  - N10D Status: ${o.n10dStatus || 'N/A'}
+  - DFL: ${o.dfl || 'N/A'} MT | Inventory: ${o.inventory || 'N/A'} MT
+  - Avail Date: ${o.availDate || 'N/A'}
+  - Estimated Completion (before shutdown): ${o.completionDate || 'N/A'}
+  - Can divert to partner line: ${o.canDivertWithin ? 'Yes' : 'No historical rate, but possible'}
+  - Can divert outside feedmill: ${o.canDivertOutside ? `Yes (${o.outsideLines.join(', ')})` : 'No'}
+`).join('\n')}
+
+RULES FOR YOUR RESPONSE:
+- Start with a concise impact summary (2-3 sentences): how many orders affected, total volume halted, which orders are most at risk
+- List SPECIFIC orders that will be delayed and by how much (estimate based on their production time and position in queue)
+- Identify which orders are CRITICAL or URGENT from N10D — these must be diverted first
+- For each order that should be diverted, recommend the specific target line
+- Prioritize partner line within the same feedmill as the primary diversion option
+- Mention orders that have NO historical run rate on the partner line but note they can still be moved since lines in the same feedmill are generally compatible
+- Include estimated delay impact if orders are NOT diverted (e.g., "If not diverted, Gall 21 Chicken Layer will be delayed by approximately 19.5 hours, risking stockout given its Critical status")
+- Assess the partner line's capacity — warn if diverting all orders would overload it
+- Keep it specific with product names, volumes, N10D status, and estimated times
+- Do NOT use markdown formatting
+- Use full month names for dates
+
+FORMAT:
+[2-3 sentence impact summary — total halt, most critical orders at risk, urgency level]
+
+Affected orders and estimated delays:
+- [Order name] ([volume] MT, [N10D status]): Estimated [X.X] hrs production time. [Impact if not diverted]. Recommend diverting to [target line].
+- [Next order...]
+
+Recommended actions:
+1. [Most urgent diversion — Critical/Urgent products first]
+2. [Second action]
+3. [Third action]
+4. [Partner line capacity note]
+5. [Any other recommendation]
+
+Partner line capacity check:
+[Note about whether the partner line can absorb the diverted orders without becoming overloaded]
+  `;
+}
+```
+
+### UPDATE CONTEXT — INCLUDE MORE DETAIL PER ORDER
+
+```javascript
+function buildSummaryContext(type, data, scope) {
+  const context = { /* ... existing context ... */ };
+  
+  const shutdownLines = [];
+  Object.entries(lineShutdowns).forEach(([line, info]) => {
+    if (info.isShutdown) {
+      const feedmill = LINE_TO_FEEDMILL_MAP[line];
+      const feedmillLines = FEEDMILL_LINE_MAP[feedmill];
+      const partnerLines = feedmillLines.filter(
+        l => l !== line && !lineShutdowns[l]?.isShutdown
+      );
+      
+      const lineOrders = data.filter(o => 
+        o.line === line && o.status !== 'Done' && o.status !== 'Cancel PO'
+      );
+      
+      // Partner line load
+      const partnerLineLoad = {};
+      const partnerLineVolume = {};
+      partnerLines.forEach(pl => {
+        const plOrders = data.filter(o => 
+          o.line === pl && o.status !== 'Done' && o.status !== 'Cancel PO'
+        );
+        partnerLineLoad[pl] = plOrders.length;
+        partnerLineVolume[pl] = plOrders.reduce((s, o) => s + (parseFloat(o.volume) || 0), 0);
+      });
+      
+      const masterData = getMasterData();
+      const n10dData = getN10DProducts();
+      
+      const ordersWithDetail = lineOrders.map(o => {
+        const md = masterData.find(m => String(m.fgMaterialCode) === String(o.material_code_fg));
+        const lineRateMap = md ? {
+          'Line 1': parseFloat(md.l1Rate) || 0,
+          'Line 2': parseFloat(md.l2Rate) || 0,
+          'Line 3': parseFloat(md.l3Rate) || 0,
+          'Line 4': parseFloat(md.l4Rate) || 0,
+          'Line 5': parseFloat(md.l5Rate) || 0,
+          'Line 6': parseFloat(md.l6Rate) || 0,
+          'Line 7': parseFloat(md.l7Rate) || 0,
+        } : {};
+        
+        const outsideLines = Object.keys(LINE_TO_FEEDMILL_MAP).filter(
+          l => !feedmillLines.includes(l) && !lineShutdowns[l]?.isShutdown && lineRateMap[l] > 0
+        );
+        
+        const n10dProduct = n10dData?.find(
+          p => String(p.material_code_fg) === String(o.material_code_fg)
+        );
+        const n10dStatus = n10dProduct ? getProductStatus(
+          n10dProduct.due_for_loading, n10dProduct.inventory,
+          getDailyColumns(), n10dProduct, new Date()
+        ) : null;
+        
+        const runRate = parseFloat(o.run_rate) || 0;
+        const volume = parseFloat(o.volume) || 0;
+        const productionHours = runRate > 0 ? volume / runRate : 0;
+        
+        return {
+          name: o.item_description,
+          fpr: o.fpr,
+          volume: o.volume,
+          form: o.form,
+          prio: o.prio,
+          n10dStatus,
+          dfl: n10dProduct?.due_for_loading || null,
+          inventory: n10dProduct?.inventory || null,
+          availDate: o.avail_date,
+          completionDate: o.completion_date,
+          productionHours: productionHours.toFixed(2),
+          canDivertWithin: partnerLines.length > 0,
+          canDivertOutside: outsideLines.length > 0,
+          outsideLines,
+          possibleLines: [...partnerLines, ...outsideLines]
+        };
+      });
+      
+      shutdownLines.push({
+        line,
+        feedmill,
+        reason: info.reason,
+        since: info.since,
+        orderCount: lineOrders.length,
+        totalVolume: lineOrders.reduce((s, o) => s + (parseFloat(o.volume) || 0), 0),
+        partnerLines,
+        partnerLineLoad,
+        partnerLineVolume,
+        orders: ordersWithDetail,
+        divertibleOutsideCount: ordersWithDetail.filter(o => o.canDivertOutside).length,
+        divertibleWithinCount: ordersWithDetail.filter(o => o.canDivertWithin).length
+      });
+    }
+  });
+  
+  context.shutdownLines = shutdownLines;
+  return context;
+}
+```
+
+---
+
+## VERIFICATION
+
+### Yellow highlight fix
+1. ✅ Orders with run rates on outside feedmill lines → yellow highlight
+2. ✅ Orders with NO run rates on outside lines but have partner line → white background + "right-click to divert"
+3. ✅ Orders that cannot divert anywhere → white background + "awaiting resume"
+4. ✅ Only shutdown line orders are affected — non-shutdown line orders remain normal
+5. ✅ Feedmill shutdown → only yellow for outside diversion (no partner lines available)
+
+### AI insight quality
+6. ✅ Summary states total orders affected, total volume halted
+7. ✅ Lists EACH affected order with volume, N10D status, estimated production time
+8. ✅ States estimated delay if order is NOT diverted
+9. ✅ Identifies Critical and Urgent orders explicitly
+10. ✅ Recommends specific target line for each order
+11. ✅ Prioritizes partner line within same feedmill
+12. ✅ Notes orders with no historical rate but still movable
+13. ✅ Includes partner line capacity assessment
+14. ✅ Uses product names, volumes, and N10D status throughout
+15. ✅ Actionable numbered recommendations
+```

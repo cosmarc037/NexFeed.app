@@ -1,0 +1,129 @@
+Please add a simple shutdown history section to the Dashboard > Overview page.
+
+Since users can now shut down lines in the app, we want a lightweight way to see the recent shutdown actions directly from the dashboard.
+
+---
+
+## PLACEMENT
+
+Please place the new section:
+
+## directly below the "Line Status Monitoring" section
+
+on the **Dashboard > Overview** page.
+
+This is the preferred location because it keeps line monitoring and shutdown visibility close together.
+
+---
+
+## SECTION NAME
+
+Use a dashboard-friendly title such as:
+
+## Recent Shutdowns
+
+This should be a simple history panel showing recent line shutdowns recorded in the app.
+
+---
+
+## PURPOSE
+
+The goal is to give users quick visibility into:
+- which lines were shut down
+- when the shutdown happened
+- whether it was planned or unplanned
+- the reason for shutdown
+- and the downtime window / duration
+
+This should be a simple dashboard history, not a heavy audit page.
+
+---
+
+## SUGGESTED CONTENT
+
+Display a compact list or table of recent shutdown records.
+
+Recommended fields:
+- Date / Time
+- Line
+- Shutdown Type
+- Reason
+- Downtime Window
+- Duration
+
+Optional if already available:
+- Notes preview
+- user who triggered the shutdown
+- current shutdown status
+
+For the first version, keep it simple and readable.
+
+---
+
+## DISPLAY BEHAVIOR
+
+- show the most recent shutdowns first
+- keep the section lightweight
+- recommended to display only recent records (for example last 5 or last 10)
+- if there are no shutdowns yet, show a clean empty state such as:
+  - `No shutdown history yet`
+
+---
+
+## VISUAL STYLE
+
+The section should visually fit the Overview dashboard style.
+
+It can be:
+- a simple table
+- or a clean stacked card/list
+
+Either is acceptable as long as it remains compact and readable below Line Status Monitoring.
+
+---
+
+## DATA SOURCE
+
+Use the shutdown records already created through the shutdown feature in the app.
+
+If shutdown type, reason, start/end window, and notes are already captured, surface them here appropriately.
+
+---
+
+## OPTIONAL NICE-TO-HAVE
+
+If easy to include, add a small tag or badge for:
+- Planned
+- Unplanned
+
+This would make the history easier to scan.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log:
+
+```javascript
+console.debug('[Overview Shutdown History Load]', {
+  recordCount,
+  latestShutdowns,
+});
+```
+
+```javascript
+console.debug('[Overview Shutdown History Render]', {
+  sectionVisible: true,
+  renderedRows,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ A new shutdown history section appears below Line Status Monitoring in Dashboard > Overview
+2. ✅ The section shows recent shutdown records created in the app
+3. ✅ Each row shows useful basic shutdown information such as line, type, reason, and timeframe
+4. ✅ The section remains lightweight and readable
+5. ✅ Empty state is handled properly if no shutdown records exist

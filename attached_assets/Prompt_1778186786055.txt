@@ -1,0 +1,252 @@
+```
+Please revisit the AI sequencing and strategy-description alignment so that whatever the AI says in the strategy card is 100% reflected in the actual After-table result.
+
+---
+
+## OBJECTIVE
+
+The current issue is that the AI strategy description still does not fully align with the resulting order table.
+
+Example from the screenshot:
+
+### Strategy card says:
+`Red-Last Changeover Relief`
+> Positions red pellet order last to avoid expensive red→other color flush and clusters yellow 4mm runs earlier.
+
+### But the actual table shows:
+- the red pellet order is **not last**
+
+This means the strategy card is making a concrete claim that is visibly not true in the resulting sequence.
+
+We need to ensure that:
+1. the AI has enough context to propose an actually executable strategy
+2. the final applied table truly reflects that strategy
+3. the strategy description only says what the final table actually did
+
+---
+
+## WHAT IS WRONG
+
+### 1. The strategy description is too concrete for what was actually applied
+The phrase:
+- `positions red pellet order last`
+
+is a hard, visible claim.
+
+But in the table, the red order is not in the last row.
+
+So the card and the table are contradictory.
+
+### 2. The AI likely still does not have enough grounded context
+To generate an accurate and executable strategy, the AI needs to understand:
+- the current sequence of the orders
+- the detailed properties of each order
+- the changeover rules
+- which orders are movable/flexible
+- date constraints and hard restrictions
+- what the execution layer can actually honor
+
+### 3. The system may still be generating a strategy description from intent, not from the final applied result
+This causes the AI to describe:
+- what it *wanted* to do
+
+instead of:
+- what the final sequence *actually did*
+
+That should be corrected.
+
+---
+
+## REQUIRED FIX
+
+The AI strategy description must be grounded in the actual resulting final sequence.
+
+That means:
+- if the final table places the red order last, the description may say so
+- if the final table does not place the red order last, the description must not claim that
+
+In other words:
+## strategy wording must describe the actual applied table, not just the intended optimization idea
+
+---
+
+## 1. GIVE THE AI FULL CONTEXT ABOUT THE CURRENT LINE-UP
+
+For each line, provide the AI with the actual current lineup of orders, including for each order:
+- current position
+- item description
+- material code
+- category
+- color
+- diameter
+- form
+- volume
+- production time
+- avail date
+- Future Dispatches / urgency status
+- whether it is flexible/movable
+- whether it is MTO protected
+- whether it was combined
+- current or projected changeover to adjacent orders if available
+
+This allows the AI to reason on the real sequence, not just abstract attributes.
+
+---
+
+## 2. GIVE THE AI THE REAL CHANGEOVER RULES
+
+The AI must explicitly receive the actual Changeover Rules tab values, including:
+- diameter change penalties
+- color transition penalties
+- directional penalties
+- category penalties
+- stacking behavior
+- feedmill-specific values if applicable
+
+This should include the fact that:
+- multiple conditions can stack
+- some penalties are directional
+- changeovers are based on the following order’s properties
+
+The AI should use these as part of its reasoning and clustering decisions.
+
+---
+
+## 3. REQUIRE THE AI TO PROPOSE AN EXECUTABLE ORDERING, NOT JUST A HIGH-LEVEL IDEA
+
+The AI should not only produce a broad concept like:
+- “red last”
+- “cluster yellow 4mm earlier”
+
+It should internally reason in terms of actual order adjacency:
+- which order should move where
+- which block should stay together
+- which order should be last
+- what exact cluster arrangement reduces changeover
+
+The resulting proposal must be something the execution layer can realistically apply.
+
+---
+
+## 4. MAKE THE EXECUTION LAYER PRESERVE THE AI’S ACTUAL INTENDED MOVES
+
+Even if the AI proposes a valid low-changeover structure, the table can still drift if the execution layer only partially applies it.
+
+Please improve the execution layer so it preserves the intended structure more faithfully, especially when the strategy makes a concrete claim like:
+- red order last
+- yellow 4mm runs earlier
+- same-diameter cluster together
+
+If the execution layer cannot preserve such a move due to constraints, then the final strategy description must be revised accordingly.
+
+---
+
+## 5. GENERATE THE STRATEGY DESCRIPTION FROM THE FINAL APPLIED RESULT, NOT JUST FROM THE PRE-APPLICATION PLAN
+
+This is the key fix.
+
+After the AI strategy is applied and the final After-table order is known:
+- generate or revise the strategy description based on the final applied sequence
+- not purely based on the original intent
+
+So the description should answer:
+- what actually changed in the final table?
+- what was actually moved?
+- what clustering is actually visible?
+- what changeover benefit was actually realized?
+
+This ensures the description is always truthful.
+
+---
+
+## 6. DO NOT ALLOW SPECIFIC CLAIMS UNLESS THEY ARE TRUE IN THE FINAL TABLE
+
+For example:
+- only say `red order last` if the red order is actually last
+- only say `yellow 4mm runs earlier` if yellow 4mm orders were actually pulled earlier
+- only say `clustered same-diameter orders` if the final table clearly reflects that
+
+If a claimed move was only partially achieved, use more accurate wording such as:
+- `shifted red later`
+- `improved yellow 4mm grouping where feasible`
+- `partially clustered compatible orders under date constraints`
+
+The wording must match the actual result exactly.
+
+---
+
+## 7. USE THE FINAL TABLE AS THE SOURCE OF TRUTH FOR FAITHFULNESS
+
+Faithfulness should be computed against:
+- the final claimed strategy wording
+- the actual final applied table
+
+It should not give high faithfulness if the description says:
+- red last
+
+but the table does not actually place red last.
+
+This is especially important for concrete claims.
+
+---
+
+## 8. REVISE THE STRATEGY CARD IF THE APPLIED RESULT IS ONLY PARTIAL
+
+If the actual final result only partially reflects the intended optimization, then:
+- the description should be softened
+- the faithfulness score should reflect that partial alignment
+- the card should not overstate the strategy
+
+Example:
+Instead of:
+- `positions red pellet order last`
+
+say:
+- `moves the red pellet order later in the sequence to reduce costly outgoing red transitions where feasible`
+
+if that is what really happened.
+
+---
+
+## 9. ADD DEBUG LOGGING TO COMPARE STRATEGY CLAIMS VS FINAL TABLE
+
+Temporarily log:
+
+```javascript
+console.debug('[AI Strategy Alignment Check]', {
+  lineId,
+  strategyId,
+  strategyTitle,
+  strategyDescription,
+  finalOrders: finalOrders.map((o, index) => ({
+    position: index + 1,
+    orderId: o.id,
+    item: o.item_description,
+    category: o.category,
+    color: o.color,
+    diameter: o.diameter,
+  })),
+  concreteClaims: {
+    redLastClaim: /red.*last/i.test(strategyDescription),
+    yellow4mmEarlierClaim: /yellow 4mm.*earlier/i.test(strategyDescription),
+  },
+});
+```
+
+Also explicitly validate:
+- if description claims red last → final red row index must equal last index
+- if description claims yellow 4mm earlier → final order positions should support that
+- if not, adjust description or lower faithfulness
+
+---
+
+## 10. VERIFICATION
+
+1. ✅ The AI receives the current lineup of orders with full relevant details
+2. ✅ The AI receives the actual changeover rules and can reason from them
+3. ✅ The AI proposes an executable clustering/order structure, not just a vague optimization idea
+4. ✅ The execution layer preserves the AI’s intended moves more faithfully
+5. ✅ The strategy description is generated or revised from the final applied table
+6. ✅ Concrete claims like `red order last` only appear if they are actually true in the final table
+7. ✅ Faithfulness is computed against the final wording and the final applied order result
+8. ✅ Strategy cards, faithfulness scores, and After-table positions are fully aligned and no longer contradictory

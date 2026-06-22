@@ -1,0 +1,177 @@
+Please correct the Delivered to Date comparison logic in the SKU Monitoring / Detailed Demand View.
+
+The app is currently failing to show completed volume because it is comparing both the historical demand period and the order End Date using the full year, which is incorrect for this monitoring use case.
+
+This should follow the same period-matching logic we aligned on earlier:
+- compare by the same month/day/quarter period
+- not by requiring the same historical year
+
+---
+
+## BUSINESS INTENT
+
+The monitoring page is meant to compare:
+- current operational fulfillment progress
+against
+- historical demand benchmark for the same period
+
+This means:
+- Monthly view should compare by **month**
+- Daily view should compare by **month + day**
+- Quarterly view should compare by **quarter**
+- Only Yearly view should compare by **year**
+
+The historical demand year is just the benchmark year in the uploaded dataset.
+It should not block matching against current-year operational orders.
+
+---
+
+## REQUIRED FIX
+
+### Monthly view
+If the monitoring row shows:
+- **May 2025**
+
+then any completed order whose **End Date is in May** should count toward **Delivered to Date**,
+even if the End Date year is different (for example May 2026).
+
+Example:
+- historical demand row = May 2025
+- completed order End Date = May 19, 2026
+- result: this order **must** be included in Delivered to Date for May
+
+---
+
+### Daily view
+Match by:
+- month + day
+
+Example:
+- historical demand benchmark day = May 19 (from historical dataset)
+- completed order End Date = May 19, 2026
+- result: include in Delivered to Date
+
+Do not require the same historical benchmark year.
+
+---
+
+### Quarterly view
+Match by:
+- quarter only
+
+Example:
+- historical benchmark = Q2 2025
+- completed order End Date = Q2 2026
+- result: include in Delivered to Date for Q2 comparison
+
+---
+
+### Yearly view
+For yearly view only, year-based comparison is expected.
+
+---
+
+## DELIVERED TO DATE DATA SOURCE
+
+Keep the existing source rule:
+- Delivered to Date must still come from **Order History**
+- count only orders with status = `Done`
+- use **End Date** to determine the order’s completed period
+
+But period matching should follow the selected time grain, not strict historical year equality.
+
+---
+
+## WHAT TO AVOID
+
+Do not require:
+- historical demand row year = order End Date year
+
+for:
+- monthly view
+- daily view
+- quarterly view
+
+That causes valid current-period completions to disappear incorrectly.
+
+---
+
+## EXPECTED MATCHING LOGIC
+
+### Monthly
+Match if:
+- `endDate.month === selectedHistoricalMonth`
+
+### Daily
+Match if:
+- `endDate.month === selectedHistoricalMonth`
+- `endDate.day === selectedHistoricalDay`
+
+### Quarterly
+Match if:
+- `getQuarter(endDate) === selectedHistoricalQuarter`
+
+### Yearly
+Match if:
+- `endDate.year === selectedHistoricalYear`
+
+---
+
+## EXAMPLE
+
+If the table row shows:
+- Date = May 2025
+- Historical Demand = 6,628.9
+
+and there is a completed order in Order History:
+- status = Done
+- End Date = May 19, 2026
+- volume = 22 MT
+
+then:
+- Delivered to Date should show **22.0**
+- not blank / zero
+
+because the comparison is by **May**, not by exact benchmark year equality.
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log:
+
+```javascript
+console.debug('[SKU Monitoring Delivered Period Match]', {
+  selectedTimeGrain,
+  historicalBenchmarkLabel,
+  historicalBenchmarkYear,
+  historicalBenchmarkMonth,
+  historicalBenchmarkDay,
+  orderId,
+  orderEndDate,
+  matchedByPeriod,
+});
+```
+
+```javascript
+console.debug('[SKU Monitoring Delivered Aggregation]', {
+  selectedTimeGrain,
+  selectedPeriodLabel,
+  matchedOrderIds,
+  deliveredToDateMT,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Delivered to Date still uses Order History and status = Done
+2. ✅ End Date is still the basis for assigning completed orders to a period
+3. ✅ Monthly view matches by month only, not strict year
+4. ✅ Daily view matches by month + day, not strict year
+5. ✅ Quarterly view matches by quarter, not strict year
+6. ✅ Yearly view still matches by year
+7. ✅ A Done order ending in May 2026 is counted against a May historical benchmark row
+8. ✅ Valid current-period completions no longer disappear due to year mismatch
+9. ✅ No double counting or console errors are introduced

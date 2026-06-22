@@ -1,0 +1,48 @@
+Implement the following change to the NexFeed application:
+
+---
+
+## READINESS COLUMN — REMOVE AVAIL DATE FROM CHECKING CRITERIA
+
+The Readiness column currently includes the Avail Date as part of its validation check to determine if an order is ready (green ✅), has warnings (orange ⚠), or is missing critical data (red ✗). 
+
+Remove the Avail Date from the readiness checking process entirely.
+
+**Reason:**
+The Avail Date field is NOT a reliability indicator for order readiness. It can contain:
+- A valid date (e.g., "March 22, 2026")
+- "prio replenish"
+- "safety stocks"
+- "for sched"
+- Other free-text values
+
+All of these are legitimate values depending on the order type. An order with "prio replenish" as its Avail Date is NOT incomplete or missing data — it simply means the order has no fixed delivery date. Therefore, the Avail Date should never trigger a warning or missing-critical status.
+
+**Updated readiness logic:**
+
+The readiness check should evaluate ONLY the following fields (remove avail_date from wherever it is currently checked):
+
+**Red (✗ Missing Critical) — Order cannot proceed:**
+- Missing Material Code (FG)
+- Missing Item Description
+- Missing FPR
+- Missing Planned Order (FG or SFG)
+- Missing Volume (MT) or Volume = 0
+- Missing Batch Size or Batch Size = 0
+- Missing Number of Batches or Number of Batches = 0
+- Missing Form
+
+**Orange (⚠ Incomplete) — Order can proceed but has gaps:**
+- Missing or incomplete Hand-Adds data (HA fields)
+- Missing Production Order (FG or SFG) — if applicable
+- Any other non-critical field that is empty but expected
+
+**Green (✅ Ready) — All required fields are populated:**
+- All critical fields present and valid.
+- No missing hand-adds or secondary data.
+
+**What to change:**
+- Find every instance where `avail_date` (or its equivalent field name) is referenced in the readiness/validation logic.
+- Remove it from all readiness checks — red, orange, and green tier evaluations.
+- The Avail Date column continues to display normally in the table; it is simply no longer part of the readiness assessment.
+- Update the hover tooltip on the readiness icon so it does NOT list "Avail Date" as a missing or incomplete field.

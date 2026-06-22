@@ -1,0 +1,194 @@
+Please revisit and fix the **production time / run rate logic** so that the app **always uses the order’s own run rate**, and **never falls back to a standard line/feedmill run rate** when the order has no run rate.
+
+---
+
+## 1. ALWAYS USE THE ORDER’S OWN RUN RATE
+
+Please make the production-time calculation use the **order’s own run rate** only.
+
+### Required rule
+For any order:
+- if the order has a valid run rate, use that run rate
+- do not substitute another line-level or feedmill-level default rate
+
+### Expected result
+Production time is always based on the run rate stored for that specific order.
+
+---
+
+## 2. DO NOT FALL BACK TO STANDARD FEEDMILL / LINE RUN RATES
+
+There appears to be fallback behavior where, if the product/order run rate is missing, zero, or invalid, the app may use a generic standard run rate such as:
+- `20 MT/hr`
+- `10 MT/hr`
+
+based on line/feedmill defaults.
+
+Please remove that behavior.
+
+### Important
+If the order’s run rate is:
+- `0`
+- missing
+- null
+- invalid
+- or otherwise unavailable
+
+then the app must **not** use a standard line/feedmill run rate as a substitute.
+
+### Expected result
+No order should get a fallback production time just because a standard line/feedmill run rate exists.
+
+---
+
+## 3. IF THE ORDER HAS NO RUN RATE, THEN TREAT IT AS HAVING NO RUN RATE
+
+If the order’s run rate is unavailable, please keep that state honest.
+
+### Expected behavior
+If the order has no valid run rate:
+- `Rate` should remain blank / `-` / unavailable
+- `Production Time` should remain blank / `—` / unavailable
+- do not generate a synthetic time from default line/feedmill assumptions
+
+### Goal
+Avoid false scheduling confidence based on guessed fallback rates.
+
+### Expected result
+Orders with no valid run rate should visibly remain as having no valid production-time basis.
+
+---
+
+## 4. PRODUCTION TIME MUST ONLY BE CALCULATED WHEN THE ORDER HAS A VALID RUN RATE
+
+Please ensure the app only calculates:
+
+- `Production Time = Volume / Run Rate`
+
+when the run rate used is the **actual valid run rate of that order**.
+
+### Expected result
+If the order’s rate is:
+- `8.89` → calculate from `8.89`
+- `7.07` → calculate from `7.07`
+- `0` or unavailable → do not calculate production time
+
+---
+
+## 5. APPLY THIS BOTH TO PREVIEW AND SCHEDULE TABLES
+
+Please make sure this no-fallback rule applies consistently in:
+- auto-sequence preview
+- final applied schedule
+- order tables where production time and rate are shown
+
+### Expected result
+The app should behave consistently everywhere:
+- use the order’s own rate if valid
+- otherwise show no valid rate / no production time
+- never fall back to generic feedmill defaults
+
+---
+
+## 6. KEEP THE DISPLAY HONEST
+
+If there is no run rate, please do not display a misleading time.
+
+### Expected result
+Instead of fabricating a production time from a default line/feedmill rate, the UI should clearly show that:
+- the order has no valid rate
+- and therefore no production time can be derived
+
+### Goal
+Make the scheduling data more accurate and trustworthy.
+
+---
+
+## 7. APPLY THIS ACROSS ALL LINES / FEEDMILLS
+
+Please ensure this rule applies across:
+- `Line 1`
+- `Line 2`
+- `Line 3`
+- `Line 4`
+- `Line 5`
+- `Line 6`
+- `Line 7`
+
+and across:
+- `FM1`
+- `FM2`
+- `FM3`
+- `PMX`
+
+### Expected result
+No line/feedmill should use a hidden fallback standard rate when the order itself has no valid run rate.
+
+---
+
+## IMPORTANT
+
+Please enforce this rule everywhere relevant:
+
+> **Always use the order’s own run rate.**  
+> If the order has no valid run rate, then it has no valid run rate — do not fall back to a standard line/feedmill run rate.
+
+This means:
+- no automatic fallback to values like `20 MT/hr` or `10 MT/hr`
+- no generated production time from generic feedmill defaults
+- if the rate is unavailable, show rate as unavailable and production time as unavailable
+
+---
+
+## DEBUG LOGGING
+
+Temporarily log rate-source selection and fallback blocking.
+
+```javascript
+console.debug('[Production Time Run Rate Source]', {
+  line,
+  feedmill,
+  orderId,
+  orderRunRate,
+  usedRunRate,
+  usedOrderRunRate: usedRunRate === orderRunRate,
+  usedFeedmillFallbackRate: false,
+});
+```
+
+```javascript
+console.debug('[Production Time No Fallback Check]', {
+  line,
+  feedmill,
+  orderId,
+  orderRunRate,
+  productionTimeCalculated,
+  blockedBecauseNoValidOrderRunRate: !orderRunRate || orderRunRate <= 0,
+});
+```
+
+```javascript
+console.debug('[Invalid Run Rate Handling]', {
+  line,
+  feedmill,
+  orderId,
+  orderRunRate,
+  displayedRate,
+  displayedProductionTime,
+  treatedAsUnavailable: !orderRunRate || orderRunRate <= 0,
+});
+```
+
+---
+
+## VERIFICATION
+
+1. ✅ Production time uses the order’s own run rate only
+2. ✅ No fallback to standard feedmill/line run rates occurs
+3. ✅ Orders with missing/zero/invalid run rate do not get synthetic production time
+4. ✅ Rate displays as unavailable when no valid order run rate exists
+5. ✅ Production Time displays as unavailable when no valid order run rate exists
+6. ✅ Behavior is consistent in preview and schedule tables
+7. ✅ The rule works across `Line 1` to `Line 7`
+8. ✅ The rule works across `FM1`, `FM2`, `FM3`, and `PMX`
+9. ✅ No UI errors or console errors are introduced

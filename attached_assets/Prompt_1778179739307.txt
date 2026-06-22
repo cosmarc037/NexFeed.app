@@ -1,0 +1,152 @@
+```
+Please revisit the selected AI strategy because the strategy card description, the final After-table lineup, and the faithfulness score do not seem aligned.
+
+---
+
+## ISSUE TO CHECK
+
+The selected strategy is:
+
+### `Red-Late Changeover Cut`
+Description:
+> Positions the red color order late to avoid costly red→non-red penalty, grouping compatible yellow 3mm orders early.
+
+The After-table lineup shown is:
+
+1. Gallimax Pigeon Pellet, 50kg — Yellow, 3.00mm
+2. Salto Chick Booster Cr 1kg (Bundle) — Yellow, 4.00mm
+3. Elite XP Startex, Mini-pellet 50kg — Brown, 3.00mm
+4. Ave Max Quail Layex Crumble, 50kg — Yellow, 4.00mm
+5. Salto Conditioner P 1kg (Bundle) — Yellow, 3.00mm
+6. Gallimax 3 Maintenance Red Pellet, 50kg — Red, 3.00mm
+
+The strategy card also shows:
+- Faithfulness = 96.0%
+
+---
+
+## WHAT LOOKS WRONG
+
+### 1. The “red-late” part is somewhat reflected
+Yes, the red order is last, so that part of the strategy is visible.
+
+### 2. But the “grouping compatible yellow 3mm orders early” part is not really reflected
+The yellow 3mm orders are not clearly grouped together early in the sequence.
+
+Instead, the sequence goes:
+- Yellow 3.00mm
+- Yellow 4.00mm
+- Brown 3.00mm
+- Yellow 4.00mm
+- Yellow 3.00mm
+- Red 3.00mm
+
+So the yellow 3mm orders are still split apart by:
+- yellow 4mm
+- brown 3mm
+- yellow 4mm
+
+That means the lineup does not strongly match the claimed clustering behavior.
+
+### 3. The faithfulness score of 96.0% seems too high
+If the strategy says:
+- red is intentionally late
+- compatible yellow 3mm orders are grouped early
+
+then a 96% faithfulness score implies the final table should reflect both parts clearly.
+
+But based on the visible lineup:
+- only the “red late” part is clearly visible
+- the “yellow 3mm grouped early” part is not strongly reflected
+
+So either:
+- the strategy description is overstating what happened
+- the faithfulness score is inflated
+- or the execution layer is not applying the strategy strongly enough
+
+---
+
+## REQUEST
+
+Please revisit this strategy and check the following:
+
+### A. Strategy narrative alignment
+Verify whether the final lineup actually supports this exact description:
+> "Positions the red color order late to avoid costly red→non-red penalty, grouping compatible yellow 3mm orders early."
+
+If not, then rewrite the description to better match what the table actually did.
+
+For example, if the only strong effect was moving red late, then the strategy should focus on that and not overclaim the yellow 3mm grouping.
+
+---
+
+### B. Faithfulness scoring
+Please review how the 96.0% faithfulness was calculated.
+
+Because visually, the lineup does not appear to reflect the full strategy strongly enough to justify that high a score.
+
+Please verify whether:
+- the faithfulness score is over-crediting only one part of the strategy
+- the clustering criteria are too loose
+- the score is not checking actual adjacency/grouping strongly enough
+
+---
+
+### C. Execution quality
+Please verify whether the strategy was actually applied in a way that should create:
+- yellow 3mm orders grouped earlier
+- more compatible adjacency
+- lower-cost clustering
+
+If the AI intended that but the execution layer only partially applied it, then please improve the strategy application so the final lineup better reflects the intended grouping.
+
+---
+
+### D. Strategy wording fallback
+If the actual final lineup only strongly supports:
+- “red placed late”
+
+then update the description accordingly and remove the stronger claim about:
+- “grouping compatible yellow 3mm orders early”
+
+unless that pattern is truly visible in the final result.
+
+---
+
+## SUGGESTED DEBUG CHECKS
+
+Please compare:
+- strategy title
+- strategy description
+- actual after-table order sequence
+- actual adjacency/grouping pattern
+- faithfulness score calculation inputs
+- final measured changeover logic
+
+Also log or inspect whether:
+- the strategy engine intended a stronger yellow-3mm grouping
+- the application/execution layer diluted that grouping
+- the faithfulness score is using too broad a definition of clustering success
+
+---
+
+## EXPECTED OUTCOME
+
+Please make sure that for AI strategies like this:
+
+1. the description matches what the final lineup actually did
+2. the faithfulness score reflects the real visible alignment
+3. if the strategy says it grouped compatible yellow 3mm orders early, the After table visibly shows that
+4. if only the red-late part was achieved, then the description says that more accurately
+5. the final strategy card, table output, and faithfulness score all tell the same story
+
+---
+
+## VERIFICATION
+
+1. ✅ The selected AI strategy description is reviewed against the actual After-table lineup
+2. ✅ Overstated claims like “grouping compatible yellow 3mm orders early” are removed if not clearly reflected
+3. ✅ Faithfulness scoring is checked and corrected if it is overstating alignment
+4. ✅ If the intended clustering was not strongly applied, the execution logic is improved
+5. ✅ The final strategy description matches the actual visible row ordering
+6. ✅ The strategy card, faithfulness score, and resulting sequence are aligned and no longer contradictory

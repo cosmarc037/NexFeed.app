@@ -8,8 +8,7 @@ on:
 
 env:
   NODE_VERSION: '24.x'
-  # Replace with your Azure Web App name
-  AZURE_WEBAPP_NAME: YOUR_AZURE_WEBAPP_NAME
+  AZURE_WEBAPP_NAME: NexFeed
 
 jobs:
   build-and-deploy:
